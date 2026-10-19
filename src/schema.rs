@@ -410,9 +410,10 @@ pub enum Record {
 
     // --- Spine edges (GraphModel-SPEC.md; PHASE_01) ---
     // End-to-end traceability from why to code. The target-model matrix keeps
-    // `Drives` (Requirement → Service) and `Represents` (Actor → User,
+    // `DrivenBy` (Service → Requirement) and `Represents` (Actor → User,
     // Person → Actor).
-    Drives {
+    #[serde(rename = "driven-by")]
+    DrivenBy {
         from: String,
         to: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -427,7 +428,7 @@ pub enum Record {
 
     // --- New-model §3.3 spec edges (apg-projects). `implemented-by` is not
     // the §3.3 spelling `Record`'s `snake_case` rename would give, so it
-    // carries an explicit rename. `contains`/`drives`/`represents`/`details`/
+    // carries an explicit rename. `contains`/`driven-by`/`represents`/`details`/
     // `calls`/`uses` reuse the existing record variants and are routed by
     // endpoint node-kind at load time. ---
     /// `{"type":"implemented-by","from":"solution.component.<name>","to":"<code fqn>"}`

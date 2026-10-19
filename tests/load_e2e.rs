@@ -822,9 +822,9 @@ mod e2e {
             "requirements.user.customer".to_string(),
             "requirements.requirement.auth".to_string(),
         ));
-        g.drives.insert((
-            "requirements.requirement.auth".to_string(),
+        g.driven_by.insert((
             "domain.service.checkout".to_string(),
+            "requirements.requirement.auth".to_string(),
         ));
         g.represents.insert((
             "domain.actor.buyer".to_string(),
@@ -880,7 +880,7 @@ mod e2e {
         // Edge sets are identical — nothing projected away.
         assert_eq!(back.contains, g.contains, "contains edges");
         for (name, a, b) in [
-            ("drives", &back.drives, &g.drives),
+            ("driven-by", &back.driven_by, &g.driven_by),
             ("represents", &back.represents, &g.represents),
             ("requires", &back.requires, &g.requires),
             ("reads", &back.reads, &g.reads),
@@ -938,7 +938,7 @@ mod e2e {
         }
         let out = conn
             .query(
-                "MATCH (:Stakeholder)-[:Requires]->(:Requirement)-[:Drives]->(:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(impl) RETURN impl.fqn",
+                "MATCH (:Stakeholder)-[:Requires]->(:Requirement)<-[:DrivenBy]-(:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(impl) RETURN impl.fqn",
             )
             .unwrap()
             .to_string();

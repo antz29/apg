@@ -262,16 +262,16 @@ fn with_authored_row(mut g: Graph) -> Graph {
             ..Node::default()
         },
     );
-    g.drives.insert((
-        "requirements.requirement.req".into(),
+    g.driven_by.insert((
         "domain.service.task".into(),
+        "requirements.requirement.req".into(),
     ));
     g
 }
 
 /// [`with_authored_row`] plus the `Scan` row the seed guard's content-key check
 /// reads — a realistic seed side: one `Requirement` (`req`), its `Service`, and a
-/// `Drives` edge, built at content key `oldkey`.
+/// `DrivenBy` edge, built at content key `oldkey`.
 fn seeded_authored_graph(base: Graph) -> Graph {
     let mut g = with_authored_row(base);
     g.nodes.insert(
@@ -282,7 +282,7 @@ fn seeded_authored_graph(base: Graph) -> Graph {
 }
 
 /// A spec-only delta over [`seeded_authored_graph`]: the SAME code, the SAME
-/// `Scan` row, but an EXTRA `Requirement` (`req2`) and its `Drives` edge the
+/// `Scan` row, but an EXTRA `Requirement` (`req2`) and its `DrivenBy` edge the
 /// seed DB does not carry. Its authored/transient identity can therefore never
 /// equal a seed built from [`seeded_authored_graph`], while every code row is
 /// unchanged.
@@ -294,9 +294,9 @@ fn with_authored_delta(base: Graph) -> Graph {
         ..Node::default()
     };
     g.nodes.insert("requirements.requirement.req2".into(), req2);
-    g.drives.insert((
-        "requirements.requirement.req2".into(),
+    g.driven_by.insert((
         "domain.service.task".into(),
+        "requirements.requirement.req2".into(),
     ));
     g
 }
@@ -1409,7 +1409,7 @@ mod e2e {
         };
         assert_eq!(full_counts.get("Requirement"), Some(&2));
         assert_eq!(full_counts.get("Service"), Some(&1));
-        assert_eq!(full_counts.get("Drives"), Some(&2));
+        assert_eq!(full_counts.get("DrivenBy"), Some(&2));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1447,51 +1447,66 @@ mod e2e {
         let wt = repo.start_project("foo");
         let apg_root = wt.join(apg::specs::LAYOUT);
 
-        // 1. The checkout carries an authored Requirement (rooted by a
-        //    Stakeholder — the minimal whole-model-valid base, SPEC §8.1).
-        //    Commit it so the worktree is clean, then scan: `db.lbug` and
-        //    `graph.jsonl` carry the authored rows and the scan_meta records the
-        //    clean HEAD.
-        let mut req = apg::layers::NodeFile {
-            layer: "requirements".to_string(),
-            node_type: "requirement".to_string(),
-            name: "req".to_string(),
-            body: "the authored row the divergence will drop".to_string(),
-            properties: BTreeMap::new(),
-            out: Vec::new(),
-            in_edges: Vec::new(),
-        };
-        req.in_edges.push(apg::layers::InEdge {
-            kind: "requires".to_string(),
-            source: "requirements.stakeholder.owner".to_string(),
-            properties: BTreeMap::new(),
-        });
-        let owner = apg::layers::NodeFile {
-            layer: "requirements".to_string(),
-            node_type: "stakeholder".to_string(),
-            name: "owner".to_string(),
-            body: "the owner".to_string(),
-            properties: BTreeMap::new(),
-            out: vec![apg::layers::OutEdge {
-                kind: "requires".to_string(),
-                target: "requirements.requirement.req".to_string(),
-                properties: BTreeMap::new(),
-            }],
-            in_edges: Vec::new(),
-        };
+        // 1. The checkout carries an authored Requirement threaded through the
+        //    minimal whole-model-valid spine (SPEC §8.1): a Stakeholder
+        //    `requires` it, a leaf Group's Service is `driven-by` it and is
+        //    `realises`'d by a Component that `is-role`s a Role. Commit it so the
+        //    worktree is clean, then scan: `db.lbug` and `graph.jsonl` carry the
+        //    authored rows and the scan_meta records the clean HEAD.
+        let mut owner = testutil::node("requirements", "stakeholder", "owner");
+        owner.body = "the owner".to_string();
+        owner.out = vec![testutil::out_edge(
+            "requires",
+            "requirements.requirement.req",
+        )];
+
+        let mut req = testutil::node("requirements", "requirement", "req");
+        req.body = "the authored row the divergence will drop".to_string();
+        req.in_edges = vec![
+            testutil::in_edge("requires", "requirements.stakeholder.owner"),
+            testutil::in_edge("driven-by", "domain.service.svc"),
+        ];
+
+        let mut grp = testutil::node("domain", "group", "g");
+        grp.out = vec![testutil::out_edge("contains", "domain.service.svc")];
+
+        let mut svc = testutil::node("domain", "service", "svc");
+        svc.out = vec![testutil::out_edge(
+            "driven-by",
+            "requirements.requirement.req",
+        )];
+        svc.in_edges = vec![
+            testutil::in_edge("contains", "domain.group.g"),
+            testutil::in_edge("realises", "solution.component.cmp"),
+        ];
+
+        let mut cmp = testutil::node("solution", "component", "cmp");
+        cmp.out = vec![
+            testutil::out_edge("realises", "domain.service.svc"),
+            testutil::out_edge("is-role", "solution.role.r"),
+        ];
+
+        let mut role = testutil::node("solution", "role", "r");
+        role.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        role.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
+
         let req_path = apg::layers::node_file_path(
             &apg_root,
             apg::layers::Layer::Requirements,
             "requirement",
             "req",
         );
-        apg::layers::write_node(&apg_root, &owner).unwrap();
-        apg::layers::write_node(&apg_root, &req).unwrap();
+        apg::layers::write_project(&apg_root, &[owner, req, grp, svc, cmp, role], &[]).unwrap();
         testutil::wt_commit_paths(
             &wt,
             &[
                 "apg/layers/requirements/requirement/req.json",
                 "apg/layers/requirements/stakeholder/owner.json",
+                "apg/layers/domain/group/g.json",
+                "apg/layers/domain/service/svc.json",
+                "apg/layers/solution/component/cmp.json",
+                "apg/layers/solution/role/r.json",
             ],
             "author requirement",
         );
@@ -1523,23 +1538,35 @@ mod e2e {
             "routed node add: {}",
             String::from_utf8_lossy(&add.stderr)
         );
-        // Root `req2` under `req` (via `contains` decomposition), keeping the
-        // buffered model whole-model-valid at save (SPEC §8.1).
-        let root = testutil::ApgCommand::new(&[
-            "edge",
-            "add",
-            "contains",
-            "requirements.requirement.req",
-            "requirements.requirement.req2",
-        ])
-        .cwd(&wt)
-        .env("HOME", home.to_str().unwrap())
-        .output();
-        assert!(
-            root.status.success(),
-            "routed edge add: {}",
-            String::from_utf8_lossy(&root.stderr)
-        );
+        // Root `req2` under `req` (via `contains` decomposition) and drive it
+        // from the seeded Service, keeping the buffered model whole-model-valid
+        // at save (SPEC §8.1/§3.4).
+        for edge in [
+            &[
+                "edge",
+                "add",
+                "contains",
+                "requirements.requirement.req",
+                "requirements.requirement.req2",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.svc",
+                "requirements.requirement.req2",
+            ][..],
+        ] {
+            let out = testutil::ApgCommand::new(edge)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "routed edge add {edge:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),

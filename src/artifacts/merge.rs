@@ -585,11 +585,11 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
         Record::Reviews { from, to } => Some(("Reviews", from, to, None)),
         Record::Gates { from, to } => Some(("Gates", from, to, None)),
         Record::Satisfies { from, to } => Some(("Satisfies", from, to, None)),
-        Record::Drives {
+        Record::DrivenBy {
             from,
             to,
             properties,
-        } => Some(("Drives", from, to, Some(properties))),
+        } => Some(("DrivenBy", from, to, Some(properties))),
         Record::Represents {
             from,
             to,
@@ -699,7 +699,7 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
         | Record::Reviews { from, to }
         | Record::Gates { from, to }
         | Record::Satisfies { from, to }
-        | Record::Drives { from, to, .. }
+        | Record::DrivenBy { from, to, .. }
         | Record::Represents { from, to, .. }
         | Record::SpecImplementedBy { from, to, .. }
         | Record::Publishes { from, to, .. }

@@ -319,36 +319,31 @@ mod unit {
         assert!(err.to_string().contains("entity|event"), "{err}");
     }
 
-    /// Group: `attribute` ∈ {core, supporting, generic} and `root` are both
-    /// optional; when present they are validated — root against the name
-    /// allowlist, independent of the attribute.
+    /// Group carries no classification (SPEC §3.1/§10): `attribute`/`root` are
+    /// not validated — any value is plain metadata, never refused.
     #[test]
-    fn group_attribute_and_root_optional_but_validated() {
+    fn group_carries_no_classification() {
         let empty = BTreeSet::new();
         // No properties at all — valid.
         assert!(validate_node(Layer::Domain, "group", "sales", &BTreeMap::new(), &empty).is_ok());
-        for attr in ["core", "supporting", "generic"] {
+        for attr in ["core", "supporting", "generic", "dubious"] {
             let props = BTreeMap::from([("attribute".to_string(), attr.to_string())]);
             assert!(
                 validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok(),
-                "attribute {attr} must be accepted"
+                "attribute {attr} is metadata — must be accepted"
             );
         }
-        let props = BTreeMap::from([("attribute".to_string(), "dubious".to_string())]);
-        let err = validate_node(Layer::Domain, "group", "sales", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("core|supporting|generic"), "{err}");
-        // root is independent of attribute and format-validated.
-        let props = BTreeMap::from([("root".to_string(), "sales-root".to_string())]);
-        assert!(validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok());
         let props = BTreeMap::from([("root".to_string(), "SalesRoot".to_string())]);
-        let err = validate_node(Layer::Domain, "group", "sales", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("allowlist"), "{err}");
+        assert!(
+            validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok(),
+            "root is metadata — must be accepted"
+        );
     }
 
-    /// Container `kind` ∈ {app, service, db, queue} — validated when present,
-    /// optional otherwise (SPEC §3.1 "takes").
+    /// Container `kind` is removed (SPEC §10): any `kind` is plain metadata,
+    /// never validated.
     #[test]
-    fn container_kind_validated_when_present() {
+    fn container_kind_is_removed_metadata() {
         let empty = BTreeSet::new();
         assert!(
             validate_node(
@@ -360,16 +355,13 @@ mod unit {
             )
             .is_ok()
         );
-        for kind in ["app", "service", "db", "queue"] {
+        for kind in ["app", "service", "db", "queue", "web"] {
             let props = BTreeMap::from([("kind".to_string(), kind.to_string())]);
             assert!(
                 validate_node(Layer::Solution, "container", "api", &props, &empty).is_ok(),
-                "kind {kind} must be accepted"
+                "kind {kind} is metadata — must be accepted"
             );
         }
-        let props = BTreeMap::from([("kind".to_string(), "web".to_string())]);
-        let err = validate_node(Layer::Solution, "container", "api", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("app|service|db|queue"), "{err}");
     }
 
     /// Unknown property keys are metadata — allowed, never identity (SPEC
@@ -496,9 +488,9 @@ mod unit {
                 "solution.component.cmp1",
             ),
             (
-                "drives",
-                "requirements.requirement.r1",
+                "driven-by",
                 "domain.service.svc1",
+                "requirements.requirement.r1",
             ),
             ("reads", "domain.service.svc1", "domain.entity.e1"),
             ("writes", "domain.service.svc1", "domain.entity.e1"),
@@ -539,10 +531,10 @@ mod unit {
         let bad: &[(&str, &str, &str)] = &[
             // calls from an Entity (not Service/Actor).
             ("calls", "domain.entity.e1", "domain.service.svc1"),
-            // drives from a Group — the stored direction is Requirement → Service.
-            ("drives", "domain.group.g1", "domain.service.svc1"),
-            // drives to a Group — a Service is the only target.
-            ("drives", "requirements.requirement.r1", "domain.group.g1"),
+            // driven-by from a Group — the stored direction is Service → Requirement.
+            ("driven-by", "domain.group.g1", "domain.service.svc1"),
+            // driven-by to a Group — a Requirement is the only target.
+            ("driven-by", "domain.service.svc1", "domain.group.g1"),
             // contains from a Container to a Requirement — a tier skip.
             (
                 "contains",
@@ -686,12 +678,16 @@ mod unit {
     #[test]
     fn dangling_authored_endpoint_is_a_write_time_error() {
         // Unknown layer in the source.
-        let msg = validate_edge("drives", "banana.type.name", "domain.group.g1")
-            .unwrap_err()
-            .to_string();
+        let msg = validate_edge(
+            "driven-by",
+            "banana.type.name",
+            "requirements.requirement.r1",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(msg.contains("banana"), "{msg}");
         // Unknown layer in the target.
-        let msg = validate_edge("drives", "requirements.requirement.r1", "banana.type.name")
+        let msg = validate_edge("driven-by", "domain.service.svc1", "banana.type.name")
             .unwrap_err()
             .to_string();
         assert!(msg.contains("banana"), "{msg}");
@@ -704,8 +700,8 @@ mod unit {
         .unwrap_err()
         .to_string();
         assert!(msg.contains("FQN"), "{msg}");
-        // A code FQN in a non-exempt endpoint (drives target) is a dangling ref.
-        let msg = validate_edge("drives", "requirements.requirement.r1", "apg.main")
+        // A code FQN in a non-exempt endpoint (driven-by target) is a dangling ref.
+        let msg = validate_edge("driven-by", "domain.service.svc1", "apg.main")
             .unwrap_err()
             .to_string();
         assert!(msg.contains("apg.main"), "{msg}");
@@ -762,9 +758,9 @@ mod unit {
                 "requirements.requirement.r2",
             ),
             (
-                "drives",
-                "requirements.requirement.r1",
+                "driven-by",
                 "domain.service.svc1",
+                "requirements.requirement.r1",
             ),
         ];
         assert!(validate_edges(ok).is_ok());
@@ -774,10 +770,10 @@ mod unit {
                 "requirements.requirement.r1",
                 "requirements.requirement.r2",
             ),
-            ("drives", "domain.group.g1", "domain.service.svc1"),
+            ("driven-by", "domain.group.g1", "domain.service.svc1"),
         ];
         let msg = validate_edges(bad).unwrap_err().to_string();
-        assert!(msg.contains("drives"), "{msg}");
+        assert!(msg.contains("driven-by"), "{msg}");
     }
 
     /// The plain-named domain types are accepted: the catalog's `group`,
@@ -848,7 +844,7 @@ mod unit {
     }
 
     /// The spine (SPEC §6) is tier-locked by the matrix: the full legal chain
-    /// Stakeholder/User --requires--> Requirement --drives--> Service, and
+    /// Stakeholder/User --requires--> Requirement <--driven-by-- Service, and
     /// Component --realises--> Service --implemented-by--> code passes
     /// hop-by-hop; a tier skip is refused.
     #[test]
@@ -863,9 +859,9 @@ mod unit {
         );
         assert!(
             validate_edge(
-                "drives",
-                "requirements.requirement.r1",
-                "domain.service.svc1"
+                "driven-by",
+                "domain.service.svc1",
+                "requirements.requirement.r1"
             )
             .is_ok()
         );
@@ -874,7 +870,7 @@ mod unit {
         );
         assert!(validate_edge("implemented-by", "solution.component.cmp1", "apg.main").is_ok());
         // Tier skips: a Requirement may not realise a Service, and a
-        // Requirement may not drive an Entity.
+        // Service may not driven-by an Entity.
         let msg = validate_edge(
             "realises",
             "requirements.requirement.r1",
@@ -885,10 +881,10 @@ mod unit {
         assert!(msg.contains("realises"), "{msg}");
         assert!(msg.contains("requirements.requirement.r1"), "{msg}");
         assert!(msg.contains("domain.service.svc1"), "{msg}");
-        let msg = validate_edge("drives", "requirements.requirement.r1", "domain.entity.e1")
+        let msg = validate_edge("driven-by", "domain.service.svc1", "domain.entity.e1")
             .unwrap_err()
             .to_string();
-        assert!(msg.contains("drives"), "{msg}");
+        assert!(msg.contains("driven-by"), "{msg}");
     }
 
     /// The §3.3 edge-kind matrix is complete and internally consistent: its
@@ -2153,21 +2149,26 @@ mod unit {
         assert_error(&nodes, "Entity `domain.entity.order` contains no Value");
     }
 
-    /// Every Service is driven by at least one Requirement (SPEC §4.3).
+    /// Every Service is `driven-by` at least one Requirement (SPEC §3.4).
     #[test]
     fn service_must_be_driven_by_a_requirement() {
         let mut nodes = valid_model();
-        remove_out(
-            &mut nodes,
-            "requirements",
-            "requirement",
-            "place-order",
-            "drives",
-            "domain.service.place-order",
-        );
+        for target in [
+            "requirements.requirement.place-order",
+            "requirements.requirement.refund",
+        ] {
+            remove_out(
+                &mut nodes,
+                "domain",
+                "service",
+                "place-order",
+                "driven-by",
+                target,
+            );
+        }
         assert_error(
             &nodes,
-            "Service `domain.service.place-order` is driven by no Requirement",
+            "Service `domain.service.place-order` is `driven-by` no Requirement",
         );
     }
 
@@ -2444,9 +2445,11 @@ mod unit {
             "implemented-by",
             "apg.layers.validate_edges",
         );
-        assert_error(
-            &nodes,
-            "Component `solution.component.order-handler` carries 2 `implemented-by` claims",
+        // A component claims MANY code nodes (SPEC §5.2) — no at-most-one
+        // restriction.
+        assert!(
+            validate_cardinalities(&assembled_of(&nodes), None, Context::Lint).is_empty(),
+            "a component may claim many code nodes"
         );
     }
 
@@ -2528,20 +2531,20 @@ mod unit {
     }
 
     /// Cardinality scope (SPEC §9.2): a single-tier run reports only that
-    /// tier's violations. A missing `drives` edge is a Domain error and is
-    /// invisible to the Requirements scope.
+    /// tier's violations. A missing `contains` edge leaving a leaf Group with
+    /// no Service is a Domain error and is invisible to the Requirements scope.
     #[test]
     fn cardinality_scope_limits_reported_tiers() {
         let mut nodes = valid_model();
         remove_out(
             &mut nodes,
-            "requirements",
-            "requirement",
-            "place-order",
-            "drives",
+            "domain",
+            "group",
+            "ordering",
+            "contains",
             "domain.service.place-order",
         );
-        let rule = "Service `domain.service.place-order` is driven by no Requirement";
+        let rule = "leaf Group `domain.group.ordering` contains no Service";
         let all = validate_cardinalities(&assembled_of(&nodes), None, Context::Lint);
         assert!(all.iter().any(|e| e.contains(rule)), "{all:?}");
         let domain =

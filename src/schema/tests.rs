@@ -169,14 +169,14 @@ mod unit {
     #[test]
     fn spine_edge_records_parse() {
         let lines = [
-            r#"{"type":"drives","from":"foo/spec.R1","to":"domain.group.sales"}"#,
+            r#"{"type":"driven-by","from":"domain.service.checkout","to":"requirements.requirement.place-order"}"#,
             r#"{"type":"represents","from":"requirements.user.u1","to":"domain.entity.e1"}"#,
         ];
         for l in lines {
             let _ = parse(l);
         }
-        assert!(matches!(parse(lines[0]), Record::Drives { from, to, .. }
-            if from == "foo/spec.R1" && to == "domain.group.sales"));
+        assert!(matches!(parse(lines[0]), Record::DrivenBy { from, to, .. }
+            if from == "domain.service.checkout" && to == "requirements.requirement.place-order"));
         assert!(
             matches!(parse(lines[1]), Record::Represents { from, to, .. }
             if from == "requirements.user.u1" && to == "domain.entity.e1")

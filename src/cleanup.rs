@@ -73,7 +73,7 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         &mut graph.reviews,
         &mut graph.gates,
         &mut graph.satisfies,
-        &mut graph.drives,
+        &mut graph.driven_by,
         &mut graph.represents,
         &mut graph.spec_implemented_by,
         &mut graph.publishes,

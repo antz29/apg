@@ -923,6 +923,49 @@ mod e2e {
             "requirements.stakeholder.one-a",
             "requirements.requirement.one-b",
         ]);
+        // Complete the whole-model minimums the new §3.4/§6 coverage rules
+        // require (SPEC §8.1): the Requirement needs a driving Service, the
+        // Service a leaf Group + realising Component, the Component a Role.
+        run(&["node", "add", "domain", "service", "one-c"]);
+        run(&["node", "add", "domain", "group", "one-d"]);
+        run(&["node", "add", "solution", "component", "one-e"]);
+        run(&[
+            "node",
+            "add",
+            "solution",
+            "role",
+            "one-f",
+            "--property",
+            "applies-to=component",
+        ]);
+        run(&[
+            "edge",
+            "add",
+            "driven-by",
+            "domain.service.one-c",
+            "requirements.requirement.one-b",
+        ]);
+        run(&[
+            "edge",
+            "add",
+            "contains",
+            "domain.group.one-d",
+            "domain.service.one-c",
+        ]);
+        run(&[
+            "edge",
+            "add",
+            "realises",
+            "solution.component.one-e",
+            "domain.service.one-c",
+        ]);
+        run(&[
+            "edge",
+            "add",
+            "is-role",
+            "solution.component.one-e",
+            "solution.role.one-f",
+        ]);
 
         // NO commit (and no node file) lands while the mutations are buffered:
         // `apg/layers/**` and git stay at the last saved state.

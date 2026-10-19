@@ -367,17 +367,17 @@ mod unit {
             );
         }
 
-        // Domain: a Service with no driving Requirement.
+        // Domain: a Service realised by no Component.
         let mut domain_broken = valid_model();
         without_edge(
             &mut domain_broken,
-            "requirements",
-            "requirement",
-            "place-order",
-            "drives",
+            "solution",
+            "component",
+            "order-handler",
+            "realises",
             "domain.service.place-order",
         );
-        let domain_rule = "Service `domain.service.place-order` is driven by no Requirement";
+        let domain_rule = "Service `domain.service.place-order` is realised by no Component";
         assert!(
             model_errors(&domain_broken, None, Context::Lint)
                 .iter()
@@ -437,14 +437,14 @@ mod unit {
         let mut bad_shape = valid_model();
         bad_shape
             .iter_mut()
-            .find(|n| n.layer == "requirements" && n.name == "place-order")
+            .find(|n| n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
             .unwrap()
             .out
-            .push(out_edge("drives", "domain.group.ordering"));
+            .push(out_edge("driven-by", "domain.group.ordering"));
 
         let direct = validate_edges(&[(
-            "drives",
-            "requirements.requirement.place-order",
+            "driven-by",
+            "domain.service.place-order",
             "domain.group.ordering",
         )])
         .unwrap_err()
@@ -457,17 +457,16 @@ mod unit {
         let mut dangling = valid_model();
         dangling
             .iter_mut()
-            .find(|n| n.layer == "requirements" && n.name == "place-order")
+            .find(|n| n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
             .unwrap()
             .out
-            .push(out_edge("drives", "domain.service.missing"));
+            .push(out_edge("driven-by", "requirements.requirement.missing"));
         assert!(
             model_errors(&dangling, None, Context::Lint)
                 .iter()
-                .any(
-                    |e| e.contains("edge `drives` endpoint `domain.service.missing`")
-                        && e.contains("dangling authored reference")
-                ),
+                .any(|e| e
+                    .contains("edge `driven-by` endpoint `requirements.requirement.missing`")
+                    && e.contains("dangling authored reference")),
             "lint must report a dangling authored endpoint"
         );
     }
@@ -513,24 +512,23 @@ mod unit {
     /// Scoped lint flags a dangling authored endpoint on an in-scope edge (the
     /// SPEC §9.2 "drift" reading): endpoint existence is structural, not a
     /// "downstream completeness" question, so a `--tier requirements` run
-    /// reports `requirement drives domain.service.missing` even though the
-    /// absent Service is a downstream-tier node.
+    /// reports a `driven-by` edge whose target Requirement is missing (the
+    /// source Service is the more-concrete upstream tier).
     #[test]
-    fn requirements_scope_flags_a_dangling_drives_target() {
+    fn requirements_scope_flags_a_dangling_driven_by_target() {
         let mut dangling = valid_model();
         dangling
             .iter_mut()
-            .find(|n| n.layer == "requirements" && n.name == "place-order")
+            .find(|n| n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
             .unwrap()
             .out
-            .push(out_edge("drives", "domain.service.missing"));
+            .push(out_edge("driven-by", "requirements.requirement.missing"));
 
         let errors = model_errors(&dangling, Some(Layer::Requirements), Context::Lint);
         assert!(
-            errors.iter().any(
-                |e| e.contains("edge `drives` endpoint `domain.service.missing`")
-                    && e.contains("dangling authored reference")
-            ),
+            errors.iter().any(|e| e
+                .contains("edge `driven-by` endpoint `requirements.requirement.missing`")
+                && e.contains("dangling authored reference")),
             "requirements scope must flag the dangling authored endpoint as drift: {errors:?}"
         );
     }
@@ -574,10 +572,8 @@ mod unit {
             .out
             .push(out_edge("implemented-by", "rust.apg.spec_lint.lint"));
         assert!(
-            model_errors(&linked, None, Context::Lint)
-                .iter()
-                .any(|e| e.contains("carries 2 `implemented-by` claims")),
-            "more than one claim is an error even under ordinary lint"
+            model_errors(&linked, None, Context::Lint).is_empty(),
+            "a component may claim more than one code node (no at-most-one restriction)"
         );
     }
 }

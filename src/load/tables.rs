@@ -662,7 +662,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             "Calls" => Some("calls"),
             "Uses" => Some("uses"),
             "Details" => Some("details"),
-            "Drives" => Some("drives"),
+            "DrivenBy" => Some("driven-by"),
             "Represents" => Some("represents"),
             "SpecImplementedBy" => Some("implemented-by"),
             "Publishes" => Some("publishes"),
@@ -795,8 +795,8 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                     }
                 }
             }
-            "Drives" => {
-                for (a, b) in &graph.drives {
+            "DrivenBy" => {
+                for (a, b) in &graph.driven_by {
                     if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
                         fa.push(a.clone());
                         fb.push(b.clone());
@@ -989,12 +989,12 @@ pub(crate) fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     v.push(("Gates", PlanPhase, PlanPhase));
     v.push(("Satisfies", PlanPhase, Requirement));
     // Target-model §4 (schema-rework). `requires` roots a Requirement in a
-    // Stakeholder/User; `drives` runs Requirement → Service; `represents` runs
+    // Stakeholder/User; `driven-by` runs Service → Requirement; `represents` runs
     // Actor → User and Person → Actor; `implemented-by` runs Component → code;
     // `subscribes` runs Service/Actor → Entity.
     v.push(("Requires", Stakeholder, Requirement));
     v.push(("Requires", User, Requirement));
-    v.push(("Drives", Requirement, Service));
+    v.push(("DrivenBy", Service, Requirement));
     v.push(("Represents", Actor, User));
     v.push(("Represents", Person, Actor));
     for to in [Module, File, Struct, Function] {
@@ -1269,7 +1269,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE REL TABLE Gates(FROM PlanPhase TO PlanPhase)")?;
     conn.query("CREATE REL TABLE Satisfies(FROM PlanPhase TO Requirement)")?;
-    conn.query("CREATE REL TABLE Drives(FROM Requirement TO Service, properties STRING)")?;
+    conn.query("CREATE REL TABLE DrivenBy(FROM Service TO Requirement, properties STRING)")?;
     conn.query(
         "CREATE REL TABLE Represents(FROM Actor TO User, FROM Person TO Actor, properties STRING)",
     )?;

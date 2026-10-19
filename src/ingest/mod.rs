@@ -1321,7 +1321,7 @@ fn ingest_records(
                     graph.satisfies.insert((a, b));
                 }
                 // Spine edges (GraphModel-SPEC.md; PHASE_01).
-                Record::Drives {
+                Record::DrivenBy {
                     from,
                     to,
                     properties,
@@ -1336,9 +1336,9 @@ fn ingest_records(
                     if !properties.is_empty() {
                         graph
                             .edge_properties
-                            .insert(("drives", a.clone(), b.clone()), properties);
+                            .insert(("driven-by", a.clone(), b.clone()), properties);
                     }
-                    graph.drives.insert((a, b));
+                    graph.driven_by.insert((a, b));
                 }
                 Record::Represents {
                     from,
@@ -1600,11 +1600,11 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::Requirement)
     });
 
-    // Spine edges (GraphModel-SPEC.md; PHASE_01). `drives` runs Requirement →
-    // Service; `represents` runs Actor → User and Person → Actor (both
+    // Spine edges (GraphModel-SPEC.md; PHASE_01). `driven-by` runs Service →
+    // Requirement; `represents` runs Actor → User and Person → Actor (both
     // endpoints must exist and carry the tier kinds).
-    graph.drives = filter_edges(graph, &graph.drives, |g, a, b| {
-        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Service)
+    graph.driven_by = filter_edges(graph, &graph.driven_by, |g, a, b| {
+        kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Requirement)
     });
     graph.represents = filter_edges(graph, &graph.represents, |g, a, b| {
         (kind_is(g, a, NodeKind::Actor) && kind_is(g, b, NodeKind::User))

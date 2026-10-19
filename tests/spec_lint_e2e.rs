@@ -156,17 +156,22 @@ mod e2e {
         );
 
         // ...and the store stays authorable afterwards: a further direct write
-        // (a lone, whole-model-valid `solution.role`) succeeds and leaves the
+        // (a lone, whole-model-valid `global.constraint`) succeeds and leaves the
         // model as it was otherwise.
         apg::layers::write_project(
             &apg_root,
-            &[testutil::node("solution", "role", "auditor")],
+            &[testutil::node("global", "constraint", "auditor")],
             &[],
         )
         .unwrap();
         assert!(
-            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Solution, "role", "auditor")
-                .exists(),
+            apg::layers::node_file_path(
+                &apg_root,
+                apg::layers::Layer::Global,
+                "constraint",
+                "auditor"
+            )
+            .exists(),
             "the durable store must stay authorable after a read-only lint"
         );
 
@@ -193,21 +198,17 @@ mod e2e {
         let home = repo.root.join("home");
         let path = apg::layers::node_file_path(
             &apg_root,
-            apg::layers::Layer::Solution,
-            "role",
+            apg::layers::Layer::Requirements,
+            "requirement",
             "demo-val",
         );
 
         // A session always holds a database, so seed a committed baseline and
         // scan it before opening the session — the same write-then-scan pattern
-        // the crash/reclaim test uses. The base node is a lone `solution.role`
-        // (unconstrained), so the seeded store is whole-model-valid (SPEC §8.1).
-        apg::layers::write_project(
-            &apg_root,
-            &[testutil::node("solution", "role", "seed")],
-            &[],
-        )
-        .unwrap();
+        // the crash/reclaim test uses. The base is a complete, whole-model-valid
+        // durable model (SPEC §8.1), so the `demo-val` requirement added below
+        // can be rooted and driven-by'd onto it at save.
+        testutil::seed_valid_model(&apg_root);
         testutil::scan_checkout(&wt).unwrap();
 
         // Durable mutations are mandatory-session: one live `apg session start`
@@ -244,8 +245,8 @@ mod e2e {
         let out = run(&[
             "node",
             "add",
-            "solution",
-            "role",
+            "requirements",
+            "requirement",
             "demo-val",
             "--body",
             "The old flow was synchronous.",
@@ -260,13 +261,39 @@ mod e2e {
         // completes (the success assert above).
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("apg: warning: solution.role.demo-val:"),
+            stderr.contains("apg: warning: requirements.requirement.demo-val:"),
             "the warning must name the mutated node on the client's stderr: {stderr}"
         );
         assert!(
             stderr.contains(apg::spec_lint::WORDING_ADVISORY),
             "the wording advisory must reach the client's stderr: {stderr}"
         );
+        // Root the new requirement under the seeded Stakeholder and drive it
+        // from the seeded Service so the buffered model stays whole-model-valid
+        // at the save boundary (SPEC §8.1/§3.4).
+        for edge in [
+            &[
+                "edge",
+                "add",
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.demo-val",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.place-order",
+                "requirements.requirement.demo-val",
+            ][..],
+        ] {
+            let out = run(edge);
+            assert!(
+                out.status.success(),
+                "edge add: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
         save(&wt);
         assert!(
             path.exists(),
@@ -278,8 +305,8 @@ mod e2e {
         let out = run(&[
             "node",
             "update",
-            "solution",
-            "role",
+            "requirements",
+            "requirement",
             "demo-val",
             "--body",
             "The service will retry the request.",
@@ -293,7 +320,7 @@ mod e2e {
         // while the update completes.
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("apg: warning: solution.role.demo-val:"),
+            stderr.contains("apg: warning: requirements.requirement.demo-val:"),
             "the warning must name the mutated node on the client's stderr: {stderr}"
         );
         assert!(
@@ -303,8 +330,8 @@ mod e2e {
         save(&wt);
         let back = apg::layers::read_node_file(
             &apg_root,
-            apg::layers::Layer::Solution,
-            "role",
+            apg::layers::Layer::Requirements,
+            "requirement",
             "demo-val",
         )
         .unwrap();
@@ -316,8 +343,8 @@ mod e2e {
         let out = run(&[
             "node",
             "update",
-            "solution",
-            "role",
+            "requirements",
+            "requirement",
             "demo-val",
             "--body",
             "The service stores the record.",
@@ -335,8 +362,8 @@ mod e2e {
         save(&wt);
         let back = apg::layers::read_node_file(
             &apg_root,
-            apg::layers::Layer::Solution,
-            "role",
+            apg::layers::Layer::Requirements,
+            "requirement",
             "demo-val",
         )
         .unwrap();
@@ -412,29 +439,27 @@ mod e2e {
             );
         }
 
-        // Break the domain: the driving Requirement no longer points at its
-        // Service. Both endpoint files are rewritten so pairing stays intact.
+        // Break the domain: the Component no longer realises its Service. Both
+        // endpoint files are rewritten so pairing stays intact.
         let mut nodes = testutil::valid_model();
         drop_edge(
             &mut nodes,
-            "requirements",
-            "requirement",
-            "place-order",
-            "drives",
+            "solution",
+            "component",
+            "order-handler",
+            "realises",
             "domain.service.place-order",
         );
         let changed: Vec<apg::layers::NodeFile> = nodes
             .into_iter()
             .filter(|n| {
-                (n.layer == "requirements"
-                    && n.node_type == "requirement"
-                    && n.name == "place-order")
+                (n.layer == "solution" && n.node_type == "component" && n.name == "order-handler")
                     || (n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
             })
             .collect();
         apg::layers::write_project(&apg_root, &changed, &[]).unwrap();
 
-        let rule = "Service `domain.service.place-order` is driven by no Requirement";
+        let rule = "Service `domain.service.place-order` is realised by no Component";
         let domain = testutil::spawn_apg(&["spec", "lint", "--tier", "domain"], &wt);
         assert!(!domain.status.success());
         assert!(
@@ -556,11 +581,11 @@ mod e2e {
 
         // A session always holds a database, so seed a committed baseline and
         // scan it before opening the session. The base node is a lone
-        // `solution.role` — an unconstrained type, so the seeded store is
+        // `global.constraint` — an unconstrained type, so the seeded store is
         // whole-model-valid (SPEC §8.1) on its own.
         apg::layers::write_project(
             &apg_root,
-            &[testutil::node("solution", "role", "seed")],
+            &[testutil::node("global", "constraint", "seed")],
             &[],
         )
         .unwrap();

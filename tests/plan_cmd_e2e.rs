@@ -3059,7 +3059,7 @@ mod e2e {
     fn plan_verify_at_ignores_spine_and_supplies_merge_base_delta() {
         // plan_verify_at computes the MERGE-BASE delta against the repo's
         // default branch and hands it to coverage_check. It does NOT walk the
-        // Requirement Drives Service Realises Component spine and does NOT read
+        // Requirement ←driven-by— Service ←realises— Component spine and does NOT read
         // the phase Satisfies set for implemented-by coverage: an UNCHANGED
         // pre-existing claim (committed on `main` BEFORE the branch) is exempt
         // and forces no gap, while the branch's changed claim must be touched.
@@ -3113,14 +3113,14 @@ mod e2e {
         // drives (the spine is IGNORED by coverage), and two branch-added
         // solution nodes: one with a claim (required), one with no claim (a
         // `no_claims` warning, never a blocker).
+        write_node_file(&apg_root, "requirements", "requirement", "cr", &[]);
         write_node_file(
             &apg_root,
-            "requirements",
-            "requirement",
-            "cr",
-            &[("drives", "domain.service.plan-record")],
+            "domain",
+            "service",
+            "plan-record",
+            &[("driven-by", "requirements.requirement.cr")],
         );
-        write_node_file(&apg_root, "domain", "service", "plan-record", &[]);
         write_solution_node(
             &apg_root,
             "component",

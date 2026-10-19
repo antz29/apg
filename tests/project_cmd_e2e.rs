@@ -106,6 +106,9 @@ fn write_spec_node(wt_apg: &Path) {
     requirement
         .in_edges
         .push(in_e("requires", "requirements.user.agent"));
+    requirement
+        .in_edges
+        .push(in_e("driven-by", "domain.service.tick-svc"));
     let mut user = nf(
         "requirements",
         "user",
@@ -115,7 +118,29 @@ fn write_spec_node(wt_apg: &Path) {
     );
     user.out
         .push(out_e("requires", "requirements.requirement.timer"));
-    layers::write_project(wt_apg, &[requirement, user], &[]).unwrap();
+    let mut svc = nf("domain", "service", "tick-svc", "One tick", &[]);
+    svc.out
+        .push(out_e("driven-by", "requirements.requirement.timer"));
+    svc.in_edges.push(in_e("contains", "domain.group.billing"));
+    svc.in_edges
+        .push(in_e("realises", "solution.component.tick-cmp"));
+    let mut grp = nf("domain", "group", "billing", "the billing group", &[]);
+    grp.out.push(out_e("contains", "domain.service.tick-svc"));
+    let mut cmp = nf("solution", "component", "tick-cmp", "tick component", &[]);
+    cmp.out.push(out_e("realises", "domain.service.tick-svc"));
+    cmp.out.push(out_e("is-role", "solution.role.tick-role"));
+    cmp.out
+        .push(out_e("implemented-by", "go.fixture.mod.Store"));
+    let mut role = nf(
+        "solution",
+        "role",
+        "tick-role",
+        "the tick role",
+        &[("applies-to", "component")],
+    );
+    role.in_edges
+        .push(in_e("is-role", "solution.component.tick-cmp"));
+    layers::write_project(wt_apg, &[requirement, user, svc, grp, cmp, role], &[]).unwrap();
 }
 
 /// A plan whose single task plans `fixture.mod.Widget` (not yet real
@@ -673,7 +698,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         tier_push(
             &mut nodes,
             &mut idx,
-            nf("solution", "role", name, body, &[]),
+            nf("solution", "role", name, body, &[("applies-to", "both")]),
         );
     }
 
@@ -718,14 +743,14 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             &format!("requirements.requirement.{to}"),
         );
     }
-    // drives: every Requirement → the change-set-records domain service.
+    // driven-by: the change-set-records domain service → every Requirement.
     for r in &req_fqns {
         tier_edge(
             &mut nodes,
             &idx,
-            "drives",
-            r,
+            "driven-by",
             "domain.service.change-set-records",
+            r,
         );
     }
     // contains: the change-sets group hosts its service and entities.
@@ -1661,8 +1686,8 @@ mod e2e {
         let add = testutil::ApgCommand::new(&[
             "node",
             "add",
-            "solution",
-            "role",
+            "global",
+            "constraint",
             "timer",
             "--body",
             "A workitem can be started",
@@ -1679,7 +1704,7 @@ mod e2e {
         );
         // The add is BUFFERED: no node file and no commit until save.
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Solution, "role", "timer").exists(),
+            !layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "timer").exists(),
             "a buffered add must not write a node file before save"
         );
 
@@ -1720,7 +1745,7 @@ mod e2e {
             foo_tip
                 .tree()
                 .unwrap()
-                .get_path(Path::new("apg/layers/solution/role/timer.json"))
+                .get_path(Path::new("apg/layers/global/constraint/timer.json"))
                 .is_ok(),
             "spec node file must be committed on the project branch"
         );
@@ -1788,7 +1813,7 @@ mod e2e {
         // The main checkout carries the merged content (the spec node file).
         assert!(
             repo.root
-                .join("apg/layers/solution/role/timer.json")
+                .join("apg/layers/global/constraint/timer.json")
                 .exists()
         );
         assert!(repo.is_clean(), "merged main must be clean");
@@ -1797,7 +1822,7 @@ mod e2e {
         // merged spec; the transient plan did not cross the merge.
         let main_apg = repo.apg_root();
         let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        assert!(db.has_node("solution.role.timer"));
+        assert!(db.has_node("global.constraint.timer"));
         assert!(db.has_node(format!("{MOD_FQN}.Store").as_str()));
         assert!(db.has_node(format!("{MOD_FQN}.Widget").as_str()));
         assert!(!db.has_node("foo/plan"), "transient plans never reach main");
@@ -2062,7 +2087,7 @@ mod e2e {
                 .unwrap_or(0)
         };
         assert_eq!(
-            count("MATCH (:Requirement)-[:Drives]->(:Service) RETURN count(*)"),
+            count("MATCH (:Service)-[:DrivenBy]->(:Requirement) RETURN count(*)"),
             20
         );
         assert_eq!(
@@ -2218,7 +2243,13 @@ mod e2e {
                 "The component behind the container.",
                 &[],
             ),
-            nf("solution", "role", "app", "The application role.", &[]),
+            nf(
+                "solution",
+                "role",
+                "app",
+                "The application role.",
+                &[("applies-to", "both")],
+            ),
         ] {
             tier_push(&mut nodes, &mut idx, n);
         }
@@ -2229,7 +2260,11 @@ mod e2e {
                 "requirements.requirement.r1",
             ),
             ("contains", "domain.group.g", "domain.service.s"),
-            ("drives", "requirements.requirement.r1", "domain.service.s"),
+            (
+                "driven-by",
+                "domain.service.s",
+                "requirements.requirement.r1",
+            ),
             ("contains", "solution.system.sys", "solution.container.c"),
             (
                 "contains",
@@ -2448,6 +2483,21 @@ mod e2e {
                 Record::Satisfies {
                     from: "test/plan.phase-01".to_string(),
                     to: "requirements.requirement.timer".to_string(),
+                },
+                Record::Task {
+                    fqn: "test/plan.phase-01.task-1".to_string(),
+                    title: "touch go.fixture.mod.Store".to_string(),
+                    kind: "source".to_string(),
+                    tier: String::new(),
+                    status: "pending".to_string(),
+                    verb: "modifies".to_string(),
+                    target: "go.fixture.mod.Store".to_string(),
+                    new_fqn: String::new(),
+                },
+                Record::Contains {
+                    from: "test/plan.phase-01".to_string(),
+                    to: "test/plan.phase-01.task-1".to_string(),
+                    properties: layers::NodeProperties::default(),
                 },
             ],
         )
@@ -2834,7 +2884,7 @@ mod e2e {
             "node add service: {}",
             String::from_utf8_lossy(&add_svc.stderr)
         );
-        let add_edge = warm_run(&wt, &home, &["edge", "add", "drives", req_fqn, svc_fqn]);
+        let add_edge = warm_run(&wt, &home, &["edge", "add", "driven-by", svc_fqn, req_fqn]);
         assert!(
             add_edge.status.success(),
             "edge add: {}",
@@ -2869,6 +2919,45 @@ mod e2e {
                 req_fqn,
             ],
             vec!["edge", "add", "contains", "domain.group.billing", svc_fqn],
+            vec![
+                "node",
+                "add",
+                "solution",
+                "component",
+                "tick-cmp",
+                "--body",
+                "tick component",
+            ],
+            vec![
+                "node",
+                "add",
+                "solution",
+                "role",
+                "tick-role",
+                "--property",
+                "applies-to=component",
+            ],
+            vec![
+                "edge",
+                "add",
+                "realises",
+                "solution.component.tick-cmp",
+                svc_fqn,
+            ],
+            vec![
+                "edge",
+                "add",
+                "is-role",
+                "solution.component.tick-cmp",
+                "solution.role.tick-role",
+            ],
+            vec![
+                "edge",
+                "add",
+                "implemented-by",
+                "solution.component.tick-cmp",
+                "go.scratch/a.A",
+            ],
         ] {
             let argv: Vec<&str> = args.clone();
             let out = warm_run(&wt, &home, &argv);
@@ -2903,9 +2992,11 @@ mod e2e {
         );
 
         // A minimal transient plan that passes `apg plan verify` with NO
-        // planned node: one phase that `Satisfies` the changed requirement —
-        // the only coverage obligation a spec-only delta creates — so the
-        // verify gate has nothing to block on.
+        // planned node: one phase that `Satisfies` the changed requirement,
+        // plus a `modifies` task that touches the component's `implemented-by`
+        // code FQN — the two coverage obligations the spec-only delta creates
+        // (requirement Satisfies + implemented-by touch) — so the verify gate
+        // has nothing to block on.
         let plan_records = vec![
             Record::Plan {
                 fqn: "spec-only/plan".into(),
@@ -2930,12 +3021,12 @@ mod e2e {
             },
             Record::Task {
                 fqn: "spec-only/plan.phase-01.task-1".into(),
-                title: "Author the spec".into(),
+                title: "touch go.scratch/a.A".into(),
                 kind: "source".into(),
                 tier: String::new(),
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: String::new(),
+                verb: "modifies".into(),
+                target: "go.scratch/a.A".into(),
                 new_fqn: String::new(),
             },
             Record::Contains {
@@ -3001,7 +3092,7 @@ mod e2e {
         };
         assert_eq!(
             count(&format!(
-                "MATCH (:Requirement {{fqn: '{req_fqn}'}})-[:Drives]->(:Service {{fqn: '{svc_fqn}'}}) RETURN count(*)"
+                "MATCH (:Service {{fqn: '{svc_fqn}'}})-[:DrivenBy]->(:Requirement {{fqn: '{req_fqn}'}}) RETURN count(*)"
             )),
             1,
             "main's db.lbug must carry the merged authored drives edge"

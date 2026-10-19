@@ -243,15 +243,15 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
                 ("owner", "team-x"),
                 ("empty-meta", ""),
             ]),
-            vec![
-                out("drives", "domain.service.billing", drives_props.clone()),
-                out("contains", "requirements.requirement.audit", props(&[])),
-            ],
-            vec![inc(
-                "requires",
-                "requirements.stakeholder.customer",
+            vec![out(
+                "contains",
+                "requirements.requirement.audit",
                 props(&[]),
             )],
+            vec![
+                inc("requires", "requirements.stakeholder.customer", props(&[])),
+                inc("driven-by", "domain.service.billing", drives_props.clone()),
+            ],
         ),
         node(
             "requirements",
@@ -360,13 +360,13 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
                 ),
                 out("reads", "domain.entity.order", props(&[])),
                 out("writes", "domain.entity.order", props(&[])),
-            ],
-            vec![
-                inc(
-                    "drives",
+                out(
+                    "driven-by",
                     "requirements.requirement.checkout",
                     drives_props.clone(),
                 ),
+            ],
+            vec![
                 inc("calls", "domain.actor.buyer", props(&[])),
                 inc("realises", "solution.component.worker", props(&[])),
             ],
@@ -867,9 +867,9 @@ mod e2e {
         // The routed mutation is admitted into the live session's write-back
         // buffer and projected into the session-held DB — but it is NOT durable
         // yet: the node file is absent and no commit landed. The anchor is a
-        // lone `solution.role` (an unconstrained type, so the buffered model is
-        // whole-model-valid at the SPEC §8.1 save).
-        let add = testutil::ApgCommand::new(&["node", "add", "solution", "role", "buffered"])
+        // lone `global.constraint` (an unconstrained type, so the buffered model
+        // is whole-model-valid at the SPEC §8.1 save).
+        let add = testutil::ApgCommand::new(&["node", "add", "global", "constraint", "buffered"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
@@ -878,7 +878,7 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
-        let node_file = layers::node_file_path(&wt_apg, Layer::Solution, "role", "buffered");
+        let node_file = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "buffered");
         assert!(
             !node_file.exists(),
             "a routed write must be buffered, not written to apg/layers/** before save"
@@ -894,7 +894,7 @@ mod e2e {
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.buffered'}) RETURN count(n)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.buffered'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -1413,7 +1413,7 @@ mod e2e {
                 properties,
             };
 
-        // The `drives` edge carries an authored edge property on BOTH halves
+        // The `driven-by` edge carries an authored edge property on BOTH halves
         // (the pairing invariant demands identical properties); the current
         // schema has no rel property column, so the reconstruction must drop it.
         let drives_props = || props(&[("flavor", "context-map")]);
@@ -1425,12 +1425,11 @@ mod e2e {
             name: "checkout".to_string(),
             body: "the checkout flow".to_string(),
             properties: props(&[("id", "REQ-1"), ("feature", "feature-checkout")]),
-            out: vec![out_edge("drives", "domain.service.billing", drives_props())],
-            in_edges: vec![in_edge(
-                "requires",
-                "requirements.stakeholder.customer",
-                props(&[]),
-            )],
+            out: Vec::new(),
+            in_edges: vec![
+                in_edge("requires", "requirements.stakeholder.customer", props(&[])),
+                in_edge("driven-by", "domain.service.billing", drives_props()),
+            ],
         };
         let stakeholder = layers::NodeFile {
             layer: "requirements".to_string(),
@@ -1471,12 +1470,12 @@ mod e2e {
             name: "billing".to_string(),
             body: "the billing service".to_string(),
             properties: props(&[("runtime", "rust")]),
-            out: Vec::new(),
-            in_edges: vec![in_edge(
-                "drives",
+            out: vec![out_edge(
+                "driven-by",
                 "requirements.requirement.checkout",
                 drives_props(),
             )],
+            in_edges: Vec::new(),
         };
         let container = layers::NodeFile {
             layer: "solution".to_string(),
@@ -1601,15 +1600,15 @@ mod e2e {
         assert_eq!(k.body, "the local rule");
         assert_eq!(k.properties, props(&[("scope", "local")]));
 
-        // Both halves of `drives`, with the authored edge property intact: the
+        // Both halves of `driven-by`, with the authored edge property intact: the
         // serialized-properties column carries it, and it feeds both halves.
-        let drives_out = out(&r, "drives", "domain.service.billing");
+        let drives_out = out(&service, "driven-by", "requirements.requirement.checkout");
         assert_eq!(
             drives_out.properties,
             drives_props(),
             "the serialized-properties column round-trips an edge property: {drives_out:?}"
         );
-        let drives_in = incoming(&service, "drives", "requirements.requirement.checkout");
+        let drives_in = incoming(&r, "driven-by", "domain.service.billing");
         assert_eq!(
             drives_in.properties,
             drives_props(),
@@ -1845,30 +1844,34 @@ mod e2e {
                 ("owner", ""),
                 ("empty-meta", ""),
             ]),
-            out: vec![out_edge("drives", "domain.service.billing", drives_props())],
-            in_edges: vec![in_edge(
-                "requires",
-                "requirements.stakeholder.customer",
-                contains_props(),
-            )],
+            out: Vec::new(),
+            in_edges: vec![
+                in_edge(
+                    "requires",
+                    "requirements.stakeholder.customer",
+                    contains_props(),
+                ),
+                in_edge("driven-by", "domain.service.billing", drives_props()),
+            ],
         };
-        // The `drives` target: a Service with empty-valued keys.
+        // The `driven-by` source: a Service with empty-valued keys.
         let billing = layers::NodeFile {
             layer: "domain".to_string(),
             node_type: "service".to_string(),
             name: "billing".to_string(),
             body: "the billing service".to_string(),
             properties: props(&[("runtime", "rust"), ("empty-meta", "")]),
-            out: Vec::new(),
+            out: vec![out_edge(
+                "driven-by",
+                "requirements.requirement.checkout",
+                drives_props(),
+            )],
             in_edges: vec![
-                in_edge(
-                    "drives",
-                    "requirements.requirement.checkout",
-                    drives_props(),
-                ),
                 // Owned by the leaf Group below — the whole-model ownership
                 // minimum the SPEC §8.1 save boundary enforces.
                 in_edge("contains", "domain.group.ordering", props(&[])),
+                // Realised by the worker Component — the §6 coverage minimum.
+                in_edge("realises", "solution.component.worker", props(&[])),
             ],
         };
         // An Entity carrying `kind = event` (a durable key with no dedicated
@@ -1923,7 +1926,33 @@ mod e2e {
             in_edges: Vec::new(),
         };
 
-        for node in [&checkout, &billing, &order, &ordering, &order_id, &customer] {
+        // A Component realising the Service (the whole-model minimum) plus its
+        // exactly-one Role — the new §4/§6 solution-coverage rules.
+        let worker = layers::NodeFile {
+            layer: "solution".to_string(),
+            node_type: "component".to_string(),
+            name: "worker".to_string(),
+            body: "the worker component".to_string(),
+            properties: props(&[]),
+            out: vec![
+                out_edge("realises", "domain.service.billing", props(&[])),
+                out_edge("is-role", "solution.role.app-service", props(&[])),
+            ],
+            in_edges: Vec::new(),
+        };
+        let app_role = layers::NodeFile {
+            layer: "solution".to_string(),
+            node_type: "role".to_string(),
+            name: "app-service".to_string(),
+            body: "the application service role".to_string(),
+            properties: props(&[("applies-to", "component")]),
+            out: Vec::new(),
+            in_edges: vec![in_edge("is-role", "solution.component.worker", props(&[]))],
+        };
+
+        for node in [
+            &checkout, &billing, &order, &ordering, &order_id, &customer, &worker, &app_role,
+        ] {
             layers::write_node(&wt_apg, node).unwrap();
         }
         wt_commit_paths(&wt, &["apg/layers"], "seed the lossless node set");
@@ -1945,6 +1974,8 @@ mod e2e {
                     ordering.clone(),
                     order_id.clone(),
                     customer.clone(),
+                    worker.clone(),
+                    app_role.clone(),
                 ],
             );
         }
@@ -2018,6 +2049,8 @@ mod e2e {
                 ordering.clone(),
                 order_id.clone(),
                 customer.clone(),
+                worker.clone(),
+                app_role.clone(),
             ],
         );
 
@@ -2044,11 +2077,11 @@ mod e2e {
             "the mutated node's arbitrary + empty-valued keys must survive the partial delta"
         );
         let drives_out = r
-            .out
+            .in_edges
             .iter()
-            .find(|e| e.kind == "drives" && e.target == "domain.service.billing")
+            .find(|e| e.kind == "driven-by" && e.source == "domain.service.billing")
             .cloned()
-            .expect("the drives out half must survive the partial delta");
+            .expect("the driven-by in half must survive the partial delta");
         assert_eq!(drives_out.properties, drives_props());
         let requires_in = r
             .in_edges
@@ -2064,15 +2097,15 @@ mod e2e {
             props(&[("runtime", "rust"), ("empty-meta", "")])
         );
         let drives_in = b
-            .in_edges
+            .out
             .iter()
-            .find(|e| e.kind == "drives" && e.source == "requirements.requirement.checkout")
+            .find(|e| e.kind == "driven-by" && e.target == "requirements.requirement.checkout")
             .cloned()
-            .expect("the drives in half must survive the partial delta");
+            .expect("the driven-by out half must survive the partial delta");
         assert_eq!(
             drives_in.properties,
             drives_props(),
-            "the drives properties must survive on BOTH halves"
+            "the driven-by properties must survive on BOTH halves"
         );
 
         let o = find("domain", "entity", "order");
@@ -2317,13 +2350,13 @@ mod e2e {
 
         // A durable baseline: `survivor` (a later RMW target) and `doomed` (a
         // later accepted-delete target) added through the session and saved.
-        // Lone `solution.role` anchors keep the model whole-model-valid (SPEC
-        // §8.1): the Role type carries no cardinality minimums.
+        // Lone `global.constraint` anchors keep the model whole-model-valid (SPEC
+        // §8.1): the Constraint type carries no cardinality minimums.
         run(&[
             "node",
             "add",
-            "solution",
-            "role",
+            "global",
+            "constraint",
             "survivor",
             "--body",
             "survivor baseline",
@@ -2331,8 +2364,8 @@ mod e2e {
         run(&[
             "node",
             "add",
-            "solution",
-            "role",
+            "global",
+            "constraint",
             "doomed",
             "--body",
             "doomed baseline",
@@ -2344,7 +2377,7 @@ mod e2e {
             String::from_utf8_lossy(&seed_save.stderr)
         );
 
-        let path = |name: &str| layers::node_file_path(&wt_apg, Layer::Solution, "role", name);
+        let path = |name: &str| layers::node_file_path(&wt_apg, Layer::Global, "constraint", name);
         assert!(path("survivor").exists() && path("doomed").exists());
 
         let commits_before = testutil::commit_count(&wt);
@@ -2353,8 +2386,8 @@ mod e2e {
         // a durable node) plus an accepted delete of a durable node. The
         // expected node files are exactly the content asserted at admission.
         let bare = |name: &str, body: &str| layers::NodeFile {
-            layer: "solution".to_string(),
-            node_type: "role".to_string(),
+            layer: "global".to_string(),
+            node_type: "constraint".to_string(),
             name: name.to_string(),
             body: body.to_string(),
             properties: NodeProperties::default(),
@@ -2366,21 +2399,33 @@ mod e2e {
         let updated_survivor = bare("survivor", "survivor buffered");
 
         run(&[
-            "node", "add", "solution", "role", "kept-a", "--body", "kept a",
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "kept-a",
+            "--body",
+            "kept a",
         ]);
         run(&[
-            "node", "add", "solution", "role", "kept-b", "--body", "kept b",
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "kept-b",
+            "--body",
+            "kept b",
         ]);
         run(&[
             "node",
             "update",
-            "solution",
-            "role",
+            "global",
+            "constraint",
             "survivor",
             "--body",
             "survivor buffered",
         ]);
-        run(&["node", "rm", "solution", "role", "doomed"]);
+        run(&["node", "rm", "global", "constraint", "doomed"]);
 
         // Before save nothing is durable: the new node files are absent, the
         // update/delete have not touched `apg/layers/**`, and no commit landed.
@@ -2393,7 +2438,7 @@ mod e2e {
             "a buffered delete must not touch apg/layers/** before save"
         );
         assert_eq!(
-            layers::read_node_file(&wt_apg, Layer::Solution, "role", "survivor")
+            layers::read_node_file(&wt_apg, Layer::Global, "constraint", "survivor")
                 .unwrap()
                 .body,
             "survivor baseline",
@@ -2425,7 +2470,8 @@ mod e2e {
             let node_path = path(&expected.name);
             assert!(node_path.exists(), "save must write `{}`", expected.name);
             assert_eq!(
-                layers::read_node_file(&wt_apg, Layer::Solution, "role", &expected.name).unwrap(),
+                layers::read_node_file(&wt_apg, Layer::Global, "constraint", &expected.name)
+                    .unwrap(),
                 *expected,
                 "the on-disk node file for `{}` must equal the admitted content",
                 expected.name
@@ -2447,8 +2493,9 @@ mod e2e {
         // The held DB agrees with disk: routed reads report the admitted bodies
         // and the deleted node is gone.
         let assert_body = |fqn: &str, body: &str| {
-            let query =
-                format!("MATCH (n:Role {{fqn: '{fqn}'}}) WHERE n.body = '{body}' RETURN count(*)");
+            let query = format!(
+                "MATCH (n:Constraint {{fqn: '{fqn}'}}) WHERE n.body = '{body}' RETURN count(*)"
+            );
             let out = testutil::spawn_apg(&["query", &query], &wt);
             assert!(
                 out.status.success(),
@@ -2464,14 +2511,14 @@ mod e2e {
                 "the held DB must report the admitted body for {fqn}"
             );
         };
-        assert_body("solution.role.kept-a", "kept a");
-        assert_body("solution.role.kept-b", "kept b");
-        assert_body("solution.role.survivor", "survivor buffered");
+        assert_body("global.constraint.kept-a", "kept a");
+        assert_body("global.constraint.kept-b", "kept b");
+        assert_body("global.constraint.survivor", "survivor buffered");
 
         let gone = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.doomed'}) RETURN count(*)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.doomed'}) RETURN count(*)",
             ],
             &wt,
         );
@@ -2496,7 +2543,7 @@ mod e2e {
             assert!(
                 nodes
                     .iter()
-                    .any(|n| n.node_type == "role" && n.name == name),
+                    .any(|n| n.node_type == "constraint" && n.name == name),
                 "the durable store must contain `{name}`"
             );
         }
@@ -2553,12 +2600,12 @@ mod e2e {
 
         // Route one durable mutation: admitted into the write-back buffer (and
         // projected into the held DB) but NOT durable until save. A lone
-        // `solution.role` keeps the model whole-model-valid (SPEC §8.1).
+        // `global.constraint` keeps the model whole-model-valid (SPEC §8.1).
         let add = testutil::ApgCommand::new(&[
             "node",
             "add",
-            "solution",
-            "role",
+            "global",
+            "constraint",
             "reanchored",
             "--body",
             "a buffered durable node",
@@ -2722,23 +2769,24 @@ mod e2e {
             "requirement",
             "checkout",
             "checkout original",
+            Vec::new(),
             vec![
-                out_edge(
-                    "drives",
+                in_edge(
+                    "requires",
+                    "requirements.stakeholder.customer",
+                    NodeProperties::default(),
+                ),
+                in_edge(
+                    "driven-by",
                     "domain.service.billing",
                     props(&[("flavor", "map")]),
                 ),
-                out_edge(
-                    "drives",
+                in_edge(
+                    "driven-by",
                     "domain.service.scratch",
                     NodeProperties::default(),
                 ),
             ],
-            vec![in_edge(
-                "requires",
-                "requirements.stakeholder.customer",
-                NodeProperties::default(),
-            )],
         );
         let customer = nf(
             "requirements",
@@ -2757,16 +2805,20 @@ mod e2e {
             "service",
             "billing",
             "the billing service",
-            Vec::new(),
+            vec![out_edge(
+                "driven-by",
+                "requirements.requirement.checkout",
+                props(&[("flavor", "map")]),
+            )],
             vec![
-                in_edge(
-                    "drives",
-                    "requirements.requirement.checkout",
-                    props(&[("flavor", "map")]),
-                ),
                 in_edge(
                     "contains",
                     "domain.group.ordering",
+                    NodeProperties::default(),
+                ),
+                in_edge(
+                    "realises",
+                    "solution.component.worker",
                     NodeProperties::default(),
                 ),
             ],
@@ -2776,16 +2828,20 @@ mod e2e {
             "service",
             "scratch",
             "a scratch service",
-            Vec::new(),
+            vec![out_edge(
+                "driven-by",
+                "requirements.requirement.checkout",
+                NodeProperties::default(),
+            )],
             vec![
-                in_edge(
-                    "drives",
-                    "requirements.requirement.checkout",
-                    NodeProperties::default(),
-                ),
                 in_edge(
                     "contains",
                     "domain.group.ordering",
+                    NodeProperties::default(),
+                ),
+                in_edge(
+                    "realises",
+                    "solution.component.worker",
                     NodeProperties::default(),
                 ),
             ],
@@ -2865,9 +2921,51 @@ mod e2e {
                 NodeProperties::default(),
             )],
         );
+        // A Component realising the two seeded services (the §6 coverage
+        // minimum) plus its exactly-one Role.
+        let worker = nf(
+            "solution",
+            "component",
+            "worker",
+            "the worker component",
+            vec![
+                out_edge(
+                    "realises",
+                    "domain.service.billing",
+                    NodeProperties::default(),
+                ),
+                out_edge(
+                    "realises",
+                    "domain.service.scratch",
+                    NodeProperties::default(),
+                ),
+                out_edge(
+                    "is-role",
+                    "solution.role.app-service",
+                    NodeProperties::default(),
+                ),
+            ],
+            Vec::new(),
+        );
+        let mut app_role = nf(
+            "solution",
+            "role",
+            "app-service",
+            "the application service role",
+            Vec::new(),
+            vec![in_edge(
+                "is-role",
+                "solution.component.worker",
+                NodeProperties::default(),
+            )],
+        );
+        app_role
+            .properties
+            .insert("applies-to".to_string(), "component".to_string());
 
         for node in [
             &checkout, &customer, &billing, &scratch, &order, &ordering, &order_id, &doomed,
+            &worker, &app_role,
         ] {
             layers::write_node(&wt_apg, node).unwrap();
         }
@@ -2952,7 +3050,7 @@ mod e2e {
             "MATCH (n:Stakeholder) RETURN n.fqn, n.body ORDER BY n.fqn",
             "MATCH (n:Entity) RETURN n.fqn, n.body ORDER BY n.fqn",
             "MATCH (n:Value) RETURN n.fqn, n.body ORDER BY n.fqn",
-            "MATCH (a:Requirement)-[r:Drives]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
+            "MATCH (a:Service)-[r:DrivenBy]->(b:Requirement) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
             "MATCH (a:Stakeholder)-[r:Requires]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
             "MATCH (f:Feedback) RETURN f.fqn, f.body, f.status, f.disposition ORDER BY f.fqn",
             "MATCH (f:Feedback)-[r:Reviews]->(t) RETURN f.fqn, t.fqn ORDER BY f.fqn, t.fqn",
@@ -3028,9 +3126,9 @@ mod e2e {
         run(&[
             "edge",
             "add",
-            "drives",
-            "requirements.requirement.checkout",
+            "driven-by",
             "domain.service.added-svc",
+            "requirements.requirement.checkout",
         ]);
         // Keep the added requirement rooted and the added service owned, so the
         // assembled model satisfies the whole-model minimums at save (SPEC §8.1).
@@ -3050,18 +3148,25 @@ mod e2e {
         ]);
         run(&[
             "edge",
-            "rm",
-            "drives",
-            "requirements.requirement.checkout",
-            "domain.service.scratch",
+            "add",
+            "realises",
+            "solution.component.worker",
+            "domain.service.added-svc",
         ]);
-        // `scratch` must stay driven by a Requirement after the `drives` rm.
+        run(&[
+            "edge",
+            "rm",
+            "driven-by",
+            "domain.service.scratch",
+            "requirements.requirement.checkout",
+        ]);
+        // `scratch` must stay driven by a Requirement after the `driven-by` rm.
         run(&[
             "edge",
             "add",
-            "drives",
-            "requirements.requirement.added-req",
+            "driven-by",
             "domain.service.scratch",
+            "requirements.requirement.added-req",
         ]);
         run(&["node", "rm", "domain", "value", "doomed"]);
 

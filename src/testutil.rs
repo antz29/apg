@@ -414,11 +414,18 @@ pub fn valid_model() -> Vec<NodeFile> {
             "requirements",
         ),
         (
-            "requirement",
+            "service",
             "place-order",
-            "drives",
-            "domain.service.place-order",
-            "requirements",
+            "driven-by",
+            "requirements.requirement.place-order",
+            "domain",
+        ),
+        (
+            "service",
+            "place-order",
+            "driven-by",
+            "requirements.requirement.refund",
+            "domain",
         ),
         (
             "group",
@@ -527,6 +534,12 @@ pub fn valid_model() -> Vec<NodeFile> {
         .unwrap()
         .properties
         .insert("kind".to_string(), "entity".to_string());
+    nodes
+        .iter_mut()
+        .find(|n| n.node_type == "role")
+        .unwrap()
+        .properties
+        .insert("applies-to".to_string(), "both".to_string());
     for &(node_type, name, kind, target, layer) in edges {
         add_out(&mut nodes, layer, node_type, name, kind, target);
     }
@@ -958,8 +971,8 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
             "satisfies" => {
                 g.satisfies.insert((s("from"), s("to")));
             }
-            "drives" => {
-                g.drives.insert((s("from"), s("to")));
+            "driven-by" => {
+                g.driven_by.insert((s("from"), s("to")));
             }
             "represents" => {
                 g.represents.insert((s("from"), s("to")));

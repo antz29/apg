@@ -262,7 +262,8 @@ enum Export {
         from: String,
         to: String,
     },
-    Drives {
+    #[serde(rename = "driven-by")]
+    DrivenBy {
         from: String,
         to: String,
     },
@@ -601,10 +602,10 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             },
         )?;
     }
-    for (a, b) in &graph.drives {
+    for (a, b) in &graph.driven_by {
         write_line(
             &mut w,
-            &Export::Drives {
+            &Export::DrivenBy {
                 from: a.clone(),
                 to: b.clone(),
             },

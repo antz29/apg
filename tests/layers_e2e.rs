@@ -33,7 +33,7 @@ fn sample_node() -> NodeFile {
         body: "A customer can place an order.".to_string(),
         properties: BTreeMap::new(),
         out: vec![OutEdge {
-            kind: "drives".to_string(),
+            kind: "driven-by".to_string(),
             target: "domain.service.checkout".to_string(),
             properties: BTreeMap::new(),
         }],
@@ -76,15 +76,18 @@ fn write_tree(root: &Path, nodes: &[NodeFile]) {
     }
 }
 
-/// A sample spine tree: a requirement `drives` a service, a component
+/// A sample spine tree: a service `driven-by` a requirement, a component
 /// `realises` the service, and the component is `implemented-by` a code FQN.
 /// Fully paired in/out halves.
 fn sample_tree() -> Vec<NodeFile> {
     let mut req = node("requirements", "requirement", "place-order");
-    req.out.push(out_edge("drives", "domain.service.checkout"));
+    req.in_edges
+        .push(in_edge("driven-by", "domain.service.checkout"));
     let mut svc = node("domain", "service", "checkout");
-    svc.in_edges
-        .push(in_edge("drives", "requirements.requirement.place-order"));
+    svc.out.push(out_edge(
+        "driven-by",
+        "requirements.requirement.place-order",
+    ));
     svc.in_edges
         .push(in_edge("realises", "solution.component.payments"));
     let mut comp = node("solution", "component", "payments");
@@ -226,10 +229,13 @@ mod e2e {
         let root = temp_root("multiwrite");
         let mut a = node("requirements", "requirement", "place-order");
         a.body = "A customer can place an order.".to_string();
-        a.out.push(out_edge("drives", "domain.service.checkout"));
+        a.in_edges
+            .push(in_edge("driven-by", "domain.service.checkout"));
         let mut b = node("domain", "service", "checkout");
-        b.in_edges
-            .push(in_edge("drives", "requirements.requirement.place-order"));
+        b.out.push(out_edge(
+            "driven-by",
+            "requirements.requirement.place-order",
+        ));
 
         write_through(&root, &[a.clone(), b.clone()]).unwrap();
 
@@ -557,9 +563,9 @@ mod e2e {
         // The spine edges, out-side only.
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Drives { from, to, .. }
-                if from == "requirements.requirement.place-order"
-                    && to == "domain.service.checkout"
+            Record::DrivenBy { from, to, .. }
+                if from == "domain.service.checkout"
+                    && to == "requirements.requirement.place-order"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
@@ -1430,7 +1436,7 @@ mod e2e {
 
     /// Phase-05 task-9: projection-equals-sources as a TWO-WAY equality over
     /// NODES AND EDGES — `db − sources = ∅` AND `sources − db = ∅` — covering
-    /// every authored edge kind (Contains/Requires/Drives/Realises/
+    /// every authored edge kind (Contains/Requires/DrivenBy/Realises/
     /// SpecImplementedBy/Uses/Represents/IsRole/Reads/Writes/Details) plus the
     /// transient Satisfies/Gates/Reviews, with no duplicate rows per
     /// `(label, fqn)`. Scoped to BOTH the durable (`write_project`) and
@@ -1452,6 +1458,8 @@ mod e2e {
         let mut checkout = node("domain", "service", "checkout");
         let mut gateway = node("solution", "component", "gateway");
         let mut role = node("solution", "role", "app-service");
+        role.properties
+            .insert("applies-to".to_string(), "both".to_string());
         let mut alice = node("solution", "person", "alice");
         let mut buyer = node("domain", "actor", "buyer");
         let mut notes = node("implementation", "note", "notes");
@@ -1469,13 +1477,13 @@ mod e2e {
         timer
             .in_edges
             .push(in_edge("requires", "requirements.user.customer"));
-        // drives: Requirement → Service
-        timer
-            .out
-            .push(out_edge("drives", "domain.service.checkout"));
+        // driven-by: Service → Requirement
         checkout
+            .out
+            .push(out_edge("driven-by", "requirements.requirement.timer"));
+        timer
             .in_edges
-            .push(in_edge("drives", "requirements.requirement.timer"));
+            .push(in_edge("driven-by", "domain.service.checkout"));
         // realises: Component → Service
         gateway
             .out
@@ -1663,7 +1671,7 @@ mod e2e {
         const EDGE_TABLES: [&str; 17] = [
             "Contains",
             "Requires",
-            "Drives",
+            "DrivenBy",
             "Realises",
             "SpecImplementedBy",
             "Uses",

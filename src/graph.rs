@@ -21,12 +21,12 @@ pub struct Graph {
     pub gates: HashSet<(String, String)>,
     pub satisfies: HashSet<(String, String)>,
     /// Spine edges (GraphModel-SPEC.md; PHASE_01): end-to-end why-to-code
-    /// traceability through the Domain and Solution tiers. `drives`
-    /// (Requirement → Service), `represents` (Actor → User, Person → Actor).
-    pub drives: HashSet<(String, String)>,
+    /// traceability through the Domain and Solution tiers. `driven-by`
+    /// (Service → Requirement), `represents` (Actor → User, Person → Actor).
+    pub driven_by: HashSet<(String, String)>,
     pub represents: HashSet<(String, String)>,
     /// New-model §3.3 spec edges (apg-projects). `implemented-by` keeps the
-    /// §3.3 wire spelling. `calls`/`uses`/`contains`/`drives`/`represents`/
+    /// §3.3 wire spelling. `calls`/`uses`/`contains`/`driven-by`/`represents`/
     /// `details` reuse the scanner/spine sets above and are routed by endpoint
     /// node-kind at load time.
     pub spec_implemented_by: HashSet<(String, String)>,
@@ -41,7 +41,7 @@ pub struct Graph {
     pub realises: HashSet<(String, String)>,
     /// The **full** node-file properties map of every durable authored edge,
     /// keyed by the node-file edge kind and its `(from, to)` endpoints (e.g.
-    /// `("drives", "requirements.requirement.checkout", "domain.group.core")`).
+    /// `("driven-by", "domain.service.checkout", "requirements.requirement.place-order")`).
     /// The endpoint sets above carry membership; this map carries the per-row
     /// metadata the projection's serialized-properties column stores. A scanned
     /// code edge — or an authored edge declared without properties — has no

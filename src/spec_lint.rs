@@ -107,7 +107,8 @@ fn assembled_nodes(nodes: &[NodeFile]) -> BTreeMap<String, &NodeFile> {
 /// A scoped run validates the edges whose source is in scope (the tier's local
 /// structure) plus the typed cross-tier edges whose target is in scope and
 /// whose source is an upstream tier (the upstream spine paths the tier
-/// requires — e.g. `drives` from a Requirement into a Domain Service). Every
+/// requires — e.g. `driven-by` from a Domain Service into a Requirements
+/// Requirement). Every
 /// validated edge's authored endpoints must exist in the model — endpoint
 /// existence is structural (drift), not an out-of-scope "downstream
 /// completeness" question, so a single-tier run flags a dangling authored
@@ -122,8 +123,10 @@ pub(crate) fn model_errors(
     let mut errors: Vec<String> = Vec::new();
 
     // Tier rank for the upstream-spine filter: requirements < domain <
-    // solution. A cross-tier edge is upstream-facing when its source tier is
-    // earlier than its in-scope target tier.
+    // solution. Under P3, cross-tier edges point "up" (concrete → abstract),
+    // so an in-scope tier's upstream-spine edges have their SOURCE in a more
+    // concrete tier (a higher rank) and their TARGET in the in-scope tier —
+    // e.g. `driven-by` from a Domain Service into a Requirements Requirement.
     let rank = |layer: Layer| match layer {
         Layer::Requirements => Some(1u8),
         Layer::Domain => Some(2u8),
@@ -141,7 +144,7 @@ pub(crate) fn model_errors(
                     dst_layer == scope
                         && rank(src_layer)
                             .zip(rank(dst_layer))
-                            .is_some_and(|(s, d)| s < d)
+                            .is_some_and(|(s, d)| s > d)
                 })
             });
             if in_scope || upstream {

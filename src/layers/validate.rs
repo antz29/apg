@@ -17,16 +17,12 @@ use super::node_file::{NodeFile, NodeProperties, fqn};
 /// metadata (SPEC §4.1: short ids "may exist as metadata only") and is never
 /// refused, never treated as identity.
 pub const PROP_KIND: &str = "kind";
-pub const PROP_ATTRIBUTE: &str = "attribute";
-pub const PROP_ROOT: &str = "root";
+pub const PROP_APPLIES_TO: &str = "applies-to";
 
 /// `Entity` `kind` values (SPEC §3.1: "Entity — kind `entity` | `event`").
 pub const ENTITY_KINDS: [&str; 2] = ["entity", "event"];
-/// `Group` `attribute` values (SPEC §3.1: "attributes
-/// `core`/`supporting`/`generic`").
-pub const GROUP_ATTRIBUTES: [&str; 3] = ["core", "supporting", "generic"];
-/// `Container` `kind` values (SPEC §3.1: "kind `app`/`service`/`db`/`queue`").
-pub const CONTAINER_KINDS: [&str; 4] = ["app", "service", "db", "queue"];
+/// `Role` `applies-to` values (SPEC §4: "applies-to = container|component|both").
+pub const ROLE_APPLIES_TO: [&str; 3] = ["container", "component", "both"];
 
 /// The SPEC §4 name allowlist `[a-z0-9][a-z0-9-]*` — refuse, never
 /// sanitize. Lowercase ASCII letters and digits anywhere, hyphens after the
@@ -103,33 +99,14 @@ pub fn validate_node(
             ),
             None => anyhow::bail!("Entity requires `kind` ({})", ENTITY_KINDS.join("|")),
         },
-        "group" => {
-            if let Some(attribute) = properties.get(PROP_ATTRIBUTE)
-                && !GROUP_ATTRIBUTES.contains(&attribute.as_str())
-            {
-                anyhow::bail!(
-                    "Group `attribute` `{attribute}` is invalid — expected {}",
-                    GROUP_ATTRIBUTES.join("|")
-                );
-            }
-            if let Some(root) = properties.get(PROP_ROOT)
-                && !valid_name(root)
-            {
-                anyhow::bail!(
-                    "Group `root` `{root}` is invalid — must match the name allowlist [a-z0-9][a-z0-9-]*"
-                );
-            }
-        }
-        "container" => {
-            if let Some(kind) = properties.get(PROP_KIND)
-                && !CONTAINER_KINDS.contains(&kind.as_str())
-            {
-                anyhow::bail!(
-                    "Container `kind` `{kind}` is invalid — expected {}",
-                    CONTAINER_KINDS.join("|")
-                );
-            }
-        }
+        "role" => match properties.get(PROP_APPLIES_TO) {
+            Some(level) if ROLE_APPLIES_TO.contains(&level.as_str()) => {}
+            Some(level) => anyhow::bail!(
+                "Role `applies-to` `{level}` is invalid — expected {}",
+                ROLE_APPLIES_TO.join("|")
+            ),
+            None => anyhow::bail!("Role requires `applies-to` ({})", ROLE_APPLIES_TO.join("|")),
+        },
         _ => {}
     }
     if existing.contains(&(layer, node_type.to_string(), name.to_string())) {
@@ -247,7 +224,7 @@ pub fn validate_trees_acyclic(
 pub(crate) const EDGE_KINDS: [&str; 14] = [
     "requires",
     "contains",
-    "drives",
+    "driven-by",
     "reads",
     "writes",
     "calls",
@@ -322,11 +299,11 @@ pub(crate) const MATRIX: &[MatrixRow] = &[
         &["component"],
     ),
     (
-        "drives",
-        Layer::Requirements,
-        &["requirement"],
+        "driven-by",
         Layer::Domain,
         &["service"],
+        Layer::Requirements,
+        &["requirement"],
     ),
     (
         "reads",
@@ -447,8 +424,8 @@ fn allowed_shapes(kind: &str) -> String {
 /// loops [`validate_edge`] over every edge.
 ///
 /// This is also the spine check (SPEC §6): every spine hop is tier-locked by
-/// the matrix (`requires`: Stakeholder/User → Requirement; `drives`:
-/// Requirement → Service; `realises`: Component → Service; `implemented-by`:
+/// the matrix (`requires`: Stakeholder/User → Requirement; `driven-by`:
+/// Service → Requirement; `realises`: Component → Service; `implemented-by`:
 /// Component → code), so a tier skip is impossible once the matrix holds — the
 /// matrix IS the spine enforcement, and there is no extra tier machinery. A
 /// dangling FQN endpoint (malformed FQN or unknown layer) is a write-time error.
@@ -664,20 +641,26 @@ pub(crate) enum Context {
 /// - a leaf Group (no subgroup) contains at least one Service; a Group with
 ///   subgroups contains no direct Service/Entity (the two modes are exclusive);
 /// - every Entity contains at least one Value;
-/// - every Service is driven by at least one Requirement;
+/// - every Service is `driven-by` at least one Requirement (source end) and
+///   every Requirement is `driven-by` at least one Service (target end, §3.4);
+/// - every Service is realised by at least one Component;
 /// - every Component realises at least one Service;
 /// - every Container and Component `is-role` exactly one Role;
+/// - every Role is used by at least one Container/Component, and its
+///   `applies-to` matches the level that uses it;
 /// - a Service's `reads`/`writes` target belongs to the Service's own Group;
 /// - every Stakeholder and User requires at least one Requirement, and every
 ///   Requirement is rooted in a Stakeholder or User directly or through
 ///   Requirement decomposition;
 /// - every Actor represents at least one User and calls at least one Service;
-/// - every Person represents at least one Actor and uses at least one Component;
+/// - every Person represents at least one Actor and uses at least one Component,
+///   and the Actor a Person represents calls a Service the Component realises
+///   (directly or through `calls`);
 /// - every System contains at least one Container, and every Container
 ///   contains at least one Component;
-/// - a Component carries at most one `implemented-by` claim, and under
-///   [`Context::MergeStrength`] at least one (presence itself is deferred to
-///   merge under `Save`/`Lint`, SPEC §8.2);
+/// - exactly one Component claims each code node (`implemented-by`, no shared
+///   claims); under [`Context::MergeStrength`] every Component claims at least
+///   one (presence itself is deferred to merge under `Save`/`Lint`, SPEC §8.2);
 /// - `contains` is acyclic (delegated to [`validate_trees_acyclic`]).
 pub(crate) fn validate_cardinalities(
     assembled: &BTreeMap<String, &NodeFile>,
@@ -810,18 +793,34 @@ pub(crate) fn validate_cardinalities(
         }
     }
 
-    // Every Service is driven by at least one Requirement (SPEC §4.3).
+    // Every Service is `driven-by` at least one Requirement (SPEC §3.4, source
+    // end), and every Requirement is `driven-by` at least one Service (SPEC
+    // §3.4, target end — requirement coverage).
     for (fqn, node) in assembled {
         if node.node_type != "service" || !in_scope(node) {
             continue;
         }
-        let drivers = in_of(fqn, "drives")
+        let requirements = out_of(fqn, "driven-by")
             .iter()
-            .filter(|s| is_type(s, "requirement"))
+            .filter(|t| is_type(t, "requirement"))
             .count();
-        if drivers == 0 {
+        if requirements == 0 {
             errors.push(format!(
-                "Service `{fqn}` is driven by no Requirement — every Service is driven by at least one Requirement"
+                "Service `{fqn}` is `driven-by` no Requirement — every Service is `driven-by` at least one Requirement"
+            ));
+        }
+    }
+    for (fqn, node) in assembled {
+        if node.node_type != "requirement" || !in_scope(node) {
+            continue;
+        }
+        let services = in_of(fqn, "driven-by")
+            .iter()
+            .filter(|s| is_type(s, "service"))
+            .count();
+        if services == 0 {
+            errors.push(format!(
+                "Requirement `{fqn}` is `driven-by` no Service — every Requirement is `driven-by` at least one Service (requirement coverage, SPEC §3.4)"
             ));
         }
     }
@@ -843,13 +842,9 @@ pub(crate) fn validate_cardinalities(
                     ));
                 }
                 let claims = out_of(fqn, "implemented-by").len();
-                if claims > 1 {
+                if claims == 0 && context == Context::MergeStrength {
                     errors.push(format!(
-                        "Component `{fqn}` carries {claims} `implemented-by` claims — a Component has at most one code target"
-                    ));
-                } else if claims == 0 && context == Context::MergeStrength {
-                    errors.push(format!(
-                        "Component `{fqn}` has no `implemented-by` claim — merge-strength validation requires exactly one real scanned-code target"
+                        "Component `{fqn}` has no `implemented-by` claim — merge-strength validation requires every Component to claim at least one code node"
                     ));
                 }
                 let roles = out_of(fqn, "is-role")
@@ -894,6 +889,125 @@ pub(crate) fn validate_cardinalities(
                 }
             }
             _ => {}
+        }
+    }
+
+    // Every Service is realised by at least one Component (SPEC §6).
+    for (fqn, node) in assembled {
+        if node.node_type != "service" || !in_scope(node) {
+            continue;
+        }
+        let components = in_of(fqn, "realises")
+            .iter()
+            .filter(|s| is_type(s, "component"))
+            .count();
+        if components == 0 {
+            errors.push(format!(
+                "Service `{fqn}` is realised by no Component — every Service is realised by at least one Component"
+            ));
+        }
+    }
+
+    // Every Role is used by at least one Container/Component, and its
+    // `applies-to` matches the level that uses it (SPEC §4/§6).
+    for (fqn, node) in assembled {
+        if node.node_type != "role" || !in_scope(node) {
+            continue;
+        }
+        let users = in_of(fqn, "is-role");
+        if users.is_empty() {
+            errors.push(format!(
+                "Role `{fqn}` is used by no Container/Component — every Role is used by at least one"
+            ));
+            continue;
+        }
+        let applies_to = node.properties.get(PROP_APPLIES_TO).map(String::as_str);
+        for user in &users {
+            let user_type = assembled
+                .get(user)
+                .map(|n| n.node_type.as_str())
+                .unwrap_or_default();
+            let matches = match applies_to {
+                Some("container") => user_type == "container",
+                Some("component") => user_type == "component",
+                Some("both") => user_type == "container" || user_type == "component",
+                _ => false,
+            };
+            if !matches {
+                errors.push(format!(
+                    "Role `{fqn}` `applies-to` `{}` does not match its `is-role` user `{user}` (`{user_type}`)",
+                    applies_to.unwrap_or("<unset>")
+                ));
+            }
+        }
+    }
+
+    // Exactly one Component per code node (SPEC §5.2/§6 — no shared claims): a
+    // Component claims MANY code nodes; a code node is claimed by at most one.
+    let mut claimed_by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (fqn, node) in assembled {
+        if node.node_type != "component" {
+            continue;
+        }
+        for target in out_of(fqn, "implemented-by") {
+            claimed_by.entry(target).or_default().insert(fqn.clone());
+        }
+    }
+    for (code, components) in &claimed_by {
+        if components.len() > 1 {
+            errors.push(format!(
+                "code `{code}` is `implemented-by` {} Components ({}) — exactly one Component per code node",
+                components.len(),
+                components.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+
+    // Person ↔ Actor ↔ Service consistency (SPEC §4/§6): if a Person `uses` a
+    // Component, the Actor the Person represents must `call` — directly or
+    // through `calls` — a Service the Component realises.
+    for (fqn, node) in assembled {
+        if node.node_type != "person" || !in_scope(node) {
+            continue;
+        }
+        let components: Vec<String> = out_of(fqn, "uses")
+            .into_iter()
+            .filter(|t| is_type(t, "component"))
+            .collect();
+        let actors: Vec<String> = out_of(fqn, "represents")
+            .into_iter()
+            .filter(|t| is_type(t, "actor"))
+            .collect();
+        for component in &components {
+            let realised: BTreeSet<String> = out_of(component, "realises")
+                .into_iter()
+                .filter(|t| is_type(t, "service"))
+                .collect();
+            if realised.is_empty() {
+                continue;
+            }
+            for actor in &actors {
+                let mut reachable: BTreeSet<String> = BTreeSet::new();
+                let mut stack: Vec<String> = out_of(actor, "calls")
+                    .into_iter()
+                    .filter(|t| is_type(t, "service"))
+                    .collect();
+                while let Some(service) = stack.pop() {
+                    if !reachable.insert(service.clone()) {
+                        continue;
+                    }
+                    stack.extend(
+                        out_of(&service, "calls")
+                            .into_iter()
+                            .filter(|t| is_type(t, "service")),
+                    );
+                }
+                if reachable.is_disjoint(&realised) {
+                    errors.push(format!(
+                        "Person `{fqn}` uses Component `{component}` but the Actor `{actor}` it represents calls no Service the Component realises"
+                    ));
+                }
+            }
         }
     }
 

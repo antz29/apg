@@ -733,7 +733,7 @@ fn durable_edge_record(
             to,
             properties,
         },
-        "Drives" => Record::Drives {
+        "DrivenBy" => Record::DrivenBy {
             from,
             to,
             properties,
@@ -879,7 +879,7 @@ const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
 /// are reconstructed.
 const DURABLE_EDGE_TABLES: [(&str, &str); 14] = [
     ("Contains", "contains"),
-    ("Drives", "drives"),
+    ("DrivenBy", "driven-by"),
     ("SpecImplementedBy", "implemented-by"),
     ("Calls", "calls"),
     ("Publishes", "publishes"),

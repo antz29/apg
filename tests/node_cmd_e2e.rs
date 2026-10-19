@@ -102,14 +102,51 @@ fn setup_hub_and_leaves(wt: &Path, n: usize) {
         "requirements.requirement.hub",
     )];
     let mut hub = node("requirements", "requirement", "hub");
-    hub.in_edges = vec![testutil::in_edge(
-        "requires",
-        "requirements.stakeholder.owner",
-    )];
-    let mut nodes = vec![owner, hub];
+    hub.in_edges = vec![
+        testutil::in_edge("requires", "requirements.stakeholder.owner"),
+        testutil::in_edge("driven-by", "domain.service.svc"),
+    ];
+
+    // Whole-model completion (SPEC §8.1/§3.4): one Service driven-by the hub and
+    // every leaf, contained by a leaf Group and realised by a Component that
+    // is-role's a Role (applies-to=component) — so the seeded store is
+    // whole-model-valid at the save boundary.
+    let mut svc = node("domain", "service", "svc");
+    svc.out.push(testutil::out_edge(
+        "driven-by",
+        "requirements.requirement.hub",
+    ));
+    svc.in_edges
+        .push(testutil::in_edge("contains", "domain.group.grp"));
+    svc.in_edges
+        .push(testutil::in_edge("realises", "solution.component.cmp"));
+
+    let mut grp = node("domain", "group", "grp");
+    grp.out
+        .push(testutil::out_edge("contains", "domain.service.svc"));
+
+    let mut cmp = node("solution", "component", "cmp");
+    cmp.out
+        .push(testutil::out_edge("realises", "domain.service.svc"));
+    cmp.out
+        .push(testutil::out_edge("is-role", "solution.role.rl"));
+
+    let mut rl = node("solution", "role", "rl");
+    rl.properties
+        .insert("applies-to".to_string(), "component".to_string());
+    rl.in_edges
+        .push(testutil::in_edge("is-role", "solution.component.cmp"));
+
+    let mut nodes = vec![owner, hub, grp, cmp, rl];
     for i in 0..n {
-        nodes.push(node("requirements", "requirement", &format!("leaf-{i}")));
+        let leaf_fqn = format!("requirements.requirement.leaf-{i}");
+        let mut leaf = node("requirements", "requirement", &format!("leaf-{i}"));
+        leaf.in_edges
+            .push(testutil::in_edge("driven-by", "domain.service.svc"));
+        svc.out.push(testutil::out_edge("driven-by", &leaf_fqn));
+        nodes.push(leaf);
     }
+    nodes.push(svc);
     layers::write_project(&wt.join(specs::LAYOUT), &nodes, &[]).unwrap();
 }
 
@@ -399,11 +436,11 @@ mod e2e {
             "the session must be live"
         );
 
-        // `apg node add solution role timer` — admitted into the write-back
-        // buffer, so nothing is durable yet. A lone `solution.role` is an
-        // unconstrained node type, so the saved model is whole-model-valid
-        // (SPEC §8.1).
-        let add = testutil::ApgCommand::new(&["node", "add", "solution", "role", "timer"])
+        // `apg node add global constraint timer` — admitted into the write-back
+        // buffer, so nothing is durable yet. A lone `global.constraint` is an
+        // unconstrained node type (no cardinality minimums), so the saved model
+        // is whole-model-valid (SPEC §8.1).
+        let add = testutil::ApgCommand::new(&["node", "add", "global", "constraint", "timer"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
@@ -414,15 +451,15 @@ mod e2e {
         );
         assert_eq!(
             String::from_utf8_lossy(&add.stdout).trim(),
-            "Added node solution.role.timer"
+            "Added node global.constraint.timer"
         );
 
         // The file name is the identity, and the add BUFFERS: no node file
         // appears before save (the durability point below).
         let path = wt_apg
             .join(layers::LAYERS_DIR)
-            .join("solution")
-            .join("role")
+            .join("global")
+            .join("constraint")
             .join("timer.json");
         assert!(
             !path.exists(),
@@ -445,16 +482,19 @@ mod e2e {
 
         // One file per node at the derived path; the file name is the identity.
         assert!(path.exists(), "{} must exist", path.display());
-        let back = layers::read_node_file(&wt_apg, Layer::Solution, "role", "timer").unwrap();
+        let back = layers::read_node_file(&wt_apg, Layer::Global, "constraint", "timer").unwrap();
         assert_eq!(back.name, "timer");
-        assert_eq!(fqn(Layer::Solution, "role", "timer"), "solution.role.timer");
+        assert_eq!(
+            fqn(Layer::Global, "constraint", "timer"),
+            "global.constraint.timer"
+        );
 
         // Visible in the branch DB: a routed read sees the saved node while
         // the session is still live.
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.timer'}) RETURN count(n)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.timer'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -488,7 +528,7 @@ mod e2e {
         assert!(
             head.tree()
                 .unwrap()
-                .get_path(Path::new("apg/layers/solution/role/timer.json"))
+                .get_path(Path::new("apg/layers/global/constraint/timer.json"))
                 .is_ok(),
             "the node file must be committed on the project branch"
         );
@@ -501,7 +541,7 @@ mod e2e {
             String::from_utf8_lossy(&out.stderr)
         );
         let db = ArtifactDb::open(&wt_apg).unwrap();
-        assert!(db.has_node("solution.role.timer"));
+        assert!(db.has_node("global.constraint.timer"));
         drop(db);
 
         testutil::remove(&repo);
@@ -545,7 +585,7 @@ mod e2e {
         );
 
         // And it still routes a real durable mutation.
-        let add = testutil::spawn_apg(&["node", "add", "solution", "role", "survivor"], &wt);
+        let add = testutil::spawn_apg(&["node", "add", "global", "constraint", "survivor"], &wt);
         assert!(
             add.status.success(),
             "a routed mutation after the disconnect must succeed: {}",
@@ -631,6 +671,73 @@ mod e2e {
             ],
             "Added edge requires requirements.stakeholder.owner -> requirements.requirement.r1",
         );
+        // Whole-model completion (SPEC §8.1/§3.4): the Requirement `r1` must be
+        // `driven-by` a Service at save, and that Service needs the domain/
+        // solution context that satisfies the other cardinalities.
+        run(
+            &["node", "add", "domain", "service", "svc"],
+            "Added node domain.service.svc",
+        );
+        run(
+            &["node", "add", "domain", "group", "grp"],
+            "Added node domain.group.grp",
+        );
+        run(
+            &["node", "add", "solution", "component", "cmp"],
+            "Added node solution.component.cmp",
+        );
+        run(
+            &[
+                "node",
+                "add",
+                "solution",
+                "role",
+                "rl",
+                "--property",
+                "applies-to=component",
+            ],
+            "Added node solution.role.rl",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.svc",
+                "requirements.requirement.r1",
+            ],
+            "Added edge driven-by domain.service.svc -> requirements.requirement.r1",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "contains",
+                "domain.group.grp",
+                "domain.service.svc",
+            ],
+            "Added edge contains domain.group.grp -> domain.service.svc",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "realises",
+                "solution.component.cmp",
+                "domain.service.svc",
+            ],
+            "Added edge realises solution.component.cmp -> domain.service.svc",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "is-role",
+                "solution.component.cmp",
+                "solution.role.rl",
+            ],
+            "Added edge is-role solution.component.cmp -> solution.role.rl",
+        );
 
         // Buffered: neither endpoint file exists yet and no commit landed.
         assert!(
@@ -669,7 +776,7 @@ mod e2e {
         assert_eq!(src_back.out.len(), 1);
         assert_eq!(src_back.out[0].kind, "requires");
         assert_eq!(src_back.out[0].target, "requirements.requirement.r1");
-        assert_eq!(dst_back.in_edges.len(), 1);
+        assert_eq!(dst_back.in_edges.len(), 2);
         assert_eq!(dst_back.in_edges[0].kind, "requires");
         assert_eq!(
             dst_back.in_edges[0].source,
@@ -1074,7 +1181,7 @@ mod e2e {
         let err = edge_update(
             &wt_apg,
             &av(&[
-                "drives",
+                "driven-by",
                 "requirements.requirement.r1",
                 "requirements.requirement.r2",
             ]),
@@ -1204,6 +1311,62 @@ mod e2e {
             String::from_utf8_lossy(&edge.stderr)
         );
 
+        // Whole-model completion (SPEC §8.1/§3.4): the Requirement `gap-b` must
+        // be `driven-by` a Service at save, and that Service needs the domain/
+        // solution context satisfying the other cardinalities.
+        for args in [
+            &["node", "add", "domain", "service", "svc"][..],
+            &["node", "add", "domain", "group", "grp"][..],
+            &["node", "add", "solution", "component", "cmp"][..],
+            &[
+                "node",
+                "add",
+                "solution",
+                "role",
+                "rl",
+                "--property",
+                "applies-to=component",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.svc",
+                "requirements.requirement.gap-b",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "contains",
+                "domain.group.grp",
+                "domain.service.svc",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "realises",
+                "solution.component.cmp",
+                "domain.service.svc",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "is-role",
+                "solution.component.cmp",
+                "solution.role.rl",
+            ][..],
+        ] {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "routed {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
         // (4) Read-write DB class is exclusive while the session owns the DB: a
         // second read-write opener fails on the lbug file lock. (The old direct
         // `apg node add` loser is dropped — the routed entry never opens the DB.)
@@ -1253,7 +1416,7 @@ mod e2e {
         assert_eq!(a.out[0].target, "requirements.requirement.gap-b");
         let b =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "gap-b").unwrap();
-        assert_eq!(b.in_edges.len(), 1, "gap-b's in-half must be durable");
+        assert_eq!(b.in_edges.len(), 2, "gap-b's in-half must be durable");
         assert_eq!(b.in_edges[0].source, "requirements.stakeholder.gap-a");
 
         // (6) After the session ends the read-write DB is free again, but a
@@ -1329,11 +1492,18 @@ mod e2e {
             target: "requirements.requirement.r1".to_string(),
             properties: BTreeMap::new(),
         }];
-        r0.in_edges = vec![InEdge {
-            kind: "requires".to_string(),
-            source: "requirements.stakeholder.owner".to_string(),
-            properties: BTreeMap::new(),
-        }];
+        r0.in_edges = vec![
+            InEdge {
+                kind: "requires".to_string(),
+                source: "requirements.stakeholder.owner".to_string(),
+                properties: BTreeMap::new(),
+            },
+            InEdge {
+                kind: "driven-by".to_string(),
+                source: "domain.service.svc".to_string(),
+                properties: BTreeMap::new(),
+            },
+        ];
         let mut r1 = node("requirements", "requirement", "r1");
         r1.properties = BTreeMap::from([
             ("a".to_string(), "0".to_string()),
@@ -1344,18 +1514,92 @@ mod e2e {
             target: "requirements.requirement.r2".to_string(),
             properties: BTreeMap::new(),
         }];
-        r1.in_edges = vec![InEdge {
-            kind: "contains".to_string(),
-            source: "requirements.requirement.r0".to_string(),
-            properties: BTreeMap::new(),
-        }];
+        r1.in_edges = vec![
+            InEdge {
+                kind: "contains".to_string(),
+                source: "requirements.requirement.r0".to_string(),
+                properties: BTreeMap::new(),
+            },
+            InEdge {
+                kind: "driven-by".to_string(),
+                source: "domain.service.svc".to_string(),
+                properties: BTreeMap::new(),
+            },
+        ];
         let mut r2 = node("requirements", "requirement", "r2");
-        r2.in_edges = vec![InEdge {
+        r2.in_edges = vec![
+            InEdge {
+                kind: "contains".to_string(),
+                source: "requirements.requirement.r1".to_string(),
+                properties: BTreeMap::new(),
+            },
+            InEdge {
+                kind: "driven-by".to_string(),
+                source: "domain.service.svc".to_string(),
+                properties: BTreeMap::new(),
+            },
+        ];
+        // Whole-model completion (SPEC §8.1/§3.4): a Service driven-by each of
+        // r0/r1/r2, contained by a leaf Group and realised by a Component that
+        // is-role's a Role (applies-to=component).
+        let mut svc = node("domain", "service", "svc");
+        svc.out = vec![
+            OutEdge {
+                kind: "driven-by".to_string(),
+                target: "requirements.requirement.r0".to_string(),
+                properties: BTreeMap::new(),
+            },
+            OutEdge {
+                kind: "driven-by".to_string(),
+                target: "requirements.requirement.r1".to_string(),
+                properties: BTreeMap::new(),
+            },
+            OutEdge {
+                kind: "driven-by".to_string(),
+                target: "requirements.requirement.r2".to_string(),
+                properties: BTreeMap::new(),
+            },
+        ];
+        svc.in_edges = vec![
+            InEdge {
+                kind: "contains".to_string(),
+                source: "domain.group.grp".to_string(),
+                properties: BTreeMap::new(),
+            },
+            InEdge {
+                kind: "realises".to_string(),
+                source: "solution.component.cmp".to_string(),
+                properties: BTreeMap::new(),
+            },
+        ];
+        let mut grp = node("domain", "group", "grp");
+        grp.out = vec![OutEdge {
             kind: "contains".to_string(),
-            source: "requirements.requirement.r1".to_string(),
+            target: "domain.service.svc".to_string(),
             properties: BTreeMap::new(),
         }];
-        layers::write_project(&wt_apg, &[owner, r0, r1, r2], &[]).unwrap();
+        let mut cmp = node("solution", "component", "cmp");
+        cmp.out = vec![
+            OutEdge {
+                kind: "realises".to_string(),
+                target: "domain.service.svc".to_string(),
+                properties: BTreeMap::new(),
+            },
+            OutEdge {
+                kind: "is-role".to_string(),
+                target: "solution.role.rl".to_string(),
+                properties: BTreeMap::new(),
+            },
+        ];
+        let mut rl = node("solution", "role", "rl");
+        rl.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        rl.in_edges = vec![InEdge {
+            kind: "is-role".to_string(),
+            source: "solution.component.cmp".to_string(),
+            properties: BTreeMap::new(),
+        }];
+        layers::write_project(&wt_apg, &[owner, r0, r1, r2, svc, grp, cmp, rl], &[]).unwrap();
         // A session always holds a database, so build one from the committed
         // baseline before opening it — the same write-then-scan pattern the
         // crash/reclaim test uses. The DB's reconstructed base carries r1's
@@ -1365,7 +1609,7 @@ mod e2e {
         let before =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
         assert_eq!(before.out.len(), 1, "one out-edge before the update");
-        assert_eq!(before.in_edges.len(), 1, "one in-edge before the update");
+        assert_eq!(before.in_edges.len(), 2, "two in-edges before the update");
 
         // Durable mutations are mandatory-session: open one so the strict
         // node/edge updates below route through its write-back buffer
@@ -1481,7 +1725,7 @@ mod e2e {
         assert_eq!(after.out.len(), 1, "out-edge survives a node update");
         assert_eq!(after.out[0].kind, before.out[0].kind);
         assert_eq!(after.out[0].target, before.out[0].target);
-        assert_eq!(after.in_edges.len(), 1, "in-edge survives a node update");
+        assert_eq!(after.in_edges.len(), 2, "in-edges survive a node update");
         assert_eq!(after.in_edges[0].kind, before.in_edges[0].kind);
         assert_eq!(after.in_edges[0].source, before.in_edges[0].source);
 
@@ -1492,7 +1736,7 @@ mod e2e {
         assert_eq!(r1.out.len(), 1, "the duplicate must not add an out-half");
         assert_eq!(
             r2.in_edges.len(),
-            1,
+            2,
             "the duplicate must not add an in-half"
         );
         let expect = BTreeMap::from([("a".to_string(), "1".to_string())]);
@@ -1678,7 +1922,7 @@ mod e2e {
         for i in 0..N {
             let name = format!("amort-{i}");
             let add =
-                testutil::ApgCommand::new(&["node", "add", "solution", "role", name.as_str()])
+                testutil::ApgCommand::new(&["node", "add", "global", "constraint", name.as_str()])
                     .cwd(&wt)
                     .env("HOME", home.to_str().unwrap())
                     .output();
@@ -1690,7 +1934,8 @@ mod e2e {
 
             // A SEPARATE routed reader sees the mutation as soon as it returns
             // (projected at admission — no end-of-session flush).
-            let query = format!("MATCH (n:Role {{fqn: 'solution.role.{name}'}}) RETURN count(n)");
+            let query =
+                format!("MATCH (n:Constraint {{fqn: 'global.constraint.{name}'}}) RETURN count(n)");
             let q = testutil::spawn_apg(&["query", query.as_str()], &wt);
             assert!(
                 q.status.success(),
@@ -1711,7 +1956,7 @@ mod e2e {
         for i in 0..N {
             let name = format!("amort-{i}");
             assert!(
-                !layers::node_file_path(&wt_apg, Layer::Solution, "role", &name).exists(),
+                !layers::node_file_path(&wt_apg, Layer::Global, "constraint", &name).exists(),
                 "a buffered mutation must not write `{name}` before save"
             );
         }
@@ -1747,7 +1992,7 @@ mod e2e {
         for i in 0..N {
             let name = format!("amort-{i}");
             assert!(
-                layers::node_file_path(&wt_apg, Layer::Solution, "role", &name).exists(),
+                layers::node_file_path(&wt_apg, Layer::Global, "constraint", &name).exists(),
                 "save must write the `{name}` node file"
             );
         }
@@ -1814,11 +2059,11 @@ mod e2e {
         // Forward a node add with an explicit client id. It is admitted into the
         // write-back buffer (and projected into the live DB), but is NOT durable:
         // no node file is on disk and no commit is made.
-        let args = av(&["add", "solution", "role", "once"]);
+        let args = av(&["add", "global", "constraint", "once"]);
         let first = session_forward_node(&wt_apg, "dup-1", &args);
-        assert_eq!(first, "Added node solution.role.once");
+        assert_eq!(first, "Added node global.constraint.once");
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "once").exists(),
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "once").exists(),
             "a buffered forward must not write the node file before save"
         );
         assert_eq!(
@@ -1839,7 +2084,7 @@ mod e2e {
             "a replay must not create a second commit"
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "once").exists(),
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "once").exists(),
             "a replay must not write anything to the durable store"
         );
 
@@ -1848,7 +2093,7 @@ mod e2e {
         let count = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.once'}) RETURN count(n)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.once'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -1879,7 +2124,7 @@ mod e2e {
             "Session saved"
         );
         assert!(
-            layers::node_file_path(&wt_apg, Layer::Solution, "role", "once").exists(),
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "once").exists(),
             "save must write the forwarded node file"
         );
         assert_eq!(
@@ -1896,7 +2141,7 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let ghost = av(&["add", "solution", "role", "ghost"]);
+        let ghost = av(&["add", "global", "constraint", "ghost"]);
         let err = apg::session::Coordinator::forward_mutation_with_id(
             &wt_apg,
             "after-end",
@@ -1909,7 +2154,7 @@ mod e2e {
             "{err:#}"
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "ghost").exists(),
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "ghost").exists(),
             "a failed forward must not fall back to the direct path"
         );
         assert_eq!(
@@ -2001,7 +2246,13 @@ mod e2e {
         // node file and no commit (the refused scan/merge above wrote nothing
         // durable either).
         let add = testutil::ApgCommand::new(&[
-            "node", "add", "solution", "role", "pending", "--body", "buffered",
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "pending",
+            "--body",
+            "buffered",
         ])
         .cwd(&wt)
         .env("HOME", home.to_str().unwrap())
@@ -2012,7 +2263,7 @@ mod e2e {
             String::from_utf8_lossy(&add.stderr)
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "pending").exists(),
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "pending").exists(),
             "a buffered add must not write a node file before save"
         );
         assert_eq!(
@@ -2042,7 +2293,7 @@ mod e2e {
             "end must report the pending-change count: {end_err}"
         );
         assert!(
-            end_err.contains("write solution.role.pending"),
+            end_err.contains("write global.constraint.pending"),
             "end must name the pending change: {end_err}"
         );
         assert!(
@@ -2071,7 +2322,7 @@ mod e2e {
             String::from_utf8_lossy(&save.stderr)
         );
         assert!(
-            layers::node_file_path(&wt_apg, Layer::Solution, "role", "pending").exists(),
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "pending").exists(),
             "save must write the buffered node file"
         );
         assert_eq!(
@@ -2146,7 +2397,7 @@ mod e2e {
             "variant (a) must run with a live session"
         );
         let before_commits = testutil::commit_count(&wt);
-        let add = testutil::ApgCommand::new(&["node", "add", "solution", "role", "foo"])
+        let add = testutil::ApgCommand::new(&["node", "add", "global", "constraint", "foo"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
@@ -2158,7 +2409,7 @@ mod e2e {
 
         // Still buffered: no node file written, no commit made.
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "foo").exists(),
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "foo").exists(),
             "a buffered add must not write a node file before save"
         );
         assert_eq!(
@@ -2169,7 +2420,7 @@ mod e2e {
 
         // A SEPARATE query process routes through the live session and sees the
         // mutation before save/end — read-your-writes through the session.
-        let query = "MATCH (n:Role {fqn: 'solution.role.foo'}) RETURN count(n)";
+        let query = "MATCH (n:Constraint {fqn: 'global.constraint.foo'}) RETURN count(n)";
         let q = testutil::spawn_apg(&["query", query], &wt);
         assert!(
             q.status.success(),
@@ -2194,7 +2445,7 @@ mod e2e {
             String::from_utf8_lossy(&save.stderr)
         );
         assert!(
-            layers::node_file_path(&wt_apg, Layer::Solution, "role", "foo").exists(),
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "foo").exists(),
             "save must write the buffered node file"
         );
         let out = end_session(&wt, session);
@@ -2401,24 +2652,47 @@ mod e2e {
         let home = repo.root.join("home");
 
         // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
-        // anchor Requirement. Each reviewed Requirement added below is rooted by
-        // a routed `requires` edge from `owner`, so `node rm` of the reviewed
-        // node leaves `owner` still satisfying its `requires` minimum.
+        // anchor Requirement, driven-by a Service contained by a leaf Group and
+        // realised by a Component that is-role's a Role. Each reviewed
+        // Requirement added below is rooted by a routed `requires` edge from
+        // `owner` and driven-by the seeded Service, so `node rm` of the reviewed
+        // node leaves `owner` and the Service still satisfying their minimums.
         let mut owner = node("requirements", "stakeholder", "owner");
         owner.out = vec![testutil::out_edge(
             "requires",
             "requirements.requirement.anchor",
         )];
         let mut anchor = node("requirements", "requirement", "anchor");
-        anchor.in_edges = vec![testutil::in_edge(
-            "requires",
-            "requirements.stakeholder.owner",
+        anchor.in_edges = vec![
+            testutil::in_edge("requires", "requirements.stakeholder.owner"),
+            testutil::in_edge("driven-by", "domain.service.svc"),
+        ];
+        let mut svc = node("domain", "service", "svc");
+        svc.out = vec![testutil::out_edge(
+            "driven-by",
+            "requirements.requirement.anchor",
         )];
-        layers::write_project(&wt_apg, &[owner, anchor], &[]).unwrap();
+        svc.in_edges = vec![
+            testutil::in_edge("contains", "domain.group.grp"),
+            testutil::in_edge("realises", "solution.component.cmp"),
+        ];
+        let mut grp = node("domain", "group", "grp");
+        grp.out = vec![testutil::out_edge("contains", "domain.service.svc")];
+        let mut cmp = node("solution", "component", "cmp");
+        cmp.out = vec![
+            testutil::out_edge("realises", "domain.service.svc"),
+            testutil::out_edge("is-role", "solution.role.rl"),
+        ];
+        let mut rl = node("solution", "role", "rl");
+        rl.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        rl.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
+        layers::write_project(&wt_apg, &[owner, anchor, svc, grp, cmp, rl], &[]).unwrap();
 
         // Run a durable `args` under a fresh live session, make the buffered
         // change durable with `save`, then end the session cleanly. A node ADD
-        // also roots the new Requirement under the seeded `owner`.
+        // also roots the new Requirement under the seeded `owner` and drives it
+        // from the seeded Service.
         let mutate = |args: &[&str]| -> std::process::Output {
             let session = testutil::start_session_process(&wt, &home);
             let out = testutil::ApgCommand::new(args)
@@ -2448,6 +2722,22 @@ mod e2e {
                     "rooting edge for {}: {}",
                     args[4],
                     String::from_utf8_lossy(&add_rooted.stderr)
+                );
+                let add_driven = testutil::ApgCommand::new(&[
+                    "edge",
+                    "add",
+                    "driven-by",
+                    "domain.service.svc",
+                    &format!("requirements.requirement.{}", args[4]),
+                ])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+                assert!(
+                    add_driven.status.success(),
+                    "driven-by edge for {}: {}",
+                    args[4],
+                    String::from_utf8_lossy(&add_driven.stderr)
                 );
             }
             let save = testutil::spawn_apg(&["session", "save"], &wt);
@@ -2625,9 +2915,16 @@ mod e2e {
 
         // Establish the LAST SAVED state: one buffered node flushed by `save`,
         // so the baseline the later mutations must NOT disturb is non-empty. A
-        // lone `solution.role` keeps the baseline whole-model-valid (SPEC §8.1).
+        // lone `global.constraint` keeps the baseline whole-model-valid (SPEC
+        // §8.1 — no cardinality minimums).
         let saved = testutil::ApgCommand::new(&[
-            "node", "add", "solution", "role", "saved", "--body", "baseline",
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "saved",
+            "--body",
+            "baseline",
         ])
         .cwd(&wt)
         .env("HOME", home.to_str().unwrap())
@@ -2849,19 +3146,41 @@ mod e2e {
         let home = repo.root.join("home");
 
         // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
-        // anchor Requirement. Each added Requirement below is rooted by a
-        // `requires` edge from `owner`.
+        // anchor Requirement, driven-by a Service contained by a leaf Group and
+        // realised by a Component that is-role's a Role. Each added Requirement
+        // below is rooted by a `requires` edge from `owner` and driven-by the
+        // seeded Service.
         let mut owner = node("requirements", "stakeholder", "owner");
         owner.out = vec![testutil::out_edge(
             "requires",
             "requirements.requirement.anchor",
         )];
         let mut anchor = node("requirements", "requirement", "anchor");
-        anchor.in_edges = vec![testutil::in_edge(
-            "requires",
-            "requirements.stakeholder.owner",
+        anchor.in_edges = vec![
+            testutil::in_edge("requires", "requirements.stakeholder.owner"),
+            testutil::in_edge("driven-by", "domain.service.svc"),
+        ];
+        let mut svc = node("domain", "service", "svc");
+        svc.out = vec![testutil::out_edge(
+            "driven-by",
+            "requirements.requirement.anchor",
         )];
-        layers::write_project(&wt_apg, &[owner, anchor], &[]).unwrap();
+        svc.in_edges = vec![
+            testutil::in_edge("contains", "domain.group.grp"),
+            testutil::in_edge("realises", "solution.component.cmp"),
+        ];
+        let mut grp = node("domain", "group", "grp");
+        grp.out = vec![testutil::out_edge("contains", "domain.service.svc")];
+        let mut cmp = node("solution", "component", "cmp");
+        cmp.out = vec![
+            testutil::out_edge("realises", "domain.service.svc"),
+            testutil::out_edge("is-role", "solution.role.rl"),
+        ];
+        let mut rl = node("solution", "role", "rl");
+        rl.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        rl.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
+        layers::write_project(&wt_apg, &[owner, anchor, svc, grp, cmp, rl], &[]).unwrap();
 
         let session = testutil::start_session_process(&wt, &home);
 
@@ -2931,6 +3250,22 @@ mod e2e {
                 ],
                 &format!(
                     "Added edge requires requirements.stakeholder.owner -> requirements.requirement.{name}"
+                ),
+            );
+        }
+        // Each added Requirement is also driven-by the seeded Service (SPEC
+        // §3.4 — every Requirement is driven-by at least one Service at save).
+        for name in ["alpha", "beta", "gamma"] {
+            run(
+                &[
+                    "edge",
+                    "add",
+                    "driven-by",
+                    "domain.service.svc",
+                    &format!("requirements.requirement.{name}"),
+                ],
+                &format!(
+                    "Added edge driven-by domain.service.svc -> requirements.requirement.{name}"
                 ),
             );
         }
@@ -3227,9 +3562,10 @@ mod e2e {
         // A pre-existing durable node file, committed through the direct path:
         // `apg/layers/**` is non-empty before the session starts, so "nothing
         // written or changed" is a real claim rather than a vacuous one. The
-        // base is a lone `solution.role` — whole-model-valid (SPEC §8.1), so a
-        // later buffered save on this base can never refuse spuriously.
-        layers::write_project(&wt_apg, &[node("solution", "role", "existing")], &[]).unwrap();
+        // base is a lone `global.constraint` — whole-model-valid (SPEC §8.1, no
+        // cardinality minimums), so a later buffered save on this base can never
+        // refuse spuriously.
+        layers::write_project(&wt_apg, &[node("global", "constraint", "existing")], &[]).unwrap();
 
         // A live session that has admitted no mutation: the write-back buffer
         // is empty by construction.
@@ -3840,13 +4176,14 @@ mod e2e {
     fn routed_warning_reaches_the_client() {
         let (wt_apg, repo, wt) = node_store_fixture("routed-warning");
         let home = repo.root.join("home");
-        let path = layers::node_file_path(&wt_apg, Layer::Solution, "role", "demo-val");
+        let path = layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "demo-val");
 
         // A session always holds a database, so seed a committed baseline and
         // scan it before opening the session — the same write-then-scan pattern
-        // the crash/reclaim test uses. The base node is a lone `solution.role`
-        // (unconstrained), so the seeded store is whole-model-valid (SPEC §8.1).
-        layers::write_project(&wt_apg, &[node("solution", "role", "seed")], &[]).unwrap();
+        // the crash/reclaim test uses. The base is a complete, whole-model-valid
+        // durable model (SPEC §8.1), so the `demo-val` requirement added below
+        // can be rooted and driven-by'd onto it at save.
+        testutil::seed_valid_model(&wt_apg);
         testutil::scan_checkout(&wt).unwrap();
 
         // Durable mutations are mandatory-session: one live `apg session start`
@@ -3872,8 +4209,8 @@ mod e2e {
         let out = run(&[
             "node",
             "add",
-            "solution",
-            "role",
+            "requirements",
+            "requirement",
             "demo-val",
             "--body",
             "The old flow was synchronous.",
@@ -3885,12 +4222,12 @@ mod e2e {
         );
         assert_eq!(
             String::from_utf8_lossy(&out.stdout).trim(),
-            "Added node solution.role.demo-val",
+            "Added node requirements.requirement.demo-val",
             "the write's result must be intact"
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("apg: warning: solution.role.demo-val:"),
+            stderr.contains("apg: warning: requirements.requirement.demo-val:"),
             "the warning must name the mutated node on the caller's stderr: {stderr}"
         );
         assert!(
@@ -3904,8 +4241,8 @@ mod e2e {
         let out = run(&[
             "node",
             "update",
-            "solution",
-            "role",
+            "requirements",
+            "requirement",
             "demo-val",
             "--body",
             "The service stores the record.",
@@ -3921,6 +4258,33 @@ mod e2e {
             "plain wording must not print a warning: {stderr}"
         );
 
+        // Root the new requirement under the seeded Stakeholder and drive it
+        // from the seeded Service so the buffered model stays whole-model-valid
+        // at the save boundary (SPEC §8.1/§3.4).
+        for edge in [
+            &[
+                "edge",
+                "add",
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.demo-val",
+            ][..],
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.place-order",
+                "requirements.requirement.demo-val",
+            ][..],
+        ] {
+            let out = run(edge);
+            assert!(
+                out.status.success(),
+                "routed edge add: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
         // The write's result is intact: the buffered state is durable on save
         // and carries the plain body (not the flagged one).
         let save = testutil::spawn_apg(&["session", "save"], &wt);
@@ -3933,7 +4297,8 @@ mod e2e {
             path.exists(),
             "the flagged-but-advisory add must still land its node file"
         );
-        let back = layers::read_node_file(&wt_apg, Layer::Solution, "role", "demo-val").unwrap();
+        let back = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "demo-val")
+            .unwrap();
         assert_eq!(back.body, "The service stores the record.");
 
         let out = end_session(&wt, session);
@@ -4069,12 +4434,19 @@ mod e2e {
         };
 
         // A durable baseline: add a node through the session and save it. A
-        // lone `solution.role` keeps the baseline whole-model-valid (SPEC §8.1).
+        // lone `global.constraint` keeps the baseline whole-model-valid (SPEC
+        // §8.1 — no cardinality minimums).
         run(
             &[
-                "node", "add", "solution", "role", "doomed", "--body", "first",
+                "node",
+                "add",
+                "global",
+                "constraint",
+                "doomed",
+                "--body",
+                "first",
             ],
-            "Added node solution.role.doomed",
+            "Added node global.constraint.doomed",
         );
         let first_save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
@@ -4082,7 +4454,7 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&first_save.stderr)
         );
-        let node_path = layers::node_file_path(&wt_apg, Layer::Solution, "role", "doomed");
+        let node_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "doomed");
         assert!(
             node_path.exists(),
             "the baseline save must have written the `doomed` node file"
@@ -4093,13 +4465,19 @@ mod e2e {
         // same unsaved run, then the single durability point.
         run(
             &[
-                "node", "update", "solution", "role", "doomed", "--body", "second",
+                "node",
+                "update",
+                "global",
+                "constraint",
+                "doomed",
+                "--body",
+                "second",
             ],
-            "Updated node solution.role.doomed",
+            "Updated node global.constraint.doomed",
         );
         run(
-            &["node", "rm", "solution", "role", "doomed"],
-            "Removed node solution.role.doomed",
+            &["node", "rm", "global", "constraint", "doomed"],
+            "Removed node global.constraint.doomed",
         );
 
         // Before the save nothing else is durable: the last saved file is still
@@ -4138,11 +4516,11 @@ mod e2e {
             "the durable store must no longer contain `doomed`"
         );
 
-        // The DB agrees: no `Role` row for the removed FQN.
+        // The DB agrees: no `Constraint` row for the removed FQN.
         let count = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.doomed'}) RETURN count(*)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.doomed'}) RETURN count(*)",
             ],
             &wt,
         );
@@ -4318,8 +4696,8 @@ mod e2e {
             .properties
             .insert("feature".to_string(), "isolation".to_string());
 
-        // A Stakeholder requiring both requirements roots them, keeping the
-        // seeded model whole-model-valid (SPEC §8.1).
+        // A Stakeholder requiring both requirements roots them, and a Service
+        // driven-by both keeps the seeded model whole-model-valid (SPEC §8.1/§3.4).
         let mut owner = node("requirements", "stakeholder", "owner");
         owner.out = vec![
             testutil::out_edge("requires", "requirements.requirement.keep"),
@@ -4329,11 +4707,38 @@ mod e2e {
             "requires",
             "requirements.stakeholder.owner",
         ));
+        keep.in_edges
+            .push(testutil::in_edge("driven-by", "domain.service.svc"));
         moved.in_edges.push(testutil::in_edge(
             "requires",
             "requirements.stakeholder.owner",
         ));
-        for n in [&owner, &keep, &moved] {
+        moved
+            .in_edges
+            .push(testutil::in_edge("driven-by", "domain.service.svc"));
+
+        let mut svc = node("domain", "service", "svc");
+        svc.out = vec![
+            testutil::out_edge("driven-by", "requirements.requirement.keep"),
+            testutil::out_edge("driven-by", "requirements.requirement.move"),
+        ];
+        svc.in_edges = vec![
+            testutil::in_edge("contains", "domain.group.grp"),
+            testutil::in_edge("realises", "solution.component.cmp"),
+        ];
+        let mut grp = node("domain", "group", "grp");
+        grp.out = vec![testutil::out_edge("contains", "domain.service.svc")];
+        let mut cmp = node("solution", "component", "cmp");
+        cmp.out = vec![
+            testutil::out_edge("realises", "domain.service.svc"),
+            testutil::out_edge("is-role", "solution.role.rl"),
+        ];
+        let mut rl = node("solution", "role", "rl");
+        rl.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        rl.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
+
+        for n in [&owner, &keep, &moved, &svc, &grp, &cmp, &rl] {
             layers::write_node(&wt_apg, n).unwrap();
         }
 
@@ -5441,7 +5846,7 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_start_with_absent_trans_seed_is_a_clean_noop() {
-        const COUNT_CREATED: &str = "MATCH (n:Role {fqn: 'solution.role.created'}) \
+        const COUNT_CREATED: &str = "MATCH (n:Constraint {fqn: 'global.constraint.created'}) \
              RETURN count(n)";
 
         let (repo, wt, wt_apg) = testutil::project_with_db("session-absent-trans-seed");
@@ -5486,8 +5891,8 @@ mod e2e {
             &[
                 "node",
                 "add",
-                "solution",
-                "role",
+                "global",
+                "constraint",
                 "created",
                 "--body",
                 "created through a session started without .trans",
@@ -5501,7 +5906,7 @@ mod e2e {
         );
         assert_eq!(
             String::from_utf8_lossy(&added.stdout).trim(),
-            "Added node solution.role.created"
+            "Added node global.constraint.created"
         );
         assert_eq!(
             routed(COUNT_CREATED).lines().last().map(str::trim),

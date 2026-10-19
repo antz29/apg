@@ -59,7 +59,7 @@ pub(crate) fn filter_edges(
 
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
-/// 8 gates, 9 satisfies, 10 drives, 11 represents, 13 spec_implemented_by,
+/// 8 gates, 9 satisfies, 10 driven-by, 11 represents, 13 spec_implemented_by,
 /// 14 publishes, 15 subscribes, 16 requires, 17 reads, 18 writes, 19 is_role,
 /// 20 realises) followed by four length-prefixed UTF-8 strings (from, to,
 /// target_type, properties; `target_type` is empty for most, `properties` is
@@ -106,7 +106,7 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
         Record::Satisfies { from, to } => {
             write_edge_fields(w, 9, &from, &to, "", &NodeProperties::new())
         }
-        Record::Drives {
+        Record::DrivenBy {
             from,
             to,
             properties,
@@ -226,7 +226,7 @@ impl<R: BufRead> EdgeReader<R> {
             6 => Record::Reviews { from: a, to: b },
             8 => Record::Gates { from: a, to: b },
             9 => Record::Satisfies { from: a, to: b },
-            10 => Record::Drives {
+            10 => Record::DrivenBy {
                 from: a,
                 to: b,
                 properties,

@@ -15,7 +15,7 @@ use std::process::Command;
 /// the `[package] version` line on every release: the assertions below fail
 /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
 /// advertised release), so a bump commit cannot silently skip it.
-const RELEASE_VERSION: &str = "0.23.2";
+const RELEASE_VERSION: &str = "0.24.0";
 
 /// The `version = "..."` declared directly under a Cargo.toml `[package]`
 /// header.
@@ -2826,12 +2826,12 @@ mod e2e {
     fn readme_documents_release_version() {
         let readme =
             std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        // The README pins the 0.23.x line, not an exact patch, so patch releases
+        // The README pins the 0.24.x line, not an exact patch, so patch releases
         // don't require a README edit.
-        assert!(readme.contains("apg 0.23.x"), "README --version examples");
-        assert!(readme.contains("0.23.x"), "README tagged-release prose");
+        assert!(readme.contains("apg 0.24.x"), "README --version examples");
+        assert!(readme.contains("0.24.x"), "README tagged-release prose");
         assert!(
-            readme.contains("--version 0.23.x"),
+            readme.contains("--version 0.24.x"),
             "README Linux installer pin option"
         );
         // No stale release records: the previous versions must be fully replaced.
@@ -2941,20 +2941,41 @@ mod e2e {
         let home = repo.root.join("home");
 
         // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
-        // anchor Requirement. The two requirements added below are rooted by
-        // routed `requires` edges from `owner`, so removing one leaves the
-        // other rooted and the model valid.
+        // anchor Requirement, covered by a Service (with its leaf Group,
+        // realising Component, and Role). The two requirements added below are
+        // rooted by routed `requires` edges from `owner`, so removing one leaves
+        // the other rooted and the model valid.
         let mut owner = testutil::node("requirements", "stakeholder", "owner");
         owner.out = vec![testutil::out_edge(
             "requires",
             "requirements.requirement.anchor",
         )];
         let mut anchor = testutil::node("requirements", "requirement", "anchor");
-        anchor.in_edges = vec![testutil::in_edge(
-            "requires",
-            "requirements.stakeholder.owner",
+        anchor.in_edges = vec![
+            testutil::in_edge("requires", "requirements.stakeholder.owner"),
+            testutil::in_edge("driven-by", "domain.service.svc"),
+        ];
+        let mut svc = testutil::node("domain", "service", "svc");
+        svc.out = vec![testutil::out_edge(
+            "driven-by",
+            "requirements.requirement.anchor",
         )];
-        apg::layers::write_project(&apg_root, &[owner, anchor], &[]).unwrap();
+        svc.in_edges = vec![
+            testutil::in_edge("contains", "domain.group.grp"),
+            testutil::in_edge("realises", "solution.component.cmp"),
+        ];
+        let mut grp = testutil::node("domain", "group", "grp");
+        grp.out = vec![testutil::out_edge("contains", "domain.service.svc")];
+        let mut cmp = testutil::node("solution", "component", "cmp");
+        cmp.out = vec![
+            testutil::out_edge("realises", "domain.service.svc"),
+            testutil::out_edge("is-role", "solution.role.rl"),
+        ];
+        let mut rl = testutil::node("solution", "role", "rl");
+        rl.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        rl.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
+        apg::layers::write_project(&apg_root, &[owner, anchor, svc, grp, cmp, rl], &[]).unwrap();
 
         let before_commits = testutil::commit_count(&wt);
 
@@ -3037,6 +3058,16 @@ mod e2e {
                 "add",
                 "requires",
                 "requirements.stakeholder.owner",
+                "requirements.requirement.r2",
+            ]))
+        })
+        .unwrap();
+        // Cover r2 with the seeded Service (the §3.4 requirement-coverage rule).
+        with_cwd(&wt, || {
+            node_cmd::cmd_edge(&argv(&[
+                "add",
+                "driven-by",
+                "domain.service.svc",
                 "requirements.requirement.r2",
             ]))
         })
@@ -3505,21 +3536,21 @@ mod e2e {
 
         // A routed mutation lands in the write-back buffer and is projected
         // write-through into the session-held DB — but it is NOT yet durable.
-        // A lone `solution.role` keeps the model whole-model-valid (SPEC §8.1).
-        let add = testutil::spawn_apg(&["node", "add", "solution", "role", "live"], &wt);
+        // A lone `global.constraint` keeps the model whole-model-valid (SPEC §8.1).
+        let add = testutil::spawn_apg(&["node", "add", "global", "constraint", "live"], &wt);
         assert!(
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Solution, "role", "live").exists(),
+            !layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "live").exists(),
             "a routed mutation must stay buffered (unsaved) until `session save`"
         );
 
         // Routed read: the session's route exposes the UNSAVED buffered change
         // (read-your-writes), with no lock error and no wait for end.
-        let query = "MATCH (n:Role {fqn: 'solution.role.live'}) RETURN count(n)";
+        let query = "MATCH (n:Constraint {fqn: 'global.constraint.live'}) RETURN count(n)";
         let routed = testutil::spawn_apg(&["query", query], &wt);
         assert!(
             routed.status.success(),
@@ -3555,7 +3586,7 @@ mod e2e {
             String::from_utf8_lossy(&save.stderr)
         );
         assert!(
-            layers::node_file_path(&wt_apg, layers::Layer::Solution, "role", "live").exists(),
+            layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "live").exists(),
             "save must land the buffered node file"
         );
 
@@ -3627,11 +3658,31 @@ mod e2e {
             "requirements.requirement.anchor",
         )];
         let mut anchor = testutil::node("requirements", "requirement", "anchor");
-        anchor.in_edges = vec![testutil::in_edge(
-            "requires",
-            "requirements.stakeholder.owner",
+        anchor.in_edges = vec![
+            testutil::in_edge("requires", "requirements.stakeholder.owner"),
+            testutil::in_edge("driven-by", "domain.service.svc"),
+        ];
+        let mut svc = testutil::node("domain", "service", "svc");
+        svc.out = vec![testutil::out_edge(
+            "driven-by",
+            "requirements.requirement.anchor",
         )];
-        layers::write_project(&wt_apg, &[owner, anchor], &[]).unwrap();
+        svc.in_edges = vec![
+            testutil::in_edge("contains", "domain.group.grp"),
+            testutil::in_edge("realises", "solution.component.cmp"),
+        ];
+        let mut grp = testutil::node("domain", "group", "grp");
+        grp.out = vec![testutil::out_edge("contains", "domain.service.svc")];
+        let mut cmp = testutil::node("solution", "component", "cmp");
+        cmp.out = vec![
+            testutil::out_edge("realises", "domain.service.svc"),
+            testutil::out_edge("is-role", "solution.role.rl"),
+        ];
+        let mut rl = testutil::node("solution", "role", "rl");
+        rl.properties
+            .insert("applies-to".to_string(), "component".to_string());
+        rl.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
+        layers::write_project(&wt_apg, &[owner, anchor, svc, grp, cmp, rl], &[]).unwrap();
 
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
         let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
@@ -3712,6 +3763,13 @@ mod e2e {
         mutate(&[
             "edge",
             "add",
+            "driven-by",
+            "domain.service.svc",
+            "requirements.requirement.r2",
+        ]);
+        mutate(&[
+            "edge",
+            "add",
             "contains",
             "requirements.requirement.r1",
             "requirements.requirement.r2",
@@ -3744,6 +3802,13 @@ mod e2e {
         // the transient plan/review mutations take the same extended flock as
         // the live session, so they run only after it has ended).
         mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
+        mutate(&[
+            "edge",
+            "add",
+            "driven-by",
+            "domain.service.svc",
+            "requirements.requirement.reviewed",
+        ]);
         assert_eq!(
             query(
                 "MATCH (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN count(n)"
@@ -4019,18 +4084,59 @@ mod e2e {
         // (1) The durable mutations return successfully, admitted into the
         // session's buffer. A Stakeholder `requires` a Requirement — the minimal
         // whole-model-valid authored pair/edge (SPEC §8.1).
-        for args in [
-            ["node", "add", "requirements", "stakeholder", "foo"],
-            ["node", "add", "requirements", "requirement", "bar"],
-            [
+        let mutations: [&[&str]; 11] = [
+            &["node", "add", "requirements", "stakeholder", "foo"],
+            &["node", "add", "requirements", "requirement", "bar"],
+            &[
                 "edge",
                 "add",
                 "requires",
                 "requirements.stakeholder.foo",
                 "requirements.requirement.bar",
             ],
-        ] {
-            let out = testutil::spawn_apg(&args, &wt);
+            &["node", "add", "domain", "service", "svc"],
+            &["node", "add", "domain", "group", "grp"],
+            &["node", "add", "solution", "component", "cmp"],
+            &[
+                "node",
+                "add",
+                "solution",
+                "role",
+                "rl",
+                "--property",
+                "applies-to=component",
+            ],
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.svc",
+                "requirements.requirement.bar",
+            ],
+            &[
+                "edge",
+                "add",
+                "contains",
+                "domain.group.grp",
+                "domain.service.svc",
+            ],
+            &[
+                "edge",
+                "add",
+                "realises",
+                "solution.component.cmp",
+                "domain.service.svc",
+            ],
+            &[
+                "edge",
+                "add",
+                "is-role",
+                "solution.component.cmp",
+                "solution.role.rl",
+            ],
+        ];
+        for args in mutations {
+            let out = testutil::spawn_apg(args, &wt);
             assert!(
                 out.status.success(),
                 "{args:?}: {}",
@@ -4287,6 +4393,76 @@ mod e2e {
                 &["node", "add", "requirements", "requirement", name.as_str()],
             );
         }
+        // Complete the §3.4 requirement-coverage minimum: one Service drives the
+        // hub and every leaf, with its leaf Group, realising Component, and Role.
+        run_in(&wt, &["node", "add", "domain", "service", "svc"]);
+        run_in(&wt, &["node", "add", "domain", "group", "grp"]);
+        run_in(&wt, &["node", "add", "solution", "component", "cmp"]);
+        run_in(
+            &wt,
+            &[
+                "node",
+                "add",
+                "solution",
+                "role",
+                "rl",
+                "--property",
+                "applies-to=component",
+            ],
+        );
+        run_in(
+            &wt,
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.svc",
+                "requirements.requirement.hub",
+            ],
+        );
+        for i in 0..N {
+            let to = format!("requirements.requirement.leaf-{i}");
+            run_in(
+                &wt,
+                &[
+                    "edge",
+                    "add",
+                    "driven-by",
+                    "domain.service.svc",
+                    to.as_str(),
+                ],
+            );
+        }
+        run_in(
+            &wt,
+            &[
+                "edge",
+                "add",
+                "contains",
+                "domain.group.grp",
+                "domain.service.svc",
+            ],
+        );
+        run_in(
+            &wt,
+            &[
+                "edge",
+                "add",
+                "realises",
+                "solution.component.cmp",
+                "domain.service.svc",
+            ],
+        );
+        run_in(
+            &wt,
+            &[
+                "edge",
+                "add",
+                "is-role",
+                "solution.component.cmp",
+                "solution.role.rl",
+            ],
+        );
         let home_burst = home_s.clone();
         let mut kids = Vec::with_capacity(N);
         for i in 0..N {
@@ -4361,11 +4537,11 @@ mod e2e {
 
         // An immediate read-your-writes across the real CLI, still unsaved.
         // `foo` is a lone `solution.role` (unconstrained: whole-model-valid).
-        run_in(&wt, &["node", "add", "solution", "role", "foo"]);
+        run_in(&wt, &["node", "add", "global", "constraint", "foo"]);
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.foo'}) RETURN count(n)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.foo'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -4434,7 +4610,7 @@ mod e2e {
         let direct = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Role {fqn: 'solution.role.foo'}) RETURN count(n)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.foo'}) RETURN count(n)",
             ],
             &wt,
         );
