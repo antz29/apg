@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "layout-exclusion",
-  "body": "The exclusion of the repository's top-level `apg/` layout from the structural claim scope, configured in the repository's own classifier config and applied by the walk and the ingestor alike.",
+  "body": "The exclusion of the repository's top-level `apg/` layout from the structural claim scope, applied unconditionally by the root-aware walk prune and the ingestor's layout-dir drop, and configured in the apg repository's structural scope.",
   "properties": {},
   "out": [],
   "in": [
