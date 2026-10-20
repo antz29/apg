@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "tool-owned-layout",
+  "body": "The repository's top-level `apg/` directory holding the tool's own state — layer node files, `config.json`, the migration guide, and the transient scan and plan stores — which is not authored source and carries no source-file identity.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.layout-exclusion",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-hygiene",
+      "properties": {}
+    }
+  ]
+}

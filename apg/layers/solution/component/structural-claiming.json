@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "structural-claiming",
-  "body": "The claim and scope boundary of the structural scanner: it skips code-frontend-claimed extensions, honours the standard exclusions, and applies the config include and exclude scope and the structural code type.",
+  "body": "The claim and scope boundary of the structural scanner: it skips code-frontend-claimed extensions, prunes the scan root's tool-owned `apg/` layout, honours the standard exclusions, and applies the config scope and structural code type.",
   "properties": {},
   "out": [
     {
@@ -28,6 +28,11 @@
     {
       "kind": "realises",
       "target": "domain.service.structural-file-graphing",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.discovery.walk",
       "properties": {}
     }
   ],

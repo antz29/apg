@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "every-tracked-file-graphed",
-  "body": "A scan of a git-tracked repository emits a file node for every tracked file, the code frontends claiming their own sources and the bundled structural scanner claiming the remainder.",
+  "body": "A scan of a git-tracked repository emits a file node for every tracked file outside the tool-owned `apg/` layout, the code frontends claiming their own sources and the bundled structural scanner claiming the remainder.",
   "properties": {
     "feature": "structural-graphing"
   },

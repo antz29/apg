@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "layout-exclusion",
+  "body": "The exclusion of the repository's top-level `apg/` layout from the structural claim scope, configured in the repository's own classifier config and applied by the walk and the ingestor alike.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.tool-owned-layout",
+      "properties": {}
+    }
+  ]
+}

@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "scan-hygiene",
-  "body": "The boundary between the source a scan ingests and the artifacts it leaves out: the scanner's caches, generated test mains, and build outputs, excluded so graph identities stay a function of authored content.",
+  "body": "The boundary between the source a scan ingests and the artifacts it leaves out: the scanner's caches, generated test mains, build outputs, and the tool-owned `apg/` layout, excluded so graph identity follows authored content alone.",
   "properties": {
     "attribute": "supporting"
   },
@@ -15,6 +15,11 @@
     {
       "kind": "contains",
       "target": "domain.service.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.tool-owned-layout",
       "properties": {}
     }
   ],

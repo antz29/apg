@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "tool-owned-layout-is-not-source",
+  "body": "Tool-owned state in the repository's top-level `apg/` layout is never authored source: no source-file identity, module identity, or graph node derives from a file under it, on any scan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -2,12 +2,22 @@
   "layer": "domain",
   "type": "service",
   "name": "scan-hygiene",
-  "body": "The capability that keeps toolchain-produced artifacts out of the graph, so graph identity stays a function of authored content alone.",
+  "body": "The capability that keeps toolchain-produced and tool-owned artifacts out of the graph, so graph identity stays a function of authored content alone.",
   "properties": {},
   "out": [
     {
       "kind": "driven-by",
       "target": "requirements.requirement.no-self-ingestion",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.tool-owned-layout-excluded",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.apg-layout-scope-exclusion",
       "properties": {}
     }
   ],

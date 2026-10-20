@@ -14,6 +14,16 @@
       "kind": "requires",
       "target": "requirements.requirement.structural-file-graphing",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.tool-owned-layout-excluded",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.apg-layout-scope-exclusion",
+      "properties": {}
     }
   ],
   "in": []

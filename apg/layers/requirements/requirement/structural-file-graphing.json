@@ -41,14 +41,14 @@
       "kind": "contains",
       "target": "requirements.requirement.structural-scanner-in-base-package",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.tool-owned-layout-excluded",
+      "properties": {}
     }
   ],
   "in": [
-    {
-      "kind": "requires",
-      "source": "requirements.stakeholder.frontend-maintainer",
-      "properties": {}
-    },
     {
       "kind": "driven-by",
       "source": "domain.service.structural-file-graphing",

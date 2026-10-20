@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-hygiene",
-  "body": "The component that keeps non-source artifacts out of the graph: gitignore-aware path filtering, the shared build cache, generated test mains, and build outputs, defining what counts as source content for identity.",
+  "body": "The component that keeps non-source artifacts out of the graph: gitignore-aware path filtering, the tool-owned-layout clause, the shared build cache, generated test mains, and build outputs, defining what counts as source content.",
   "properties": {},
   "out": [
     {
