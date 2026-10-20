@@ -1,11 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "agents": {
-    "agent-builder": { "model": "ollama-cloud/deepseek-v4-pro" },
-    "implementation-phase-reviewer": { "model": "ollama-cloud/deepseek-v4-pro" },
-    "plan-review": { "model": "ollama-cloud/deepseek-v4-pro" },
+    "agent-builder": { "model": "ollama-cloud/glm-5.3-flash" },
+    "implementation-phase-reviewer": { "model": "ollama-cloud/glm-5.3-flash" },
+    "plan-review": { "model": "ollama-cloud/glm-5.3-flash" },
     "plan-writer": { "model": "opencode-go/deepseek-v4.1-flash" },
-    "spec-review": { "model": "ollama-cloud/deepseek-v4-pro" },
+    "spec-review": { "model": "ollama-cloud/glm-5.3-flash" },
     "spec-writer": { "model": "opencode-go/deepseek-v4.1-flash" },
     "build-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
     "cpp-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
