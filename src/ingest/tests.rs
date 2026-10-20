@@ -356,6 +356,63 @@ mod unit {
         }
         assert_eq!(out, edges);
     }
+
+    /// exclude-apg-layout phase-03 task-2: the tool-owned top-level `apg/`
+    /// layout is dropped config-independently (no config, no git base) — for a
+    /// path-less structural module identity (`misc.apg` / `misc.apg/...`), for
+    /// a path-carrying record, and for a stale/cached transient record — while
+    /// a source tree legitimately named `apg` deeper in the repo
+    /// (`src/apg/...`) survives.
+    #[test]
+    fn blacklist_drops_structural_apg_layout() {
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "misc",
+            config: None,
+            base: None,
+        };
+        // A path-less structural module identity is a repo-relative tree in
+        // disguise: the bare layout root and anything below it are dropped.
+        assert!(is_blacklisted("misc.apg", None, "misc", &opts));
+        assert!(is_blacklisted("misc.apg/.trans", None, "misc", &opts));
+        assert!(is_blacklisted("misc.apg/layers", None, "misc", &opts));
+        // A path-carrying record under the layout is dropped on any stream.
+        assert!(is_blacklisted(
+            "misc.apg/config.json",
+            Some("apg/config.json"),
+            "misc",
+            &opts
+        ));
+        assert!(is_blacklisted(
+            "rust.apg.config",
+            Some("apg/config.json"),
+            "rust",
+            &opts
+        ));
+        // A stale/cached record: the gitignored transient state below the
+        // layout is not authored source either.
+        assert!(is_blacklisted(
+            "misc.apg/.trans/db.lbug",
+            Some("apg/.trans/db.lbug"),
+            "misc",
+            &opts
+        ));
+        // Only the FIRST component is matched: a source directory named `apg`
+        // deeper in the repo survives (path-carrying and path-less).
+        assert!(!is_blacklisted(
+            "rust.src/apg/lib",
+            Some("src/apg/lib.rs"),
+            "rust",
+            &opts
+        ));
+        assert!(!is_blacklisted(
+            "misc.src/apg/README.md",
+            Some("src/apg/README.md"),
+            "misc",
+            &opts
+        ));
+        assert!(!is_blacklisted("misc.src/apg", None, "misc", &opts));
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no
