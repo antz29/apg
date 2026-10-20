@@ -24,6 +24,13 @@ use super::identity::structural_scope_excludes;
 /// structural record is never silently kept or lost. Code streams are
 /// unaffected.
 ///
+/// A record also never belongs in the graph when its repo-relative path — or,
+/// on a structural stream, its module identity — is the tool-owned top-level
+/// `apg/` layout: that directory holds config, layers and transient state,
+/// never authored source. This is config-independent (the layout is present in
+/// every project) and matches only a TOP-LEVEL `apg` component, so a source
+/// directory legitimately named `apg` elsewhere (`src/apg/...`) survives.
+///
 /// `path` is `None` for records that carry no source location (modules) and
 /// for edge endpoints, whose FQN prefix is still honoured. A **structural
 /// module** identity is a repo-relative tree in disguise (`misc.apg/.trans`):
@@ -52,6 +59,9 @@ pub(crate) fn is_blacklisted(
                 .strip_prefix(language)
                 .and_then(|rest| rest.strip_prefix('.'))
         {
+            if under_apg_layout(identity) {
+                return true;
+            }
             if crate::classify::is_build_output_path(identity) {
                 return true;
             }
@@ -67,6 +77,9 @@ pub(crate) fn is_blacklisted(
     if crate::classify::is_build_output_path(path) {
         return true;
     }
+    if under_apg_layout(path) {
+        return true;
+    }
     if crate::classify::is_structural_language(language)
         && structural_scope_excludes(path, opts.config)
     {
@@ -74,4 +87,12 @@ pub(crate) fn is_blacklisted(
     }
     opts.base
         .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(path)))
+}
+
+/// True when a repo-relative identity is the tool-owned top-level `apg/` layout
+/// itself or anything below it. Only the FIRST component is matched, so a
+/// legitimate source tree named `apg` deeper in the repo (`src/apg/...`) is
+/// untouched.
+fn under_apg_layout(identity: &str) -> bool {
+    identity == "apg" || identity.starts_with("apg/")
 }
