@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "tool-owned-layout-excluded",
-  "body": "The graph holds no tool-owned state: the structural walk prunes the repository's top-level `apg/` layout and the ingestor drops every record whose path or module identity lies under it.",
+  "body": "The graph carries only authored source: the structural walk prunes the repository's top-level `apg/` layout and the ingestor drops every record whose path or module identity lies under it.",
   "properties": {
     "feature": "structural-graphing"
   },
@@ -14,13 +14,13 @@
       "properties": {}
     },
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.frontend-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.scan-hygiene",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.scan-hygiene",
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
       "properties": {}
     }
   ]

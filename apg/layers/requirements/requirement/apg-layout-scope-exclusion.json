@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "apg-layout-scope-exclusion",
-  "body": "The apg repository's classifier config excludes its own top-level `apg/` layout from the structural claim scope, so a scan of apg's checkout claims no tool-owned node file.",
+  "body": "The apg repository's classifier config places its own top-level `apg/` layout in the structural exclude scope, so a scan of apg's checkout claims authored source alone.",
   "properties": {
     "feature": "structural-graphing"
   },
@@ -14,13 +14,13 @@
       "properties": {}
     },
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.frontend-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.scan-hygiene",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.scan-hygiene",
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
       "properties": {}
     }
   ]
