@@ -15,6 +15,10 @@ use crate::paths::{absolutize, repo_relative_identity};
 /// `.git` and `.worktrees` also happen to be hidden, but the taxonomy does not
 /// prune hidden trees wholesale — `.github/`, `.cargo/` and the config dotfiles
 /// are claimed like any other authored content.
+///
+/// The walk additionally prunes a top-level `apg/` — the project layout itself
+/// (config, layers, transient state), not authored content — but only at the
+/// scan root: a nested `apg/` deeper in the tree is claimed like any directory.
 const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"];
 
 /// The code-frontend extensions the structural scanner never claims: a file a
@@ -157,8 +161,9 @@ pub(crate) fn in_scope(
 /// Every claimed file at or below `dir`, paired with its stream id (the
 /// full-scan discovery walk). Code-frontend extensions and the pruned directory
 /// trees are skipped here; `--module`/`--exclude-path`/config scope are applied
-/// by the caller so the walk stays the pure taxonomy.
-pub(crate) fn walk(dir: &Path, out: &mut Vec<(PathBuf, &'static str)>) {
+/// by the caller so the walk stays the pure taxonomy. `root` is the scan root:
+/// it distinguishes the top-level `apg/` layout (pruned) from a nested `apg/`.
+pub(crate) fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, &'static str)>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -166,10 +171,11 @@ pub(crate) fn walk(dir: &Path, out: &mut Vec<(PathBuf, &'static str)>) {
         let Ok(ft) = entry.file_type() else { continue };
         let path = entry.path();
         if ft.is_dir() {
-            if is_pruned_dir(&entry.file_name().to_string_lossy()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if is_pruned_dir(&name) || (dir == root && name == "apg") {
                 continue;
             }
-            walk(&path, out);
+            walk(root, &path, out);
         } else if ft.is_file() {
             if let Some(stream) = stream_for_path(&path) {
                 out.push((path, stream));

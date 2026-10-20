@@ -86,7 +86,7 @@ fn run(args: Args) -> io::Result<()> {
             .collect(),
         None => {
             let mut out = Vec::new();
-            walk(&root, &mut out);
+            walk(&root, &root, &mut out);
             out
         }
     };
