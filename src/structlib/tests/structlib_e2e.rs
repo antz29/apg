@@ -96,4 +96,75 @@ mod e2e {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    #[ignore = "e2e tier: spawns the built structfrontend against a scratch /tmp tree; run via cargo test-e2e"]
+    fn structfrontend_prunes_top_level_apg_layout() {
+        let dir =
+            std::fs::canonicalize(scratch_dir("apg-layout")).expect("canonicalize scratch dir");
+        let layout = dir.join("apg");
+        std::fs::create_dir_all(layout.join("layers/requirements/requirement"))
+            .expect("create apg layout");
+        std::fs::write(layout.join("config.json"), "{\n  \"default\": \"src\"\n}\n")
+            .expect("write layout config");
+        std::fs::write(
+            layout.join("layers/requirements/requirement/req.json"),
+            "{\n  \"layer\": \"requirements\"\n}\n",
+        )
+        .expect("write layout node");
+        std::fs::write(dir.join("README.md"), "# Title\n").expect("write root fixture");
+
+        let out = std::process::Command::new(structfrontend_bin())
+            .arg(&dir)
+            .output()
+            .expect("spawn structfrontend");
+        assert!(
+            out.status.success(),
+            "structfrontend failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8(out.stdout).expect("utf8 stdout");
+        let recs: Vec<serde_json::Value> = stdout
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("jsonl record"))
+            .collect();
+
+        // The scan ran: the root fixture is still claimed.
+        let readme = dir.join("README.md");
+        assert!(
+            recs.iter().any(|r| {
+                r["type"] == "file"
+                    && r["path"]
+                        .as_str()
+                        .is_some_and(|p| Path::new(p) == readme.as_path())
+            }),
+            "root README.md missing from {recs:?}"
+        );
+
+        // No File record originates under the top-level apg/ layout.
+        let stray_files: Vec<&str> = recs
+            .iter()
+            .filter(|r| r["type"] == "file")
+            .filter_map(|r| r["path"].as_str())
+            .filter(|p| Path::new(p).starts_with(layout.as_path()))
+            .collect();
+        assert!(
+            stray_files.is_empty(),
+            "File records leaked from the top-level apg/ layout: {stray_files:?}"
+        );
+
+        // No Module identity is the top-level apg/ directory or anything under it.
+        let stray_modules: Vec<&str> = recs
+            .iter()
+            .filter(|r| r["type"] == "module")
+            .filter_map(|r| r["fqn"].as_str())
+            .filter(|fqn| *fqn == "apg" || fqn.starts_with("apg/"))
+            .collect();
+        assert!(
+            stray_modules.is_empty(),
+            "Module records leaked from the top-level apg/ layout: {stray_modules:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
