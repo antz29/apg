@@ -14,17 +14,27 @@
       "kind": "implemented-by",
       "target": "java.Collector.emitPkgHierarchy",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.(default)",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.java-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.java-package",
       "properties": {}
     }
   ]

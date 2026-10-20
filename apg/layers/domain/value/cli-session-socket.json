@@ -8,17 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.cli-session",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-crash-recovery",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-lifecycle-exclusivity",
+      "source": "domain.entity.cli-session-coordinator",
       "properties": {}
     }
   ]

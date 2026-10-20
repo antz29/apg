@@ -6,21 +6,20 @@
   "properties": {
     "feature": "spec-principles"
   },
-  "out": [
+  "out": [],
+  "in": [
     {
-      "kind": "drives",
-      "target": "domain.entity.spec-truth",
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
       "properties": {}
     },
     {
-      "kind": "drives",
-      "target": "domain.group.spec-authoring",
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
       "properties": {}
-    }
-  ],
-  "in": [
+    },
     {
-      "kind": "contains",
+      "kind": "requires",
       "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }

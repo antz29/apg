@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "duplicate-agent-warning",
+  "body": "The loud install warning naming a repository-local agent file that duplicates a distributed agent, deleting nothing.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-file-migration",
+      "properties": {}
+    }
+  ]
+}

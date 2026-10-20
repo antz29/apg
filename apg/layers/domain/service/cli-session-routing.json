@@ -6,13 +6,53 @@
   "properties": {},
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-caller-guidance",
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-crash-recovery",
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-routing",
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-required-for-durable-mutations",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-substrate",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-read-your-writes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-warning-visibility",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-caller-controlled-durability",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-clean-end-and-abandon",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-single-writer-receive-order",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-write-back-buffer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-lifecycle-exclusivity",
       "properties": {}
     }
   ],
@@ -23,13 +63,33 @@
       "properties": {}
     },
     {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-read-your-writes",
+      "kind": "realises",
+      "source": "solution.component.cli-session-durability",
       "properties": {}
     },
     {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-required-for-durable-mutations",
+      "kind": "realises",
+      "source": "solution.component.cli-session-warning-propagation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-coordinator",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-docs",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-lifecycle-guards",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-routing",
       "properties": {}
     }
   ]

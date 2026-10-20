@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.plan-verification",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
+      "source": "domain.entity.plan-coverage",
       "properties": {}
     }
   ]

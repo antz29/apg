@@ -1,0 +1,101 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "agent-roster",
+  "body": "The capability that classifies and maintains the agent roster: the distributed agents apg installs and the repository agents the agent-builder scaffolds and commits on main.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-upgrade-removal-guide",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-builder-drops-optional-coordinator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.no-plan-note-grant",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-builder-optional-release-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.push-tag-human-approved-release-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-builder-main-flow",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-builder-model-map",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-builder-agents-md-hygiene",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.distributed-agent-install",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.distributed-reviewer-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.agent-builder-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.repo-agent-guide",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.push-tag-policy-surfaces",
+      "properties": {}
+    }
+  ]
+}

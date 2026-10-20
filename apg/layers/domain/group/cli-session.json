@@ -27,53 +27,7 @@
       "kind": "contains",
       "target": "domain.service.cli-session-routing",
       "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.cli-session-socket",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-docs",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-durability",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-lifecycle-guards",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-routing",
-      "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-crash-recovery",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-required-for-durable-mutations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-substrate",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

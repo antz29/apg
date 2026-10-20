@@ -1,0 +1,56 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "source-layout",
+  "body": "The capability that lays apg's first-party source out as cohesive modules with a reachable library surface and tier-separable tests.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.decomposed-source-modules",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.testable-library-surface",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.tier-separable-tests",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.graph-visible-tests",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.spec-only-splice-equivalence-tests",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.test-layout",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.splice-equivalence-tests",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.library-surface",
+      "properties": {}
+    }
+  ]
+}

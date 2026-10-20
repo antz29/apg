@@ -8,15 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.project-start-seeder",
+      "kind": "contains",
+      "target": "domain.value.seeded-database",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.fast-project-start",
+      "kind": "contains",
+      "source": "domain.group.splice-equivalence",
       "properties": {}
     }
   ]

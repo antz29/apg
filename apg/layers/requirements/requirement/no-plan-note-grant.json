@@ -11,22 +11,22 @@
       "kind": "contains",
       "target": "requirements.requirement.navigator-cadence-marks-done-only",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.opencode-permission-rule-set",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.generated-agent-set",
-      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
       "properties": {}
     }
   ]

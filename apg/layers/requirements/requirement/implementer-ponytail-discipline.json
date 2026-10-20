@@ -28,11 +28,6 @@
       "properties": {}
     },
     {
-      "kind": "drives",
-      "target": "domain.group.implementer-discipline",
-      "properties": {}
-    },
-    {
       "kind": "contains",
       "target": "requirements.requirement.ponytail-return-states-skipped-and-risk",
       "properties": {}
@@ -40,7 +35,17 @@
   ],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.code-writer-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.implementer-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.code-writer-agent",
       "properties": {}
     }

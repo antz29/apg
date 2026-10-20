@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "task-cadence",
+  "body": "The per-task execution rhythm under the staleness guard: one task per session, commit, verify, scan, then resume to mark done.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.task-execution-cadence",
+      "properties": {}
+    }
+  ]
+}

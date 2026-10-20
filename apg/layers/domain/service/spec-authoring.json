@@ -1,0 +1,71 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "spec-authoring",
+  "body": "The capability that enforces and states the durable spec's authoring discipline: target truth, the body budget, layer-scoped constraints, note confinement, and the deterministic lint.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.durable-spec-states-what-is",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.notes-implementation-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.spec-body-budget",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.deterministic-spec-lint",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.details-target-set-consistency",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.spec-principles-prompts",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.details-target-validation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.constraint-scope",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.spec-lint",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.note-layer-confinement",
+      "properties": {}
+    }
+  ]
+}

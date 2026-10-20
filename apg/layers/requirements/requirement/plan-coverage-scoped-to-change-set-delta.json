@@ -6,26 +6,20 @@
   "properties": {
     "feature": "plan-coverage"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.plan-coverage",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.plan-verification",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.change-set-spec-delta",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.navigator-agent",
       "properties": {}
     }

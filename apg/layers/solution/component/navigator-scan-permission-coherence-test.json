@@ -2,12 +2,22 @@
   "layer": "solution",
   "type": "component",
   "name": "navigator-scan-permission-coherence-test",
-  "body": "The coherence end-to-end test pinning the navigator's scan authorization: the prompt frontmatter grants a per-call scan prompt as its sole scan gate and allows the review action.",
+  "body": "The coherence end-to-end tests pinning the navigator's scan authorization and session isolation: a per-call scan prompt is the sole scan gate, the review action is allowed, and each dispatch is a fresh isolated session.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
       "target": "rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-navigation",
       "properties": {}
     }
   ],
@@ -15,11 +25,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.scan-authorization",
       "properties": {}
     }
   ]

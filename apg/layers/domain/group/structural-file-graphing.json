@@ -20,30 +20,9 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.misc-residual-format",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.structural-scanner",
+      "target": "domain.service.structural-file-graphing",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.every-tracked-file-graphed",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-file-graphing",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-format-scope-config",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

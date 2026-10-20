@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "merge-gate",
+  "body": "The verify-gated merge act through which a project branch's work reaches the main checkout.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.main-integration",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "install-count",
+  "body": "One of apg init's success-line counts, measured against its own population's total rather than a mixed one.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.install-report",
+      "properties": {}
+    }
+  ]
+}

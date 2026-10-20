@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "isolated-dispatch",
+  "body": "One fresh, isolated subagent session carrying a single self-contained unit of work.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.subagent-session-isolation",
+      "properties": {}
+    }
+  ]
+}

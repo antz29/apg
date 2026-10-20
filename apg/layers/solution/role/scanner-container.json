@@ -1,0 +1,17 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "scanner-container",
+  "body": "The container role of the apg binary, which drives scans, resolves identity, and serves the durable spec.",
+  "properties": {
+    "applies-to": "container"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

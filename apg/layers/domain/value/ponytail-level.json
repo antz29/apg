@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.implementer-discipline",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.ponytail-level-is-ultra",
+      "source": "domain.entity.implementer-change-discipline",
       "properties": {}
     }
   ]

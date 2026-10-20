@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.container.build-pipeline",
+      "kind": "contains",
+      "target": "domain.value.toolchain-pin",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.frontend-dependencies",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.build-toolchain-pins",
       "properties": {}
     }
   ]

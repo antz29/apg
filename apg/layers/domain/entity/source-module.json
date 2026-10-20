@@ -8,48 +8,13 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.library-surface",
+      "kind": "contains",
+      "target": "domain.value.module-size-signal",
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "target": "solution.container.cpp-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.csharp-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.go-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.java-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.py-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.rust-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.structural-scanner",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.ts-frontend",
+      "kind": "contains",
+      "target": "domain.value.module-identity",
       "properties": {}
     }
   ],
@@ -57,16 +22,6 @@
     {
       "kind": "contains",
       "source": "domain.group.source-layout",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.decomposed-source-modules",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.testable-library-surface",
       "properties": {}
     }
   ]

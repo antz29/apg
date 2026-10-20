@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-driver",
-  "body": "The scan orchestrator: the scan command and the project-start path, choosing full versus incremental work, picking the frontends to spawn, splicing reused fragments, and seeding a branch database by copy.",
+  "body": "The scan orchestrator: the scan command and project-start path choosing full versus incremental work, the frontends to spawn, fragment splice, branch-database seeding by copy, and the classification identity folded into the cache key.",
   "properties": {},
   "out": [
     {
@@ -37,11 +37,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.project_cmd.start.project_start_at",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.scan.cmd_scan",
       "properties": {}
     },
@@ -49,17 +44,37 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.delta",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.main",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.graph-identity",
       "properties": {}
     }
   ]

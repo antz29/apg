@@ -14,6 +14,11 @@
     },
     {
       "kind": "contains",
+      "target": "domain.entity.phase-review-scope",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.entity.removal-feedback-notice",
       "properties": {}
     },
@@ -24,55 +29,14 @@
     },
     {
       "kind": "contains",
-      "target": "domain.service.feedback-lifecycle",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.review-status",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.feedback-mirror-store",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.feedback-projection",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.review-command-surface",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.review-record-retention",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.verify-feedback-stage",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "domain.entity.senior-review-finding",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.value.review-severity",
+      "target": "domain.service.feedback-lifecycle",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.feedback-survives-target-removal",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

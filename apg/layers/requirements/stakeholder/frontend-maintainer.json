@@ -6,12 +6,12 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.frontend-dependency-contract",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.structural-file-graphing",
       "properties": {}
     }

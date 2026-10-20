@@ -6,7 +6,7 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.cli-session-substrate",
       "properties": {}
     }

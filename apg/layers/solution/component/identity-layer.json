@@ -34,22 +34,22 @@
       "kind": "implemented-by",
       "target": "rust.apg.load.export.write_graph_jsonl",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.source-file",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.graph-identity",
       "properties": {}
     }
   ]

@@ -8,28 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-roster-docs",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.codebase-navigator-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.distributed-agent-install",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.distributed-reviewer-prompt",
+      "kind": "contains",
+      "target": "domain.value.agent-count",
       "properties": {}
     }
   ],
@@ -37,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-roster",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
     }
   ]

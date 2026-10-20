@@ -14,17 +14,22 @@
       "kind": "implemented-by",
       "target": "rust.build_script_build.main",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.pipeline-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.structural-file-graphing",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.build-pipeline",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.structural-scanner",
       "properties": {}
     }
   ]

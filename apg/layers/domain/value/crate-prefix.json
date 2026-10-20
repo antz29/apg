@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "crate-prefix",
+  "body": "The distinct, stable module prefix the Rust frontend renders for one local crate target of a package.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.rust-crate-target",
+      "properties": {}
+    }
+  ]
+}

@@ -6,13 +6,48 @@
   "properties": {},
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.review-command-surface",
+      "kind": "driven-by",
+      "target": "requirements.requirement.feedback-survives-target-removal",
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "target": "solution.component.review-record-retention",
+      "kind": "driven-by",
+      "target": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.feedback-persists-across-target-loss",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-feedback-blocks-verify",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-reviews-notes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-senior-review-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-reviews-the-phase-under-review",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-warning-visibility",
       "properties": {}
     }
   ],
@@ -23,8 +58,33 @@
       "properties": {}
     },
     {
-      "kind": "drives",
-      "source": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "kind": "realises",
+      "source": "solution.component.verify-feedback-stage",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.review-record-retention",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.feedback-mirror-store",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.feedback-projection",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.node-removal-feedback-notice",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.review-command-surface",
       "properties": {}
     }
   ]

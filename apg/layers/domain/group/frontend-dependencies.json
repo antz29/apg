@@ -33,16 +33,10 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "target": "solution.system.apg",
+      "kind": "contains",
+      "target": "domain.service.frontend-dependencies",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.frontend-dependency-contract",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

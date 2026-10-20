@@ -6,22 +6,16 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.classification-config",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.cache-key",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.portable-graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
       "properties": {}
     }
   ]

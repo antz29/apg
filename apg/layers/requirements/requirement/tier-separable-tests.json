@@ -6,26 +6,15 @@
   "properties": {
     "feature": "test-layout"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.test-harness",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.test-tier",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.source-layout",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.source-maintainer",
       "properties": {}
     }

@@ -1,0 +1,81 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "structural-file-graphing",
+  "body": "The capability that graphs every tracked file a code frontend leaves unclaimed: format claiming, per-format emitters, the residual stream, and the bundled zero-dependency scanner.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.every-tracked-file-graphed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-file-graphing",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-format-scope-config",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.md-lang-id-preserved",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-format-claiming",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-format-structure",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.no-new-scan-time-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-scanner-in-base-package",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.structural-file-graphing",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-scanner-crate",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-claiming",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-stream-dispatch",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-format-emitters",
+      "properties": {}
+    }
+  ]
+}

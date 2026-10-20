@@ -19,20 +19,9 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.change-set-spec-delta",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.plan-coverage-check",
+      "target": "domain.service.plan-verification",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

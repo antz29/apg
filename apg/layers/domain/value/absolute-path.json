@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "absolute-path",
+  "body": "The absolute filesystem path a suite tool returns, re-based from a stored repo-relative identity at the consumer boundary.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.tool-path-resolution",
+      "properties": {}
+    }
+  ]
+}

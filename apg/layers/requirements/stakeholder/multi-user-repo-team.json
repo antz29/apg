@@ -6,17 +6,17 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.graph-first-navigation",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.portable-graph-identity",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
       "properties": {}
     }

@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.ts-package-rooting",
+      "kind": "contains",
+      "target": "domain.value.ts-package-name",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.frontend-rooting-from-repo-base",
       "properties": {}
     }
   ]

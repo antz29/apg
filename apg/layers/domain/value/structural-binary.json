@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "structural-binary",
+  "body": "The single self-contained structfrontend binary the base package installs and the scan driver spawns.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.structural-scanner",
+      "properties": {}
+    }
+  ]
+}

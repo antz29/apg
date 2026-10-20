@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "engine-version",
+  "body": "The exact engine version a frontend is built against, which sets its language-version ceiling.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.engine-pin",
+      "properties": {}
+    }
+  ]
+}

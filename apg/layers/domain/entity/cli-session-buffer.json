@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-durability",
+      "kind": "contains",
+      "target": "domain.value.pending-change-set",
       "properties": {}
     }
   ],
@@ -17,31 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.cli-session",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-caller-controlled-durability",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-clean-end-and-abandon",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-read-your-writes",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-single-writer-receive-order",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-write-back-buffer",
       "properties": {}
     }
   ]

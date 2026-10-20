@@ -19,17 +19,22 @@
       "kind": "implemented-by",
       "target": "ts.apg-opencode-suite.lib.apg.ToolContext",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.opencode-integration",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.opencode-tool-registration",
       "properties": {}
     }
   ]

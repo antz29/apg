@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.ungranted-plan-note",
+      "kind": "contains",
+      "target": "domain.value.generated-agent-catalogue",
       "properties": {}
     }
   ],
@@ -22,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-roster",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-builder-drops-optional-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.no-plan-note-grant",
       "properties": {}
     }
   ]

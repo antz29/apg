@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.scan-freshness-guard",
+      "kind": "contains",
+      "target": "domain.value.content-identity",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.splice-equivalence",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
       "properties": {}
     }
   ]

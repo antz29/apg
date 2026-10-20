@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.plan-coverage-check",
+      "kind": "contains",
+      "target": "domain.value.change-set-spec-delta",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.plan-verification",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
       "properties": {}
     }
   ]

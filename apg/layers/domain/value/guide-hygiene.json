@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "guide-hygiene",
+  "body": "The rule keeping a repository's agent guide consistent with the distributed-agent rules and clear of the change-set flow.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.repo-agent-guide-surface",
+      "properties": {}
+    }
+  ]
+}

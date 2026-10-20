@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "stage-sequence",
+  "body": "The ordered change-set stages from spec through plan and implementation reviews.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.staged-delivery-process",
+      "properties": {}
+    }
+  ]
+}

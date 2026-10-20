@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.test-layout",
+      "kind": "contains",
+      "target": "domain.value.tier-selection",
       "properties": {}
     }
   ],
@@ -17,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.source-layout",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.graph-visible-tests",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.tier-separable-tests",
       "properties": {}
     }
   ]

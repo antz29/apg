@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-implementer-ponytail",
+      "kind": "contains",
+      "target": "domain.value.ponytail-level",
       "properties": {}
     }
   ],
@@ -17,21 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.implementer-discipline",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.ponytail-smallest-complete-change",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.ponytail-verification-floor",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.ponytail-return-states-skipped-and-risk",
       "properties": {}
     }
   ]

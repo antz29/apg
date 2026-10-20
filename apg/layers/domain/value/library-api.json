@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "library-api",
+  "body": "The crate-internal API surface the root crate's library target exposes to tests outside the declaring module.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.library-surface",
+      "properties": {}
+    }
+  ]
+}

@@ -6,17 +6,16 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.rust-crate-target",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.portable-graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
       "properties": {}
     }
   ]

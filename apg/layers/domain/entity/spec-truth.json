@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.spec-principles-prompts",
+      "kind": "contains",
+      "target": "domain.value.affirmative-statement",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.spec-authoring",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.durable-spec-states-what-is",
       "properties": {}
     }
   ]

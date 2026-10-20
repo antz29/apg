@@ -1,0 +1,17 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "suite-container",
+  "body": "The container role of the opencode suite distribution embedded into the binary and installed by apg init.",
+  "properties": {
+    "applies-to": "container"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    }
+  ]
+}

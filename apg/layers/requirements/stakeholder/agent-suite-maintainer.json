@@ -6,27 +6,27 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.agent-builder-drops-optional-coordinator",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.agent-builder-optional-release-agent",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.opencode-2x-support",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.push-tag-human-approved-release-only",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
     }

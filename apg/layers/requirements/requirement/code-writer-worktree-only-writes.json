@@ -6,21 +6,20 @@
   "properties": {
     "feature": "agent-permissions"
   },
-  "out": [
+  "out": [],
+  "in": [
     {
-      "kind": "drives",
-      "target": "domain.entity.worktree-write-boundary",
+      "kind": "requires",
+      "source": "requirements.user.code-writer-agent",
       "properties": {}
     },
     {
-      "kind": "drives",
-      "target": "domain.value.permission-scope",
+      "kind": "driven-by",
+      "source": "domain.service.agent-fs-operations",
       "properties": {}
-    }
-  ],
-  "in": [
+    },
     {
-      "kind": "contains",
+      "kind": "requires",
       "source": "requirements.user.code-writer-agent",
       "properties": {}
     }

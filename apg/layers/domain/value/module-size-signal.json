@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.source-layout",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.decomposed-source-modules",
+      "source": "domain.entity.source-module",
       "properties": {}
     }
   ]

@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.opencode-agent-templates",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.ungranted-plan-note",
+      "kind": "contains",
+      "target": "domain.value.permission-rule",
       "properties": {}
     }
   ],
@@ -22,21 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.opencode-integration",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-agent-frontmatter-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-generated-agent-shape-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.no-plan-note-grant",
       "properties": {}
     }
   ]

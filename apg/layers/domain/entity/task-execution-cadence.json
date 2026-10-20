@@ -8,25 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.codebase-navigator-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.ungranted-plan-note",
+      "kind": "contains",
+      "target": "domain.value.task-cadence",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.navigator-task-cadence",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.navigator-cadence-marks-done-only",
+      "kind": "contains",
+      "source": "domain.group.agent-navigation",
       "properties": {}
     }
   ]

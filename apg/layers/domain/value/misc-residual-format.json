@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.structural-file-graphing",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-format-claiming",
+      "source": "domain.entity.structural-format",
       "properties": {}
     }
   ]

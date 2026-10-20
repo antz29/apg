@@ -8,18 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-install-registry",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-tool-suite",
+      "kind": "contains",
+      "target": "domain.value.permission-scope",
       "properties": {}
     }
   ],
@@ -27,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-fs-operations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-fs-write-operations",
       "properties": {}
     }
   ]

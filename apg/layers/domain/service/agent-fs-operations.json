@@ -1,0 +1,51 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "agent-fs-operations",
+  "body": "The capability that confines an agent's filesystem mutations to the paths its permission scope grants, with main integration reached only through the merge gate.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-fs-write-operations",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.code-writer-worktree-only-writes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-no-unguarded-main-git",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-fs-operations",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.agent-fs-tool-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.agent-builder-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.worktree-boundary-tests",
+      "properties": {}
+    }
+  ]
+}

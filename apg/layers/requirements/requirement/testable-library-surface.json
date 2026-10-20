@@ -6,26 +6,20 @@
   "properties": {
     "feature": "test-layout"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.library-surface",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.source-module",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.source-layout",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.source-contributor",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.source-contributor",
       "properties": {}
     }

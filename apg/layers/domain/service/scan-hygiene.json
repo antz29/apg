@@ -1,0 +1,31 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "scan-hygiene",
+  "body": "The capability that keeps toolchain-produced artifacts out of the graph, so graph identity stays a function of authored content alone.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.no-self-ingestion",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.go-build-cache",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-hygiene",
+      "properties": {}
+    }
+  ]
+}

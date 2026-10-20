@@ -51,21 +51,21 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-multitarget-crate-identity",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.source-file",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.canonical-file-identity",
-      "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
     }

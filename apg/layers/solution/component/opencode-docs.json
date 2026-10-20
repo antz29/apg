@@ -7,12 +7,17 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "AGENTS.md",
+      "target": "README.md",
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "README.md",
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.opencode-integration",
       "properties": {}
     }
   ],
@@ -20,11 +25,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.opencode-integration",
       "properties": {}
     }
   ]

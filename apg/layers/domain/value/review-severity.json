@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-senior-review-discipline",
+      "source": "domain.entity.senior-review-finding",
       "properties": {}
     }
   ]

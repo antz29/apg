@@ -8,18 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.spec-lint",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.spec-body-budget",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.note-layer-confinement",
+      "kind": "contains",
+      "target": "domain.value.lint-verdict",
       "properties": {}
     }
   ],
@@ -27,21 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.spec-authoring",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.deterministic-spec-lint",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.notes-implementation-only",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.spec-body-budget",
       "properties": {}
     }
   ]

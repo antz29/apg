@@ -6,16 +6,15 @@
   "properties": {
     "feature": "agent-builder-roster-cleanup"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.agent-file-migration",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.apg-upgrader",
       "properties": {}
     }

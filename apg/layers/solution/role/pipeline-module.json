@@ -1,0 +1,17 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "pipeline-module",
+  "body": "The component role of a build and staging unit inside the release pipeline.",
+  "properties": {
+    "applies-to": "component"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.component.structural-build-staging",
+      "properties": {}
+    }
+  ]
+}

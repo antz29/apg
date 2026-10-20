@@ -6,22 +6,16 @@
   "properties": {
     "feature": "splice-equivalence"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.durable-layer-node-set",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.splice-equivalence",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
       "properties": {}
     }
   ]

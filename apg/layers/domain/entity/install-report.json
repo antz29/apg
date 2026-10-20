@@ -8,25 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.init-install-report",
+      "kind": "contains",
+      "target": "domain.value.install-count",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.init-reports-suite-file-count",
-      "properties": {}
-    },
-    {
       "kind": "contains",
       "source": "domain.group.opencode-integration",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.init-reports-agent-count",
       "properties": {}
     }
   ]

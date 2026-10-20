@@ -1,0 +1,61 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "implementer-discipline",
+  "body": "The capability that carries the implementer's Ponytail discipline \u2014 scope pass, smallest complete change, fixed ultra level, and shortcut notes \u2014 into every generated implementer.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.implementer-ponytail-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ponytail-level-is-ultra",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ponytail-smallest-complete-change",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ponytail-verification-floor",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ponytail-return-states-skipped-and-risk",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ponytail-shortcut-reported-not-commented",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-authors-shortcut-notes",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.implementer-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.agent-builder-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    }
+  ]
+}

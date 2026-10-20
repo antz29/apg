@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "package-name",
+  "body": "A Java source file's package name, including the degenerate default package.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.java-package",
+      "properties": {}
+    }
+  ]
+}

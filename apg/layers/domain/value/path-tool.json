@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "path-tool",
+  "body": "A tool name that resolves on the path for a language scan to run, checked by the scan-time preflight.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.scan-time-tool",
+      "properties": {}
+    }
+  ]
+}

@@ -6,16 +6,20 @@
   "properties": {
     "feature": "agent-discipline"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.shortcut-note",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.implementer-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.navigator-agent",
       "properties": {}
     }

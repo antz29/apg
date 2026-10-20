@@ -22,11 +22,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_cp.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_edge.ts",
       "properties": {}
     },
@@ -68,11 +63,6 @@
     {
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_modules.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_mv.ts",
       "properties": {}
     },
     {
@@ -167,22 +157,12 @@
     },
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_rm.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_scan.ts",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_session.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_spec_lint.ts",
       "properties": {}
     },
     {
@@ -199,22 +179,27 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_uses.ts",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.plan-tooling",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.opencode-plugin-definition",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.opencode-tool-registration",
       "properties": {}
     }
   ]

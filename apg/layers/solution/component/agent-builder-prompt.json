@@ -9,42 +9,32 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/agent-builder.md",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-fs-operations",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.implementer-discipline",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.agent-model-map",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.agent-scaffold-flow",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.distributed-agent-set",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.generated-agent-set",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.release-agent-flow",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.worktree-write-boundary",
       "properties": {}
     }
   ]

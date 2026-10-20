@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "dotted-module-path",
+  "body": "A Python source file's dotted module path, built from its full package directory path.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.python-module",
+      "properties": {}
+    }
+  ]
+}

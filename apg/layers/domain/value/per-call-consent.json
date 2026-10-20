@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "per-call-consent",
+  "body": "The opencode per-call tool permission that prompts the user on each scan invocation.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.scan-authorization",
+      "properties": {}
+    }
+  ]
+}

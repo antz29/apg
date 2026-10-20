@@ -6,22 +6,16 @@
   "properties": {
     "feature": "review-integrity"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.feedback-item",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.reviewed-target-reference",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.feedback-survives-target-removal",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.feedback-lifecycle",
       "properties": {}
     }
   ]

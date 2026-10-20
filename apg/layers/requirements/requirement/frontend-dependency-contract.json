@@ -36,21 +36,21 @@
       "kind": "contains",
       "target": "requirements.requirement.scan-time-toolchain-preflight",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.frontend-artifact",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.frontend-dependencies",
-      "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.frontend-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.frontend-maintainer",
       "properties": {}
     }

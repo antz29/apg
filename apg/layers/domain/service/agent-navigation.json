@@ -1,0 +1,61 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "agent-navigation",
+  "body": "The capability that carries the navigator's operating discipline into every distributed and generated agent: graph-first navigation, per-call scan consent, isolated dispatches, and the staged delivery flow.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.graph-first-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-scan-permission",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-session-isolation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-task-cadence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-cadence-marks-done-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-staged-flow",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.navigator-scan-permission-coherence-test",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.repo-agent-guide",
+      "properties": {}
+    }
+  ]
+}

@@ -6,27 +6,16 @@
   "properties": {
     "feature": "cli-session-substrate"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.cli-session-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.cli-session",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.cli-session-socket",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.cli-session-substrate",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cli-session-routing",
       "properties": {}
     }
   ]

@@ -8,18 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.go-build-cache",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.scan-hygiene",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.go-frontend",
+      "kind": "contains",
+      "target": "domain.value.artifact-exclusion",
       "properties": {}
     }
   ],
@@ -27,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.scan-hygiene",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.no-self-ingestion",
       "properties": {}
     }
   ]

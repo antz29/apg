@@ -6,17 +6,16 @@
   "properties": {
     "feature": "structural-graphing"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.structural-format",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.structural-file-graphing",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.structural-file-graphing",
       "properties": {}
     }
   ]

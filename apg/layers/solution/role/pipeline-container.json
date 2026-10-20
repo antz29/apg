@@ -1,0 +1,17 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "pipeline-container",
+  "body": "The container role of the build and release pipeline that compiles and stages every frontend artifact.",
+  "properties": {
+    "applies-to": "container"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.container.build-pipeline",
+      "properties": {}
+    }
+  ]
+}

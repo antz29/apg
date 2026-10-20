@@ -26,21 +26,16 @@
       "kind": "contains",
       "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.incremental-splice",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.shared-fact-store",
-      "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "contains",
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
     }

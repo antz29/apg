@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "splice-delta",
+  "body": "The code delta an incremental build applies to a seeded working copy of the previous database.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.incremental-splice",
+      "properties": {}
+    }
+  ]
+}

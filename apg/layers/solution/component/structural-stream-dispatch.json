@@ -22,17 +22,17 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.frontends.spawn_frontend",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.ingest.identity.root_module_fqn",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.ingest_records",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.structural-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.structural-file-graphing",
       "properties": {}
     }
   ],
@@ -40,11 +40,6 @@
     {
       "kind": "contains",
       "source": "solution.container.structural-scanner",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.structural-format",
       "properties": {}
     }
   ]

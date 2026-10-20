@@ -14,17 +14,22 @@
       "kind": "implemented-by",
       "target": "ts.apg-opencode-suite.lib.apg.runCypher",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.tool-path-resolution",
       "properties": {}
     }
   ]

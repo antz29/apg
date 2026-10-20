@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.opencode-tool-plugin",
+      "kind": "contains",
+      "target": "domain.value.opencode-plugin-api",
       "properties": {}
     }
   ],
@@ -17,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.opencode-integration",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-plugin-api-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-suite-install-v2",
       "properties": {}
     }
   ]

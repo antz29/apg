@@ -8,15 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.navigator-agent-builder-surface",
+      "kind": "contains",
+      "target": "domain.value.main-write-path-set",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.navigator-agent-builder-surface-coherence",
+      "kind": "contains",
+      "source": "domain.group.agent-roster",
       "properties": {}
     }
   ]

@@ -6,17 +6,21 @@
   "properties": {
     "feature": "frontend-dependencies"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.scan-time-tool",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.frontend-dependency-contract",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.frontend-installer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.frontend-dependencies",
       "properties": {}
     }
   ]

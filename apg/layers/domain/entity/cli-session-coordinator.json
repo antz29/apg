@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.cli-session-suite-tool",
+      "kind": "contains",
+      "target": "domain.value.cli-session-socket",
       "properties": {}
     }
   ],
@@ -22,36 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.cli-session",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-clean-end-and-abandon",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-crash-recovery",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-lifecycle-exclusivity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-required-for-durable-mutations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-single-writer-receive-order",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-write-back-buffer",
       "properties": {}
     }
   ]

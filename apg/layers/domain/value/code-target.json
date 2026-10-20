@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "code-target",
+  "body": "The single implementation-layer code identity a note deepens through the details edge.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.details-edge",
+      "properties": {}
+    }
+  ]
+}

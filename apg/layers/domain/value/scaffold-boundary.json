@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "scaffold-boundary",
+  "body": "The main-checkout boundary within which the agent-builder creates or updates a repository's code-writer agents.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-scaffold-flow",
+      "properties": {}
+    }
+  ]
+}

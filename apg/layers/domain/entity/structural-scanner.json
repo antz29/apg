@@ -8,18 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.structural-build-staging",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.structural-scanner-crate",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.structural-scanner",
+      "kind": "contains",
+      "target": "domain.value.structural-binary",
       "properties": {}
     }
   ],
@@ -27,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.structural-file-graphing",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.no-new-scan-time-deps",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-scanner-in-base-package",
       "properties": {}
     }
   ]

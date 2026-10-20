@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "frontend-binary",
+  "body": "One installed per-language scanner frontend binary that the scan driver spawns for its language.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.frontend-artifact",
+      "properties": {}
+    }
+  ]
+}

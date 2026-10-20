@@ -6,12 +6,12 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.decomposed-source-modules",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.tier-separable-tests",
       "properties": {}
     }

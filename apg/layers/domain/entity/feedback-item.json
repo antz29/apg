@@ -8,23 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.feedback-mirror-store",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.review-command-surface",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.review-record-retention",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.verify-feedback-stage",
+      "kind": "contains",
+      "target": "domain.value.review-status",
       "properties": {}
     }
   ],
@@ -32,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.feedback-persists-across-target-loss",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.unresolved-feedback-blocks-verify",
       "properties": {}
     }
   ]

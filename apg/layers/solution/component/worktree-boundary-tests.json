@@ -9,17 +9,22 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tests/boundary.e2e.test.ts",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-fs-operations",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.worktree-write-boundary",
       "properties": {}
     }
   ]

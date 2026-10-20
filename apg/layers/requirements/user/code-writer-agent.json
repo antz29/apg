@@ -6,17 +6,17 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.agent-fs-write-operations",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.code-writer-worktree-only-writes",
       "properties": {}
     },
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.implementer-ponytail-discipline",
       "properties": {}
     }

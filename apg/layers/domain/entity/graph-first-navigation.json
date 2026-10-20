@@ -8,20 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.navigator-prompt-guidance",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.repo-agent-guide",
+      "kind": "contains",
+      "target": "domain.value.query-first-order",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.graph-first-navigation",
+      "kind": "contains",
+      "source": "domain.group.agent-navigation",
       "properties": {}
     }
   ]

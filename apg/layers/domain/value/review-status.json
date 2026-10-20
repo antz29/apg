@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.unresolved-feedback-blocks-verify",
+      "source": "domain.entity.feedback-item",
       "properties": {}
     }
   ]

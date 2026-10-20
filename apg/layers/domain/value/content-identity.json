@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.splice-equivalence",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
+      "source": "domain.entity.freshness-fast-path",
       "properties": {}
     }
   ]

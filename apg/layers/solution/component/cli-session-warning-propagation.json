@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.node_cmd.node_rm_change",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.node_cmd.node_update_change",
       "properties": {}
     },
@@ -24,17 +19,22 @@
       "kind": "implemented-by",
       "target": "rust.apg.session.Coordinator.handle_mutation",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.cli-session-routing",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.write-time-advisory",
       "properties": {}
     }
   ]

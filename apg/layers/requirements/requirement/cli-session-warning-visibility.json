@@ -8,23 +8,13 @@
   },
   "out": [
     {
-      "kind": "depends-on",
+      "kind": "contains",
       "target": "requirements.requirement.deterministic-spec-lint",
       "properties": {}
     },
     {
-      "kind": "depends-on",
+      "kind": "contains",
       "target": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.removal-feedback-notice",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.write-time-advisory",
       "properties": {}
     }
   ],
@@ -32,6 +22,16 @@
     {
       "kind": "contains",
       "source": "requirements.requirement.cli-session-substrate",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.feedback-lifecycle",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cli-session-routing",
       "properties": {}
     }
   ]

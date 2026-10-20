@@ -6,13 +6,7 @@
   "properties": {
     "feature": "review-integrity"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.removal-feedback-notice",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
@@ -20,8 +14,13 @@
       "properties": {}
     },
     {
-      "kind": "depends-on",
+      "kind": "contains",
       "source": "requirements.requirement.cli-session-warning-visibility",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.feedback-lifecycle",
       "properties": {}
     }
   ]

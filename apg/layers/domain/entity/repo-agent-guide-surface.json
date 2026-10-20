@@ -8,15 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-agents-md-hygiene",
+      "kind": "contains",
+      "target": "domain.value.guide-hygiene",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-builder-agents-md-hygiene",
+      "kind": "contains",
+      "source": "domain.group.agent-roster",
       "properties": {}
     }
   ]

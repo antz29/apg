@@ -6,16 +6,20 @@
   "properties": {
     "feature": "plan-coverage"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.plan-review-verdict",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.plan-review-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.plan-review-agent",
       "properties": {}
     }

@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.tool-path-resolution",
+      "kind": "contains",
+      "target": "domain.value.absolute-path",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
       "properties": {}
     }
   ]

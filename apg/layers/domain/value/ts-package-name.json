@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "ts-package-name",
+  "body": "A TypeScript package's declared name, combined with the repository-relative base to root its files' identities.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.typescript-package",
+      "properties": {}
+    }
+  ]
+}

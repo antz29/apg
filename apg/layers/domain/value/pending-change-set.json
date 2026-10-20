@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "pending-change-set",
+  "body": "The in-memory node-file writes and deletes a live session accepted since its previous save.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.cli-session-buffer",
+      "properties": {}
+    }
+  ]
+}

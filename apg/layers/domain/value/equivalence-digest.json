@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "equivalence-digest",
+  "body": "The digest folded from the assembled graph's authored rows and the seed database's matching rows, compared for splice eligibility.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.seed-equivalence-guard",
+      "properties": {}
+    }
+  ]
+}

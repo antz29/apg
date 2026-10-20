@@ -1,0 +1,91 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "opencode-integration",
+  "body": "The capability that runs the apg suite as an opencode 2.x integration: plugins, tool registration, permission rules, and the install surface.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-2x-support",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-docs-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-suite-install-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-plugin-api-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-agent-frontmatter-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.no-plan-note-grant",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.init-reports-suite-file-count",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.init-reports-agent-count",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.init-install-report",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-install-layout",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-lib-context",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-docs",
+      "properties": {}
+    }
+  ]
+}

@@ -8,15 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.details-target-validation",
+      "kind": "contains",
+      "target": "domain.value.code-target",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.details-target-set-consistency",
+      "kind": "contains",
+      "source": "domain.group.spec-authoring",
       "properties": {}
     }
   ]

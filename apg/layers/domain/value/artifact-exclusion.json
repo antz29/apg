@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "artifact-exclusion",
+  "body": "The exclusion that keeps a toolchain-produced file out of the graph and out of any source-file identity.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.runtime-artifact",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "structural-container",
+  "body": "The container role of the bundled structural scanner, shipped in the base package with zero scan-time tools.",
+  "properties": {
+    "applies-to": "container"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.container.structural-scanner",
+      "properties": {}
+    }
+  ]
+}

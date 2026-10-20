@@ -1,0 +1,182 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "scan-module",
+  "body": "The component role of a unit inside the apg binary: scan, ingest, identity, session, spec, plan, review, and documentation modules.",
+  "properties": {
+    "applies-to": "component"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.component.cli-session-coordinator",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cli-session-docs",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cli-session-durability",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cli-session-lifecycle-guards",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cli-session-routing",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cli-session-warning-propagation",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.constraint-scope",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.details-target-validation",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.distributed-agent-install",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.feedback-mirror-store",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.feedback-projection",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.identity-layer",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.init-install-report",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.library-surface",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.navigator-scan-permission-coherence-test",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.node-removal-feedback-notice",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.note-layer-confinement",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.opencode-docs",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.opencode-install-layout",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.plan-coverage-check",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.project-start-seeder",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.push-tag-policy-surfaces",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.repo-agent-guide",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.review-command-surface",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.review-record-retention",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.scan-driver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.scan-freshness-guard",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.scan-time-preflight",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.spec-lint",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.splice-eligibility-guard",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.splice-equivalence-tests",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.test-layout",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.verify-feedback-stage",
+      "properties": {}
+    }
+  ]
+}

@@ -14,17 +14,27 @@
       "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.identity.package_prefix_map",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.rust-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.rust-crate-target",
       "properties": {}
     }
   ]

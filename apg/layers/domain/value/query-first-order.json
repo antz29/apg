@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "query-first-order",
+  "body": "The ordering rule that a code or structure question reaches the program graph before any file tool.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.graph-first-navigation",
+      "properties": {}
+    }
+  ]
+}

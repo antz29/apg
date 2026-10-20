@@ -8,17 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.agent-fs-operations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-fs-write-operations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.code-writer-worktree-only-writes",
+      "source": "domain.entity.agent-fs-operation",
       "properties": {}
     }
   ]

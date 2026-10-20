@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.splice-equivalence-tests",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.test-layout",
+      "kind": "contains",
+      "target": "domain.value.test-fixture",
       "properties": {}
     }
   ],
@@ -22,21 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.source-layout",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.graph-visible-tests",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.spec-only-splice-equivalence-tests",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.tier-separable-tests",
       "properties": {}
     }
   ]

@@ -6,8 +6,28 @@
   "properties": {},
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.splice-eligibility-guard",
+      "kind": "driven-by",
+      "target": "requirements.requirement.splice-db-equals-full-rebuild-for-all-tables",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fast-project-start",
       "properties": {}
     }
   ],
@@ -18,8 +38,23 @@
       "properties": {}
     },
     {
-      "kind": "drives",
-      "source": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
+      "kind": "realises",
+      "source": "solution.component.splice-eligibility-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-start-seeder",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.splice-equivalence-tests",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-freshness-guard",
       "properties": {}
     }
   ]

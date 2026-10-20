@@ -6,16 +6,20 @@
   "properties": {
     "feature": "agent-builder-roster-cleanup"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.distributed-agent-set",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
     }

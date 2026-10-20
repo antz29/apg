@@ -8,15 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.navigator-staged-flow-prompt",
+      "kind": "contains",
+      "target": "domain.value.stage-sequence",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.navigator-staged-flow",
+      "kind": "contains",
+      "source": "domain.group.agent-navigation",
       "properties": {}
     }
   ]

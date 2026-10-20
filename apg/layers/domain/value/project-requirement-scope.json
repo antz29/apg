@@ -8,12 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.plan-tooling",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-phases-project-scoping",
+      "source": "domain.entity.plan-phases-tool",
       "properties": {}
     }
   ]

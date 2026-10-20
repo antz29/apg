@@ -6,26 +6,15 @@
   "properties": {
     "feature": "agent-fs-tools"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.agent-fs-operation",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.agent-fs-operations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.permission-scope",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "driven-by",
+      "source": "domain.service.agent-fs-operations",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.code-writer-agent",
       "properties": {}
     }

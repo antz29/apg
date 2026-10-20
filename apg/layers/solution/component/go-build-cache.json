@@ -14,22 +14,22 @@
       "kind": "implemented-by",
       "target": "go.apg/gofrontend.applyGoBuildCache",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.scan-hygiene",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.go-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.runtime-artifact",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.scan-hygiene",
       "properties": {}
     }
   ]

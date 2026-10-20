@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "generated-agent-catalogue",
+  "body": "The repository's generated implementer roster: the root implementer, per-subsystem implementers, and tiered test implementers.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.generated-agent-set",
+      "properties": {}
+    }
+  ]
+}

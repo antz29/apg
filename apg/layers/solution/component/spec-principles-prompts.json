@@ -7,21 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/agents/codebase-navigator.md",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/agents/plan-review.md",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "opencode-suite/agents/plan-writer.md",
       "properties": {}
     },
@@ -34,22 +19,22 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/spec-writer.md",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.spec-authoring",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.spec-truth",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.spec-authoring",
       "properties": {}
     }
   ]

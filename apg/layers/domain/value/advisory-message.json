@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "advisory-message",
+  "body": "The non-blocking wording or outstanding-feedback advisory a durable mutation returns to its caller.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.write-time-advisory",
+      "properties": {}
+    }
+  ]
+}

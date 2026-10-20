@@ -6,16 +6,15 @@
   "properties": {
     "feature": "agent-discipline"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.reviewed-target-reference",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "driven-by",
+      "source": "domain.service.feedback-lifecycle",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.reviewer",
       "properties": {}
     }

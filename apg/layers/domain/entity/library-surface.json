@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.library-surface",
+      "kind": "contains",
+      "target": "domain.value.library-api",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.source-layout",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.testable-library-surface",
       "properties": {}
     }
   ]

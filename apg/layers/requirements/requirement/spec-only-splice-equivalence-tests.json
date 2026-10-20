@@ -6,17 +6,16 @@
   "properties": {
     "feature": "splice-equivalence"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.test-harness",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
       "properties": {}
     }
   ]

@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cpp-frontend-artifact",
+  "body": "The C++ frontend artifact's implementation: the tree-sitter-based scanner binary that parses C++ sources with the vendored grammar and streams their declarations.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "cpp.cpplib",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.frontend-dependencies",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.cpp-frontend",
+      "properties": {}
+    }
+  ]
+}

@@ -6,22 +6,16 @@
   "properties": {
     "feature": "spec-model-enforcement"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.group.spec-authoring",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.spec-lint",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
       "properties": {}
     }
   ]

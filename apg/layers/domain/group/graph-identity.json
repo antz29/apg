@@ -45,60 +45,9 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.cache-key",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.canonical-file-identity",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.module-identity",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.repo-relative-path",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.identity-layer",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.scan-driver",
+      "target": "domain.service.graph-identity",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.frontend-rooting-from-repo-base",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.java-default-package-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.python-namespace-package-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.repo-relative-file-identity",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

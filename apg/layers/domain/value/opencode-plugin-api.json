@@ -8,22 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.opencode-integration",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-docs-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-plugin-api-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-suite-install-v2",
+      "source": "domain.entity.opencode-plugin-definition",
       "properties": {}
     }
   ]

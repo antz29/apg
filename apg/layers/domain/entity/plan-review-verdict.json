@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.plan-review-prompt",
+      "kind": "contains",
+      "target": "domain.value.review-pass",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.plan-verification",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
     }
   ]

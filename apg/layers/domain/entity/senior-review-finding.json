@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.reviewer-senior-review-discipline",
+      "kind": "contains",
+      "target": "domain.value.review-severity",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-senior-review-discipline",
       "properties": {}
     }
   ]

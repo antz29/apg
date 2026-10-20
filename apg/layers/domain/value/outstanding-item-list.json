@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "outstanding-item-list",
+  "body": "The removed node's outstanding review items, each named with its identity and status in the removal warning.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.removal-feedback-notice",
+      "properties": {}
+    }
+  ]
+}

@@ -6,16 +6,20 @@
   "properties": {
     "feature": "durable-spec-integrity"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.details-edge",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }

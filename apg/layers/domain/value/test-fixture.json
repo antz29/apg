@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "test-fixture",
+  "body": "A shared scratch-repository builder, candidate-binary driver, or fixture helper reachable from every test tier.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.test-harness",
+      "properties": {}
+    }
+  ]
+}

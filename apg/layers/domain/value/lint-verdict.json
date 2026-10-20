@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "lint-verdict",
+  "body": "The deterministic lint verdict: a blocking error per structural violation and a non-blocking warning per forbidden wording.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.spec-lint",
+      "properties": {}
+    }
+  ]
+}

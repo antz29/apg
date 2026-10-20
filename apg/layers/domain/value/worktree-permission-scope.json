@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "worktree-permission-scope",
+  "body": "The effective permission scope of a code-writer agent, granting its worktree paths and denying the repository-root paths.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.worktree-write-boundary",
+      "properties": {}
+    }
+  ]
+}

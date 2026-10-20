@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "permission-rule",
+  "body": "One ordered entry of an agent's permission model: an action, a resource, and an effect, last match winning.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.opencode-permission-rule-set",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "toolchain-pin",
+  "body": "A build toolchain's pinned version, exact where the toolchain mechanism enforces it and a documented floor elsewhere.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.build-toolchain",
+      "properties": {}
+    }
+  ]
+}

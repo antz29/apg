@@ -6,16 +6,20 @@
   "properties": {
     "feature": "navigator-staged-flow"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.staged-delivery-process",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.navigator-agent",
       "properties": {}
     }

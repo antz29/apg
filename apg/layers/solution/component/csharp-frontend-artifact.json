@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "csharp-frontend-artifact",
+  "body": "The C# frontend artifact's implementation: the Roslyn-based scanner binary that parses C# sources with Microsoft.CodeAnalysis.CSharp and streams their declarations.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.frontend-dependencies",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.csharp-frontend",
+      "properties": {}
+    }
+  ]
+}

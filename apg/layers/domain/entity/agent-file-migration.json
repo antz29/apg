@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.distributed-agent-install",
+      "kind": "contains",
+      "target": "domain.value.duplicate-agent-warning",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-roster",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-upgrade-removal-guide",
       "properties": {}
     }
   ]

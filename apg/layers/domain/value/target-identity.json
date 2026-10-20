@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "target-identity",
+  "body": "The recorded identity of the thing a review item reviews, retained regardless of whether a node or code carries it.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.reviewed-target-reference",
+      "properties": {}
+    }
+  ]
+}

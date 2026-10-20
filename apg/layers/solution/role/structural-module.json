@@ -1,0 +1,32 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "structural-module",
+  "body": "The component role of a unit inside the bundled structural scanner: claiming, emitters, stream dispatch, and the crate itself.",
+  "properties": {
+    "applies-to": "component"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.component.structural-claiming",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.structural-format-emitters",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.structural-scanner-crate",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.structural-stream-dispatch",
+      "properties": {}
+    }
+  ]
+}

@@ -8,25 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.codebase-navigator-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.repo-agent-guide",
+      "kind": "contains",
+      "target": "domain.value.scaffold-boundary",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-builder-main-flow",
+      "kind": "contains",
+      "source": "domain.group.agent-roster",
       "properties": {}
     }
   ]

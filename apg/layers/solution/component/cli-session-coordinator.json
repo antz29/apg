@@ -19,22 +19,22 @@
       "kind": "implemented-by",
       "target": "rust.apg.session_cmd",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.cli-session-routing",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.cli-session-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.cli-session",
       "properties": {}
     }
   ]

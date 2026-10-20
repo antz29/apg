@@ -1,0 +1,71 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "frontend-dependencies",
+  "body": "The capability that states and checks every scanner's dependency contract: build-time dependencies, scan-time tools, the engine pin, and the preflight that names a missing tool.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-dependency-contract",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-build-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-scanner-in-base-package",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-engine-pin",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-dependency-docs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-scan-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-time-toolchain-preflight",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.build-toolchain-pins",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.frontend-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-time-preflight",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cpp-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.csharp-frontend-artifact",
+      "properties": {}
+    }
+  ]
+}

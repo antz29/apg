@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "tier-selection",
+  "body": "The libtest path filter that selects exactly one verification tier from a test run.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.test-tier",
+      "properties": {}
+    }
+  ]
+}

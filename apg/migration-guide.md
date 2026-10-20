@@ -2,9 +2,9 @@
 
 Written by `apg init`; read and worked by the **migration-agent**, which finds it here in the repo's `apg/` dir.
 
-The layout was at apg 0.22.2; this binary is apg 0.23.2. Run the **migration-agent** to work the tasks below, then re-run `apg scan`.
+The layout was at apg 0.22.2; this binary is apg 0.24.0. Run the **migration-agent** to work the tasks below, then re-run `apg scan`.
 
-## Migration: 0.22.2 → 0.23.2
+## Migration: 0.22.2 → 0.24.0
 
 ### v0.23.0
 

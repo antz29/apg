@@ -8,8 +8,13 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.identity-layer",
+      "kind": "contains",
+      "target": "domain.value.canonical-file-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.repo-relative-path",
       "properties": {}
     }
   ],
@@ -17,16 +22,6 @@
     {
       "kind": "contains",
       "source": "domain.group.graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.portable-graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.repo-relative-file-identity",
       "properties": {}
     }
   ]

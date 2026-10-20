@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.container.build-pipeline",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.scanner-cli",
+      "kind": "contains",
+      "target": "domain.value.dependency-floor",
       "properties": {}
     }
   ],
@@ -22,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.frontend-dependencies",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.frontend-build-deps",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-scanner-in-base-package",
       "properties": {}
     }
   ]

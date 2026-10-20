@@ -9,17 +9,22 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/plan-review.md",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.plan-verification",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.plan-review-verdict",
       "properties": {}
     }
   ]

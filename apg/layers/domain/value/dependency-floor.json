@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "dependency-floor",
+  "body": "A frontend's minimum build dependency version together with its resolution mechanism and network requirement.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.build-dependency",
+      "properties": {}
+    }
+  ]
+}

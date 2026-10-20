@@ -1,0 +1,42 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "agent-navigation",
+  "body": "The agent-navigation subdomain of the distributed agent prompts: graph-first navigation, per-call scan authorization, isolated subagent sessions, the per-task cadence, and the staged delivery flow.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.graph-first-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.scan-authorization",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.subagent-session-isolation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.task-execution-cadence",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.staged-delivery-process",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.agent-navigation",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

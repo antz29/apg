@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "release-approval",
+  "body": "The explicit human consent that every push and tag command of the optional release agent requires.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.release-agent-flow",
+      "properties": {}
+    }
+  ]
+}

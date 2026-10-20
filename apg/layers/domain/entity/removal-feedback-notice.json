@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.node-removal-feedback-notice",
+      "kind": "contains",
+      "target": "domain.value.outstanding-item-list",
       "properties": {}
     }
   ],
@@ -17,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-warning-visibility",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
       "properties": {}
     }
   ]

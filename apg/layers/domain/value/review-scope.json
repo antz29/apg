@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "review-scope",
+  "body": "The phase under review: its own code, the code it touches, its tests, and the plan and spec it implements.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.phase-review-scope",
+      "properties": {}
+    }
+  ]
+}

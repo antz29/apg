@@ -1,0 +1,26 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "plan-tooling",
+  "body": "The capability that reports a project's plan health against the durable spec, scoped to the requirements the project branch is responsible for.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-phases-project-scoping",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.plan-tooling",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    }
+  ]
+}

@@ -8,20 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.codebase-navigator-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.navigator-isolation-coherence-test",
+      "kind": "contains",
+      "target": "domain.value.isolated-dispatch",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.navigator-session-isolation",
+      "kind": "contains",
+      "source": "domain.group.agent-navigation",
       "properties": {}
     }
   ]

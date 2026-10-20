@@ -9,47 +9,37 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/codebase-navigator.md",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-fs-operations",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.implementer-discipline",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.agent-scaffold-flow",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.distributed-agent-set",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.main-integration",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.release-agent-flow",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.scan-authorization",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.subagent-session-isolation",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.task-execution-cadence",
       "properties": {}
     }
   ]

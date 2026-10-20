@@ -17,17 +17,17 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.state.path_is_ignored",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.ingest.blacklist.is_blacklisted",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.claim",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.structural-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.structural-file-graphing",
       "properties": {}
     }
   ],
@@ -35,11 +35,6 @@
     {
       "kind": "contains",
       "source": "solution.container.structural-scanner",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.structural-format",
       "properties": {}
     }
   ]

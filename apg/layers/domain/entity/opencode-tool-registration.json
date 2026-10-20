@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.opencode-lib-context",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.opencode-tool-plugin",
+      "kind": "contains",
+      "target": "domain.value.tool-definition",
       "properties": {}
     }
   ],
@@ -22,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.opencode-integration",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-plugin-api-v2",
       "properties": {}
     }
   ]

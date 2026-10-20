@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "shortcut-record",
+  "body": "The NOTE line reporting a shortcut and its known limit to the coordinator rather than an inline source comment.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.shortcut-note",
+      "properties": {}
+    }
+  ]
+}

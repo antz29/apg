@@ -8,20 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-prompt",
+      "kind": "contains",
+      "target": "domain.value.model-pin",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-builder-model-map",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "kind": "contains",
+      "source": "domain.group.agent-roster",
       "properties": {}
     }
   ]

@@ -19,20 +19,9 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.ponytail-level",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-implementer-ponytail",
+      "target": "domain.service.implementer-discipline",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.implementer-ponytail-discipline",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

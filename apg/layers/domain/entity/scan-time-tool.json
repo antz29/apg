@@ -8,33 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.scan-time-preflight",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.go-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.java-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.rust-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.ts-frontend",
+      "kind": "contains",
+      "target": "domain.value.path-tool",
       "properties": {}
     }
   ],
@@ -42,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.frontend-dependencies",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.frontend-scan-deps",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.scan-time-toolchain-preflight",
       "properties": {}
     }
   ]

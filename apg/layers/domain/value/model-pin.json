@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "model-pin",
+  "body": "One agent-to-model entry in the repository's agent model map, pinning a named agent to a model.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-model-map",
+      "properties": {}
+    }
+  ]
+}

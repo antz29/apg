@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "classification-rule",
+  "body": "One ordered code-type classification rule with its globs, names, and assigned type.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.classification-config",
+      "properties": {}
+    }
+  ]
+}

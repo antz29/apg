@@ -6,16 +6,20 @@
   "properties": {
     "feature": "agent-permissions"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.main-integration",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-fs-operations",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.navigator-agent",
       "properties": {}
     }

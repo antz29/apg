@@ -8,8 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.container.opencode-suite",
+      "kind": "contains",
+      "target": "domain.value.project-requirement-scope",
       "properties": {}
     }
   ],
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.plan-tooling",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-phases-project-scoping",
       "properties": {}
     }
   ]

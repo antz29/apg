@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "seeded-database",
+  "body": "The branch database a project start copies verbatim from main's current scan.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.project-start-seed",
+      "properties": {}
+    }
+  ]
+}

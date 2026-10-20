@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "affirmative-statement",
+  "body": "The present-tense, affirmative sentence a tier-1-3 node body states of what is.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.spec-truth",
+      "properties": {}
+    }
+  ]
+}

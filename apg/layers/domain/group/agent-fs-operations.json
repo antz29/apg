@@ -25,30 +25,9 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.permission-scope",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-install-registry",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-tool-suite",
+      "target": "domain.service.agent-fs-operations",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-fs-write-operations",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

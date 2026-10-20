@@ -19,27 +19,22 @@
       "kind": "implemented-by",
       "target": "rust.apg.specs.transient_feedback_path",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.feedback-lifecycle",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.feedback-item",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.reviewed-target-reference",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.review-integrity",
       "properties": {}
     }
   ]

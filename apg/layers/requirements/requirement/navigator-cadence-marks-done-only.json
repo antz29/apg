@@ -6,17 +6,16 @@
   "properties": {
     "feature": "spec-model-enforcement"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.task-execution-cadence",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.no-plan-note-grant",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
       "properties": {}
     }
   ]

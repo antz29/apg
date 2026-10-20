@@ -8,15 +8,15 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.reviewer-senior-review-discipline",
+      "kind": "contains",
+      "target": "domain.value.review-scope",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-reviews-the-phase-under-review",
+      "kind": "contains",
+      "source": "domain.group.review-integrity",
       "properties": {}
     }
   ]

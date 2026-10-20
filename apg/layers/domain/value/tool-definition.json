@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "tool-definition",
+  "body": "A registered suite tool's definition: its name, description, input schema, and execute function.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.opencode-tool-registration",
+      "properties": {}
+    }
+  ]
+}

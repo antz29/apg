@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "agent-count",
+  "body": "The number of distributed agents apg init installs, stated as a fixed seven-member roster.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.distributed-agent-set",
+      "properties": {}
+    }
+  ]
+}

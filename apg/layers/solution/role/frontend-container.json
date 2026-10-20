@@ -1,0 +1,47 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "frontend-container",
+  "body": "The container role of a per-language scanner frontend artifact spawned by the scan driver.",
+  "properties": {
+    "applies-to": "container"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.container.cpp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.go-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.java-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.py-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.rust-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.ts-frontend",
+      "properties": {}
+    }
+  ]
+}

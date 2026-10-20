@@ -1,0 +1,62 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "suite-module",
+  "body": "The component role of a unit inside the opencode suite: a tool plugin, a shared-plumbing adapter, an agent prompt, or a suite test.",
+  "properties": {
+    "applies-to": "component"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.component.agent-builder-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.agent-fs-tool-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.distributed-reviewer-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.opencode-lib-context",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.plan-review-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.spec-principles-prompts",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.tool-path-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.worktree-boundary-tests",
+      "properties": {}
+    }
+  ]
+}

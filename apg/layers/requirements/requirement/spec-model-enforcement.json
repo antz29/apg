@@ -21,21 +21,21 @@
       "kind": "contains",
       "target": "requirements.requirement.spec-body-budget",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.spec-authoring",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.opencode-integration",
-      "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "contains",
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }

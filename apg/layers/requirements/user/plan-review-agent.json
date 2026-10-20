@@ -6,7 +6,7 @@
   "properties": {},
   "out": [
     {
-      "kind": "contains",
+      "kind": "requires",
       "target": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
     }

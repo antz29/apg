@@ -24,17 +24,22 @@
       "kind": "implemented-by",
       "target": "rust.structfrontend.md.parse_headings",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.structural-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.structural-file-graphing",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.structural-scanner",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.structural-format",
       "properties": {}
     }
   ]

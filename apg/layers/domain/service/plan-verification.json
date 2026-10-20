@@ -1,0 +1,36 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "plan-verification",
+  "body": "The capability that checks a plan against the change-set's spec delta, through the derived-coverage gate and the plan-review verdict.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-review-deterministic-and-minimal",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.plan-review-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.plan-coverage-check",
+      "properties": {}
+    }
+  ]
+}

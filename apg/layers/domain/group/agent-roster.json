@@ -15,6 +15,21 @@
     },
     {
       "kind": "contains",
+      "target": "domain.entity.agent-main-write-surface",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.agent-model-map",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.agent-scaffold-flow",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.entity.distributed-agent-set",
       "properties": {}
     },
@@ -29,8 +44,13 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-roster-docs",
+      "kind": "contains",
+      "target": "domain.entity.repo-agent-guide-surface",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.agent-roster",
       "properties": {}
     }
   ],

@@ -1,0 +1,96 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "graph-identity",
+  "body": "The capability that names repository content portably: repo-relative file and module identities, the language roots, and the classification identity folded into the cache key.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-rooting-from-repo-base",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.java-default-package-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.python-namespace-package-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.repo-relative-file-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.portable-graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.classification-config-in-cache-key",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.rust-multitarget-crate-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fast-project-start",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.rust-crate-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ts-package-rooting",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.python-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.java-package-hierarchy",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.identity-layer",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.tool-path-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-driver",
+      "properties": {}
+    }
+  ]
+}

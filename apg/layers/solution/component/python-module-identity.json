@@ -14,17 +14,22 @@
       "kind": "implemented-by",
       "target": "rust.pyfrontend.scanner.Scanner.module_fqn_for",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.py-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.python-module",
       "properties": {}
     }
   ]

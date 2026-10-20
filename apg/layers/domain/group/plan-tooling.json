@@ -14,20 +14,9 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.project-requirement-scope",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.opencode-suite",
+      "target": "domain.service.plan-tooling",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.plan-phases-project-scoping",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

@@ -8,28 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-tool-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.worktree-boundary-tests",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.worktree-isolation-guide",
+      "kind": "contains",
+      "target": "domain.value.worktree-permission-scope",
       "properties": {}
     }
   ],
@@ -37,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-fs-operations",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.code-writer-worktree-only-writes",
       "properties": {}
     }
   ]

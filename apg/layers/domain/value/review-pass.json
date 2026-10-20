@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "review-pass",
+  "body": "One of the two plan-review passes: the deterministic coverage pass or the semantic per-node pass.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.plan-review-verdict",
+      "properties": {}
+    }
+  ]
+}

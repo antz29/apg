@@ -25,55 +25,14 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.opencode-plugin-api",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.opencode-docs",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.opencode-install-layout",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.scanner-cli",
+      "target": "domain.entity.install-report",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.entity.install-report",
+      "target": "domain.service.opencode-integration",
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-2x-support",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-docs-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.opencode-suite-install-v2",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.spec-model-enforcement",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

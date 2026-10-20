@@ -11,21 +11,21 @@
       "kind": "contains",
       "target": "requirements.requirement.reviewer-reviews-the-phase-under-review",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.senior-review-finding",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.review-severity",
-      "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "contains",
+      "kind": "requires",
+      "source": "requirements.user.reviewer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.feedback-lifecycle",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "source": "requirements.user.reviewer",
       "properties": {}
     }

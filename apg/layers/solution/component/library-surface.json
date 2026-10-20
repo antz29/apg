@@ -9,22 +9,22 @@
       "kind": "implemented-by",
       "target": "rust.apg",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.source-layout",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.library-surface",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.source-module",
       "properties": {}
     }
   ]

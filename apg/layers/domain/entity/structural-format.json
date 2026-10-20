@@ -8,23 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.structural-claiming",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.structural-format-emitters",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.structural-stream-dispatch",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.structural-scanner",
+      "kind": "contains",
+      "target": "domain.value.misc-residual-format",
       "properties": {}
     }
   ],
@@ -32,21 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.structural-file-graphing",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.md-lang-id-preserved",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-format-claiming",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.structural-format-structure",
       "properties": {}
     }
   ]

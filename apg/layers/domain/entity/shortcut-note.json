@@ -8,13 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-builder-implementer-ponytail",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.navigator-note-authoring",
+      "kind": "contains",
+      "target": "domain.value.shortcut-record",
       "properties": {}
     }
   ],
@@ -22,16 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.implementer-discipline",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.ponytail-shortcut-reported-not-commented",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.navigator-authors-shortcut-notes",
       "properties": {}
     }
   ]

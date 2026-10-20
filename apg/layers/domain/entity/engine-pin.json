@@ -8,38 +8,8 @@
   },
   "out": [
     {
-      "kind": "realised-by",
-      "target": "solution.container.cpp-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.csharp-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.go-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.java-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.py-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.rust-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.ts-frontend",
+      "kind": "contains",
+      "target": "domain.value.engine-version",
       "properties": {}
     }
   ],
@@ -47,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.frontend-dependencies",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.frontend-engine-pin",
       "properties": {}
     }
   ]

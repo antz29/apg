@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "main-write-path-set",
+  "body": "The set of main-checkout paths the agent-builder owns: the agent scaffold, the model map, and the repository agent guide.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-main-write-surface",
+      "properties": {}
+    }
+  ]
+}

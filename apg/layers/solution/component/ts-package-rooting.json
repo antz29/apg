@@ -14,17 +14,22 @@
       "kind": "implemented-by",
       "target": "ts.apg-tsfrontend.discovery.discoverPackages",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "solution.container.ts-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.typescript-package",
       "properties": {}
     }
   ]

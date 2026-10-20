@@ -8,27 +8,7 @@
   "in": [
     {
       "kind": "contains",
-      "source": "domain.group.graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.fast-project-start",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.portable-graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.repo-relative-file-identity",
+      "source": "domain.entity.source-file",
       "properties": {}
     }
   ]

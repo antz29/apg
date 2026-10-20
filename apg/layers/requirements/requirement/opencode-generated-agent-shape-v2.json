@@ -6,22 +6,21 @@
   "properties": {
     "feature": "opencode-2x-support"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.agent-model-map",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.opencode-permission-rule-set",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.opencode-2x-support",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
       "properties": {}
     }
   ]

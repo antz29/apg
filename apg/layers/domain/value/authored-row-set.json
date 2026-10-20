@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "authored-row-set",
+  "body": "The durable layer rows plus the transient plan rows a scan assembles from the authored tree.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.durable-layer-node-set",
+      "properties": {}
+    }
+  ]
+}

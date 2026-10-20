@@ -6,27 +6,16 @@
   "properties": {
     "feature": "opencode-2x-support"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.entity.opencode-plugin-definition",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.opencode-tool-registration",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.opencode-plugin-api",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "requirements.requirement.opencode-2x-support",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
       "properties": {}
     }
   ]

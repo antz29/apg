@@ -1,0 +1,47 @@
+{
+  "layer": "solution",
+  "type": "role",
+  "name": "frontend-module",
+  "body": "The component role of a language-specific identity or artifact unit inside a scanner frontend container.",
+  "properties": {
+    "applies-to": "component"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "is-role",
+      "source": "solution.component.cpp-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.csharp-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.go-build-cache",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.java-package-hierarchy",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.python-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.rust-crate-identity",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ts-package-rooting",
+      "properties": {}
+    }
+  ]
+}

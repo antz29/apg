@@ -61,11 +61,5 @@
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "realised-by",
-      "source": "domain.group.frontend-dependencies",
-      "properties": {}
-    }
-  ]
+  "in": []
 }
