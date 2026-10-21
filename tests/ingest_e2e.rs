@@ -1369,6 +1369,207 @@ mod e2e {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// Phase-02 task-8: the win-B assembly reports the spool AND every
+    /// `splice_cached` admission through the same `Progress` emitter — exactly
+    /// one symbol (and one summary tally) per node that enters the graph, never
+    /// a second one. The cached go unit's `Callee`/`Model` replace the spool's
+    /// `UnresolvedTarget` placeholders (one symbol each, for the real node), its
+    /// `Shared` is already re-emitted by the spool (the kept incumbent emits
+    /// nothing), its File lands in pass 1, the skipped language's own module in
+    /// pass 2, and its remaining scaffolding modules plus the `Language` root in
+    /// pass 2b.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn reuse_splice_reports_one_progress_symbol_per_admission() {
+        use apg::cache::{CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey};
+        use apg::graph::{Graph, Location, Node, NodeKind};
+        use apg::progress::Progress;
+        use std::path::PathBuf;
+
+        let dir = std::env::temp_dir().join(format!("apg-splice-progress-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let located = |kind: NodeKind, path: &str| Node {
+            kind,
+            location: Some(Location {
+                path: PathBuf::from(path),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            }),
+            code_type: "src".into(),
+            ..Node::default()
+        };
+
+        // The reusable go unit: its File, three declarations, and its module.
+        let mut cached_go = Graph::default();
+        cached_go.nodes.insert("go.scratch".into(), module());
+        cached_go
+            .nodes
+            .insert("b.go".into(), located(NodeKind::File, "b.go"));
+        for (fqn, kind) in [
+            ("go.scratch.Callee", NodeKind::Function),
+            ("go.scratch.Model", NodeKind::Struct),
+            ("go.scratch.Shared", NodeKind::Struct),
+        ] {
+            cached_go.nodes.insert(fqn.into(), located(kind, "b.go"));
+        }
+        cached_go
+            .contains
+            .insert(("go.scratch".into(), "b.go".into()));
+        for child in ["go.scratch.Callee", "go.scratch.Model", "go.scratch.Shared"] {
+            cached_go.contains.insert(("b.go".into(), child.into()));
+        }
+        store
+            .put(
+                &FileFragment::from_graph(&cached_go, "b.go", "b.go", "oid-b", "go"),
+                "/fresh",
+                &cache_key,
+            )
+            .unwrap();
+
+        // The skipped language's cached unit + global scaffolding.
+        let skipped = "csharp/T.cs";
+        let mut cached_csharp = Graph::default();
+        cached_csharp.nodes.insert(
+            "csharp".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        for m in [
+            "Apg",
+            "Apg.CsharpFrontend",
+            "Apg.CsharpFrontend.Tests",
+            "Apg.CsharpFrontend.Tests.Inline",
+        ] {
+            cached_csharp.nodes.insert(m.into(), module());
+        }
+        cached_csharp
+            .nodes
+            .insert(skipped.into(), located(NodeKind::File, skipped));
+        cached_csharp.nodes.insert(
+            "Apg.CsharpFrontend.Tests.Program".into(),
+            located(NodeKind::Struct, skipped),
+        );
+        for (from, to) in [
+            ("Apg", "Apg.CsharpFrontend"),
+            ("Apg.CsharpFrontend", "Apg.CsharpFrontend.Tests"),
+            (
+                "Apg.CsharpFrontend.Tests",
+                "Apg.CsharpFrontend.Tests.Inline",
+            ),
+            ("Apg.CsharpFrontend.Tests", skipped),
+            (skipped, "Apg.CsharpFrontend.Tests.Program"),
+            ("csharp", "Apg"),
+        ] {
+            cached_csharp.contains.insert((from.into(), to.into()));
+        }
+        store
+            .put(
+                &FileFragment::from_graph(&cached_csharp, skipped, skipped, "oid-t", "csharp"),
+                "/x",
+                &cache_key,
+            )
+            .unwrap();
+        store
+            .put_scaffolding_all(
+                &ModuleScaffolding::extract(&cached_csharp, std::path::Path::new("/x")),
+                &cache_key,
+            )
+            .unwrap();
+
+        // The freshly re-emitted spool: `Shared` is declared again (the kept
+        // incumbent) and the two cached real FQNs appear as unresolved
+        // placeholders (replaced in pass 1).
+        let spool = vec![
+            Record::Module {
+                fqn: "scratch".to_string(),
+            },
+            Record::Function {
+                id: "s1".to_string(),
+                parent: "scratch".to_string(),
+                name: "Caller".to_string(),
+                params: vec![],
+                file: "a.go".to_string(),
+                path: "a.go".to_string(),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            },
+            file_rec("a.go", "scratch", 10),
+            srec("s2", "scratch", "Shared", "a.go"),
+            Record::Unresolved {
+                fqn: "go.scratch.Callee".to_string(),
+                category: Some("unknown".to_string()),
+            },
+            Record::Unresolved {
+                fqn: "go.scratch.Model".to_string(),
+                category: Some("external".to_string()),
+            },
+        ];
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![
+                ("b.go".to_string(), "go".to_string(), "oid-b".to_string()),
+                (
+                    "csharp/T.cs".to_string(),
+                    "csharp".to_string(),
+                    "oid-t".to_string(),
+                ),
+            ],
+            reader_root: "/fresh".to_string(),
+            skipped_langs: ["csharp".to_string()].into_iter().collect(),
+        };
+
+        let mut out: Vec<u8> = Vec::new();
+        {
+            let mut progress = Progress::new(true, &mut out);
+            let (_graph, _) = ingest_with_reuse(
+                spool,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                    base: None,
+                },
+                Some(&reuse),
+                Some(&mut progress),
+            );
+            progress.summary();
+        }
+
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            concat!(
+                // spool: File a.go, Struct Shared, Function Caller, Module, Language
+                "📄🧱⚙️📦🌍",
+                // pass 1 (go unit): File b.go, Callee, Model — Shared kept silent
+                "📄⚙️🧱",
+                // pass 1 (skipped unit): Struct Program, File csharp/T.cs
+                "🧱📄",
+                // pass 2: the skipped file's own module
+                "📦",
+                // pass 2b: the other scaffolding modules, then the Language root
+                "📦📦📦",
+                "🌍",
+                "\n🌍 Language: 2, 📦 Module: 5, 📄 File: 3, 🧱 Struct: 3, ⚙️ Function: 2\n",
+            ),
+            "one symbol per admitted node, then one summary tally per kind"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase-03 task-9 — the splice path END-TO-END: a scratch /tmp git repo
     /// driven by the CANDIDATE binary only
     /// (global.constraint.no-real-project-test). (1) The DETERMINISTIC
