@@ -107,4 +107,23 @@ impl<'a> Progress<'a> {
         };
         self.current = Some(index);
     }
+
+    /// Emit one admitted node: its kind's symbol to the writer, one increment
+    /// of that kind's tally, and one increment of the current language's tally
+    /// (none while [`Progress::language`] has selected no language). Kinds
+    /// outside the five code kinds stream nothing. A no-op while the gate is
+    /// off.
+    pub fn node(&mut self, kind: NodeKind) {
+        if !self.gate {
+            return;
+        }
+        let Some(index) = kind_index(kind) else {
+            return;
+        };
+        let _ = write!(self.out, "{}", KINDS[index].0);
+        self.counts[index] += 1;
+        if let Some(current) = self.current {
+            self.languages[current].1 += 1;
+        }
+    }
 }
