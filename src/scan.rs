@@ -706,6 +706,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         pipeline_input.as_ref(),
         Some(&identity_base),
         &mut log,
+        // Phase-03 task-1 constructs the emitter here and replaces this `None`.
+        None,
     );
     timing.add(
         timing::Phase::IngestAssembly,

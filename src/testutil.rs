@@ -1524,7 +1524,7 @@ pub fn scan_checkout_locked(project_dir: &Path) -> anyhow::Result<()> {
     std::env::set_current_dir(&trans_dir)?;
     let result = {
         let mut log = crate::Log::new();
-        crate::run_pipeline(records, &[], &[], "go", None, None, None, &mut log);
+        crate::run_pipeline(records, &[], &[], "go", None, None, None, &mut log, None);
         Ok(())
     };
     std::env::set_current_dir(old)?;

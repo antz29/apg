@@ -12,6 +12,7 @@ use lbug::{Connection, Database};
 
 use crate::cleanup::{CleanupOptions, cleanup};
 use crate::logging::Log;
+use crate::progress::Progress;
 use crate::scan::temp_dir;
 use crate::{cache, classify, graph, incremental, ingest, load, schema, session, splice, timing};
 
@@ -22,6 +23,10 @@ use crate::{cache, classify, graph, incremental, ingest, load, schema, session, 
 /// (phase-02 task-7/task-8): the cached fact units to splice into the assembly
 /// and the store to record the completed scan back into. `None` on the full
 /// path (and for the hermetic test harness), where assembly is spool-only.
+///
+/// `progress` streams one symbol per admitted code node through the whole
+/// assembly (the spool and, on the win-B path, the cached-fact splice); the
+/// caller supplies the emitter, or `None` for a silent assembly.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_pipeline(
     records: impl IntoIterator<Item = schema::Record>,
@@ -32,6 +37,7 @@ pub(crate) fn run_pipeline(
     input: Option<&incremental::PipelineInput>,
     base: Option<&Path>,
     log: &mut Log,
+    progress: Option<&mut Progress<'_>>,
 ) -> timing::PipelineTimings {
     // Phase-04 task-4: this function owns two reported phases. Ingest-assembly
     // covers the ingestor passes, cleanup, and the fact-store recording from
@@ -63,7 +69,7 @@ pub(crate) fn run_pipeline(
                     base,
                 },
                 Some(r),
-                None,
+                progress,
             )
         } else {
             ingest::ingest(
@@ -74,7 +80,7 @@ pub(crate) fn run_pipeline(
                     config,
                     base,
                 },
-                None,
+                progress,
             )
         }
     };
