@@ -142,6 +142,9 @@ SCAN OPTIONS:
                                repeatable)
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)
+  --no-progress               Progress is on by default when stderr is a
+                              terminal; this flag turns off the start line,
+                              the per-node symbols and the summary
   <blacklist...>              FQN prefixes to exclude from the graph"
         .to_string()
 }
