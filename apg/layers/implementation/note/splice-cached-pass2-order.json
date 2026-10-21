@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "splice-cached-pass2-order",
+  "body": "splice_cached's pass-2 cached module records iterate a HashMap, so per-language counts are order-independent but the symbol emission order on the pass-2 path is nondeterministic. Upgrade to a BTreeMap when deterministic stream order is ever required.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.splice_cached",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

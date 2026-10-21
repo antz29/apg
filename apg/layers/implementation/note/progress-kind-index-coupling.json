@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "progress-kind-index-coupling",
+  "body": "kind_index hard-codes the index positions matching the KINDS table's order, and symbol_for and Progress::node read that same table by position, so adding or reordering a code kind requires updating the table and kind_index together. Upgrade when KINDS gains a sixth kind: derive the kind-to-index mapping from the table itself rather than a parallel match.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.progress.kind_index",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "progress-e2e-pty-darwin-only",
+  "body": "pty_output is the BSD/darwin `script -q /dev/null <cmd> <args>` form only; util-linux script needs `script -q -c '<cmd>' /dev/null`, so the four pty-based progress e2e tests would fail on Linux. Upgrade when the e2e tier must run on Linux CI: add a cfg(target_os = \"linux\") -c branch.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.progress_e2e.pty_output",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
