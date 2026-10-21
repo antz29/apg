@@ -149,3 +149,6 @@ impl<'a> Progress<'a> {
         let _ = writeln!(self.out);
     }
 }
+
+#[cfg(test)]
+mod tests;
