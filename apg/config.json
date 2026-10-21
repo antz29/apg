@@ -1,10 +1,5 @@
 {
   "default": "src",
-  "structural": {
-    "exclude": [
-      "apg/**"
-    ]
-  },
   "types": [
     {
       "globs": [
