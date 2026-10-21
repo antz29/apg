@@ -49,9 +49,6 @@ pub const START_LINE: &str = "Scan running...";
 ///
 /// The gate is the resolved terminal/flag decision, so every method is a no-op
 /// while it is false and the caller never branches on it.
-// Fields land with the struct; the methods that read them arrive in the
-// following plan tasks, so the dead-code allowance is scoped to this definition.
-#[allow(dead_code)]
 pub struct Progress<'a> {
     /// Whether the stream is enabled (stderr is a terminal and the run carries
     /// no `--no-progress` flag).
@@ -125,5 +122,30 @@ impl<'a> Progress<'a> {
         if let Some(current) = self.current {
             self.languages[current].1 += 1;
         }
+    }
+
+    /// Print the closing summary on its own line: the [`KINDS`] legend with one
+    /// node count per kind, then one count per scanned language (omitted when
+    /// [`Progress::language`] recorded none). A leading newline ends the
+    /// trailing run of node symbols, which [`Progress::node`] leaves
+    /// unterminated. A no-op while the gate is off.
+    pub fn summary(&mut self) {
+        if !self.gate {
+            return;
+        }
+        let _ = writeln!(self.out);
+        for (index, (symbol, label)) in KINDS.iter().enumerate() {
+            let separator = if index == 0 { "" } else { ", " };
+            let _ = write!(
+                self.out,
+                "{separator}{symbol} {label}: {}",
+                self.counts[index]
+            );
+        }
+        for (index, (language, count)) in self.languages.iter().enumerate() {
+            let separator = if index == 0 { " | " } else { ", " };
+            let _ = write!(self.out, "{separator}{language}: {count}");
+        }
+        let _ = writeln!(self.out);
     }
 }
