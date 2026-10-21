@@ -44,3 +44,16 @@ pub struct Progress<'a> {
     /// language in scan order.
     languages: Vec<(String, usize)>,
 }
+
+impl<'a> Progress<'a> {
+    /// One run's progress stream: the resolved gate and the writer every line
+    /// reaches (stderr in a real scan, an in-memory buffer under test).
+    pub fn new(gate: bool, out: &'a mut dyn Write) -> Self {
+        Self {
+            gate,
+            out,
+            counts: [0; KINDS.len()],
+            languages: Vec::new(),
+        }
+    }
+}
