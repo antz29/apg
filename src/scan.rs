@@ -6,7 +6,7 @@
 //! loop, pre-ingest universe derivation, and pipeline dispatch.
 
 use std::collections::BTreeSet;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, IsTerminal};
 use std::path::PathBuf;
 
 use crate::frontends::{
@@ -16,7 +16,7 @@ use crate::frontends::{
 use crate::logging::{Log, emit_timing};
 use crate::warm::{reuse_universe, warm_prepared, warm_universe};
 use crate::{
-    cache, classify, find_or_create_apg_root, git, graph, incremental, ingest, layers,
+    cache, classify, find_or_create_apg_root, git, graph, incremental, ingest, layers, progress,
     run_pipeline, schema, session, specs, timing, version_gate,
 };
 
@@ -81,6 +81,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
     let mut no_build_scripts = false;
+    let mut no_progress = false;
     let mut positional: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -110,6 +111,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             }
             "--no-build-scripts" => {
                 no_build_scripts = true;
+            }
+            "--no-progress" => {
+                no_progress = true;
             }
             _ => positional.push(args[i].clone()),
         }
@@ -697,6 +701,15 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     };
 
     timing.add(timing::Phase::IngestAssembly, assembly_start.elapsed());
+    // Phase-03 task-1: the live progress stream belongs to the tree-scanning
+    // path, so the emitter exists only past the Win-A fast-path return above —
+    // a fresh tree admits no node and prints no start line or summary. It
+    // writes to stderr alone (never `apg-frontend.log`), gated on stderr being
+    // a terminal and the run carrying no `--no-progress`.
+    let gate = std::io::stderr().is_terminal() && !no_progress;
+    let mut stderr = std::io::stderr();
+    let mut progress = progress::Progress::new(gate, &mut stderr);
+    progress.start();
     let pipeline_timings = run_pipeline(
         records,
         &blacklist,
@@ -706,9 +719,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         pipeline_input.as_ref(),
         Some(&identity_base),
         &mut log,
-        // Phase-03 task-1 constructs the emitter here and replaces this `None`.
-        None,
+        Some(&mut progress),
     );
+    progress.summary();
     timing.add(
         timing::Phase::IngestAssembly,
         pipeline_timings.ingest_assembly,
