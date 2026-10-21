@@ -555,4 +555,146 @@ mod int {
             "docs"
         );
     }
+
+    /// phase-02 task-7: [`insert_node`] streams exactly one progress symbol and
+    /// one summary tally per admitted code node, and nothing for a non-code
+    /// kind or a `None` emitter. Pure in-memory: the emitter writes to a
+    /// `Vec<u8>`, and `insert_node` is wired directly (the spooling
+    /// `ingest`/`ingest_records` entry points would make this e2e).
+    #[test]
+    fn insert_node_streams_one_symbol_and_tally_per_code_kind() {
+        let mut graph = Graph::default();
+        let mut out: Vec<u8> = Vec::new();
+        let code_kinds = [
+            NodeKind::Language,
+            NodeKind::Module,
+            NodeKind::File,
+            NodeKind::Struct,
+            NodeKind::Function,
+        ];
+        {
+            let mut progress = Progress::new(true, &mut out);
+            progress.language("rust");
+            for (index, kind) in code_kinds.into_iter().enumerate() {
+                insert_node(
+                    &mut graph,
+                    format!("n{index}"),
+                    Node {
+                        kind,
+                        ..Node::default()
+                    },
+                    Some(&mut progress),
+                );
+            }
+            // A non-code kind is admitted to the graph but streams nothing.
+            insert_node(
+                &mut graph,
+                "note".to_string(),
+                Node {
+                    kind: NodeKind::Note,
+                    ..Node::default()
+                },
+                Some(&mut progress),
+            );
+            // A `None` emitter is silent.
+            insert_node(
+                &mut graph,
+                "n5".to_string(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+                None,
+            );
+            progress.summary();
+        }
+        let text = String::from_utf8(out).expect("progress is UTF-8");
+        let (symbols, summary) = text
+            .split_once('\n')
+            .expect("the summary starts on its own line");
+        let expected: String = code_kinds
+            .iter()
+            .map(|kind| crate::progress::symbol_for(*kind).expect("a code kind has a symbol"))
+            .collect();
+        assert_eq!(symbols, expected);
+        for (symbol, label) in crate::progress::KINDS {
+            assert!(
+                summary.contains(&format!("{symbol} {label}: 1")),
+                "{label} tally missing from `{summary}`"
+            );
+        }
+        assert!(
+            summary.contains("rust: 5"),
+            "per-language tally missing from `{summary}`"
+        );
+        assert!(
+            graph.nodes.contains_key("note") && graph.nodes.contains_key("n5"),
+            "a silent admission still enters the graph"
+        );
+    }
+
+    /// phase-02 task-7: a `planned` record admitted at a fresh FQN streams
+    /// exactly once (its kind); a scanner-replace over that in-graph
+    /// placeholder streams exactly once, for the real node; a planned record
+    /// colliding with real code is superseded and streams nothing.
+    #[test]
+    fn planned_admission_and_scanner_replace_stream_once() {
+        let mut graph = Graph::default();
+        let mut out: Vec<u8> = Vec::new();
+        let planned = || Node {
+            kind: NodeKind::Struct,
+            status: Some("planned".to_string()),
+            ..Node::default()
+        };
+        {
+            let mut progress = Progress::new(true, &mut out);
+            // A planned placeholder at a fresh FQN is admitted (and streams).
+            insert_node(
+                &mut graph,
+                "rust.apg.Thing".to_string(),
+                planned(),
+                Some(&mut progress),
+            );
+            assert_eq!(
+                graph.nodes["rust.apg.Thing"].status.as_deref(),
+                Some("planned")
+            );
+            // The scanner's real node at that FQN replaces the placeholder and
+            // streams once, for the real node.
+            insert_node(
+                &mut graph,
+                "rust.apg.Thing".to_string(),
+                Node {
+                    kind: NodeKind::Struct,
+                    ..Node::default()
+                },
+                Some(&mut progress),
+            );
+            assert_eq!(graph.nodes["rust.apg.Thing"].status, None);
+            // A planned record arriving at an FQN real code already holds is
+            // superseded: admitted nowhere, streamed nowhere.
+            insert_node(
+                &mut graph,
+                "rust.apg.Thing".to_string(),
+                planned(),
+                Some(&mut progress),
+            );
+            progress.summary();
+        }
+        let text = String::from_utf8(out).expect("progress is UTF-8");
+        let symbol = crate::progress::symbol_for(NodeKind::Struct).expect("Struct has a symbol");
+        let (symbols, summary) = text
+            .split_once('\n')
+            .expect("the summary starts on its own line");
+        assert_eq!(symbols, format!("{symbol}{symbol}"));
+        assert!(
+            summary.contains(&format!("{symbol} Struct: 2")),
+            "Struct tally missing from `{summary}`"
+        );
+        assert_eq!(
+            graph.nodes.len(),
+            1,
+            "the superseded placeholder adds no node"
+        );
+    }
 }
