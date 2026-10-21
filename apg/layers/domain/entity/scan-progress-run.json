@@ -1,0 +1,28 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "scan-progress-run",
+  "body": "One scan run's live progress: the languages being scanned, the nodes that entered the graph, and the per-kind count the closing summary reports.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.progress-symbol",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "writes",
+      "source": "domain.service.scan-progress-reporting",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-progress",
+      "properties": {}
+    }
+  ]
+}

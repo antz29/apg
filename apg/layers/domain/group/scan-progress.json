@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "scan-progress",
+  "body": "The progress-reporting concern of a scan run: the run's live node and language tally, the per-kind symbol, and the capability that renders both to the terminal.",
+  "properties": {
+    "attribute": "supporting",
+    "root": "scan-progress-run"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.scan-progress-reporting",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.scan-progress-run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

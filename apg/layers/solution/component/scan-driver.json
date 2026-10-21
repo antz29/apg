@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "rust.apg.cache",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.cache.fragment.rebase",
       "properties": {}
     },
@@ -22,12 +27,22 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.delta",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.delta.full_scan_reason",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "rust.apg.frontends.should_spawn_language",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.main",
       "properties": {}
     },
     {
@@ -46,16 +61,6 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "rust.apg.cache",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.delta",
-      "properties": {}
-    },
-    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}
@@ -66,8 +71,8 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "rust.apg.main",
+      "kind": "realises",
+      "target": "domain.service.scan-progress-reporting",
       "properties": {}
     }
   ],

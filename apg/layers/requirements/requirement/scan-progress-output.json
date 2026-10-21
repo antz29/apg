@@ -1,0 +1,53 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-progress-output",
+  "body": "apg scan reports live graph progress on stderr: a start line, one kind symbol per node as it enters the graph, and a closing summary that carries the symbol legend.",
+  "properties": {
+    "feature": "scan-progress"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-progress-start-line",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-progress-summary-legend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-progress-tty-default-on",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-progress-disable-flag",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-progress-node-count-completeness",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-progress-node-symbols",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.frontend-installer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-progress-reporting",
+      "properties": {}
+    }
+  ]
+}

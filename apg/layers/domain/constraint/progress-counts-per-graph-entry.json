@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "progress-counts-per-graph-entry",
+  "body": "A node's entry into the assembled graph yields exactly one progress symbol and one increment of its kind's count, whatever assembly path admitted the node.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

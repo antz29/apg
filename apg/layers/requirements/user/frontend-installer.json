@@ -9,6 +9,11 @@
       "kind": "requires",
       "target": "requirements.requirement.scan-time-toolchain-preflight",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-progress-output",
+      "properties": {}
     }
   ],
   "in": []

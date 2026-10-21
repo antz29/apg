@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-progress-summary-legend",
+  "body": "apg scan closes with one summary line reporting the languages scanned and each kind's node count, with the symbol-to-kind mapping inline as the legend.",
+  "properties": {
+    "feature": "scan-progress"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.scan-progress-output",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-progress-reporting",
+      "properties": {}
+    }
+  ]
+}

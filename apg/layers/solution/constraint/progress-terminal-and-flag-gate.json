@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "progress-terminal-and-flag-gate",
+  "body": "Progress output is emitted only when stderr is a terminal and the run carries no --no-progress flag, so both conditions gate the whole progress stream.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

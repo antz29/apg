@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-progress-node-symbols",
+  "body": "apg scan streams one symbol per node as it enters the graph, keyed by kind: 🌍 Language, 📦 Module, 📄 File, 🧱 Struct, and ⚙️ Function.",
+  "properties": {
+    "feature": "scan-progress"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.scan-progress-output",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-progress-reporting",
+      "properties": {}
+    }
+  ]
+}

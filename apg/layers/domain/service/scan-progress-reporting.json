@@ -1,0 +1,61 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "scan-progress-reporting",
+  "body": "The capability that reports a scan's graph progress to the terminal: the start line, one symbol per node as it enters the graph, and a closing summary that doubles as the symbol legend.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-node-symbols",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-summary-legend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-start-line",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-tty-default-on",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-node-count-completeness",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-disable-flag",
+      "properties": {}
+    },
+    {
+      "kind": "writes",
+      "target": "domain.entity.scan-progress-run",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-progress-output",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-progress",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-driver",
+      "properties": {}
+    }
+  ]
+}

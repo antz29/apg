@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "progress-symbol",
+  "body": "The single symbol a node kind renders in the progress stream: 🌍 Language, 📦 Module, 📄 File, 🧱 Struct, or ⚙️ Function.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.scan-progress-run",
+      "properties": {}
+    }
+  ]
+}

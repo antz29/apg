@@ -44,6 +44,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.details-target-validation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.distributed-agent-install",
       "properties": {}
     },
@@ -64,6 +69,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.init-install-report",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.library-surface",
       "properties": {}
     },
@@ -75,6 +85,11 @@
     {
       "kind": "contains",
       "target": "solution.component.node-removal-feedback-notice",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.note-layer-confinement",
       "properties": {}
     },
     {
@@ -160,21 +175,6 @@
     {
       "kind": "contains",
       "target": "solution.component.verify-feedback-stage",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.init-install-report",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.details-target-validation",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.note-layer-confinement",
       "properties": {}
     },
     {

@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "progress-stderr-only",
+  "body": "Scan progress output — the start line, every per-node symbol, and the closing summary — reaches stderr alone and is never written to apg-frontend.log.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
