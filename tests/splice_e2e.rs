@@ -1853,6 +1853,7 @@ mod e2e {
                 base: None,
             },
             Some(&reuse),
+            None,
         );
 
         // The TRUE new tree, loaded whole — the full-rebuild reference.
@@ -2043,7 +2044,7 @@ mod e2e {
         let mut fixed: Vec<Record> = vec![scan_meta()];
         fixed.extend(scaffolding());
         fixed.extend(target_facts());
-        let (assembled, _) = ingest_with_reuse(fixed, &opts, Some(&reuse));
+        let (assembled, _) = ingest_with_reuse(fixed, &opts, Some(&reuse), None);
 
         let assembled_path = dir.join("assembled.jsonl");
         let reference_path = dir.join("reference.jsonl");
@@ -2090,7 +2091,7 @@ mod e2e {
             properties: NodeProperties::default(),
         });
         pre_fix.extend(target_facts());
-        let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse));
+        let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse), None);
         let before_path = dir.join("before-fix.jsonl");
         load::write_graph_jsonl(&before_fix, &before_path).unwrap();
         let before_jsonl = std::fs::read_to_string(&before_path).unwrap();

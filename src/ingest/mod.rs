@@ -179,14 +179,19 @@ pub fn ingest(
 /// declarations — and the splicer derives its DML from exactly that. The
 /// previous `graph.jsonl` is never re-read and no second assembly runs; the
 /// full-record path ([`ingest`]) is unchanged.
+///
+/// `progress` streams one symbol per admitted code node from BOTH the spool
+/// ([`ingest_records`]) and the cached-fact splice ([`splice_cached`]), so the
+/// whole win-B assembly reports through one emitter.
 pub fn ingest_with_reuse(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
     reuse: Option<&Reuse>,
+    mut progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
-    let (mut graph, report) = ingest_records(records, opts, true, None);
+    let (mut graph, report) = ingest_records(records, opts, true, progress.as_deref_mut());
     if let Some(reuse) = reuse {
-        splice_cached(&mut graph, reuse, None);
+        splice_cached(&mut graph, reuse, progress);
         // One finalize after the cached facts land, so an edge to a cached
         // symbol is not pruned before its endpoint arrives.
         finalize_graph(&mut graph);

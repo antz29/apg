@@ -63,6 +63,7 @@ pub(crate) fn run_pipeline(
                     base,
                 },
                 Some(r),
+                None,
             )
         } else {
             ingest::ingest(

@@ -928,6 +928,7 @@ mod e2e {
                 base: None,
             },
             Some(&reuse),
+            None,
         );
         // All nodes landed and the cross-file call survived (it would be lost if
         // edges were merged per-unit before every node existed).
@@ -1085,6 +1086,7 @@ mod e2e {
                 base: None,
             },
             Some(&reuse),
+            None,
         );
 
         // The same tree resolved from scratch: the cached targets are declared
@@ -1305,6 +1307,7 @@ mod e2e {
                 base: None,
             },
             Some(&reuse),
+            None,
         );
         for m in [
             "Apg",
@@ -1357,6 +1360,7 @@ mod e2e {
                 base: None,
             },
             Some(&not_skipped),
+            None,
         );
         assert!(
             !bare.nodes.contains_key("Apg"),
