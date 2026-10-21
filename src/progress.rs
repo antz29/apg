@@ -77,4 +77,12 @@ impl<'a> Progress<'a> {
             languages: Vec::new(),
         }
     }
+
+    /// Print [`START_LINE`] before the first node enters the graph. A no-op
+    /// while the gate is off.
+    pub fn start(&mut self) {
+        if self.gate {
+            let _ = writeln!(self.out, "{START_LINE}");
+        }
+    }
 }
