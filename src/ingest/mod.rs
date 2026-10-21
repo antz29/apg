@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 use crate::classify::{ApgConfig, classify_code_type};
 use crate::graph::{Graph, Location, Node, NodeKind};
+use crate::progress::Progress;
 use crate::schema::{Record, SCAN_HEAD};
 
 pub mod blacklist;
@@ -116,7 +117,10 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
     }
 }
 
-fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
+/// Admits `node` at `fqn`, streaming one progress symbol when a code kind is
+/// admitted ([`Progress::node`] is silent for every other kind). The early
+/// returns below admit nothing and so emit nothing.
+fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut Progress<'_>>) {
     // A real declaration replaces an unresolved-target placeholder (which lives
     // only in `graph.nodes`, not in `seen`), never the other way around.
     match graph.nodes.get(&fqn) {
@@ -139,7 +143,11 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
         Some(_) if node.status.as_deref() == Some("planned") => return,
         Some(_) => panic!("duplicate project node FQN: `{fqn}`"),
     }
+    let kind = node.kind;
     graph.nodes.insert(fqn, node);
+    if let Some(progress) = progress {
+        progress.node(kind);
+    }
 }
 
 pub fn ingest(
@@ -244,6 +252,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
                     kind: NodeKind::Module,
                     ..Node::default()
                 },
+                None,
             );
         }
     }
@@ -515,6 +524,7 @@ fn ingest_records(
                             code_type,
                             ..Node::default()
                         },
+                        None,
                     );
                 }
                 Record::Function {
@@ -623,6 +633,7 @@ fn ingest_records(
                         scanned_at: Some(scanned_at),
                         ..spec_node(NodeKind::Scan)
                     },
+                    None,
                 ),
                 // Spec/plan node records carry canonical FQNs (no opaque ids),
                 // so they enter the graph immediately like modules and
@@ -646,6 +657,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Requirement)
                     },
+                    None,
                 ),
                 Record::PlannedNode {
                     fqn,
@@ -671,6 +683,7 @@ fn ingest_records(
                             status: Some("planned".to_string()),
                             ..spec_node(kind)
                         },
+                        None,
                     );
                     if !parent.is_empty() {
                         graph.contains.insert((parent, fqn));
@@ -693,6 +706,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Stakeholder)
                     },
+                    None,
                 ),
                 Record::Entity {
                     fqn,
@@ -708,6 +722,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Entity)
                     },
+                    None,
                 ),
                 Record::System {
                     fqn,
@@ -723,6 +738,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::System)
                     },
+                    None,
                 ),
                 Record::Container {
                     fqn,
@@ -740,6 +756,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Container)
                     },
+                    None,
                 ),
                 Record::Component {
                     fqn,
@@ -755,6 +772,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Component)
                     },
+                    None,
                 ),
                 // New-model tier catalog (apg-projects SPEC §3.1).
                 Record::User {
@@ -771,6 +789,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::User)
                     },
+                    None,
                 ),
                 Record::Group {
                     fqn,
@@ -790,6 +809,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Group)
                     },
+                    None,
                 ),
                 Record::Value {
                     fqn,
@@ -805,6 +825,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Value)
                     },
+                    None,
                 ),
                 Record::Service {
                     fqn,
@@ -820,6 +841,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Service)
                     },
+                    None,
                 ),
                 Record::Person {
                     fqn,
@@ -835,6 +857,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Person)
                     },
+                    None,
                 ),
                 Record::Actor {
                     fqn,
@@ -850,6 +873,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Actor)
                     },
+                    None,
                 ),
                 Record::Role {
                     fqn,
@@ -865,6 +889,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Role)
                     },
+                    None,
                 ),
                 Record::Constraint {
                     fqn,
@@ -880,6 +905,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Constraint)
                     },
+                    None,
                 ),
                 Record::Note {
                     fqn,
@@ -895,6 +921,7 @@ fn ingest_records(
                         properties,
                         ..spec_node(NodeKind::Note)
                     },
+                    None,
                 ),
                 Record::Feedback {
                     fqn,
@@ -910,6 +937,7 @@ fn ingest_records(
                         disposition: opt(disposition),
                         ..spec_node(NodeKind::Feedback)
                     },
+                    None,
                 ),
                 Record::Plan {
                     fqn,
@@ -923,6 +951,7 @@ fn ingest_records(
                         strategy: opt(strategy),
                         ..spec_node(NodeKind::Plan)
                     },
+                    None,
                 ),
                 Record::PlanPhase {
                     fqn,
@@ -940,6 +969,7 @@ fn ingest_records(
                         status: opt(status),
                         ..spec_node(NodeKind::PlanPhase)
                     },
+                    None,
                 ),
                 Record::Task {
                     fqn,
@@ -963,6 +993,7 @@ fn ingest_records(
                         new_fqn: opt(new_fqn),
                         ..spec_node(NodeKind::Task)
                     },
+                    None,
                 ),
                 // Rooted code-fact edge endpoints (PHASE_09). `Contains`
                 // endpoints are module identities (root exactly) or opaque ids
@@ -1078,6 +1109,7 @@ fn ingest_records(
                 code_type,
                 ..Node::default()
             },
+            None,
         );
     }
 
@@ -1103,6 +1135,7 @@ fn ingest_records(
                 code_type: String::new(),
                 ..Node::default()
             },
+            None,
         );
     }
 
@@ -1119,6 +1152,7 @@ fn ingest_records(
                 kind: NodeKind::Language,
                 ..Node::default()
             },
+            None,
         );
     }
     for (module, language) in &module_language {
