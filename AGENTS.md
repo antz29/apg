@@ -130,7 +130,7 @@ The project builds a single `apg` binary (package `apg`):
   (`~/.config/opencode/`), init prints a **loud warning** listing
   them — it never deletes anything.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
-  [blacklist...]`
+  [--no-progress] [blacklist...]`
   — run the pipeline; writes `apg/.trans/db.lbug`, `apg/.trans/graph.jsonl`,
   `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
   languages; when omitted, `apg` auto-detects **every** language present and
@@ -142,7 +142,12 @@ The project builds a single `apg` binary (package `apg`):
   (skip cargo build scripts and the proc-macro server); the Rust frontend
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
-  is always skipped).
+  is always skipped). When stderr is a terminal, scan streams live progress to
+  stderr (never `apg-frontend.log`): a `Scan running...` start line, one kind
+  symbol per node — 🌍 Language, 📦 Module, 📄 File, 🧱 Struct, ⚙️ Function — and
+  a closing per-language/per-kind summary carrying that legend inline; piped or
+  redirected stderr is silent, and `--no-progress` silences the start line, the
+  symbols and the summary.
 - `apg query [--json] "<cypher>"` — read-only Cypher over `apg/.trans/db.lbug`
   (found by walking up from cwd); CSV with header row by default, `--json` for
   JSON rows.
