@@ -8,6 +8,8 @@
 
 use std::io::Write;
 
+use crate::graph::NodeKind;
+
 /// The five code kinds that stream progress — `(symbol, kind label)` — and the
 /// inline legend the closing summary carries. Only these kinds emit: authored
 /// layer, plan, and feedback nodes never do.
@@ -18,6 +20,25 @@ pub const KINDS: [(&str, &str); 5] = [
     ("🧱", "Struct"),
     ("⚙️", "Function"),
 ];
+
+/// The [`KINDS`] position of a code node kind, or `None` for a kind that never
+/// streams (authored layer, plan, and feedback nodes).
+fn kind_index(kind: NodeKind) -> Option<usize> {
+    Some(match kind {
+        NodeKind::Language => 0,
+        NodeKind::Module => 1,
+        NodeKind::File => 2,
+        NodeKind::Struct => 3,
+        NodeKind::Function => 4,
+        _ => return None,
+    })
+}
+
+/// The symbol [`KINDS`] pairs with a code node kind, or `None` for a kind that
+/// never streams.
+pub fn symbol_for(kind: NodeKind) -> Option<&'static str> {
+    kind_index(kind).map(|index| KINDS[index].0)
+}
 
 /// The line printed before the first node enters the graph.
 pub const START_LINE: &str = "Scan running...";
