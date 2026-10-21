@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "scan-progress-disable-flag",
-  "body": "`apg scan --no-progress` suppresses the start line, the per-node symbols, and the summary while the run's other log output stays unchanged.",
+  "body": "`apg scan --no-progress` turns the start line, the per-node symbols, and the summary off for a run while its ordinary log output is unchanged.",
   "properties": {
     "feature": "scan-progress"
   },

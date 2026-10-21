@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "scan-progress-tty-default-on",
-  "body": "Progress output is on by default and emitted only when stderr is a terminal, so a piped or redirected run carries no progress output.",
+  "body": "Progress output is on by default and appears when stderr is a terminal, so a piped or redirected run shows its ordinary log lines alone.",
   "properties": {
     "feature": "scan-progress"
   },
