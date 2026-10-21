@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "scan-progress-summary-legend",
-  "body": "apg scan closes with one summary line reporting the languages scanned and each kind's node count, with the symbol-to-kind mapping inline as the legend.",
+  "body": "apg scan closes with one summary line reporting a node count for every language scanned and for every kind, with the symbol-to-kind mapping inline as the legend.",
   "properties": {
     "feature": "scan-progress"
   },
