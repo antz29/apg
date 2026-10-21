@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "scan-progress-node-count-completeness",
-  "body": "Every node that enters the assembled graph contributes exactly one progress symbol, whether the node arrives from a frontend stream or from cached facts.",
+  "body": "Every Language, Module, File, Struct, or Function node that enters the assembled graph contributes exactly one progress symbol, whether it arrives from a frontend stream or from cached facts.",
   "properties": {
     "feature": "scan-progress"
   },
