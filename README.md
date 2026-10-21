@@ -233,8 +233,22 @@ apg scan --language go,ts /path/to/project   # mixed repo, one graph
 apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
 apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
+apg scan --no-progress                   # silence the live progress stream
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
+
+While it runs, `apg scan` streams live progress on **stderr** (never into
+`apg-frontend.log`): a `Scan running...` start line, one kind symbol per node as
+it enters the graph — 🌍 Language, 📦 Module, 📄 File, 🧱 Struct, ⚙️ Function —
+and a closing summary line carrying that legend inline with a per-kind count and
+one count per scanned language:
+
+```
+🌍 Language: 2, 📦 Module: 12, 📄 File: 341, 🧱 Struct: 88, ⚙️ Function: 1204 | go: 1540, ts: 107
+```
+
+Progress is on by default when stderr is a terminal and off when it is piped or
+redirected; `--no-progress` turns it off.
 
 Outputs (all under the gitignored `apg/.trans/` directory; the committed
 `apg/` dir holds `config.json` plus the durable `apg/layers/` node files —
