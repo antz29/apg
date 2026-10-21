@@ -221,22 +221,25 @@ pub fn ingest_with_reuse(
 /// whose target unit had not been visited yet; the win-B fact splice must
 /// preserve the exact full-scan edge set regardless of ordering.)
 fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Progress<'_>>) {
-    let mut cached_modules: HashSet<String> = HashSet::new();
-    let mut loaded: Vec<(crate::cache::FileFragment, String)> = Vec::new();
+    // Module FQN -> declaring language, so each pass-2 insert selects the
+    // language the module was cached under (the FQN alone does not carry it).
+    let mut cached_modules: HashMap<String, String> = HashMap::new();
+    let mut loaded: Vec<(crate::cache::FileFragment, String, String)> = Vec::new();
     for (rel, lang, oid) in &reuse.files {
         let Some((frag, stored_root)) = load_reusable(reuse.store, lang, rel, oid, reuse.cache_key)
         else {
             continue;
         };
-        loaded.push((frag, stored_root));
+        loaded.push((frag, stored_root, lang.clone()));
     }
 
     // Pass 1: every unit's nodes (a fresh node at an FQN wins; a cached node
     // fills a gap; an UnresolvedTarget placeholder yields to a real node).
-    for (frag, stored_root) in &loaded {
+    for (frag, stored_root, lang) in &loaded {
+        select_language(&mut progress, lang);
         let (modules, nodes, _) = frag.project(stored_root, &reuse.reader_root);
         for m in modules {
-            cached_modules.insert(m);
+            cached_modules.entry(m).or_insert_with(|| lang.clone());
         }
         for (fqn, node) in nodes {
             let kind = node.kind;
@@ -265,8 +268,9 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     // Pass 2: cached module records — a module declared by a reused unit must
     // exist for its Module→File `contains` edges to survive. Inserted when the
     // spool did not emit it.
-    for m in cached_modules {
+    for (m, lang) in cached_modules {
         if !graph.nodes.contains_key(&m) {
+            select_language(&mut progress, &lang);
             insert_node(
                 graph,
                 m.clone(),
@@ -293,6 +297,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
         let Some(scaffolding) = reuse.store.scaffolding(lang, reuse.cache_key) else {
             continue;
         };
+        select_language(&mut progress, lang);
         for m in &scaffolding.modules {
             if !graph.nodes.contains_key(m) {
                 insert_node(
@@ -331,7 +336,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     }
 
     // Pass 3: every unit's edges, now that ALL endpoints exist.
-    for (frag, stored_root) in &loaded {
+    for (frag, stored_root, _) in &loaded {
         let (_, _, edges) = frag.project(stored_root, &reuse.reader_root);
         for e in edges {
             if !graph.nodes.contains_key(&e.from) || !graph.nodes.contains_key(&e.to) {
