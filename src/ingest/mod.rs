@@ -154,7 +154,7 @@ pub fn ingest(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
 ) -> (Graph, IngestReport) {
-    ingest_records(records, opts, false)
+    ingest_records(records, opts, false, None)
 }
 
 /// [`ingest`] with win-B cached-fact reuse (phase-02 task-7).
@@ -183,7 +183,7 @@ pub fn ingest_with_reuse(
     opts: &IngestOptions,
     reuse: Option<&Reuse>,
 ) -> (Graph, IngestReport) {
-    let (mut graph, report) = ingest_records(records, opts, true);
+    let (mut graph, report) = ingest_records(records, opts, true, None);
     if let Some(reuse) = reuse {
         splice_cached(&mut graph, reuse);
         // One finalize after the cached facts land, so an edge to a cached
@@ -406,11 +406,14 @@ fn load_reusable(
 /// resolves edges. See [`ingest`] / [`ingest_with_reuse`].
 ///
 /// `defer_finalize` suppresses the dangling-edge cleanup / edge validation
-/// (the win-B path runs it once after the cached facts merge).
+/// (the win-B path runs it once after the cached facts merge). `progress`
+/// streams one symbol per admitted code node ([`insert_node`]); the spec/plan
+/// records and the `ScanMeta`/`Unresolved` control kinds stay silent.
 fn ingest_records(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
     defer_finalize: bool,
+    mut progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
     let mut graph = Graph::default();
     let mut skipped = 0u64;
@@ -524,7 +527,7 @@ fn ingest_records(
                             code_type,
                             ..Node::default()
                         },
-                        None,
+                        progress.as_deref_mut(),
                     );
                 }
                 Record::Function {
@@ -583,7 +586,8 @@ fn ingest_records(
                     if !files.contains_key(&identity) {
                         files.insert(identity.clone(), parent.clone());
                         let code_type = classify_code_type(&path, &identity, &lang, opts.config);
-                        graph.nodes.insert(
+                        insert_node(
+                            &mut graph,
                             identity.clone(),
                             Node {
                                 kind: NodeKind::File,
@@ -598,6 +602,7 @@ fn ingest_records(
                                 code_type,
                                 ..Node::default()
                             },
+                            progress.as_deref_mut(),
                         );
                     }
                 }
@@ -683,7 +688,7 @@ fn ingest_records(
                             status: Some("planned".to_string()),
                             ..spec_node(kind)
                         },
-                        None,
+                        progress.as_deref_mut(),
                     );
                     if !parent.is_empty() {
                         graph.contains.insert((parent, fqn));
@@ -1109,7 +1114,7 @@ fn ingest_records(
                 code_type,
                 ..Node::default()
             },
-            None,
+            progress.as_deref_mut(),
         );
     }
 
@@ -1135,7 +1140,7 @@ fn ingest_records(
                 code_type: String::new(),
                 ..Node::default()
             },
-            None,
+            progress.as_deref_mut(),
         );
     }
 
@@ -1152,7 +1157,7 @@ fn ingest_records(
                 kind: NodeKind::Language,
                 ..Node::default()
             },
-            None,
+            progress.as_deref_mut(),
         );
     }
     for (module, language) in &module_language {
