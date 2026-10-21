@@ -150,6 +150,16 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
     }
 }
 
+/// Selects the language subsequent admissions count against, when an emitter is
+/// present. Streamed admissions rely on the current `lang`; the deferred passes
+/// (Functions, Modules, Language roots) re-select each node's own language
+/// immediately before admitting it.
+fn select_language(progress: &mut Option<&mut Progress<'_>>, language: &str) {
+    if let Some(progress) = progress.as_deref_mut() {
+        progress.language(language);
+    }
+}
+
 pub fn ingest(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
@@ -476,6 +486,11 @@ fn ingest_records(
     // use, so a `""` base renders every path verbatim.
     let base: &Path = opts.base.unwrap_or_else(|| Path::new(""));
 
+    // Attribute the streamed admissions to the scan's language; each
+    // `lang_switch` re-selects for the stream that follows it. The deferred
+    // passes below re-select their own node's language instead.
+    select_language(&mut progress, &lang);
+
     // Stream the records in one pass: modules, structs, and unresolved targets
     // have deterministic FQNs and enter the graph immediately; functions are
     // buffered (overload grouping needs every declaration); edges are spooled
@@ -643,6 +658,7 @@ fn ingest_records(
                 }
                 Record::LangSwitch { language } => {
                     lang = language;
+                    select_language(&mut progress, &lang);
                 }
                 // The scan_meta control record (emitted by `apg scan` ahead of
                 // the whole stream) becomes the DB's single `Scan` node: the
@@ -1123,6 +1139,7 @@ fn ingest_records(
             continue;
         }
         let code_type = classify_code_type(&f.path, &fqn, &f.language, opts.config);
+        select_language(&mut progress, &f.language);
         insert_node(
             &mut graph,
             fqn,
@@ -1156,6 +1173,9 @@ fn ingest_records(
             continue;
         }
         claim(&mut seen, fqn, fqn, NodeKind::Module);
+        if let Some(language) = module_language.get(fqn) {
+            select_language(&mut progress, language);
+        }
         insert_node(
             &mut graph,
             fqn.clone(),
@@ -1176,6 +1196,7 @@ fn ingest_records(
     // exactly once. A shadowed module (already claimed by a type of the same
     // name) carries no language edge, matching the module node it lost.
     for language in &languages {
+        select_language(&mut progress, language);
         insert_node(
             &mut graph,
             language.clone(),
