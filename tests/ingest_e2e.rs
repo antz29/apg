@@ -1563,11 +1563,88 @@ mod e2e {
                 // pass 2b: the other scaffolding modules, then the Language root
                 "📦📦📦",
                 "🌍",
-                "\n🌍 Language: 2, 📦 Module: 5, 📄 File: 3, 🧱 Struct: 3, ⚙️ Function: 2\n",
+                // The per-language buckets are populated by the WIRING: the
+                // spool and pass-1 go admissions count under `go`, the skipped
+                // csharp unit's pass-1/pass-2/pass-2b admissions under `csharp`.
+                "\n🌍 Language: 2, 📦 Module: 5, 📄 File: 3, 🧱 Struct: 3, ⚙️ Function: 2",
+                " | go: 8, csharp: 7\n",
             ),
-            "one symbol per admitted node, then one summary tally per kind"
+            "one symbol per admitted node, then one summary tally per kind and language"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase-02 task-11: a two-stream (`go` then `rust`) spool reports each
+    /// language's own node count, including the DEFERRED admissions — Functions
+    /// (pass B), Modules (pass B2), and Language roots (pass B4) — which are
+    /// inserted after the stream loop and must re-select their own language
+    /// rather than inherit the last `lang_switch`. If attribution collapsed to
+    /// the last-selected language, `go` would be absent and `rust` would carry
+    /// all ten admissions.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn lang_switch_progress_reports_each_language_bucket() {
+        use apg::progress::Progress;
+
+        let records = vec![
+            Record::LangSwitch {
+                language: "go".to_string(),
+            },
+            Record::Module {
+                fqn: "scratch".to_string(),
+            },
+            file_rec("a.go", "scratch", 10),
+            srec("g1", "scratch", "Model", "a.go"),
+            frec("g2", "scratch", "Caller", "a.go"),
+            Record::LangSwitch {
+                language: "rust".to_string(),
+            },
+            Record::Module {
+                fqn: "scratch".to_string(),
+            },
+            file_rec("src/lib.rs", "scratch", 10),
+            srec("r1", "scratch", "Widget", "src/lib.rs"),
+            frec("r2", "scratch", "run", "src/lib.rs"),
+        ];
+
+        let mut out: Vec<u8> = Vec::new();
+        {
+            let mut progress = Progress::new(true, &mut out);
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                    base: None,
+                },
+                Some(&mut progress),
+            );
+            progress.summary();
+            // The two streams render distinct rooted FQNs, so the tally below
+            // counts two real language buckets, not one shadowed stream.
+            assert!(graph.nodes.contains_key("go.scratch.Model"));
+            assert!(graph.nodes.contains_key("rust.scratch.Widget"));
+        }
+
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            concat!(
+                // go stream: File a.go, Struct Model
+                "📄🧱",
+                // rust stream: File src/lib.rs, Struct Widget
+                "📄🧱",
+                // pass B (deferred Functions): Caller (go), run (rust)
+                "⚙️⚙️",
+                // pass B2 (deferred Modules): go.scratch, rust.scratch
+                "📦📦",
+                // pass B4 (deferred Language roots): go, rust
+                "🌍🌍",
+                "\n🌍 Language: 2, 📦 Module: 2, 📄 File: 2, 🧱 Struct: 2, ⚙️ Function: 2",
+                " | go: 5, rust: 5\n",
+            ),
+            "each language's deferred admissions must land in its own bucket"
+        );
     }
 
     /// Phase-03 task-9 — the splice path END-TO-END: a scratch /tmp git repo
