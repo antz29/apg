@@ -25,6 +25,7 @@ pub mod logging;
 pub mod node_cmd;
 pub mod pipeline;
 pub mod plan_cmd;
+pub mod progress;
 pub mod project_cmd;
 pub mod query;
 pub mod review_cmd;
