@@ -1602,6 +1602,7 @@ mod e2e {
                     config: None,
                     base: None,
                 },
+                None,
             );
             assert_eq!(report.shadowed_modules, 0, "`{bare}` must not shadow");
             assert_eq!(report.shadowed_functions, 0, "`{bare}` must not shadow");
@@ -6753,6 +6754,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         assert_eq!(
             report.shadowed_modules, 0,
@@ -7536,6 +7538,7 @@ mod e2e {
                 config: None,
                 base: Some(&root),
             },
+            None,
         );
         for rel in [
             "docs/overview.md",
@@ -7720,6 +7723,7 @@ mod e2e {
                 config: None,
                 base: Some(&root),
             },
+            None,
         );
         assert_eq!(report.shadowed_modules, 0, "no py module may shadow");
         assert_eq!(report.shadowed_functions, 0, "no py function may shadow");
@@ -8648,7 +8652,7 @@ mod e2e {
             base: None,
         };
         let ingested = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            apg::ingest::ingest(records, &opts)
+            apg::ingest::ingest(records, &opts, None)
         }))
         .unwrap_or_else(|_| {
             panic!(
@@ -8718,6 +8722,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
 
         let modules: BTreeSet<String> = graph

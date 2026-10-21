@@ -73,6 +73,7 @@ pub(crate) fn run_pipeline(
                     config,
                     base,
                 },
+                None,
             )
         }
     };

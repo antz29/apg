@@ -1474,6 +1474,7 @@ pub fn scan_checkout_locked(project_dir: &Path) -> anyhow::Result<()> {
                 config: None,
                 base: None,
             },
+            None,
         );
         pre.nodes
             .iter()

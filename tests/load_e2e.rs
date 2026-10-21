@@ -258,6 +258,7 @@ mod e2e {
                 config: None,
                 base: Some(&abs_base),
             },
+            None,
         );
 
         let out = std::env::temp_dir().join(format!(

@@ -153,8 +153,9 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
 pub fn ingest(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
+    progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
-    ingest_records(records, opts, false, None)
+    ingest_records(records, opts, false, progress)
 }
 
 /// [`ingest`] with win-B cached-fact reuse (phase-02 task-7).

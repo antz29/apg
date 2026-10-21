@@ -645,6 +645,7 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
             config: None,
             base: None,
         },
+        None,
     );
     Ok(assembled_authored_identity(&graph))
 }

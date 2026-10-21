@@ -148,6 +148,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
     }
 
@@ -191,6 +192,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         assert_eq!(report.shadowed_modules, 1);
         // PHASE_09: the module/type collision is at the ROOTED FQN — every
@@ -284,6 +286,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         // The struct `p.A.test` (from the shadowed package) wins over the
         // method `p.A.test`; the distinct method `p.A.other` survives.
@@ -372,6 +375,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         // The module is rooted; the unresolved name is not.
         assert!(graph.nodes.contains_key("java.tests"));
@@ -453,6 +457,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         assert_eq!(report.skipped, 0);
         // PHASE_09: rooting makes a cross-language module-module FQN
@@ -535,6 +540,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         let n = &graph.nodes[SCAN_HEAD];
         assert_eq!(n.kind, NodeKind::Scan);
@@ -562,6 +568,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         let n = &graph.nodes[SCAN_HEAD];
         assert_eq!(n.kind, NodeKind::Scan);
@@ -615,6 +622,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         assert_eq!(report.skipped, 0);
         // PHASE_09: every module/symbol FQN is rooted under the scan's
@@ -681,6 +689,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         // The planned node lands as a Struct with status=planned (no location).
         let fqn = "github.com/x/gateway".to_string();
@@ -741,6 +750,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         let fqn = "go.github.com/x/y.Gateway".to_string();
         let node = &graph.nodes[&fqn];
@@ -790,6 +800,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
         assert!(report.skipped >= 3);
         // PHASE_09: every module FQN is rooted (`go.`), and
@@ -1137,6 +1148,7 @@ mod e2e {
                 config: None,
                 base: None,
             },
+            None,
         );
 
         // (a) the converted edges appear in `calls`/`uses`.

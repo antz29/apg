@@ -443,6 +443,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                     config: config.as_ref(),
                     base: Some(&identity_base),
                 },
+                None,
             );
             incremental::extra_cascade_targets(
                 &incremental.store_root,
@@ -572,6 +573,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 config: config.as_ref(),
                 base: Some(&identity_base),
             },
+            None,
         );
         pre.nodes
             .iter()
@@ -597,6 +599,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 config: config.as_ref(),
                 base: Some(&identity_base),
             },
+            None,
         );
         let emitted_fqns: BTreeSet<String> = emitted
             .nodes
