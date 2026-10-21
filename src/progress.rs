@@ -64,6 +64,9 @@ pub struct Progress<'a> {
     /// The per-language node tally, one `(language, node count)` entry per
     /// language in scan order.
     languages: Vec<(String, usize)>,
+    /// The [`Self::languages`] bucket later node admissions count against: the
+    /// language [`Progress::language`] last selected.
+    current: Option<usize>,
 }
 
 impl<'a> Progress<'a> {
@@ -75,6 +78,7 @@ impl<'a> Progress<'a> {
             out,
             counts: [0; KINDS.len()],
             languages: Vec::new(),
+            current: None,
         }
     }
 
@@ -84,5 +88,23 @@ impl<'a> Progress<'a> {
         if self.gate {
             let _ = writeln!(self.out, "{START_LINE}");
         }
+    }
+
+    /// Record a scanned language: establish its bucket in the closing
+    /// per-language tally and make it the language subsequent `node`
+    /// admissions count against. Re-selecting an already-recorded language
+    /// keeps its position and running count. A no-op while the gate is off.
+    pub fn language(&mut self, language: &str) {
+        if !self.gate {
+            return;
+        }
+        let index = match self.languages.iter().position(|(name, _)| name == language) {
+            Some(index) => index,
+            None => {
+                self.languages.push((language.to_string(), 0));
+                self.languages.len() - 1
+            }
+        };
+        self.current = Some(index);
     }
 }
