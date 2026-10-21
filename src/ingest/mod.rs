@@ -185,7 +185,7 @@ pub fn ingest_with_reuse(
 ) -> (Graph, IngestReport) {
     let (mut graph, report) = ingest_records(records, opts, true, None);
     if let Some(reuse) = reuse {
-        splice_cached(&mut graph, reuse);
+        splice_cached(&mut graph, reuse, None);
         // One finalize after the cached facts land, so an edge to a cached
         // symbol is not pruned before its endpoint arrives.
         finalize_graph(&mut graph);
@@ -204,7 +204,7 @@ pub fn ingest_with_reuse(
 /// (A single nodes-then-edges pass per unit would lose a `calls`/`uses` edge
 /// whose target unit had not been visited yet; the win-B fact splice must
 /// preserve the exact full-scan edge set regardless of ordering.)
-fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
+fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Progress<'_>>) {
     let mut cached_modules: HashSet<String> = HashSet::new();
     let mut loaded: Vec<(crate::cache::FileFragment, String)> = Vec::new();
     for (rel, lang, oid) in &reuse.files {
@@ -223,19 +223,25 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
             cached_modules.insert(m);
         }
         for (fqn, node) in nodes {
+            let kind = node.kind;
             match graph.nodes.get(&fqn) {
                 None => {
                     graph.nodes.insert(fqn, node);
                 }
                 Some(existing) if existing.kind == NodeKind::UnresolvedTarget => {
-                    if node.kind != NodeKind::UnresolvedTarget {
-                        graph.nodes.insert(fqn, node);
+                    if node.kind == NodeKind::UnresolvedTarget {
+                        continue;
                     }
+                    graph.nodes.insert(fqn, node);
                 }
                 Some(_) => {
                     // A freshly re-emitted node (or another cached unit's node)
                     // already claims the FQN; keep it.
+                    continue;
                 }
+            }
+            if let Some(progress) = progress.as_deref_mut() {
+                progress.node(kind);
             }
         }
     }
@@ -252,7 +258,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
                     kind: NodeKind::Module,
                     ..Node::default()
                 },
-                None,
+                progress.as_deref_mut(),
             );
         }
     }
@@ -272,10 +278,17 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
             continue;
         };
         for m in &scaffolding.modules {
-            graph.nodes.entry(m.clone()).or_insert_with(|| Node {
-                kind: NodeKind::Module,
-                ..Node::default()
-            });
+            if !graph.nodes.contains_key(m) {
+                insert_node(
+                    graph,
+                    m.clone(),
+                    Node {
+                        kind: NodeKind::Module,
+                        ..Node::default()
+                    },
+                    progress.as_deref_mut(),
+                );
+            }
         }
         for (from, to) in &scaffolding.edges {
             graph.contains.insert((from.clone(), to.clone()));
@@ -284,10 +297,17 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
         // `Language -> Module` edges are global scaffolding too — without them
         // the assembled graph would lack the language root a full rebuild has.
         for l in &scaffolding.languages {
-            graph.nodes.entry(l.clone()).or_insert_with(|| Node {
-                kind: NodeKind::Language,
-                ..Node::default()
-            });
+            if !graph.nodes.contains_key(l) {
+                insert_node(
+                    graph,
+                    l.clone(),
+                    Node {
+                        kind: NodeKind::Language,
+                        ..Node::default()
+                    },
+                    progress.as_deref_mut(),
+                );
+            }
         }
         for (from, to) in &scaffolding.language_edges {
             graph.contains.insert((from.clone(), to.clone()));
