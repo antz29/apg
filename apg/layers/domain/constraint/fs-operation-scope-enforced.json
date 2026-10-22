@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "fs-operation-scope-enforced",
-  "body": "A filesystem operation may touch only a path the acting agent's effective edit rules permit, the tool asserting the edit action so a denial refuses the operation, bounded by the project worktree.",
+  "body": "A filesystem operation may touch only a path the acting agent's effective edit rules permit, every path it touches asserted in the frame opencode's edit decision uses, one denial refusing the whole operation, bounded by the project worktree.",
   "properties": {},
   "out": [],
   "in": []
