@@ -214,6 +214,28 @@ export function canonicalPath(p: string): string {
 }
 
 /**
+ * Maps an already-canonical ABSOLUTE path into the MAIN-anchored resource
+ * opencode's permission engine matches: the bare, `/`-separated path relative
+ * to the main checkout root — the same spelling an agent's `edit` globs are
+ * written against (`src/a.rs`, `apg/.worktrees/<project>/x.txt`). No leading
+ * `/`.
+ *
+ * `root` + `p` inside the root, strictly below it (`"/repo"` + `"/repo/src/a.rs"`
+ * → `"src/a.rs"`); a path equal to the root, outside it, or escaping it (`..`)
+ * is returned UNCHANGED ABSOLUTE, so a genuinely external path is still asserted
+ * against the agent's absolute rules.
+ *
+ * PURE (no fs, no subprocess, no `Bun.$`): both arguments are assumed already
+ * canonical — resolving the frame root (`mainCheckoutRoot`) and symlink-resolving
+ * the path (`canonicalPath`) are the caller's seams, never this mapping's.
+ */
+export function mainAnchoredResource(p: string, root: string): string {
+  const rel = path.relative(root, p)
+  if (!rel || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return p
+  return rel.split(path.sep).join("/")
+}
+
+/**
  * The stored↔absolute identity boundary, side-effect-free (no fs, no
  * subprocess, no `Bun.$`): given the caller's project directory and a path,
  * it returns the OTHER spelling of the same file.
