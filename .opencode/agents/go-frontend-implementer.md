@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg Go frontend (src/golib/ — main.go, go.mod, go.sum): the Go scanner that parses Go with go/parser and resolves calls/types exactly via the go/types type checker, emitting the unified JSONL facts for the Rust ingestor. Owns src/golib/** and its *_test.go tests only; works under the Ponytail discipline (fixed level ultra); runs the go gates (build/vet/test/fmt); commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp; returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg Go frontend (src/golib/ — main.go, go.mod, go.sum): the Go scanner that parses Go with go/parser and resolves calls/types exactly via the go/types type checker, emitting the unified JSONL facts for the Rust ingestor. Owns src/golib/** and its *_test.go tests only; works under the Ponytail discipline (fixed level ultra); runs the go gates (build/vet/test/fmt); commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -244,7 +244,7 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   only. No push/tag (only the `release-agent` holds them, as `ask`).
 - **Gates**: `go build`, `go test`, `go vet`, `go fmt`, `gofmt` (argument
   variants allowed), run from inside your crate (`cd src/golib` first).
-- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only.
+- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Done gate
 

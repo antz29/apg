@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg TypeScript frontend (src/tslib/ — scanner.ts, identity.mjs, package.json, package-lock.json): the Node scanner that uses the official typescript compiler API to resolve calls/types exactly and emit the unified JSONL facts for the Rust ingestor, with the node --test harnesses scanner.test.ts / identity.test.ts. Owns src/tslib/** except src/tslib/node_modules/**; works under the Ponytail discipline (fixed level ultra); runs the npm/node gates; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp; returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg TypeScript frontend (src/tslib/ — scanner.ts, identity.mjs, package.json, package-lock.json): the Node scanner that uses the official typescript compiler API to resolve calls/types exactly and emit the unified JSONL facts for the Rust ingestor, with the node --test harnesses scanner.test.ts / identity.test.ts. Owns src/tslib/** except src/tslib/node_modules/**; works under the Ponytail discipline (fixed level ultra); runs the npm/node gates; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -248,7 +248,7 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   only. No push/tag (only the `release-agent` holds them, as `ask`).
 - **Gates**: `node`, `npm` (including `npm ci`), and `npx tsc` (argument
   variants allowed), run from inside your crate (`cd src/tslib` first).
-- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only.
+- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Done gate
 

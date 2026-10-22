@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's user-documentation surface — README.md (install/usage/features and the frontend-dependency contract table). Works under the Ponytail discipline (fixed level ultra). Marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), removes/renames/moves README.md via apg_rm/apg_mv/apg_cp, and commits its changes (git add/commit only; push/tag are human-approved and not granted to it). Never edits build/CI, the Rust source, opencode-suite/**, or .opencode/**.
+description: Implements plan tasks on the apg repo's user-documentation surface — README.md (install/usage/features and the frontend-dependency contract table). Works under the Ponytail discipline (fixed level ultra). Marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), removes/renames/moves README.md via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same path), and commits its changes (git add/commit only; push/tag are human-approved and not granted to it). Never edits build/CI, the Rust source, opencode-suite/**, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -215,7 +215,9 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   only. No push/tag. **No cargo and no gate grant** — if a claim needs a build
   to verify, report it to the coordinator.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp`, scoped to the
-  worktree `README.md`.
+  worktree `README.md` — each call passes TWO checks: the tool's own action
+  rules, then the tool's `edit`-scope assert (`edit` is the operative write
+  scope; both rule sets name the same path).
 
 ## Workflow
 

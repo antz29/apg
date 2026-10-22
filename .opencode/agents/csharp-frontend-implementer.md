@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg C# frontend (src/csharplib/ — Program.cs, CsharpFrontend.csproj): the standalone single-file Roslyn scanner (Microsoft.CodeAnalysis.CSharp) that resolves calls/types exactly and emits the unified JSONL facts for the Rust ingestor. Owns src/csharplib/** (except bin/obj build outputs) and its tests/ project; works under the Ponytail discipline (fixed level ultra); runs the dotnet gates; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp; returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg C# frontend (src/csharplib/ — Program.cs, CsharpFrontend.csproj): the standalone single-file Roslyn scanner (Microsoft.CodeAnalysis.CSharp) that resolves calls/types exactly and emits the unified JSONL facts for the Rust ingestor. Owns src/csharplib/** (except bin/obj build outputs) and its tests/ project; works under the Ponytail discipline (fixed level ultra); runs the dotnet gates; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -72,10 +72,22 @@ permissions:
   - { action: shell, resource: "dotnet *", effect: allow }
   - { action: apg_rm, resource: "*", effect: deny }
   - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/**", effect: allow }
+  - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/bin/**", effect: deny }
+  - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/obj/**", effect: deny }
+  - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/tests/bin/**", effect: deny }
+  - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/tests/obj/**", effect: deny }
   - { action: apg_mv, resource: "*", effect: deny }
   - { action: apg_mv, resource: "apg/.worktrees/*/src/csharplib/**", effect: allow }
+  - { action: apg_mv, resource: "apg/.worktrees/*/src/csharplib/bin/**", effect: deny }
+  - { action: apg_mv, resource: "apg/.worktrees/*/src/csharplib/obj/**", effect: deny }
+  - { action: apg_mv, resource: "apg/.worktrees/*/src/csharplib/tests/bin/**", effect: deny }
+  - { action: apg_mv, resource: "apg/.worktrees/*/src/csharplib/tests/obj/**", effect: deny }
   - { action: apg_cp, resource: "*", effect: deny }
   - { action: apg_cp, resource: "apg/.worktrees/*/src/csharplib/**", effect: allow }
+  - { action: apg_cp, resource: "apg/.worktrees/*/src/csharplib/bin/**", effect: deny }
+  - { action: apg_cp, resource: "apg/.worktrees/*/src/csharplib/obj/**", effect: deny }
+  - { action: apg_cp, resource: "apg/.worktrees/*/src/csharplib/tests/bin/**", effect: deny }
+  - { action: apg_cp, resource: "apg/.worktrees/*/src/csharplib/tests/obj/**", effect: deny }
   - { action: apg_query, resource: "*", effect: allow }
   - { action: apg_find_symbol, resource: "*", effect: allow }
   - { action: apg_modules, resource: "*", effect: allow }
@@ -239,7 +251,7 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   only. No push/tag (only the `release-agent` holds them, as `ask`).
 - **Gates**: `dotnet build`, `dotnet test`, `dotnet run`, `dotnet restore`
   (argument variants allowed), run from inside your crate (`cd src/csharplib`).
-- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only.
+- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Done gate
 

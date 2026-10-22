@@ -307,8 +307,10 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
 - **Gate**: `scripts/gate.sh` and `scripts/gate.sh *` (so `--e2e` matches).
 - **Cargo**: root `cargo build`/`check`/`clippy`/`fmt`/`test` (+ args), and the
   standalone crates with `--manifest-path src/{rustlib,pylib,structlib}/Cargo.toml`.
-- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only (self-enforcing
-  your worktree-rooted grants); shell `rm`/`mv`/`cp` is NOT granted.
+- **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call
+  passes TWO checks: the tool's own action rules, then the tool's
+  `edit`-scope assert (`edit` is the operative write scope; both rule sets
+  name the same owned paths); shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Done gate — the repo-green contract
 
