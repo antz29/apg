@@ -131,9 +131,11 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * Returns `null` when nothing resolves (no git repository).
  *
  * Real I/O (fs + git), so it is covered by the opt-in suite e2e, never the
- * side-effect-free unit tier; the fs tools resolve the main root here and
- * canonicalise the operative path(s) before asserting them through opencode's
- * permission engine (`fsScopeDecision`).
+ * side-effect-free int tier. It is the default frame-root resolver of
+ * `fsScopeDecision` and is never imported by the fs tools (`apg_rm` / `apg_mv` /
+ * `apg_cp` only `path.resolve` their arguments and pass the merged context):
+ * the DECISION owns frame resolution and canonicalisation, so no tool resolves
+ * the main root or canonicalises a path itself.
  */
 export async function mainCheckoutRoot(
   context: ToolContext,
@@ -191,8 +193,8 @@ export async function mainCheckoutRoot(
  * frame, while a symlink anywhere on the existing prefix (a `directory` spelled
  * through one, or a worktree-internal link pointing into the main checkout) is
  * followed to its real target and judged on it. This keeps the fs tools'
- * candidate and root comparisons in ONE frame, and the path asserted through
- * opencode's permission engine is that same canonical path.
+ * candidate and root comparisons in ONE frame, and that canonical path is the
+ * input `fsScopeDecision` maps into the main-anchored resource it asserts.
  *
  * Real I/O (fs), so it is covered by the opt-in suite e2e, never the pure unit
  * tier.
@@ -282,18 +284,28 @@ export function resolveProjectPath(projectDir: string, value: string): string {
 // MAIN-ANCHORED FRAME: the acting agent's `edit` grants are written against the
 // session workspace root (a code-writer's grants are
 // `apg/.worktrees/*/<glob>`), and opencode evaluates that agent's whole
-// effective `edit` rule set for the asserted path. The main root is discovered
-// by `mainCheckoutRoot`, and every operative path is canonicalised by the
-// `canonicalPath` I/O helper (which follows symlinks, resolving the deepest
-// existing ancestor for a not-yet-existing destination) BEFORE it is asserted,
-// so the resource opencode matches is the one on disk.
+// effective `edit` rule set for the asserted path. A bare ABSOLUTE path matches
+// the opening `{ resource: "*", effect: "deny" }` rule, so the resource must be
+// asserted in the frame the grants are written in. `fsScopeDecision` — never the
+// fs tools — owns that frame: it resolves the main checkout root
+// (`mainCheckoutRoot`) and canonicalises every operative path (`canonicalPath`)
+// through ONE injectable seam, then maps each canonical path through
+// `mainAnchoredResource` to the bare, `/`-separated main-relative resource
+// opencode matches (`src/a.rs`, `apg/.worktrees/<project>/x.txt`). A path
+// genuinely outside the main checkout has no such spelling and stays absolute.
+// An unresolvable frame root refuses the operation rather than let absolute
+// paths through. The `save` always-allow patterns are mapped lexically through
+// the SAME frame — no realpath walk, so a glob tail survives
+// (`/repo/src/**` → `src/**`) — because what an "always allow" stores is what
+// the NEXT decision matches.
 
 /** The outcome of asserting one operation's resources against opencode 2.x's
  *  permission engine. `allowed` is true when `permission.assert` resolved for
  *  every resource (opencode applies its any-deny/else-any-ask/else-allow
  *  precedence across the whole resource set within ONE call); `reason` carries
- *  the refusal when the assert threw/rejected or when the permission surface
- *  was absent (fail-closed), and is `null` when allowed. */
+ *  the refusal when the assert threw/rejected, when the permission surface was
+ *  absent, or when the main checkout frame root could not be resolved
+ *  (fail-closed), and is `null` when allowed. */
 export interface FsScopeDecision {
   allowed: boolean
   reason: string | null
@@ -306,44 +318,77 @@ export interface FsScopeDecision {
  *
  * - `permission` — the plugin's `ctx.permission`, a structurally-typed
  *   `{ assert }` seam (never an `@opencode/plugin` import). Passed in so the
- *   decision never depends on a runtime plugin type and the unit tier can drive
+ *   decision never depends on a runtime plugin type and the int tier can drive
  *   it against a stub.
  * - `context` — the V2 tool-executor context; `sessionID`/`agent`/`messageID`/
- *   `id` build the assert's caller identity.
- * - `resources` — the resolved ABSOLUTE path(s) the operation touches. ALL of
- *   an operation's paths are asserted in ONE call, so opencode's
- *   any-deny/else-any-ask/else-allow precedence across the whole set decides it:
- *   an `apg_mv`/`apg_cp` whose source is allowed but whose destination is denied
- *   is refused.
+ *   `id` build the assert's caller identity, and the frame root is resolved from
+ *   it.
+ * - `resources` — the operation's resolved ABSOLUTE path(s) as the tools resolve
+ *   them. `fsScopeDecision` — never the tools — canonicalises each one and maps
+ *   it to its main-anchored resource before the assert (see the MAIN-ANCHORED
+ *   FRAME note above). ALL of an operation's paths are asserted in ONE call, so
+ *   opencode's any-deny/else-any-ask/else-allow precedence across the whole set
+ *   decides it: an `apg_mv`/`apg_cp` whose source is allowed but whose
+ *   destination is denied is refused.
  * - `save` — the patterns opencode stores when the user chooses "always allow".
- *   Omitted from the call when empty.
+ *   They ride the SAME frame as `resources` — what an "always allow" stores is
+ *   what the next decision matches — so each is mapped to its main-anchored form
+ *   inside this decision, lexically (a pattern is not a file: no realpath walk,
+ *   so a glob tail survives, `/repo/src/**` → `src/**`). Omitted from the call
+ *   when absent or empty.
+ * - `frame` — the injectable frame seam, defaulting to the real helpers: a
+ *   frame-root resolver (`mainCheckoutRoot(context)` → its `.root`) and a
+ *   canonicaliser (`canonicalPath`). Overridable per call so the int tier drives
+ *   this decision with pure stand-ins and no fs/git/process I/O.
  *
  * The assert args are built from `context`: `sessionID`, `source`
- * (`{ type: "tool", messageID, id }`), `action: "edit"`, and `resources`.
- * `agent` is included only when `context.agent` is non-empty, so an absent agent
- * lets opencode default to the session's agent.
+ * (`{ type: "tool", messageID, id }`), `action: "edit"`, and the main-anchored
+ * `resources` (plus `save` when non-empty). Exactly ONE form per resource and
+ * per save pattern reaches `assert` — never both the absolute and the anchored
+ * spelling, which would re-trigger the opening `*` deny. `agent` is included
+ * only when `context.agent` is non-empty, so an absent agent lets opencode
+ * default to the session's agent.
  *
- * FAIL-CLOSED: a missing `permission` (or `assert`) refuses with a clear reason,
- * and an `assert` that throws/rejects (a `deny` rule, or a rejected prompt —
- * a `Tool.Error` carrying the reason) refuses with the thrown error's reason.
- * An allowed assert resolves to `{ allowed: true, reason: null }`.
+ * FAIL-CLOSED: a missing `permission` (or `assert`) refuses with a clear reason
+ * BEFORE any frame work, an unresolvable frame root (the injected resolver
+ * returning `null`) refuses rather than falling through to absolute paths, and
+ * an `assert` that throws/rejects (a `deny` rule, or a rejected prompt — a
+ * `Tool.Error` carrying the reason) refuses with the thrown error's reason. An
+ * allowed assert resolves to `{ allowed: true, reason: null }`.
  *
- * `fsScopeDecision` awaits `permission.assert`, which in production performs
- * real permission evaluation (and, on `ask`, a user prompt); the unit tier
- * drives it against a stubbed `assert` (pure in-memory) and the live behaviour
- * is covered by the opt-in suite e2e
- * (`opencode-suite/tests/boundary.e2e.test.ts`).
+ * TIER ROUTING: in production the seam does real I/O (`mainCheckoutRoot` shells
+ * out to `git rev-parse`, `canonicalPath` follows symlinks) and
+ * `permission.assert` evaluates real rules (and, on `ask`, prompts the user), so
+ * the REAL frame is covered only by the opt-in suite e2e
+ * (`opencode-suite/tests/boundary.e2e.test.ts`). The int tier drives this same
+ * decision with pure frame stand-ins (a fixed root resolver plus an identity
+ * canonicaliser) and a stubbed `assert` — two units wired, no real I/O — while
+ * `mainAnchoredResource` alone is the pure unit tier.
  */
 export async function fsScopeDecision(
   permission: { assert: (args: unknown) => Promise<void> } | undefined,
   context: ToolContext,
   resources: readonly string[],
   save?: readonly string[],
+  frame: {
+    resolveRoot: (context: ToolContext) => Promise<string | null>
+    canonicalise: (p: string) => string
+  } = {
+    resolveRoot: async (context) => (await mainCheckoutRoot(context))?.root ?? null,
+    canonicalise: canonicalPath,
+  },
 ): Promise<FsScopeDecision> {
   if (!permission || typeof permission.assert !== "function") {
     return {
       allowed: false,
       reason: "opencode permission surface unavailable (fail-closed): refusing every path",
+    }
+  }
+  const root = await frame.resolveRoot(context)
+  if (!root) {
+    return {
+      allowed: false,
+      reason: "main checkout root unavailable (fail-closed): refusing every path",
     }
   }
   const args: {
@@ -357,10 +402,10 @@ export async function fsScopeDecision(
     sessionID: context.sessionID,
     source: { type: "tool", messageID: context.messageID, id: context.id },
     action: "edit",
-    resources,
+    resources: resources.map((p) => mainAnchoredResource(frame.canonicalise(p), root)),
   }
   if (context.agent) args.agent = context.agent
-  if (save && save.length > 0) args.save = save
+  if (save && save.length > 0) args.save = save.map((p) => mainAnchoredResource(p, root))
   try {
     await permission.assert(args)
     return { allowed: true, reason: null }
