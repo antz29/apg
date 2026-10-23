@@ -121,9 +121,15 @@ The project builds a single `apg` binary (package `apg`):
   missing, other lines untouched), and install (or update, where contents
   differ) the opencode apg tool suite into `~/.config/opencode/plugins/` +
   `~/.config/opencode/lib/` (with the plugin's `package.json` beside them)
-  plus the **seven distributed agents** — `codebase-navigator`,
-  `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder`,
-  `implementation-phase-reviewer` — into `~/.config/opencode/agents/`.
+  plus the **eight distributed agents** — `codebase-navigator` (explore code
+  structure through the graph and delegate spec/plan/agent work), `spec-writer`
+  (author the durable spec through `apg_node`/`apg_edge`), `plan-writer` (author
+  the phased plan through the `apg_plan_*` tools), `spec-review` (review the
+  spec and attach Feedback), `plan-review` (review plan phases and their
+  implementations), `implementation-phase-reviewer` (review a phase's code
+  against its plan and spec), `agent-builder` (scaffold a repo's code-writer
+  agents), `migration-agent` (migrate `apg/layers/**` to the running
+  durable-spec model) — into `~/.config/opencode/agents/`.
   Project-specific implementer/reviewer agents are installed into the project's
   `.opencode/agents/` by the **`agent-builder`** agent, never by init. If the
   project's `.opencode/` holds files that duplicate the installed suite
