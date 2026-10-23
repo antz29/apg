@@ -577,8 +577,8 @@ mod unit {
     }
 
     /// Coverage is scoped to the merge-base delta, never to spine
-    /// reachability: `coverage_check` does not walk the Requirement `drives`
-    /// Service / Component `realises` Service / `implemented-by` code spine,
+    /// reachability: `coverage_check` does not walk the Requirement
+    /// ←driven-by— Service ←realises— Component —implemented-by→ code spine,
     /// and the phase `Satisfies` set never widens the implemented-by obligation
     /// set — it ONLY discharges the delta's added-or-changed requirements. A
     /// delta claim reached by no spine is still required; an unchanged
