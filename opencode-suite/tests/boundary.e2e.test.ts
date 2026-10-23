@@ -607,6 +607,91 @@ test.skipIf(!enabled)(
   },
 )
 
+// The WORKTREE frame: the acting agent's `edit` grants are written against the
+// MAIN checkout (a code-writer's grants are `apg/.worktrees/*/<glob>`), while
+// the directory being processed is the linked worktree. `fsScopeDecision`
+// therefore resolves the frame root from the worktree and asserts BARE
+// main-relative resources — the form those grants match — never the absolute
+// paths that would re-trigger the opening `*` deny. Every expectation below is
+// derived from the fixture's canonical `realpathSync` spellings: macOS
+// `os.tmpdir()` sits behind the `/var` → `/private/var` symlink, so the raw
+// `mkdtemp` string is NOT the frame root.
+async function worktreeScopePermission(): Promise<void> {
+  const { repo, repoReal, worktree, file, fileReal, deniedDestination, deniedDestinationReal, outside, outsideReal } =
+    scratchWorktreeFsRepo()
+  // The bare main-relative resource the decision asserts for a canonical path.
+  const anchored = (p: string) => path.relative(repoReal, p).split(path.sep).join("/")
+  try {
+    // The frame root is the MAIN checkout, decoded from the documented
+    // `<repo>/apg/.worktrees/demo` layout — not the worktree being processed.
+    const root = await mainCheckoutRoot(v2Context(worktree))
+    expect(root).not.toBeNull()
+    expect(root?.root).toBe(repoReal)
+    expect(root?.project).toBe("demo")
+
+    // Create-then-delete round trip through apg_rm's decision. The stub denies
+    // the ABSOLUTE spelling, so an allow proves the asserted resource is the
+    // bare main-relative form — and the pinned value names that form exactly.
+    const rmStub = stubPermission([fileReal])
+    const rm = await fsScopeDecision(rmStub.permission, v2Context(worktree), [file], [file])
+    expect(rm.allowed).toBe(true)
+    expect(rm.reason).toBe(null)
+    expect(rmStub.calls).toHaveLength(1)
+    expect((rmStub.calls[0] as { resources: readonly string[] }).resources).toEqual([
+      "apg/.worktrees/demo/scratch.txt",
+    ])
+    if (rm.allowed) fs.unlinkSync(file)
+    expect(existsSync(file)).toBe(false)
+
+    // A denied mv/cp DESTINATION refuses the whole operation: both endpoints
+    // ride ONE assert call, so the call that allows the worktree source also
+    // carries the denied destination (anchored) and nothing moves.
+    const src = path.join(worktree, "src", "a.rs")
+    const srcReal = fs.realpathSync(src)
+    const dstStub = stubPermission([anchored(deniedDestinationReal)])
+    const mv = await fsScopeDecision(
+      dstStub.permission,
+      v2Context(worktree),
+      [src, deniedDestination],
+      [src, deniedDestination],
+    )
+    expect(mv.allowed).toBe(false)
+    expect(dstStub.calls).toHaveLength(1)
+    expect((dstStub.calls[0] as { resources: readonly string[] }).resources).toEqual([
+      anchored(srcReal),
+      anchored(deniedDestinationReal),
+    ])
+    expect(mv.reason).toContain(anchored(deniedDestinationReal))
+    if (mv.allowed) fs.renameSync(src, deniedDestination)
+    expect(existsSync(src)).toBe(true)
+    expect(existsSync(deniedDestination)).toBe(false)
+
+    // A path genuinely outside the main checkout has no main-relative spelling:
+    // it stays ABSOLUTE (unchanged — not anchored) and is refused.
+    const outsideStub = stubPermission([outsideReal])
+    const external = await fsScopeDecision(
+      outsideStub.permission,
+      v2Context(worktree),
+      [outside],
+      [outside],
+    )
+    expect(external.allowed).toBe(false)
+    expect(outsideStub.calls).toHaveLength(1)
+    expect((outsideStub.calls[0] as { resources: readonly string[] }).resources).toEqual([
+      outsideReal,
+    ])
+    if (external.allowed) fs.unlinkSync(outside)
+    expect(existsSync(outside)).toBe(true)
+  } finally {
+    fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+  }
+}
+
+test.skipIf(!enabled)(
+  "e2e: worktree fs-scope asserts bare main-relative resources — round trip, denied destination, out-of-checkout",
+  worktreeScopePermission,
+)
+
 // opencode-2x-support phase-02.task-41 (task-2/task-6 acceptance, flagged from
 // phase-1): `findApgRoot` and `mainCheckoutRoot` source their walk-up START from
 // the plugin load location (`ctx.location.directory`, then
