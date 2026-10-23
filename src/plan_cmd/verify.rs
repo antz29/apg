@@ -149,8 +149,8 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     // task, and every requirement the delta adds or changes must be
     // `Satisfies`'d by a plan phase ([`coverage_check`]). The delta is the one
     // impure read (the merge-base git diff); the coverage decision itself is
-    // pure — a pre-existing unchanged claim is exempt, and the Requirement
-    // `drives` Service / Component `realises` Service / `implemented-by` code
+    // pure — a pre-existing unchanged claim is exempt, and the
+    // Requirement ←driven-by— Service ←realises— Component —implemented-by→ code
     // spine is never walked. Task targets
     // come from the transient plan records (note-26: the DB's Task table is
     // static — the plan JSONL is the source of truth). The suggestion names the
