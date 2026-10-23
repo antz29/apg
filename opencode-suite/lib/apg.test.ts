@@ -582,7 +582,9 @@ test("fsScopeDecision maps a populated save alongside resources in ONE call", as
   expect(calls).toHaveLength(1)
   const args = calls[0] as Record<string, unknown>
   expect(args.resources).toEqual(["src/a.rs"])
-  // Mapped lexically (no canonicaliser, so a glob tail survives) into the same frame.
+  // The pattern rides the SAME single call through the frame seam: its literal
+  // prefix goes through the (here identity) canonicaliser and the glob tail is
+  // preserved verbatim, then both are mapped into the main-anchored frame.
   expect(args.save).toEqual(["src/**"])
 })
 
