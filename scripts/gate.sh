@@ -18,7 +18,9 @@
 #
 # USAGE
 #   scripts/gate.sh          # fmt --check, check, clippy, build, test
-#   scripts/gate.sh --e2e    # ... then the e2e tier (opt-in, serial)
+#   scripts/gate.sh --e2e    # ... then the e2e tier (opt-in): the cargo e2e
+#                            #     tests AND the opencode-suite boundary e2e
+#                            #     (scratch /tmp repos only, never a real project)
 #
 # `cargo test` here is the repo's DEFAULT suite. Since the test-tier split it is
 # the unit+int tiers only, seconds-fast; the e2e tests are `#[ignore]`d and are
@@ -55,6 +57,16 @@ step "node --test   (src/tslib: node)"
 if [ "${1:-}" = "--e2e" ]; then
   step "cargo test e2e:: -- --ignored --test-threads=${E2E_THREADS:-1}"
   cargo test e2e:: -- --ignored --test-threads="${E2E_THREADS:-1}"
+
+  # The suite e2e is opt-in via APG_SUITE_E2E=1 (the boundary cases self-skip
+  # otherwise), and every agent's shell grant is deny-by-default exact patterns
+  # — an env-prefixed `bun test …` matches no allow rule, so this granted gate
+  # command is the runnable entry point. The candidate is the debug build the
+  # `cargo build` step above just produced; scenarios use scratch /tmp repos
+  # only (global.constraint.no-real-project-test).
+  BIN="$PWD/target/debug/apg"
+  step "bun test e2e   (opencode-suite boundary; candidate $BIN)"
+  (cd opencode-suite && APG_SUITE_E2E=1 APG_BINARY="$BIN" bun test tests/boundary.e2e.test.ts)
 fi
 
 printf '\n=== gate GREEN ===\n'
