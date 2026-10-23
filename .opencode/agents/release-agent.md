@@ -176,7 +176,7 @@ claim**. The coordinator checks the claim against the change and actions it.
 ## Hard boundaries
 
 - No `question` tool: route every question through the coordinator.
-- Never edit outside the five release surfaces. Never edit `.opencode/**`,
+- Never edit outside the six release surfaces. Never edit `.opencode/**`,
   source, or a worktree.
 - Never scan, never run `apg project start|merge`, never author spec/plan/review
   nodes, never call `apg_plan_note` (banned).

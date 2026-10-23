@@ -343,11 +343,15 @@ against a scratch `/tmp` git repo, never a real project (see below).
 **The repo gate is `scripts/gate.sh`** — the single gate command. It runs the
 exact sequence `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
 --all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
-unit+int suite), stopping at the first failure; `scripts/gate.sh --e2e` appends
-its opt-in e2e step. It is **run-only for every agent except
-`build-implementer`, which owns `scripts/**`** and may change a step — the
-safety property is that no *other* agent can rewrite the gate beneath itself
-while it is running.
+unit+int suite) → `bun test` (in `opencode-suite/`) → `node --test` (in
+`src/tslib/`), stopping at the first failure; `scripts/gate.sh --e2e` appends
+the cargo e2e tier (`cargo test e2e:: -- --ignored`, thread-bounded by
+`E2E_THREADS`, default 1) and the opencode-suite boundary e2e
+(`bun test tests/boundary.e2e.test.ts` against the `cargo build` candidate;
+the boundary cases self-skip unless `APG_SUITE_E2E=1`). It is **run-only for
+every agent except `build-implementer`, which owns `scripts/**`** and may
+change a step — the safety property is that no *other* agent can rewrite the
+gate beneath itself while it is running.
 
 **The frontend crates are separate cargo projects** (there is no root
 `[workspace]`), so their tiers are run from their own directories, never by the
@@ -485,11 +489,16 @@ on the old version, ships stale `OLD-version` bottles.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
-1. **Gate green**: run `scripts/gate.sh --e2e` — the single gate command
+1. **Gate green**: first install the suite's deps — `bun install` inside
+   `opencode-suite/` (`node_modules` is untracked, and the gate's `bun test`
+   step needs `@opencode/plugin`; the env-prefixed form is not granted, so this
+   one command is the runnable entry point). Then run
+   `scripts/gate.sh --e2e` — the single gate command
    (`scripts/gate.sh` = `cargo fmt --check` → `check --all-targets` → `clippy
-   --all-targets -D warnings` → `build` → `test`; `--e2e` appends the opt-in e2e
-   tier) — i.e. `cargo build` first, then **`cargo test` AND `cargo test-e2e`**
-   pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
+   --all-targets -D warnings` → `build` → `test` → the `bun test`/`node --test`
+   JS/TS suites; `--e2e` appends the cargo e2e tier and the opencode-suite
+   boundary e2e) — i.e. `cargo build` first, then **`cargo test` AND
+   `cargo test-e2e`** pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
    the guard runs under `cargo test-e2e` (`cargo test e2e:: -- --ignored`)
@@ -502,9 +511,14 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
 2. **Bump the version** in `Cargo.toml`, `Cargo.lock`, the `RELEASE_VERSION`
    const in `tests/main_e2e.rs`, and README.md's `apg X.Y.x` / `--version X.Y.x`
    pins — the four surfaces the release-version guard tests read
-   (`env!("CARGO_PKG_VERSION")` ties Cargo.toml to the const). Once the new
-   binary is installed, re-run `apg init` so the repo's own `apg/config.json`
-   layout `version` shares its major.minor (the version gate blocks otherwise).
+   (`env!("CARGO_PKG_VERSION")` ties Cargo.toml to the const) — and write the
+   release's `CHANGELOG.md` entry: a `## v<X.Y.Z>` heading above the existing
+   highest version (newest-first), summarizing the release; add a
+   `### Migration` subsection only when the release changes the durable-spec
+   model (`apg init` slices those sections into `apg/migration-guide.md`).
+   Once the new binary is installed, re-run `apg init` so the repo's own
+   `apg/config.json` layout `version` shares its major.minor (the version gate
+   blocks otherwise).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
 4. **Repoint all 8 formulae (the base `scanner` plus the seven per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
