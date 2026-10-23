@@ -1790,14 +1790,14 @@ mod e2e {
     /// `layers::write::project_only`.
     ///
     /// The authored set carries arbitrary/unknown AND empty-valued property keys
-    /// on every node, an authored `drives` edge with its own property map on BOTH
-    /// halves, and an incoming durable `contains` edge on the mutated node from a
-    /// source the mutation does NOT touch — so the incident-restore seam is
+    /// on every node, an authored `driven-by` edge with its own property map on
+    /// BOTH halves, and an incoming durable `contains` edge on the mutated node
+    /// from a source the mutation does NOT touch — so the incident-restore seam is
     /// exercised with real edge properties. After a routed `node update` over the
     /// property-carrying node through the live session, the held DB (read once the
     /// session releases it) reconstructs the WHOLE node-file set exactly: the
     /// updated body, the full properties map (arbitrary + empty-valued keys), the
-    /// `drives` properties on both halves, and the restored `contains` in-edge
+    /// `driven-by` properties on both halves, and the restored `contains` in-edge
     /// with its properties.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
@@ -1824,7 +1824,7 @@ mod e2e {
                 properties,
             };
 
-        // The authored `drives` edge carries a property map on BOTH halves (the
+        // The authored `driven-by` edge carries a property map on BOTH halves (the
         // pairing invariant); the incoming `contains` edge carries its own map so
         // the incident-restore round-trips edge properties, not just endpoints.
         let drives_props = || props(&[("flavor", "context-map"), ("empty-prop", "")]);
@@ -1981,7 +1981,7 @@ mod e2e {
         }
 
         // A routed `node update` through the live session: edge-preserving, so the
-        // delta is `records_for_nodes` (checkout + its `drives` out-edge) plus
+        // delta is `records_for_nodes` (checkout + its `driven-by` out-edge) plus
         // `incident_edge_records_from_db` (the `contains` in-edge from the
         // untouched customer), applied via `project_only`.
         let session = testutil::start_session_process(&wt, &home);
