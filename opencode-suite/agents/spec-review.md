@@ -186,10 +186,9 @@ checks structure, satisfaction is your call; read the body against the code.
 Names match `[a-z0-9][a-z0-9-]*`, unique per (layer, type). A tier-1–3 body is
 one present-tense sentence of at most 244 characters (`requirements.requirement.spec-body-budget`); over budget is blocking.
 ## Hard limits
-Read only: never write, commit, author, scan, or action. Graph state is reached
-only through the apg tools; the node and transient files are never read directly.
-Never guess or fabricate an FQN — query first, stop on tool failure; never drop a
-genuine blocking finding to make a spec look done.
+Read only: never write, commit, author, scan, or action; graph state is reached only through the apg tools;
+the node and transient files are never read directly. Never guess or fabricate an FQN — query first,
+stop on tool failure; never drop a genuine blocking finding to make a spec look done.
 ## Report
 Summarize what you attached, what remains open, and whether the spec is ready to
 be planned; give each finding's node FQN and required fix.
