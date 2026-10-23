@@ -526,8 +526,8 @@ mod e2e {
 
     /// `ingest_tree` on a small tree produces the right records: the three
     /// node records at their derived `<layer>.<type>.<name>` FQNs, the three
-    /// edge records (drives / realises / implemented-by), and nothing from the
-    /// in-edge halves (out is canonical).
+    /// edge records (driven-by / realises / implemented-by), and nothing
+    /// from the in-edge halves (out is canonical).
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_produces_node_and_edge_records() {
