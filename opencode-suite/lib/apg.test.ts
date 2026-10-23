@@ -586,6 +586,127 @@ test("fsScopeDecision maps a populated save alongside resources in ONE call", as
   expect(args.save).toEqual(["src/**"])
 })
 
+// SAVE-FRAME MAPPING — patterns ride the same canonical frame as resources.
+//
+// `fsScopeDecision` splits each always-allow pattern at its FIRST wildcard: a
+// wildcard-free pattern is canonicalised wholesale; an ABSOLUTE literal prefix
+// is canonicalised (the real `canonicalPath` resolves its deepest existing
+// ancestor) with the glob tail re-appended verbatim; an EMPTY or RELATIVE prefix
+// is NOT canonicalised at all (canonicalPath("") would resolve `process.cwd()`,
+// and a relative prefix is cwd-coupled) and the whole pattern maps lexically.
+// These pins drive that split through the injected pure frame — a
+// symlink-mapping canonicaliser stand-in (`/var` is a symlink to `/private/var`
+// on macOS) plus a fixed root — so no real fs/git/process I/O runs.
+
+const CANON_ROOT = "/private/var/repo"
+const canonicaliseSymlink = (p: string) => p.replace(/^\/var\//, "/private/var/")
+const symlinkFrame = {
+  resolveRoot: async () => CANON_ROOT,
+  canonicalise: canonicaliseSymlink,
+}
+
+test("fsScopeDecision anchors a RAW save pattern like its canonical spelling", async () => {
+  // The rules make the anchoring observable: the anchored `src/a.rs` matches the
+  // `src/**` allow, an absolute spelling would hit the broad `*` edit deny.
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "src/**", effect: "allow" },
+  ])
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/private/var/repo/src/a.rs"],
+    ["/var/repo/src/a.rs"],
+    symlinkFrame,
+  )
+  expect(d.allowed).toBe(true)
+  expect(d.reason).toBe(null)
+  expect(calls).toHaveLength(1)
+  const args = calls[0] as Record<string, unknown>
+  expect(args.resources).toEqual(["src/a.rs"])
+  // A raw `path.resolve`d save (what the fs tools pass) must anchor identically
+  // to its canonical spelling, or an "always allow" stored today never matches
+  // the next decision's resource.
+  expect(args.save).toEqual(["src/a.rs"])
+})
+
+test("fsScopeDecision keeps a save glob tail verbatim while its literal prefix anchors", async () => {
+  const { permission, calls } = stubPermission()
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/private/var/repo/src/a.rs"],
+    ["/var/repo/src/**"],
+    symlinkFrame,
+  )
+  expect(d.allowed).toBe(true)
+  expect(calls).toHaveLength(1)
+  const args = calls[0] as Record<string, unknown>
+  expect(args.resources).toEqual(["src/a.rs"])
+  // The literal prefix canonicalises AND anchors, the tail rides verbatim — not
+  // `src**` (the separator survives), not the absolute pattern.
+  expect(args.save).toEqual(["src/**"])
+})
+
+test("fsScopeDecision canonicalises an absolute save prefix whose directory does not exist", async () => {
+  const seen: string[] = []
+  const recordingFrame = {
+    resolveRoot: async () => CANON_ROOT,
+    canonicalise: (p: string) => {
+      seen.push(p)
+      return canonicaliseSymlink(p)
+    },
+  }
+  const { permission, calls } = stubPermission()
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/private/var/repo/src/a.rs"],
+    ["/var/repo/denied/**"],
+    recordingFrame,
+  )
+  expect(d.allowed).toBe(true)
+  const args = calls[0] as Record<string, unknown>
+  expect(args.resources).toEqual(["src/a.rs"])
+  // `denied/` need not exist: an ABSOLUTE literal prefix is still canonicalised
+  // (deepest-existing-ancestor rule), so it anchors instead of escaping absolute.
+  expect(args.save).toEqual(["denied/**"])
+  expect(seen).toContain("/var/repo/denied/")
+})
+
+test("fsScopeDecision maps empty-prefix and relative save patterns lexically and never canonicalises them", async () => {
+  const seen: string[] = []
+  const patterns = ["*", "**/x", "src/**"]
+  const guardedFrame = {
+    resolveRoot: async () => CANON_ROOT,
+    canonicalise: (p: string) => {
+      seen.push(p)
+      // A save pattern reaching the canonicaliser is exactly the bug these pins
+      // exist to catch: `canonicalPath("")` resolves `process.cwd()` and a
+      // relative prefix is cwd-coupled, so neither may be canonicalised.
+      if (patterns.includes(p)) throw new Error(`save pattern canonicalised: ${p}`)
+      return canonicaliseSymlink(p)
+    },
+  }
+  const { permission, calls } = stubPermission()
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/private/var/repo/src/a.rs"],
+    patterns,
+    guardedFrame,
+  )
+  expect(d.allowed).toBe(true)
+  expect(calls).toHaveLength(1)
+  const args = calls[0] as Record<string, unknown>
+  // The resource still rides the canonicaliser — the resource pin is not weakened.
+  expect(args.resources).toEqual(["src/a.rs"])
+  expect(args.save).toEqual(["*", "**/x", "src/**"])
+  // ...and no save pattern reached it (the throw above is the first proof).
+  for (const p of patterns) expect(seen).not.toContain(p)
+})
+
 // UNRESOLVABLE FRAME ROOT — fail closed BEFORE any assert: nothing escapes, in
 // any spelling, with or without a `save` set.
 
