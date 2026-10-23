@@ -294,10 +294,14 @@ export function resolveProjectPath(projectDir: string, value: string): string {
 // opencode matches (`src/a.rs`, `apg/.worktrees/<project>/x.txt`). A path
 // genuinely outside the main checkout has no such spelling and stays absolute.
 // An unresolvable frame root refuses the operation rather than let absolute
-// paths through. The `save` always-allow patterns are mapped lexically through
-// the SAME frame — no realpath walk, so a glob tail survives
-// (`/repo/src/**` → `src/**`) — because what an "always allow" stores is what
-// the NEXT decision matches.
+// paths through. The `save` always-allow patterns ride the SAME frame — what an
+// "always allow" stores is what the NEXT decision matches — so each is split at
+// its first wildcard and only the literal path prefix is canonicalised through
+// the SAME injected canonicaliser while the glob tail is preserved verbatim
+// (`/repo/src/**` → `src/**`); a wildcard-free pattern is canonicalised
+// wholesale; an empty or relative literal prefix is not canonicalised at all
+// and the whole pattern maps lexically; then the result is mapped into the
+// main-anchored frame with `mainAnchoredResource`.
 
 /** The outcome of asserting one operation's resources against opencode 2.x's
  *  permission engine. `allowed` is true when `permission.assert` resolved for
@@ -333,9 +337,13 @@ export interface FsScopeDecision {
  * - `save` — the patterns opencode stores when the user chooses "always allow".
  *   They ride the SAME frame as `resources` — what an "always allow" stores is
  *   what the next decision matches — so each is mapped to its main-anchored form
- *   inside this decision, lexically (a pattern is not a file: no realpath walk,
- *   so a glob tail survives, `/repo/src/**` → `src/**`). Omitted from the call
- *   when absent or empty.
+ *   inside this decision: a pattern is split at its first wildcard and only the
+ *   literal path prefix is canonicalised through the SAME injected canonicaliser
+ *   while the glob tail is preserved verbatim (`/repo/src/**` → `src/**`); a
+ *   wildcard-free pattern is canonicalised wholesale; an empty or relative
+ *   prefix is not canonicalised at all and the whole pattern maps lexically;
+ *   then the result is mapped through `mainAnchoredResource`. Omitted from the
+ *   call when absent or empty.
  * - `frame` — the injectable frame seam, defaulting to the real helpers: a
  *   frame-root resolver (`mainCheckoutRoot(context)` → its `.root`) and a
  *   canonicaliser (`canonicalPath`). Overridable per call so the int tier drives
@@ -404,8 +412,21 @@ export async function fsScopeDecision(
     action: "edit",
     resources: resources.map((p) => mainAnchoredResource(frame.canonicalise(p), root)),
   }
+  const saveResource = (p: string): string => {
+    const at = p.search(/[*?]/)
+    if (at < 0) return mainAnchoredResource(frame.canonicalise(p), root)
+    const prefix = p.slice(0, at)
+    // An empty or relative prefix is cwd-coupled (canonicalPath("") would
+    // resolve process.cwd()); map the whole pattern lexically, as before.
+    if (!path.isAbsolute(prefix)) return mainAnchoredResource(p, root)
+    const canon = frame.canonicalise(prefix)
+    // Keep the separator a prefix ending in "/" carried, so `/repo/src/**`
+    // canonicalises to `src/**` rather than `src**`.
+    const sep = prefix.endsWith("/") && !canon.endsWith("/") ? "/" : ""
+    return mainAnchoredResource(canon + sep + p.slice(at), root)
+  }
   if (context.agent) args.agent = context.agent
-  if (save && save.length > 0) args.save = save.map((p) => mainAnchoredResource(p, root))
+  if (save && save.length > 0) args.save = save.map(saveResource)
   try {
     await permission.assert(args)
     return { allowed: true, reason: null }
