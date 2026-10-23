@@ -22,6 +22,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.opencode-2x-support",
       "properties": {}
     },
@@ -82,7 +87,7 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
+      "target": "requirements.requirement.distributed-agent-roster-documented",
       "properties": {}
     }
   ],

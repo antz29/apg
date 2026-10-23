@@ -47,6 +47,31 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-body-budget",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-fixed-skeleton",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-model-current",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-pinned-assertions-preserved",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-structure-enforced-deterministically",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.push-tag-human-approved-release-only",
       "properties": {}
     },
@@ -62,27 +87,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.prompt-corpus-model-current",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.prompt-corpus-body-budget",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.prompt-corpus-fixed-skeleton",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.prompt-structure-enforced-deterministically",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.prompt-pinned-assertions-preserved",
+      "target": "requirements.requirement.distributed-agent-roster-documented",
       "properties": {}
     }
   ],
@@ -114,17 +119,17 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.migration-agent-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.push-tag-policy-surfaces",
       "properties": {}
     },
     {
       "kind": "realises",
       "source": "solution.component.repo-agent-guide",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.migration-agent-prompt",
       "properties": {}
     }
   ]

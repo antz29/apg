@@ -2,17 +2,12 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "reviewer-is-distributed-not-generated",
-  "body": "The implementation-phase reviewer is a generic distributed opencode-suite hidden subagent installed by apg init rather than a repository-local agent the agent-builder generates, so the distributed agent set holds seven members.",
+  "body": "The implementation-phase reviewer is a generic distributed opencode-suite hidden subagent installed by apg init rather than a repository-local agent the agent-builder generates, so the distributed agent set holds eight members.",
   "properties": {
     "feature": "agent-builder-roster-cleanup"
   },
   "out": [],
   "in": [
-    {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
-      "properties": {}
-    },
     {
       "kind": "driven-by",
       "source": "domain.service.agent-roster",
