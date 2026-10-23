@@ -9,6 +9,62 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.25.0
+
+Minor release: filesystem-operation permission scoping now works from a code
+writer's worktree. `fsScopeDecision` asserts every fs-operation resource — and
+every `save` always-allow pattern — in opencode's main-anchored frame through one
+injectable seam, so `apg_rm` / `apg_mv` / `apg_cp` match the code-writer's
+worktree globs instead of being refused by the broad `*` deny. A single denial
+still refuses the whole operation, and `save` patterns canonicalise their literal
+prefix while preserving a glob tail. Adds unit/int/e2e regression coverage, a
+real linked-worktree e2e fixture/scenario, and a repaired stale `apg_session`
+e2e; `scripts/gate.sh --e2e` now also runs the opencode-suite boundary e2e (the
+only agent-grant-reachable entry point). No durable-spec model change.
+
+## v0.24.1
+
+Patch release: the structural scanner no longer graphs the repo's own top-level
+`apg/` tool-owned layout. The layout is pruned in the discovery walk, excluded
+from the structural scope, and ingest drops any residual records, so a self-scan
+stops treating the tool's own state as project source. Adds structlib e2e and
+ingest unit coverage. No durable-spec model change.
+
+## v0.24.0
+
+Re-worked the durable-spec spine direction and its cardinalities. The `drives`
+edge (Requirement → Service) is replaced by `driven-by` (Service → Requirement),
+so spine edges point from the concrete tier toward the abstract one;
+`driven-by` must now reach both ends (every Service is driven by at least one
+Requirement, and every Requirement is driven by at least one Service). A
+Component may now claim many code nodes, but each code node is claimed by
+exactly one Component. Every Service must be realised by at least one Component;
+every `role` requires `applies-to` (`container`|`component`|`both`), must be
+`is-role`-ed by at least one Container/Component, and that user's level must
+match; and a Person's `uses` Component must realise a Service the Actor it
+represents reaches through `calls`. Group `attribute`/`root` and Container
+`kind` are now unvalidated metadata, requiring no layout change.
+
+### Migration
+
+- **`drives` becomes `driven-by` (renamed and reversed).** Rewrite every
+  `drives` node-file edge (Requirement → Service) as `driven-by`
+  (Service → Requirement): rename the edge kind and swap `from`/`to`. `drives`
+  is no longer an accepted edge kind.
+- **Every Requirement needs a `driven-by` Service.** A Requirement with no
+  Service driving it fails `save`/`scan` (requirement coverage).
+- **Every Service needs a `realises` Component.** Point at least one
+  `solution.component` at each realised Service.
+- **Every `solution.role` needs `applies-to`.** Set it to
+  `container`|`component`|`both`; each Role must be `is-role`-ed by at least one
+  Container/Component, and the value must match that user's level.
+- **Each code node has exactly one `implemented-by` Component.** A Component may
+  claim many code nodes, but a code node claimed by two Components must be
+  reduced to a single claimant.
+- **Person → Actor → Service coherence.** Where a Person `uses` a Component, the
+  Actor it represents must `call` — directly or through `calls` — a Service that
+  Component realises.
+
 ## v0.23.2
 
 Re-cut of v0.23.1 (same fix) with correctly-versioned bottles; the v0.23.1 bottles
