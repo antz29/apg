@@ -112,7 +112,7 @@ pub struct NodeFile {
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutEdge {
-    /// The edge kind (e.g. `drives`).
+    /// The edge kind (e.g. `driven-by`).
     pub kind: String,
     /// The target node FQN (`<layer>.<type>.<name>`, or a code FQN for
     /// `implemented-by`).
