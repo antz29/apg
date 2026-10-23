@@ -2072,7 +2072,7 @@ mod e2e {
                 "branch DB must hold transient plan node `{f}`"
             );
         }
-        // The spine is real in the branch DB: 20 drives edges, the
+        // The spine is real in the branch DB: 20 driven-by edges, the
         // Component→Service realises hop, the 5 implemented-by claims onto
         // scanned structs, the User→Requirement requires tree, and the four
         // implementation-layer notes each detailing one scanned struct.
