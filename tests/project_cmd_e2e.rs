@@ -2791,7 +2791,7 @@ mod e2e {
     /// `graph.jsonl` export it publishes beside it.
     ///
     /// The defect path: `project start` seeds the branch DB from main's scan;
-    /// the branch then authors a durable requirement + value + `drives` edge
+    /// the branch then authors a durable requirement + value + `driven-by` edge
     /// through a LIVE session (the mandatory-session path) and saves — a
     /// SPEC-ONLY change, with NO worktree scan, so the branch DB still matches
     /// main's seed content identity. Merging fast-forwards main to the branch;
@@ -3095,7 +3095,7 @@ mod e2e {
                 "MATCH (:Service {{fqn: '{svc_fqn}'}})-[:DrivenBy]->(:Requirement {{fqn: '{req_fqn}'}}) RETURN count(*)"
             )),
             1,
-            "main's db.lbug must carry the merged authored drives edge"
+            "main's db.lbug must carry the merged authored driven-by edge"
         );
         drop(db);
 
