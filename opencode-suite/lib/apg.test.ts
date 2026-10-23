@@ -280,8 +280,9 @@ function scopeRuleMatches(pattern: string, resource: string): boolean {
 }
 
 /** A stubbed `ctx.permission` that models opencode's edit decision over an
- *  ORDERED rule list in TWO stages: per resource the LAST matching rule wins and
- *  no match falls back to `ask` (never allow), then across the resources of ONE
+ *  ORDERED rule list in TWO stages: per resource the LAST rule whose action AND
+ *  resource patterns both match (whole-string, `*`/`?` wildcards) wins and no
+ *  match falls back to `ask` (never allow), then across the resources of ONE
  *  call any `deny` -> deny, else any `ask` -> ask, else allow. A later specific
  *  `allow` therefore overrides an earlier broad `*` `deny` — the any-deny
  *  precedence exists only across resources, never across rules. `allow`
@@ -296,11 +297,12 @@ function scopeRulePermission(rules: readonly ScopeRule[]): {
     assert: async (args: unknown): Promise<void> => {
       calls.push(args)
       const { action, resources } = args as { action: string; resources: readonly string[] }
-      // Stage 1 — per resource, the last rule that matches action + resource wins.
+      // Stage 1 — per resource, the last rule whose action and resource
+      // patterns both match wins.
       const effects = resources.map((resource) => {
         let effect: ScopeRule["effect"] = "ask"
         for (const rule of rules) {
-          if (rule.action === action && scopeRuleMatches(rule.resource, resource)) effect = rule.effect
+          if (scopeRuleMatches(rule.action, action) && scopeRuleMatches(rule.resource, resource)) effect = rule.effect
         }
         return effect
       })
@@ -317,10 +319,12 @@ function scopeRulePermission(rules: readonly ScopeRule[]): {
 // ORDERED RULES — the two-stage edit decision `scopeRulePermission` models.
 
 test("scopeRulePermission lets a later worktree allow override the broad `*` deny and rejects its absolute spelling", async () => {
-  // This repo's core-implementer grant shape: deny everything, then allow the
-  // worktree globs. The later, more specific allow must win — a
-  // deny-wins-over-the-rule-list implementation refuses the worktree path here.
+  // This repo's core-implementer grant shape: the real base policy allows
+  // everything, then the agent denies all edits and allows the worktree globs.
+  // The later, more specific allow must win — a deny-wins-over-the-rule-list
+  // implementation refuses the worktree path here.
   const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
     { action: "edit", resource: "*", effect: "deny" },
     { action: "edit", resource: "apg/.worktrees/*/**", effect: "allow" },
   ])
@@ -329,11 +333,17 @@ test("scopeRulePermission lets a later worktree allow override the broad `*` den
   expect(calls).toHaveLength(1)
 
   // The SAME file in its absolute spelling matches neither pattern as written
-  // (the allow is worktree-relative), so it falls through to the broad deny —
-  // main-anchoring the resource is what makes the override possible.
+  // (the allow is worktree-relative), so it falls through to the base allow and
+  // the broad edit deny — main-anchoring the resource is what makes the
+  // override possible.
   await expect(
     permission.assert({ action: "edit", resources: [`/repo/${anchored}`] }),
   ).rejects.toThrow(`path denied: /repo/${anchored}`)
+
+  // A resource matched ONLY by the base rule resolves: no edit rule matches
+  // `read`, so the base `*`/`*` allow decides — exact action equality would
+  // fall back to `ask`.
+  await permission.assert({ action: "read", resources: ["docs/readme.txt"] })
 })
 
 test("scopeRulePermission asks on no match and refuses a call when ANY resource is denied", async () => {
