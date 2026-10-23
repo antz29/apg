@@ -193,9 +193,16 @@ Sets up the project:
   `apg_scan` + the spec/plan/review suite, shared plumbing in
   `~/.config/opencode/lib/`) and writes `~/.config/opencode/package.json` naming
   the `@opencode/plugin` dependency + runs `bun install` if needed,
-- installs the **seven distributed agents** into `~/.config/opencode/agents/`:
-  `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`,
-  `plan-review`, `agent-builder`, and `implementation-phase-reviewer`.
+- installs the **eight distributed agents** into `~/.config/opencode/agents/` —
+  the `codebase-navigator` plus seven, each with a one-line purpose:
+  - `codebase-navigator` — navigates the graph and dispatches the other agents.
+  - `spec-writer` — authors the four-tier spec and spine as durable nodes.
+  - `plan-writer` — turns a spec into a phased plan with tasks and planned nodes.
+  - `spec-review` — reviews the durable spec via Feedback; never authors it.
+  - `plan-review` — reviews the plan and each phase's work via Feedback.
+  - `implementation-phase-reviewer` — reviews a phase's code against plan and spec.
+  - `agent-builder` — scaffolds a repo's implementer/reviewer agents.
+  - `migration-agent` — rewrites `apg/layers/**` for a migration, then validates.
 
 The suite installs the first time and is then kept in sync (files are
 re-written only when their contents change), so running `apg init` again after
@@ -400,8 +407,8 @@ project prefix. Six layers:
 | layer | node types |
 |---|---|
 | `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
-| `domain` | `group` (core/supporting/generic), `entity` (`entity`/`event`), `value`, `service`, `constraint` |
-| `solution` | `system`, `container` (app/service/db/queue), `component`, `person`, `constraint` |
+| `domain` | `group` (core/supporting/generic), `actor`, `entity` (`entity`/`event`), `value`, `service`, `constraint` |
+| `solution` | `system`, `container` (app/service/db/queue), `component`, `person`, `role` (requires `applies-to` container/component/both), `constraint` |
 | `implementation` | `note`, `constraint` (attach-only — a note attaches only to implementation-layer code and its `details` edge names exactly one code FQN) |
 | `global` | `constraint` (the laws) |
 | `plans` (transient) | `PlanPhase`, `Task`, planned Implementation nodes — `.trans/plans/` only |
@@ -410,9 +417,9 @@ Node files carry both halves of every edge (the out half in the source's file,
 the matching in half in the target's). Constraints are **prose** — the binary
 validates structure and references at write time; whether the prose holds is
 assessed by review, never executed. The **spine** threads the tiers end to end:
-`Stakeholder ⊃ Requirement —drives→ Domain —realised-by→ Solution
-—implemented-by→ code`; any requirement traces down to the code that implements
-it, any code traces up to the why.
+`Stakeholder/User —requires→ Requirement ←driven-by— Service
+←realises— Component —implemented-by→ code`; any requirement traces down to
+the code that implements it, any code traces up to the why.
 
 ### Sessions (caller-controlled durability)
 
