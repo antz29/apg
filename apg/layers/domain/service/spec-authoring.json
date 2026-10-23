@@ -7,12 +7,17 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.durable-spec-states-what-is",
+      "target": "requirements.requirement.details-target-set-consistency",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.spec-model-enforcement",
+      "target": "requirements.requirement.deterministic-spec-lint",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.durable-spec-states-what-is",
       "properties": {}
     },
     {
@@ -27,12 +32,12 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.deterministic-spec-lint",
+      "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.details-target-set-consistency",
+      "target": "requirements.requirement.prompt-corpus-model-current",
       "properties": {}
     }
   ],
@@ -44,7 +49,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.spec-principles-prompts",
+      "source": "solution.component.constraint-scope",
       "properties": {}
     },
     {
@@ -54,7 +59,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.constraint-scope",
+      "source": "solution.component.note-layer-confinement",
       "properties": {}
     },
     {
@@ -64,7 +69,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.note-layer-confinement",
+      "source": "solution.component.spec-principles-prompts",
       "properties": {}
     }
   ]

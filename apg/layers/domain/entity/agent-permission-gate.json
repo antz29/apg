@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent-permission-gate",
+  "body": "A filesystem operation's write authority: the tool's own callable grant and the edit assertion opencode resolves over the same main-anchored resources, both required for every path the operation touches.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.tool-grant",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-fs-operations",
+      "properties": {}
+    }
+  ]
+}

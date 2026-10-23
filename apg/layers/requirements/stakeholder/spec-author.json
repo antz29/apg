@@ -24,6 +24,11 @@
       "kind": "requires",
       "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-corpus-model-current",
+      "properties": {}
     }
   ],
   "in": []

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "prompt-structure-enforced-deterministically",
+  "body": "A deterministic test checks every shipped agent template for the fixed skeleton, the permissions section, the per-template body cap and the corpus total.",
+  "properties": {
+    "feature": "agent-prompt-clarity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    }
+  ]
+}

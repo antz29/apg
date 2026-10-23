@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "prompt-surface-truthful",
+  "body": "Every shipped agent template states the durable-spec model, the write surface and the permission model the binary implements, so no template teaches a retired edge kind or a single-gate write rule.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

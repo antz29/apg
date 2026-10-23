@@ -29,6 +29,56 @@
       "kind": "requires",
       "target": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-permission-guard-surfaces",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-corpus-body-budget",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-permission-rule-semantics",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-corpus-fixed-skeleton",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-corpus-model-current",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-two-gate-model-stated",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.agent-builder-env-shell-grant",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.opencode-permission-guide",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-pinned-assertions-preserved",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-structure-enforced-deterministically",
+      "properties": {}
     }
   ],
   "in": []

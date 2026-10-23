@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "prompt-corpus-fixed-skeleton",
+  "body": "Every shipped agent template carries the one fixed skeleton below its frontmatter, including a permissions section of four to six lines.",
+  "properties": {
+    "feature": "agent-prompt-clarity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    }
+  ]
+}

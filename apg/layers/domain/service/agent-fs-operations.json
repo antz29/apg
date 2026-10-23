@@ -19,6 +19,16 @@
       "kind": "driven-by",
       "target": "requirements.requirement.navigator-no-unguarded-main-git",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.agent-builder-env-shell-grant",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-two-gate-model-stated",
+      "properties": {}
     }
   ],
   "in": [
@@ -29,12 +39,12 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.agent-fs-tool-suite",
+      "source": "solution.component.agent-builder-prompt",
       "properties": {}
     },
     {
       "kind": "realises",
-      "source": "solution.component.agent-builder-prompt",
+      "source": "solution.component.agent-fs-tool-suite",
       "properties": {}
     },
     {

@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "prompt-body-budget",
+  "body": "Every shipped agent template body, counted below its frontmatter, stays within its own line cap, and the eight bodies total at most 1,700 lines.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

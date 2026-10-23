@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "normative-document-set",
+  "body": "The normative documentation set is the shipped agent templates, the agent guide, the readme and the tracked permission guide, while the repository's historical artefacts carry no normative weight.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

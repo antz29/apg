@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "prompt-body-line-cap",
+  "body": "The caps, counted below the frontmatter, are agent-builder 470, codebase-navigator 427, implementation-phase-reviewer 255, spec-writer 160, plan-writer 140, plan-review 100, migration-agent 88, spec-review 64, and 1,700 for the corpus.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-prompt-body",
+      "properties": {}
+    }
+  ]
+}

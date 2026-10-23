@@ -7,12 +7,42 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.init-reports-agent-count",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.init-reports-suite-file-count",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.no-plan-note-grant",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.opencode-2x-support",
       "properties": {}
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.opencode-agent-frontmatter-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.opencode-docs-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-plugin-api-v2",
       "properties": {}
     },
     {
@@ -27,32 +57,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.opencode-plugin-api-v2",
+      "target": "requirements.requirement.prompt-permission-rule-semantics",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.opencode-agent-frontmatter-v2",
+      "target": "requirements.requirement.prompt-permission-guard-surfaces",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.opencode-generated-agent-shape-v2",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.no-plan-note-grant",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.init-reports-suite-file-count",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.init-reports-agent-count",
+      "target": "requirements.requirement.opencode-permission-guide",
       "properties": {}
     }
   ],
@@ -69,7 +84,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.opencode-tool-plugin",
+      "source": "solution.component.opencode-docs",
       "properties": {}
     },
     {
@@ -84,7 +99,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.opencode-docs",
+      "source": "solution.component.opencode-tool-plugin",
       "properties": {}
     }
   ]

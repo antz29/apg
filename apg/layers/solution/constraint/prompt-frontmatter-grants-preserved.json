@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "prompt-frontmatter-grants-preserved",
+  "body": "Every shipped frontmatter grant block stays as it ships, and the agent-builder template's guidance alone adds one narrow environment-prefixed shell rule, never a general environment rule.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

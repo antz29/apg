@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "prompt-model-vocabulary-live",
+  "body": "Every shipped prompt, the agent guide, the readme and the tracked permission guide name only the live durable edge kinds and node types, never a retired kind or an outdated layer table.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -57,6 +57,11 @@
       "kind": "is-role",
       "source": "solution.component.worktree-boundary-tests",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.migration-agent-prompt",
+      "properties": {}
     }
   ]
 }

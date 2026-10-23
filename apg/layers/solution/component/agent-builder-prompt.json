@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "agent-builder-prompt",
-  "body": "The distributed agent-builder template: it scaffolds and updates each repository's code-writer agents and its agent-to-model map, and keeps its agent guide hygienic, with only the optional release-agent granted push and tag.",
+  "body": "The distributed agent-builder template: it scaffolds a repository's code-writer agents and grant guidance with both filesystem gates, maintains the agent-to-model map and agent guide, and reserves push and tag for the optional release-agent.",
   "properties": {},
   "out": [
     {
@@ -17,12 +17,12 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.agent-roster",
+      "target": "domain.service.agent-fs-operations",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.agent-fs-operations",
+      "target": "domain.service.agent-roster",
       "properties": {}
     },
     {

@@ -7,32 +7,12 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.reviewer-upgrade-removal-guide",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "target": "requirements.requirement.agent-builder-agents-md-hygiene",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.agent-builder-drops-optional-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.no-plan-note-grant",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.agent-builder-optional-release-agent",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.push-tag-human-approved-release-only",
       "properties": {}
     },
     {
@@ -47,7 +27,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "target": "requirements.requirement.agent-builder-optional-release-agent",
       "properties": {}
     },
     {
@@ -57,7 +37,52 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.agent-builder-agents-md-hygiene",
+      "target": "requirements.requirement.no-plan-note-grant",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.push-tag-human-approved-release-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-upgrade-removal-guide",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-model-current",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-body-budget",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-fixed-skeleton",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-structure-enforced-deterministically",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-pinned-assertions-preserved",
       "properties": {}
     }
   ],
@@ -65,16 +90,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-roster",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.distributed-agent-install",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.distributed-reviewer-prompt",
       "properties": {}
     },
     {
@@ -89,12 +104,27 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.repo-agent-guide",
+      "source": "solution.component.distributed-agent-install",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.distributed-reviewer-prompt",
       "properties": {}
     },
     {
       "kind": "realises",
       "source": "solution.component.push-tag-policy-surfaces",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.repo-agent-guide",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.migration-agent-prompt",
       "properties": {}
     }
   ]

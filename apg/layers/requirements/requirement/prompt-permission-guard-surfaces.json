@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "prompt-permission-guard-surfaces",
+  "body": "Each permissions section names the read-guard denials on graph state, both filesystem gates, the shell allowlist and the external directory rule, and derives its can and cannot lists from that template's own grants.",
+  "properties": {
+    "feature": "agent-prompt-clarity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    }
+  ]
+}

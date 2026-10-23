@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "prompt-skeleton-and-permissions-section",
+  "body": "Every shipped agent template carries the one fixed skeleton, with a permissions section of four to six lines whose can and cannot lists derive from that template's own frontmatter grants.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

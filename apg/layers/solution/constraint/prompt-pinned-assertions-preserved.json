@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "prompt-pinned-assertions-preserved",
+  "body": "A literal phrase the end-to-end suite pins in a shipped agent template stays present, or its assertion is re-keyed to the replacement phrase with the original intent intact.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

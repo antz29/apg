@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "tool-grant",
+  "body": "The callable-tool entry an agent's permission set carries, which makes a tool such as apg_rm reachable and leaves every path decision to the edit rules.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-permission-gate",
+      "properties": {}
+    }
+  ]
+}

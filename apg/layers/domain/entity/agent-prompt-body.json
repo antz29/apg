@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent-prompt-body",
+  "body": "The prose body of a shipped agent template below its frontmatter block: the operational narrative that states the agent's rules and the permission consequences of its own grants.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.prompt-body-line-cap",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-roster",
+      "properties": {}
+    }
+  ]
+}

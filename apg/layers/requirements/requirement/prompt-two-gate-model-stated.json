@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "prompt-two-gate-model-stated",
+  "body": "The agent-builder template states both filesystem gates: a tool's own grant makes the call reachable, and the edit assertion over the same main-anchored resources allows every path the operation touches.",
+  "properties": {
+    "feature": "agent-prompt-clarity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.code-writer-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-fs-operations",
+      "properties": {}
+    }
+  ]
+}

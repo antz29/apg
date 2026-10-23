@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "prompt-pinned-assertions-preserved",
+  "body": "A literal phrase the end-to-end suite pins in an agent template stays present, or its assertion is re-keyed to the replacement phrase with the original intent intact.",
+  "properties": {
+    "feature": "agent-prompt-clarity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    }
+  ]
+}

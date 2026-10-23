@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "spec-principles-prompts",
-  "body": "The distributed agent prompts carrying the spec rules R1 through R5: the three writer prompts and the three reviewer prompts, with the deterministic enforcement in the separate spec-lint component.",
+  "body": "The distributed agent prompts carrying the spec rules R1 through R5 — the three writer and three reviewer prompts — each inside its body-line cap and carrying the shared permissions section, with enforcement in the spec-lint component.",
   "properties": {},
   "out": [
     {

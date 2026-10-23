@@ -19,6 +19,16 @@
       "kind": "requires",
       "target": "requirements.requirement.implementer-ponytail-discipline",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-two-gate-model-stated",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.agent-builder-env-shell-grant",
+      "properties": {}
     }
   ],
   "in": []

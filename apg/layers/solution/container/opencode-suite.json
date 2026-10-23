@@ -61,6 +61,11 @@
       "kind": "is-role",
       "target": "solution.role.suite-container",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.migration-agent-prompt",
+      "properties": {}
     }
   ],
   "in": [
