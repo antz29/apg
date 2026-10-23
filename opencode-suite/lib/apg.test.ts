@@ -209,10 +209,16 @@ test("a requirement Satisfied by another project's phase is not over-satisfied b
 // no longer re-derives an agent's edit grants (the retired `editAllowGlobs`
 // parser): it asserts an operation's resolved path(s) through opencode 2.x's
 // permission engine (`ctx.permission.assert`, the `edit` action) and reduces the
-// outcome to `{ allowed, reason }`. It is side-effect-free — no fs, no process,
-// no db, and the `assert` is a pure in-memory stub — so it lives in the `bun
-// test` unit tier; the real-fs application path and the `findApgRoot` /
-// `mainCheckoutRoot` root resolution are the opt-in boundary e2e.
+// outcome to `{ allowed, reason }`.
+//
+// TIER: in production the decision's frame does real I/O — `mainCheckoutRoot`
+// shells `git rev-parse` and `canonicalPath` calls `realpathSync` — so the REAL
+// frame is covered only by the opt-in boundary e2e. Here the same decision is
+// driven with the injected PURE frame (`pureFrame`: a fixed root resolver plus an
+// identity canonicaliser) and a stubbed `permission.assert`, which makes this
+// file's `fsScopeDecision` coverage INT — two units wired (the decision over
+// `mainAnchoredResource`, plus the rule-set stub) — kept pure precisely by the
+// seam. `mainAnchoredResource` alone is the pure unit tier.
 //
 // `permission.assert` is never imported from `@opencode/plugin` here: it is a
 // structurally-typed `{ assert }` seam the tools pass through, so a stub models
@@ -222,6 +228,17 @@ test("a requirement Satisfied by another project's phase is not over-satisfied b
  *  `{ agent, sessionID, messageID, id }` (no V1 `directory`/`worktree`). */
 function v2Context(overrides: Partial<ToolContext> = {}): ToolContext {
   return { agent: "implementer", sessionID: "s1", messageID: "m1", id: "c1", ...overrides }
+}
+
+/** The pure frame `fsScopeDecision` takes as its injectable seam: a fixed root
+ *  resolver plus an identity canonicaliser (its inputs are already canonical).
+ *  The real default resolves the root with `git rev-parse` and canonicalises
+ *  through `realpathSync` — real I/O — so injecting this stand-in is what keeps
+ *  these int-tier cases pure. */
+const FIXED_ROOT = "/repo"
+const pureFrame = {
+  resolveRoot: async () => FIXED_ROOT,
+  canonicalise: (p: string) => p,
 }
 
 /** A stubbed `ctx.permission` whose single `assert` either resolves (allow) or
@@ -236,26 +253,6 @@ function stubPermission(reject?: unknown): {
     assert: async (args: unknown): Promise<void> => {
       calls.push(args)
       if (reject !== undefined) throw reject
-    },
-  }
-  return { permission, calls }
-}
-
-/** An opencode-like stub that evaluates the WHOLE resource set of a single call
- *  and denies when ANY resource is in `deniedPaths` — the any-deny precedence
- *  opencode applies across a call's resources. Used to model a denied source vs
- *  a denied destination of one `apg_mv`/`apg_cp`. */
-function scopeDenyingPaths(deniedPaths: readonly string[]): {
-  permission: { assert: (args: unknown) => Promise<void> }
-  calls: unknown[]
-} {
-  const calls: unknown[] = []
-  const permission = {
-    assert: async (args: unknown): Promise<void> => {
-      calls.push(args)
-      const { resources } = args as { resources: readonly string[] }
-      const hit = resources.find((r) => deniedPaths.includes(r))
-      if (hit !== undefined) throw new Error(`path denied: ${hit}`)
     },
   }
   return { permission, calls }
@@ -385,18 +382,19 @@ test("fsScopeDecision fail-closes when permission.assert is undefined", async ()
   expect(d.reason).toContain("opencode permission surface unavailable")
 })
 
-// ALLOW / DENY — the assert outcome reduced to the decision.
+// ALLOW / DENY — the assert outcome reduced to the decision. Every case injects
+// `pureFrame`, so no case reaches the real frame's fs/git I/O.
 
 test("fsScopeDecision allows when permission.assert resolves", async () => {
   const { permission } = stubPermission()
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"], undefined, pureFrame)
   expect(d.allowed).toBe(true)
   expect(d.reason).toBe(null)
 })
 
 test("fsScopeDecision refuses with the thrown error's message", async () => {
   const { permission } = stubPermission(new Error("path is outside the granted scope"))
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"], undefined, pureFrame)
   expect(d.allowed).toBe(false)
   expect(d.reason).toBe("path is outside the granted scope")
 })
@@ -405,7 +403,7 @@ test("fsScopeDecision extracts reason from a rejection carrying only a reason fi
   // A rejected permission prompt surfaces as a Tool.Error-shaped object whose
   // refusal lives on `reason`, not `message`.
   const { permission } = stubPermission({ reason: "denied by the user prompt" })
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"], undefined, pureFrame)
   expect(d.allowed).toBe(false)
   expect(d.reason).toBe("denied by the user prompt")
 })
@@ -414,7 +412,7 @@ test("fsScopeDecision refuses a rejected promise (async deny)", async () => {
   const permission = {
     assert: (_args: unknown): Promise<void> => Promise.reject(new Error("async deny")),
   }
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"], undefined, pureFrame)
   expect(d.allowed).toBe(false)
   expect(d.reason).toBe("async deny")
 })
@@ -424,14 +422,19 @@ test("fsScopeDecision refuses a rejected promise (async deny)", async () => {
 test("fsScopeDecision builds the assert args from the V2 context", async () => {
   const ctx = v2Context({ agent: "implementer", sessionID: "s1", messageID: "m1", id: "c1" })
   const { permission, calls } = stubPermission()
-  const resources = ["/repo/src/a.rs", "/repo/src/b.rs"]
-  await fsScopeDecision(permission, ctx, resources)
+  await fsScopeDecision(
+    permission,
+    ctx,
+    ["/repo/src/a.rs", "/repo/src/b.rs"],
+    undefined,
+    pureFrame,
+  )
 
   expect(calls).toHaveLength(1)
   const args = calls[0] as Record<string, unknown>
   expect(args.action).toBe("edit")
-  // Passed through unchanged (same array identity), not copied/rebased.
-  expect(args.resources).toBe(resources)
+  // The resources the frame rebuilds are MAIN-ANCHORED, not the absolute inputs.
+  expect(args.resources).toEqual(["src/a.rs", "src/b.rs"])
   expect(args.sessionID).toBe("s1")
   const source = args.source as Record<string, unknown>
   expect(source.type).toBe("tool")
@@ -444,62 +447,177 @@ test("fsScopeDecision builds the assert args from the V2 context", async () => {
 test("fsScopeDecision omits agent when the context agent is empty", async () => {
   // An absent agent lets opencode default to the session's agent.
   const { permission, calls } = stubPermission()
-  await fsScopeDecision(permission, v2Context({ agent: "" }), ["/repo/src/a.rs"])
+  await fsScopeDecision(permission, v2Context({ agent: "" }), ["/repo/src/a.rs"], undefined, pureFrame)
   const args = calls[0] as Record<string, unknown>
   expect("agent" in args).toBe(false)
 })
 
-test("fsScopeDecision omits save when absent or empty and passes a non-empty save through", async () => {
+test("fsScopeDecision omits save when absent or empty", async () => {
   const absent = stubPermission()
-  await fsScopeDecision(absent.permission, v2Context(), ["/repo/src/a.rs"])
+  await fsScopeDecision(absent.permission, v2Context(), ["/repo/src/a.rs"], undefined, pureFrame)
   expect("save" in (absent.calls[0] as Record<string, unknown>)).toBe(false)
 
   const empty = stubPermission()
-  await fsScopeDecision(empty.permission, v2Context(), ["/repo/src/a.rs"], [])
+  await fsScopeDecision(empty.permission, v2Context(), ["/repo/src/a.rs"], [], pureFrame)
   expect("save" in (empty.calls[0] as Record<string, unknown>)).toBe(false)
-
-  const populated = stubPermission()
-  const save = ["/repo/src/**"]
-  await fsScopeDecision(populated.permission, v2Context(), ["/repo/src/a.rs"], save)
-  expect((populated.calls[0] as Record<string, unknown>).save).toBe(save)
 })
 
 // MULTI-RESOURCE (mv/cp both-paths) — BOTH paths in ONE assert call, so a denied
-// source OR a denied destination refuses the whole operation.
+// source OR a denied destination refuses the whole operation. The rule sets make
+// the anchoring observable: the decision asserts `src/a.rs` / `dst/b.rs`, which
+// the `src/**` / `dst/**` allows match (an absolute spelling would not).
 
-test("fsScopeDecision asserts both mv/cp paths in one call and allows when neither is denied", async () => {
-  const { permission, calls } = scopeDenyingPaths([])
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs", "/repo/dst/b.rs"])
+test("fsScopeDecision asserts both mv/cp paths in one anchored call and allows when neither is denied", async () => {
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "src/**", effect: "allow" },
+    { action: "edit", resource: "dst/**", effect: "allow" },
+  ])
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/repo/src/a.rs", "/repo/dst/b.rs"],
+    undefined,
+    pureFrame,
+  )
   expect(d.allowed).toBe(true)
   expect(d.reason).toBe(null)
   expect(calls).toHaveLength(1)
-  expect((calls[0] as Record<string, unknown>).resources).toEqual([
-    "/repo/src/a.rs",
-    "/repo/dst/b.rs",
-  ])
+  expect((calls[0] as Record<string, unknown>).resources).toEqual(["src/a.rs", "dst/b.rs"])
 })
 
 test("fsScopeDecision refuses when a mv/cp SOURCE is denied", async () => {
-  const { permission, calls } = scopeDenyingPaths(["/repo/src/a.rs"])
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs", "/repo/dst/b.rs"])
-  expect(d.allowed).toBe(false)
-  expect(d.reason).toBe("path denied: /repo/src/a.rs")
-  // Both paths still reached the single call — the deny is opencode's across the set.
-  expect((calls[0] as Record<string, unknown>).resources).toEqual([
-    "/repo/src/a.rs",
-    "/repo/dst/b.rs",
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "dst/**", effect: "allow" },
   ])
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/repo/src/a.rs", "/repo/dst/b.rs"],
+    undefined,
+    pureFrame,
+  )
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toBe("path denied: src/a.rs")
+  // Both paths still reached the single call — the deny is opencode's across the set.
+  expect((calls[0] as Record<string, unknown>).resources).toEqual(["src/a.rs", "dst/b.rs"])
 })
 
 test("fsScopeDecision refuses when a mv/cp DESTINATION is denied", async () => {
-  const { permission, calls } = scopeDenyingPaths(["/repo/dst/b.rs"])
-  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs", "/repo/dst/b.rs"])
-  expect(d.allowed).toBe(false)
-  expect(d.reason).toBe("path denied: /repo/dst/b.rs")
-  expect((calls[0] as Record<string, unknown>).resources).toEqual([
-    "/repo/src/a.rs",
-    "/repo/dst/b.rs",
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "src/**", effect: "allow" },
   ])
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/repo/src/a.rs", "/repo/dst/b.rs"],
+    undefined,
+    pureFrame,
+  )
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toBe("path denied: dst/b.rs")
+  expect((calls[0] as Record<string, unknown>).resources).toEqual(["src/a.rs", "dst/b.rs"])
+})
+
+// MAIN-ANCHORING THROUGH THE DECISION — only the main-anchored resource reaches
+// `permission.assert`; the rule set (not the shape) makes the direction
+// observable, since an absolute spelling matches the broad `*` edit deny.
+
+test("fsScopeDecision asserts only the main-anchored resource, so the worktree allow matches", async () => {
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "apg/.worktrees/*/**", effect: "allow" },
+  ])
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/repo/apg/.worktrees/fs-scope-frame/x.txt"],
+    undefined,
+    pureFrame,
+  )
+  expect(d.allowed).toBe(true)
+  expect(calls).toHaveLength(1)
+  // Had the decision asserted the absolute form, the `*` edit deny would fire.
+  expect((calls[0] as Record<string, unknown>).resources).toEqual([
+    "apg/.worktrees/fs-scope-frame/x.txt",
+  ])
+})
+
+test("fsScopeDecision keeps an external path absolute and refuses it", async () => {
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "apg/.worktrees/*/**", effect: "allow" },
+  ])
+  const d = await fsScopeDecision(permission, v2Context(), ["/outside/x.rs"], undefined, pureFrame)
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toContain("path denied: /outside/x.rs")
+  // No main-relative spelling exists outside `/repo`, so it is asserted unchanged.
+  expect((calls[0] as Record<string, unknown>).resources).toEqual(["/outside/x.rs"])
+})
+
+// SAVE — a populated always-allow set rides the SAME single call as `resources`,
+// main-anchored, because what it stores is what the next decision matches.
+
+test("fsScopeDecision maps a populated save alongside resources in ONE call", async () => {
+  const { permission, calls } = scopeRulePermission([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "src/**", effect: "allow" },
+  ])
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/repo/src/a.rs"],
+    ["/repo/src/**"],
+    pureFrame,
+  )
+  expect(d.allowed).toBe(true)
+  expect(calls).toHaveLength(1)
+  const args = calls[0] as Record<string, unknown>
+  expect(args.resources).toEqual(["src/a.rs"])
+  // Mapped lexically (no canonicaliser, so a glob tail survives) into the same frame.
+  expect(args.save).toEqual(["src/**"])
+})
+
+// UNRESOLVABLE FRAME ROOT — fail closed BEFORE any assert: nothing escapes, in
+// any spelling, with or without a `save` set.
+
+test("fsScopeDecision refuses when the frame root cannot be resolved and never asserts", async () => {
+  const nullFrame = {
+    resolveRoot: async () => null,
+    canonicalise: (p: string) => p,
+  }
+  const { permission, calls } = stubPermission()
+  const d = await fsScopeDecision(
+    permission,
+    v2Context(),
+    ["/repo/src/a.rs"],
+    undefined,
+    nullFrame,
+  )
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toContain("main checkout root unavailable")
+  expect(calls).toHaveLength(0)
+
+  // A populated `save` does not escape either.
+  const withSave = stubPermission()
+  const ds = await fsScopeDecision(
+    withSave.permission,
+    v2Context(),
+    ["/repo/src/a.rs"],
+    ["/repo/src/**"],
+    nullFrame,
+  )
+  expect(ds.allowed).toBe(false)
+  expect(ds.reason).toContain("main checkout root unavailable")
+  expect(withSave.calls).toHaveLength(0)
 })
 
 // MAIN-ANCHORED RESOURCE — the pure path→resource mapping.
