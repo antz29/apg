@@ -260,6 +260,102 @@ function scopeDenyingPaths(deniedPaths: readonly string[]): {
   return { permission, calls }
 }
 
+/** An opencode edit rule: `{ action, resource, effect }`, evaluated in order. */
+interface ScopeRule {
+  action: string
+  resource: string
+  effect: "allow" | "deny" | "ask"
+}
+
+/** Whole-resource glob match: `*` spans `/` (zero or more), `?` is exactly one
+ *  character; backslashes normalise to `/`. No prefix or substring magic — the
+ *  pattern must match the ENTIRE resource. */
+function scopeRuleMatches(pattern: string, resource: string): boolean {
+  const source = pattern
+    .replace(/\\/g, "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".")
+  return new RegExp(`^${source}$`).test(resource.replace(/\\/g, "/"))
+}
+
+/** A stubbed `ctx.permission` that models opencode's edit decision over an
+ *  ORDERED rule list in TWO stages: per resource the LAST matching rule wins and
+ *  no match falls back to `ask` (never allow), then across the resources of ONE
+ *  call any `deny` -> deny, else any `ask` -> ask, else allow. A later specific
+ *  `allow` therefore overrides an earlier broad `*` `deny` — the any-deny
+ *  precedence exists only across resources, never across rules. `allow`
+ *  resolves; `deny`/`ask` throw an Error naming the offending resource so
+ *  `fsScopeDecision` reduces it to `{ allowed: false, reason }`. */
+function scopeRulePermission(rules: readonly ScopeRule[]): {
+  permission: { assert: (args: unknown) => Promise<void> }
+  calls: unknown[]
+} {
+  const calls: unknown[] = []
+  const permission = {
+    assert: async (args: unknown): Promise<void> => {
+      calls.push(args)
+      const { action, resources } = args as { action: string; resources: readonly string[] }
+      // Stage 1 — per resource, the last rule that matches action + resource wins.
+      const effects = resources.map((resource) => {
+        let effect: ScopeRule["effect"] = "ask"
+        for (const rule of rules) {
+          if (rule.action === action && scopeRuleMatches(rule.resource, resource)) effect = rule.effect
+        }
+        return effect
+      })
+      // Stage 2 — across this call's resources only.
+      const refusal = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : null
+      if (refusal === null) return
+      const hit = resources[effects.indexOf(refusal)]
+      throw new Error(refusal === "deny" ? `path denied: ${hit}` : `path asks for approval: ${hit}`)
+    },
+  }
+  return { permission, calls }
+}
+
+// ORDERED RULES — the two-stage edit decision `scopeRulePermission` models.
+
+test("scopeRulePermission lets a later worktree allow override the broad `*` deny and rejects its absolute spelling", async () => {
+  // This repo's core-implementer grant shape: deny everything, then allow the
+  // worktree globs. The later, more specific allow must win — a
+  // deny-wins-over-the-rule-list implementation refuses the worktree path here.
+  const { permission, calls } = scopeRulePermission([
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "apg/.worktrees/*/**", effect: "allow" },
+  ])
+  const anchored = "apg/.worktrees/fs-scope-frame/opencode-suite/lib/apg.test.ts"
+  await permission.assert({ action: "edit", resources: [anchored] })
+  expect(calls).toHaveLength(1)
+
+  // The SAME file in its absolute spelling matches neither pattern as written
+  // (the allow is worktree-relative), so it falls through to the broad deny —
+  // main-anchoring the resource is what makes the override possible.
+  await expect(
+    permission.assert({ action: "edit", resources: [`/repo/${anchored}`] }),
+  ).rejects.toThrow(`path denied: /repo/${anchored}`)
+})
+
+test("scopeRulePermission asks on no match and refuses a call when ANY resource is denied", async () => {
+  // No matching rule is `ask` — never allow.
+  const noMatch = scopeRulePermission([{ action: "edit", resource: "src/**", effect: "allow" }])
+  await expect(
+    noMatch.permission.assert({ action: "edit", resources: ["apg/notes.md"] }),
+  ).rejects.toThrow("path asks for approval: apg/notes.md")
+
+  // Stage 2 is across the resources of ONE call: an allowed source plus a denied
+  // destination refuses the whole operation, even though the two verdicts come
+  // from different rules and the broad deny comes FIRST in the list.
+  const { permission } = scopeRulePermission([
+    { action: "edit", resource: "*", effect: "deny" },
+    { action: "edit", resource: "src/**", effect: "allow" },
+  ])
+  await expect(
+    permission.assert({ action: "edit", resources: ["src/a.rs", "outside/b.rs"] }),
+  ).rejects.toThrow("path denied: outside/b.rs")
+  await permission.assert({ action: "edit", resources: ["src/a.rs", "src/b.rs"] })
+})
+
 // FAIL-CLOSED — no permission surface, or one whose `assert` is not a function.
 
 test("fsScopeDecision fail-closes when the permission surface is absent", async () => {
