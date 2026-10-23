@@ -129,7 +129,7 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
         // Scanner-replace (GraphModel-SPEC.md / PlanExecution-SPEC.md): a
         // present (scanned) node at an FQN a `planned` node holds supersedes
         // the planned placeholder. Edges are FQN-keyed, so every incident edge
-        // — the `Contains` hierarchy, the spine (`drives`/`realises`/
+        // — the `Contains` hierarchy, the spine (`driven-by`/`realises`/
         // `implemented-by`/`requires`/`represents`), and `details`/`reviews` —
         // re-points to the real node automatically.
         Some(existing)
