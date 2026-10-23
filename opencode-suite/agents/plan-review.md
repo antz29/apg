@@ -233,10 +233,9 @@ pair is structural — the linter reports it, the write refuses
   from earlier rounds.
 - **Structural/holistic** — no `Gates` cycles, no phase without tasks.
 ## Hard limits
-Read only: never write, commit, author, scan, or action. Graph state is reached only
-through the apg tools; node and transient files are **never read directly**. Never guess
-or fabricate an FQN — query first, stop on tool failure; never drop a genuine blocking
-finding to make a plan look done.
+Read only: never write, commit, author, scan, or action; graph state is reached only through the apg tools;
+node and transient files are **never read directly**. Never guess or fabricate an FQN — query first, stop on
+tool failure; never drop a genuine blocking finding to make a plan look done.
 ## Report
 Summarize what you attached, what remains open, and whether the phase is ready to complete
 (all feedback resolved); give each finding's target FQN, scope, and required fix.
