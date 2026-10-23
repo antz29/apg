@@ -351,6 +351,75 @@ function scratchFsRepo(): string {
   return repo
 }
 
+/// A scratch main checkout carrying a REAL linked git worktree at
+/// `<repo>/apg/.worktrees/demo` — the documented layout `mainCheckoutRoot`
+/// decodes first, so the frame root is the main checkout while the directory
+/// being processed is the worktree — plus a denied DESTINATION inside the main
+/// checkout (never created: it is a destination) and a path genuinely outside
+/// the checkout. Every path is returned raw AND canonical: macOS `os.tmpdir()`
+/// sits behind the `/var` → `/private/var` symlink, so the frame root the
+/// resolver returns is the `realpathSync` spelling, never the `mkdtemp` string.
+/// Callers clean up `path.dirname(repo)` in `finally`, like `scratchFsRepo`.
+function scratchWorktreeFsRepo(): {
+  repo: string
+  repoReal: string
+  worktree: string
+  worktreeReal: string
+  file: string
+  fileReal: string
+  deniedDestination: string
+  deniedDestinationReal: string
+  outside: string
+  outsideReal: string
+} {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-worktree-"))
+  const repo = path.join(base, "repo")
+  const worktree = path.join(repo, "apg", ".worktrees", "demo")
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true })
+  fs.writeFileSync(path.join(repo, "src", "a.rs"), "fn a() {}\n")
+  fs.writeFileSync(path.join(repo, "src", "b.rs"), "fn b() {}\n")
+
+  // A silently broken worktree would make the worktree scenarios assert nothing,
+  // so every git step is checked and a failure rethrows the captured stderr.
+  const git = (cmd: string[], cwd: string) => {
+    const out = Bun.spawnSync({ cmd, cwd, stdout: "pipe", stderr: "pipe" })
+    if (out.exitCode !== 0) {
+      throw new Error(`git ${cmd.join(" ")} failed: ${out.stderr.toString()}`)
+    }
+  }
+  git(["init", "-q", "-b", "main"], repo)
+  git(["config", "user.email", "apg@localhost"], repo)
+  git(["config", "user.name", "apg"], repo)
+  git(["add", "-A"], repo)
+  git(["commit", "-q", "-m", "init"], repo)
+  fs.mkdirSync(path.join(repo, "apg", ".worktrees"), { recursive: true })
+  git(["worktree", "add", "-b", "demo", worktree, "HEAD"], repo)
+
+  const file = path.join(worktree, "scratch.txt")
+  fs.writeFileSync(file, "scratch\n")
+  const outside = path.join(base, "outside.txt")
+  fs.writeFileSync(outside, "outside\n")
+  const deniedDestination = path.join(repo, "denied", "scratch-moved.txt")
+
+  const repoReal = fs.realpathSync(repo)
+  return {
+    repo,
+    repoReal,
+    worktree,
+    worktreeReal: fs.realpathSync(worktree),
+    file,
+    fileReal: fs.realpathSync(file),
+    deniedDestination,
+    // Nothing exists yet below `<repo>`, so the deepest EXISTING ancestor
+    // (`repoReal`) carries the canonical prefix and the destination tail is
+    // re-appended lexically — the rule `canonicalPath` applies to a non-existent
+    // destination.
+    deniedDestinationReal: path.join(repoReal, "denied", path.basename(deniedDestination)),
+    outside,
+    outsideReal: fs.realpathSync(outside),
+  }
+}
+
 /** A stubbed `ctx.permission` modelling opencode's `edit` decision: `assert`
  *  resolves (allow) unless the single call's `resources` include one of
  *  `denied`, in which case it throws a denial naming that path. `calls` records
