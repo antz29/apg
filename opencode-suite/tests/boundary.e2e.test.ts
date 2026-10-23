@@ -382,7 +382,7 @@ function scratchWorktreeFsRepo(): {
   // A silently broken worktree would make the worktree scenarios assert nothing,
   // so every git step is checked and a failure rethrows the captured stderr.
   const git = (cmd: string[], cwd: string) => {
-    const out = Bun.spawnSync({ cmd, cwd, stdout: "pipe", stderr: "pipe" })
+    const out = Bun.spawnSync({ cmd: ["git", ...cmd], cwd, stdout: "pipe", stderr: "pipe" })
     if (out.exitCode !== 0) {
       throw new Error(`git ${cmd.join(" ")} failed: ${out.stderr.toString()}`)
     }
