@@ -14,6 +14,7 @@ import {
   noteIfEmpty,
   isQueryError,
   expectQueryOk,
+  mainAnchoredResource,
   resolveProjectPath,
   findSymbolRebaseColumns,
   scopeProjectRequirements,
@@ -499,4 +500,38 @@ test("fsScopeDecision refuses when a mv/cp DESTINATION is denied", async () => {
     "/repo/src/a.rs",
     "/repo/dst/b.rs",
   ])
+})
+
+// MAIN-ANCHORED RESOURCE — the pure path→resource mapping.
+
+test("mainAnchoredResource maps a path inside the frame root to a bare `/`-separated resource", () => {
+  // Both arguments are taken as already canonical: the frame root is a stand-in
+  // string and the mapping does no fs/git/process work.
+  const root = "/repo"
+  // Strictly below the root: the bare spelling an agent's `edit` globs are
+  // written against, with no leading `/`.
+  expect(mainAnchoredResource("/repo/src/a.rs", root)).toBe("src/a.rs")
+  // A nested worktree path keeps its full depth.
+  expect(mainAnchoredResource("/repo/apg/.worktrees/fs-scope-frame/x.txt", root)).toBe(
+    "apg/.worktrees/fs-scope-frame/x.txt",
+  )
+})
+
+test("mainAnchoredResource leaves a root-equal, outside, or escaping path unchanged absolute", () => {
+  const root = "/repo"
+  // Root-equal has no non-empty relative spelling to offer.
+  expect(mainAnchoredResource("/repo", root)).toBe("/repo")
+  // Genuinely outside the frame root.
+  expect(mainAnchoredResource("/other/x.rs", root)).toBe("/other/x.rs")
+  // Escaping the root via `..`.
+  expect(mainAnchoredResource("/repo/../x.rs", root)).toBe("/repo/../x.rs")
+  // A sibling whose STRING starts with the root is not inside it: the relative
+  // form is `../repo-other/x.rs`, so it must stay absolute.
+  expect(mainAnchoredResource("/repo-other/x.rs", root)).toBe("/repo-other/x.rs")
+})
+
+test("mainAnchoredResource takes no canonicaliser argument", () => {
+  // Canonicalisation is fsScopeDecision's injected seam, never this mapping's:
+  // the helper is exactly `(path, root)` and stays pure.
+  expect(mainAnchoredResource.length).toBe(2)
 })
