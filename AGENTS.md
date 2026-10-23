@@ -449,8 +449,8 @@ FQN rendering. See *The installed binary is the contract* above.
    "$BIN" project start demo                 # worktree + branch + branch DB copied from main's scan
    cd apg/.worktrees/demo
    "$BIN" node add requirements requirement demo-req --body "…"
-   "$BIN" node add domain value demo-val --body "…"
-   "$BIN" edge add drives requirements.requirement.demo-req domain.value.demo-val
+   "$BIN" node add domain service demo-svc --body "…"
+   "$BIN" edge add driven-by domain.service.demo-svc requirements.requirement.demo-req
    "$BIN" node add requirements requirement demo-req --body dup  # must refuse (use update/rm)
    "$BIN" plan add demo --title Demo --strategy "…"
    "$BIN" plan add demo phase 1 --title P1 --deliverable "…" --satisfies demo-req
@@ -658,22 +658,25 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 - Authored node labels (the `apg/layers/` node files): `Requirement` (fqn,
   body, feature), `Stakeholder`, `User`, `DomainGroup` (the `domain.group`
   type — `Group` is a reserved word; `attribute` core/supporting/generic,
-  optional `root`), `Entity`, `Value`, `Service`, `System`, `Container`
-  (`kind` app/service/db/queue), `Component`, `Person`, `Constraint` (prose;
-  local ones carry `attaches_to`), `Note`. Transient labels: `Plan`,
+  optional `root`), `Actor` (the `domain.actor` type), `Entity`, `Value`,
+  `Service`, `System`, `Container` (`kind` app/service/db/queue),
+  `Component`, `Person`, `Role` (the `solution.role` type; `applies-to`
+  container|component|both), `Constraint` (prose; tier-scoped — its layer
+  is its scope, it names no node), `Note`. Transient labels: `Plan`,
   `PlanPhase`, `Task` (kind/tier/status), `Feedback` (body/status/
   disposition). The four Implementation kinds may carry `status: planned` for
   not-yet-built code (see "Planned Implementation nodes" below).
-- Authored edge labels: `Contains` (hierarchy), `Drives` (Requirement →
-  Group/Entity/Value/Service), `RealisedBy` (Group/Entity/Service →
-  System/Container/Component), `SpecImplementedBy` (the DB rel-table name for
-  the authored `implemented-by` kind: System/Container/Component → code),
-  `Calls` (Service→Service), `Publishes`/`Subscribes` (Service → event
-  Entity), `DependsOn` (Requirement→Requirement), `Uses` (Person→System),
-  `Represents` (User→Entity, Entity→Person), `Details` (a note → exactly one
+- Authored edge labels: `Contains` (hierarchy), `Requires` (Stakeholder/User →
+  Requirement), `DrivenBy` (Service → Requirement), `Reads`/`Writes` (Service
+  → Entity of its leaf Group), `Calls` (Actor/Service → Service),
+  `Publishes` (Service → event Entity), `Subscribes` (Service/Actor → event
+  Entity), `Realises` (Component → Service), `IsRole` (Container/Component →
+  Role), `Uses` (Person → Component), `Represents` (Actor → User, Person →
+  Actor), `SpecImplementedBy` (the DB rel-table name for the authored
+  `implemented-by` kind: Component → code), `Details` (a note → exactly one
   code FQN — the single implementation-layer code identity the note deepens).
   Transient: `Gates` (PlanPhase→PlanPhase), `Satisfies` (PlanPhase→
-  Requirement), `Reviews` (Feedback→any). Dependency and `contains` trees are
+  Requirement), `Reviews` (Feedback→any). `contains` trees are
   acyclic; a dangling FQN is a write-time error (see the layers section
   below).
 
@@ -698,8 +701,8 @@ matching in in the target's); a pairing mismatch fails at scan. The six layers:
 | layer | types |
 |---|---|
 | `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
-| `domain` | `group` (attribute core/supporting/generic, optional `root`), `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
-| `solution` | `system`, `container` (kind app/service/db/queue), `component`, `person`, `constraint` |
+| `domain` | `group` (attribute core/supporting/generic, optional `root`), `actor`, `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
+| `solution` | `system`, `container` (kind app/service/db/queue), `component`, `person`, `role` (requires `applies-to` container/component/both), `constraint` |
 | `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
 | `global` | `constraint` (the laws) |
 | `plans` (transient) | `PlanPhase`, `Task`, planned Implementation nodes — `.trans/plans/` only |
@@ -709,13 +712,22 @@ time; whether the prose holds is assessed by review, never executed. A
 `domain-rule`-style law is a `constraint` node, not an invariant.
 
 The **spine** threads the tiers end to end:
-`Stakeholder ⊃ Requirement —drives→ Domain —realised-by→ Solution
-—implemented-by→ code`. Authored edge kinds: `contains`, `drives`,
-`realised-by`, `implemented-by` (target is a code FQN, validated against the
+`Stakeholder/User —requires→ Requirement ←driven-by— Service ←realises—
+Component —implemented-by→ code`; the why-side hops (requires, driven-by,
+realises) point from the concrete tier toward the abstract one. Authored
+edge kinds: `requires`
+(Stakeholder/User → Requirement), `contains` (hierarchy), `driven-by`
+(Service → Requirement — every Service is driven by at least one Requirement
+and every Requirement is driven by at least one Service), `reads`/`writes`
+(Service → Entity of its leaf Group), `calls` (Actor/Service → Service),
+`publishes` (Service → event Entity), `subscribes` (Service/Actor → event
+Entity), `realises` (Component → Service — every Service is realised by at
+least one Component), `is-role` (Container/Component → Role), `uses` (Person
+→ Component), `represents` (Actor → User, Person → Actor), `implemented-by`
+(target is a code FQN, validated against the
 scanned graph: resolves → real; planned → pending, not an error; gone →
-drift, an error), `calls`, `publishes`/`subscribes` (Service → event Entity),
-`depends-on`, `uses` (Person → System), `represents` (User → Entity, Entity →
-Person), `details` (a note → exactly one code FQN — the single
+drift, an error — exactly one Component claims each code node), `details`
+(a note → exactly one code FQN — the single
 implementation-layer code identity the note deepens). Any requirement
 traces down to the code that
 implements it; any code traces up to the why. A requirement is `delivered`
@@ -750,7 +762,7 @@ asserted by the binary.
   `Feedback` on it is `resolved` — `apg plan complete` and the verify gate
   refuse otherwise. Feedback (and the plan itself) lives in the `.trans`
   mirrors and dies with the branch.
-- Query patterns: the spine `MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn`; plan health via the suite tools (`apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
+- Query patterns: the spine `MATCH (r:Requirement)<-[:DrivenBy]-(:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(code) RETURN r.fqn, code.fqn`; plan health via the suite tools (`apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
 - `agent-builder` scaffolds agents **into the repo it is run against**. When
   that repo is the apg repo itself, its `.opencode/agents/**` are consumer
   artifacts refreshed out-of-band with the **installed (released)** binary —
