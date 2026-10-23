@@ -462,7 +462,10 @@ test.skipIf(!enabled)(
 test.skipIf(!enabled)(
   "e2e: fsScopeDecision gates a real unlink — allow-on-resolve removes, deny-on-throw refuses",
   async () => {
-    const repo = scratchFsRepo()
+    // macOS `os.tmpdir()` sits behind the `/var` → `/private/var` symlink, and
+    // the decision's frame root is the canonical spelling: every path the case
+    // asserts is derived from the canonical repo, never the raw `mkdtemp` string.
+    const repo = fs.realpathSync(scratchFsRepo())
     try {
       // allow: `assert` resolves, so the real op mutates the tree.
       const allowedFile = path.join(repo, "src", "a.rs")
@@ -478,16 +481,23 @@ test.skipIf(!enabled)(
       expect(existsSync(allowedFile)).toBe(false)
 
       // deny: `assert` throws, so the decision carries the reason and the gated
-      // op never runs — the tree is untouched.
+      // op never runs — the tree is untouched. The stub keys on the
+      // MAIN-ANCHORED resource the decision asserts (`outside.txt`), never the
+      // absolute path: `stubPermission`'s exact-membership check compares
+      // verbatim, so an absolute key would silently ALLOW.
       const deniedFile = path.join(repo, "outside.txt")
+      const denyStub = stubPermission(["outside.txt"])
       const deny = await fsScopeDecision(
-        stubPermission([deniedFile]).permission,
+        denyStub.permission,
         v2Context(repo),
         [deniedFile],
         [deniedFile],
       )
       expect(deny.allowed).toBe(false)
       expect(deny.reason).toContain("granted globs")
+      expect((denyStub.calls[0] as { resources: readonly string[] }).resources).toEqual([
+        "outside.txt",
+      ])
       if (deny.allowed) fs.unlinkSync(deniedFile)
       expect(existsSync(deniedFile)).toBe(true)
     } finally {
@@ -499,7 +509,9 @@ test.skipIf(!enabled)(
 test.skipIf(!enabled)(
   "e2e: apg_mv asserts BOTH endpoints in ONE call — a denied source or destination refuses the move",
   async () => {
-    const repo = scratchFsRepo()
+    // Canonical frame spelling: every asserted value below is BARE
+    // main-relative, derived from the root the decision resolves.
+    const repo = fs.realpathSync(scratchFsRepo())
     try {
       // Both endpoints allowed: ONE assert call carries BOTH resolved paths, and
       // the gated rename runs.
@@ -514,15 +526,19 @@ test.skipIf(!enabled)(
       )
       expect(allow.allowed).toBe(true)
       expect(allowStub.calls).toHaveLength(1)
-      expect((allowStub.calls[0] as { resources: readonly string[] }).resources).toEqual([from, to])
+      expect((allowStub.calls[0] as { resources: readonly string[] }).resources).toEqual([
+        "src/a.rs",
+        "src/a-moved.rs",
+      ])
       if (allow.allowed) fs.renameSync(from, to)
       expect(existsSync(to)).toBe(true)
       expect(existsSync(from)).toBe(false)
 
       // A denied DESTINATION refuses the whole move: the source is allowed, but
       // the SAME single call carries the denied destination, so nothing moves.
+      // Both the deny key and the reason pin use the anchored spelling.
       const deniedTo = path.join(repo, "outside-moved.rs")
-      const dstStub = stubPermission([deniedTo])
+      const dstStub = stubPermission(["outside-moved.rs"])
       const dstDeny = await fsScopeDecision(
         dstStub.permission,
         v2Context(repo),
@@ -530,7 +546,7 @@ test.skipIf(!enabled)(
         [to, deniedTo],
       )
       expect(dstDeny.allowed).toBe(false)
-      expect(dstDeny.reason).toContain(deniedTo)
+      expect(dstDeny.reason).toContain("outside-moved.rs")
       expect(dstStub.calls).toHaveLength(1)
       if (dstDeny.allowed) fs.renameSync(to, deniedTo)
       expect(existsSync(to)).toBe(true)
@@ -539,7 +555,7 @@ test.skipIf(!enabled)(
       // A denied SOURCE is likewise refused.
       const deniedFrom = path.join(repo, "outside.txt")
       const srcDeny = await fsScopeDecision(
-        stubPermission([deniedFrom]).permission,
+        stubPermission(["outside.txt"]).permission,
         v2Context(repo),
         [deniedFrom, to],
         [deniedFrom, to],
@@ -556,7 +572,7 @@ test.skipIf(!enabled)(
 test.skipIf(!enabled)(
   "e2e: apg_cp asserts BOTH endpoints in ONE call — a denied destination refuses the copy",
   async () => {
-    const repo = scratchFsRepo()
+    const repo = fs.realpathSync(scratchFsRepo())
     try {
       const from = path.join(repo, "src", "a.rs")
       const to = path.join(repo, "src", "a-copy.rs")
@@ -573,10 +589,11 @@ test.skipIf(!enabled)(
       expect(existsSync(to)).toBe(true)
       expect(existsSync(from)).toBe(true) // the source survives a copy
 
-      // A denied destination refuses the copy: nothing is written.
+      // A denied destination refuses the copy: nothing is written. The stub keys
+      // on the anchored destination (`outside-copy.rs`), never the absolute path.
       const deniedTo = path.join(repo, "outside-copy.rs")
       const deny = await fsScopeDecision(
-        stubPermission([deniedTo]).permission,
+        stubPermission(["outside-copy.rs"]).permission,
         v2Context(repo),
         [from, deniedTo],
         [from, deniedTo],
