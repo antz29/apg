@@ -779,28 +779,21 @@ test.skipIf(!enabled || !binary)(
       expect(await sessionLiveAt(live.socket)).toBe(true)
 
       // A routed durable mutation is admitted while the session is live, and
-      // stays buffered (no node file on disk) until save.
+      // stays buffered (no node file on disk) until save. A `global` constraint
+      // carries no whole-model cardinality obligation, so `session save`'s
+      // `validate_cardinalities(Context::Save)` accepts a bare one (a lone
+      // `requirement` would be refused: it must be driven-by a Service, §3.4).
       const nodeFile = path.join(
         repo,
         "apg",
         "layers",
-        "requirements",
-        "requirement",
+        "global",
+        "constraint",
         "session-node.json",
       )
-      const added = run([
-        "node",
-        "add",
-        "requirements",
-        "requirement",
-        "session-node",
-        "--body",
-        "routed",
-      ])
+      const added = run(["node", "add", "global", "constraint", "session-node", "--body", "routed"])
       expect(added.exitCode).toBe(0)
-      expect(added.stdout.toString().trim()).toBe(
-        "Added node requirements.requirement.session-node",
-      )
+      expect(added.stdout.toString().trim()).toBe("Added node global.constraint.session-node")
       expect(existsSync(nodeFile)).toBe(false)
 
       // A SECOND detached start while one is live fails cleanly: `apg session
