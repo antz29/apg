@@ -502,8 +502,8 @@ pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
 ///    `creates` over a still-planned FQN counts exactly like a `modifies` over
 ///    real code, and a renames/moves destination counts. FQNs are compared by
 ///    language-agnostic identity, so `rust.apg.x` ≡ `apg.x`. This walk never
-///    follows the Requirement `drives` Service / Component `realises` Service /
-///    `implemented-by` code spine — ONLY the merge-base delta's claims widen
+///    follows the Requirement ←driven-by— Service ←realises— Component
+///    —implemented-by→ code spine — ONLY the merge-base delta's claims widen
 ///    scope; an unchanged pre-existing claim is exempt.
 ///
 /// 2. **Requirement-Satisfies gate** — every requirement the delta adds or
