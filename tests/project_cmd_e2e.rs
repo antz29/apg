@@ -291,7 +291,7 @@ fn tier_edge(
 /// service and is `implemented-by` its code FQN), plus the
 /// implementation-layer notes (each detailing exactly one code FQN —
 /// notes are confined to the implementation layer), threaded through the
-/// strictly sequential spine (Requirement —drives→ Service ←realises—
+/// strictly sequential spine (Requirement ←driven-by— Service ←realises—
 /// Component —implemented-by→ code). Bodies are condensed from
 /// plans/SPEC-apg-projects.md §1–6 and the old-model bootstrap
 /// apg/specs/apg-projects.jsonl — the lossy mapping is the spec-writer's
