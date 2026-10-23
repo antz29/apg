@@ -27,6 +27,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.prompt-corpus-model-current",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.spec-body-budget",
       "properties": {}
     },
@@ -37,7 +42,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.prompt-corpus-model-current",
+      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
       "properties": {}
     }
   ],

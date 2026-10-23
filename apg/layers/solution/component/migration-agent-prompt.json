@@ -2,12 +2,12 @@
   "layer": "solution",
   "type": "component",
   "name": "migration-agent-prompt",
-  "body": "The distributed migration-agent template: it works a changelog-sliced migration guide by rewriting a repository's layers from the layout's old durable-spec model to the running binary's model, validating by scan and spec lint.",
+  "body": "The distributed migration-agent template: it works a changelog-sliced migration guide by rewriting a repository's layers from the layout version's durable-spec model to the running binary's model, validating by scan and spec lint.",
   "properties": {},
   "out": [
     {
-      "kind": "realises",
-      "target": "domain.service.agent-roster",
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/migration-agent.md",
       "properties": {}
     },
     {
@@ -16,8 +16,8 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "opencode-suite/agents/migration-agent.md",
+      "kind": "realises",
+      "target": "domain.service.agent-roster",
       "properties": {}
     }
   ],

@@ -12,6 +12,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.agent-builder-env-shell-grant",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.agent-builder-optional-release-agent",
       "properties": {}
     },
@@ -22,27 +27,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.push-tag-human-approved-release-only",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.prompt-permission-guard-surfaces",
+      "target": "requirements.requirement.opencode-permission-guide",
       "properties": {}
     },
     {
       "kind": "requires",
       "target": "requirements.requirement.prompt-corpus-body-budget",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.prompt-permission-rule-semantics",
       "properties": {}
     },
     {
@@ -57,17 +47,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.prompt-two-gate-model-stated",
+      "target": "requirements.requirement.prompt-permission-guard-surfaces",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.agent-builder-env-shell-grant",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.opencode-permission-guide",
+      "target": "requirements.requirement.prompt-permission-rule-semantics",
       "properties": {}
     },
     {
@@ -78,6 +63,26 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.prompt-structure-enforced-deterministically",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.prompt-two-gate-model-stated",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.push-tag-human-approved-release-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
       "properties": {}
     }
   ],

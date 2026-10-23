@@ -22,12 +22,17 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.prompt-corpus-model-current",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.prompt-corpus-model-current",
+      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
       "properties": {}
     }
   ],
