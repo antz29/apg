@@ -1385,10 +1385,10 @@ mod e2e {
     /// BOTH halves of every AUTHORED-pair edge. The code-targeted edge kinds
     /// (`implemented-by`, `details`) carry only the source's out half — a code
     /// identity has no node file. Phase 4 added the serialized-properties
-    /// column, so the authored `drives` edge property now round-trips on both
-    /// halves; the exact full-fidelity round-trip (arbitrary keys, `Entity`
-    /// `kind`, the session's incremental merge path) is pinned by phase 4's own
-    /// e2e task.
+    /// column, so the authored `driven-by` edge property now round-trips
+    /// on both halves; the exact full-fidelity round-trip (arbitrary keys,
+    /// `Entity` `kind`, the session's incremental merge path) is pinned by
+    /// phase 4's own e2e task.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn node_files_from_db_reconstructs_the_projected_columns() {
