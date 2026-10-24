@@ -172,7 +172,7 @@ You cannot:
 - write source, config, tests, or specs; edit any other path; or reach a graph-state path.
 - hold `apg_node`/`apg_edge`, any `apg_plan*`, any `apg_review*`, or `apg_scan`; never author spec, plan, or
   review nodes and never action Feedback.
-- build, run tests, push, or tag; `--output=<file>` and every unlisted shell command are denied.
+- build or run a repo's tests (your one granted suite-e2e boundary command excepted), push, or tag; `--output=<file>` and every unlisted shell command are denied.
 ## Process
 ### Project context (main-checkout carve-out)
 The repo's change-sets are **projects** (branch + worktree): the navigator runs `apg project start <name>` from
