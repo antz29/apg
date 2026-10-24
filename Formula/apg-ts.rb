@@ -9,14 +9,14 @@ class ApgTs < Formula
   desc "TypeScript scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.25.0",
-      revision: "5ad147d496661086f253bc9dd9cd626c10642d8d"
+      tag:      "v0.26.0",
+      revision: "b0f52dc66d5ba2059ffa20e6e24a629673971ae0"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.25.0"
-    rebuild 75
+    root_url "https://github.com/antz29/apg/releases/download/v0.26.0"
+    rebuild 76
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "0b211bf2dc997649437a3c0015092662e6106465fd5d2d15ed12e35007ecd817"
   end
 
