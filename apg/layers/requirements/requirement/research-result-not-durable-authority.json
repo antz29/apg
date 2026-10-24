@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "research-result-not-durable-authority",
-  "body": "The stage absorbs the scratch finding into its own present-tense truth, the durable spec and plan cite no scratch path, the result records its sources, and fetched content stays untrusted.",
+  "body": "The stage restates the scratch finding as its own present-tense truth, the durable spec and plan carry the restated fact, the result records its sources, and fetched content stays untrusted.",
   "properties": {},
   "out": [],
   "in": [
@@ -12,13 +12,13 @@
       "properties": {}
     },
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.spec-author",
+      "kind": "driven-by",
+      "source": "domain.service.research-escalation",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.research-escalation",
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }
   ]
