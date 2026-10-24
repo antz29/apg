@@ -22,6 +22,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.distributed-agent-roster-documented",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
       "properties": {}
     },
@@ -87,7 +92,7 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.distributed-agent-roster-documented",
+      "target": "requirements.requirement.navigator-dispatches-migration-agent",
       "properties": {}
     }
   ],

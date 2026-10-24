@@ -32,6 +32,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.distributed-agent-roster-documented",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
       "properties": {}
     },
@@ -87,7 +92,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.distributed-agent-roster-documented",
+      "target": "requirements.requirement.navigator-dispatches-migration-agent",
       "properties": {}
     }
   ],
