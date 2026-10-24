@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "navigator-prose-line-budget",
+  "body": "The navigator's migration-agent roster purpose is restated in two long prose lines (up to 142 characters) to hold the roster addition within a one-line body-budget delta; upgrade the layout if the navigator body cap rises or the allowlist prose is next edited.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/agents/codebase-navigator.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
