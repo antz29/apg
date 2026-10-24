@@ -12,12 +12,17 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.scratch-surface",
+      "target": "domain.service.agent-research",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.agent-research",
+      "target": "domain.service.scratch-surface",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/researcher.md",
       "properties": {}
     }
   ],
