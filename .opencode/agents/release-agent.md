@@ -105,6 +105,11 @@ per-command approvals.
 4. **Empty results are questions, not answers.** Broaden the query. If you
    still cannot find it, stop and report to the coordinator.
 5. **Never fabricate** FQNs, paths, versions, SHAs, or line numbers.
+6. **A stale graph is a real answer.** You have no scan grant — if a graph
+   tool errors or returns nothing, stop and report the exact failure to the
+   coordinator, who runs the scan.
+7. **When in doubt, query more.** Queries cost nothing; assumptions cost
+   trust.
 
 ## Tool failures are terminal
 
@@ -133,6 +138,10 @@ git trick to reach a denied path or verb).
 - You write only the six release surfaces above, and only with `edit`.
 
 ## Release procedure (one command per shell call — no chaining)
+
+Exactly one command runs per shell call: no allowed pattern contains `&&`,
+`|`, `;`, `$()`, or redirection, and whole-value matching refuses a chained
+(`&&`, `;`, `|`) or redirected command, so each command runs on its own.
 
 1. **Preconditions.** Check `git branch --show-current` (must be `main`) and
    `git status` (must be clean). Read the current version from `Cargo.toml`.

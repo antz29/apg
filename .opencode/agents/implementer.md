@@ -475,8 +475,10 @@ reviewer:    apg_review_reject <f>                               → status = op
 ## Shell policy (deny-by-default, no chaining)
 
 - Only the exact allowed patterns match; everything else is denied.
-- **No pattern contains `&&`, `|`, `;`, `$()`, or redirection — a chained
-  command NEVER matches and is DENIED.** Run one command per shell call.
+- **Exactly one command runs per shell call:** no allowed pattern contains
+  `&&`, `|`, `;`, `$()`, or redirection, and whole-value matching refuses a
+  chained (`&&`, `;`, `|`) or redirected command — so each command runs on its
+  own.
 - The shell file-read commands are not granted (`cat`, `head`, `tail`, `dd`,
   `rg`, `grep`, `git grep`, `find`) — use the `read`/`grep`/`glob` tools.
 - **Git (read)**: `git status`, `git diff`, `git log`, `git show`.

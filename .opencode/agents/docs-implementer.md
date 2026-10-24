@@ -208,7 +208,10 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 
 ## Shell policy (deny-by-default, no chaining)
 
-- Only exact allowed patterns; **no `&&`, `|`, `;`, `$()`, or redirection**.
+- Only exact allowed patterns; **exactly one command runs per shell call** —
+  no pattern contains `&&`, `|`, `;`, `$()`, or redirection, and whole-value
+  matching refuses a chained (`&&`, `;`, `|`) or redirected command, so each
+  command runs on its own.
 - No shell file-read commands (`cat`, `head`, `tail`, `dd`, `rg`, `grep`,
   `git grep`, `find`).
 - **Git**: `git status`/`diff`/`log`/`show`; write `git add` + `git commit`

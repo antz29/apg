@@ -297,8 +297,10 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
 
 ## Shell policy (deny-by-default, no chaining)
 
-- Only exact allowed patterns match. **No `&&`, `|`, `;`, `$()`, or
-  redirection** — one command per shell call.
+- Only exact allowed patterns match. **Exactly one command runs per shell
+  call:** no allowed pattern contains `&&`, `|`, `;`, `$()`, or redirection,
+  and whole-value matching refuses a chained (`&&`, `;`, `|`) or redirected
+  command — so each command runs on its own.
 - No shell file-read commands (`cat`, `head`, `tail`, `dd`, `rg`, `grep`,
   `git grep`, `find`).
 - **Git**: read — `git status`/`diff`/`log`/`show`; write — `git add` and
