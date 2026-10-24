@@ -152,11 +152,11 @@ scoped to exactly `.opencode/agents/**`, the repo-root `opencode.json` agent→m
 `AGENTS.md`. When a repo's codebase agents are missing or outdated, the `codebase-navigator` delegates to you
 to build or update them.
 ## Permissions
-Your grants are one ordered `{action, resource, effect}` rule list, deny-by-default, last match winning.
-**Gate 1**: a tool action is reachable only when its own grant admits it and the call passes `Tool.Options.permission`.
-**Gate 2**: the plugin's `fsScopeDecision` also asserts the `edit` action over the SAME main-anchored paths
-(the main checkout root), so a write needs both gates — which is why every code-writer grant is worktree-rooted
-`apg/.worktrees/*/<glob>` and main-root paths are denied.
+Your grants are one ordered `{action, resource, effect}` rule list, deny-by-default, last match winning. Patterns match
+a resource's whole value (`*` spans `/`, `?` matches one character). **Gate 1**: a tool action is reachable only when
+its own grant admits it and the call passes `Tool.Options.permission`. **Gate 2**: the plugin's `fsScopeDecision` also
+asserts the `edit` action over the SAME main-anchored paths (the main checkout root), so a write needs both gates —
+which is why every code-writer grant is worktree-rooted `apg/.worktrees/*/<glob>` and main-root paths are denied.
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` — repo-local and every
   `apg/.worktrees/*/` mirror; `external_directory` `/tmp/**` only.

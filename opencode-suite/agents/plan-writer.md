@@ -144,10 +144,10 @@ from the spec's proposed reality to present code: you declare not-yet-built code
 Implementation nodes** at the real FQNs where it will land; `plan done` is an implementer
 assertion, `plan complete` a milestone, and a branch scan replaces realized planned nodes.
 ## Permissions
-Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last match
-winning. Two gates stand between a call and its effect: a tool action is reachable only when
-granted by its rule and passes `Tool.Options.permission`; the plugin's `fsScopeDecision` also
-asserts `edit` over the same main-anchored paths — an edit needs both, and yours denies at gate 1.
+Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last match winning. Patterns
+match a resource's whole value (`*` spans `/`, `?` matches one character). Two gates stand between a call and its
+effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`; the plugin's
+`fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both, and yours denies at gate 1.
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local and every
   `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *`.

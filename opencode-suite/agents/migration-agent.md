@@ -131,11 +131,11 @@ execute a task is here; *which* tasks this repo needs, and what each means, is
 **data** — the guide, sliced from the repo's `CHANGELOG.md` by version, so a
 schema change ships a `### Migration` section, never a new agent.
 ## Permissions
-Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last
-match winning. Two gates stand between a call and its effect: a tool action is reachable
-only when granted by its rule and passes `Tool.Options.permission`; the plugin's
-`fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs
-both gates, so only `apg/layers/**` is writable and everything else is denied at gate 2.
+Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last match winning. Patterns
+match a resource's whole value (`*` spans `/`, `?` matches one character). Two gates stand between a call and
+its effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`;
+the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
+so only `apg/layers/**` is writable and everything else is denied at gate 2.
 You can:
 - edit only `apg/layers/**`; read/glob/grep the tree except `apg/.trans/**` (repo-local
   and every `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only

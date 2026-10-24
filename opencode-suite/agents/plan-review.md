@@ -150,10 +150,10 @@ phase's implementation — through `apg_review_*`: attach, accept, or reopen `Fe
 You hold no authoring tools (`apg_plan_add`, `apg_plan_done`/`undone`/`note`/`complete`)
 and write no files; you do hold `apg_plan_verify` and `apg_spec_lint`.
 ## Permissions
-One ordered `{action, resource, effect}` rule list, deny-by-default, last match
-winning. A tool action is reachable only when granted by its rule and passes
-`Tool.Options.permission`; the plugin's `fsScopeDecision` also asserts `edit` over
-the same main-anchored paths — an edit needs both gates, and yours denies at gate 1.
+One ordered `{action, resource, effect}` rule list, deny-by-default, last match winning. Patterns
+match a resource's whole value (`*` spans `/`, `?` matches one character). A tool action is reachable
+only when granted by its rule and passes `Tool.Options.permission`; the plugin's `fsScopeDecision`
+also asserts `edit` over the same main-anchored paths — an edit needs both gates, and yours denies at gate 1.
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local
   and every `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell

@@ -235,11 +235,11 @@ residual `misc` `File` nodes with no Module/Struct/Function facts. Only paths th
 `node_modules`, `.gitignore`, `--exclude-path` — remove have no node at all. For either class
 the ordering holds: a fact the graph carries is queried first.
 ## Permissions
-Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last
-match winning. Two gates stand between a call and its effect: a tool action is reachable only
-when granted by its rule and passes `Tool.Options.permission`; the plugin's `fsScopeDecision`
-also asserts `edit` over the same main-anchored paths — an edit needs both gates, and yours
-denies at gate 1 (you author durable notes through `apg_node`/`apg_edge`, never a file edit).
+Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last match winning. Patterns
+match a resource's whole value (`*` spans `/`, `?` matches one character). Two gates stand between a call and
+its effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`;
+the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
+and yours denies at gate 1 (you author durable notes through `apg_node`/`apg_edge`, never a file edit).
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local and every
   `apg/.worktrees/*/` mirror), and `/tmp/**` externally; dispatch via `subagent` to

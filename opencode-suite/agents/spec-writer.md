@@ -140,11 +140,11 @@ never commit, never `apg_scan`. The spine threads `Stakeholder/User —requires�
 Requirement ←driven-by— Service ←realises— Component —implemented-by→ code`: any
 requirement traces down to its code, any code up to the why.
 ## Permissions
-Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last
-match winning. Two gates stand between a call and its effect: a tool action is reachable only
-when granted by its rule and passes `Tool.Options.permission`; the plugin's `fsScopeDecision`
-also asserts `edit` over the same main-anchored paths — an edit needs both gates, and yours
-denies at gate 1 (your writes go through `apg_node`/`apg_edge`, never a file edit).
+Your grants are an ordered `{action, resource, effect}` rule list, deny-by-default, last match winning. Patterns
+match a resource's whole value (`*` spans `/`, `?` matches one character). Two gates stand between a call and
+its effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`;
+the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
+and yours denies at gate 1 (your writes go through `apg_node`/`apg_edge`, never a file edit).
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local and every
   `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *`.
