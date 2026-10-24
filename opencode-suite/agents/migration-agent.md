@@ -137,9 +137,9 @@ its effect: a tool action is reachable only when granted by its rule and passes 
 the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
 so only `apg/layers/**` is writable and everything else is denied at gate 2.
 You can:
-- edit only `apg/layers/**`; read/glob/grep the tree except `apg/.trans/**` (repo-local
-  and every `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only
-  `ls *`, `pwd`, `cd *`, `git status *`, `git diff *`, `git log *`, `git show *`.
+- edit only `apg/layers/**`; read/glob/grep the tree except `apg/.trans/**` (repo-local and every
+  `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *`, `git status *`,
+  `git diff *`, `git log *`, `git show *` — one command per call, so a chained or redirected command is refused.
 - query the graph with the apg query family (`apg_query`, `apg_find_symbol`,
   `apg_modules`, `apg_file_units`, `apg_callers`, `apg_uses`, `apg_hunk`, …); lint with
   `apg_spec_lint`; run `apg_scan` at effect **ask** (never allow); track with `todowrite`.
