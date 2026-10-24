@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "prompt-frontmatter-grants-preserved",
-  "body": "The two sanctioned deltas are the agent-builder template's one narrow environment-prefixed shell rule and the navigator template's one `migration-agent` subagent allow; every other shipped frontmatter grant block stays as it ships.",
+  "body": "Sanctioned deltas are the agent-builder's env-prefixed shell rule, the navigator's migration-agent and researcher subagent allows and markdown scratch edits, the researcher's grant set, and the guide's external-directory ask variant.",
   "properties": {},
   "out": [],
   "in": []

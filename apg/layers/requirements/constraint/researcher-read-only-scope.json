@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "researcher-read-only-scope",
+  "body": "A research agent writes only the scratch directory's markdown files, holding no edit grant on project source, no shell grant, and no authoring tool, so its investigation changes no project file.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

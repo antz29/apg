@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "research-result",
+  "body": "The markdown file a research dispatch produces in the scratch directory, named for the research subject and returned to the navigator as its path.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.research-dispatch",
+      "properties": {}
+    }
+  ]
+}

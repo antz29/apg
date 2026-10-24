@@ -1,0 +1,28 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "research-dispatch",
+  "body": "One navigator request to the researcher: a research subject, the read-only investigation it drives, and the markdown result written to the scratch directory.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.research-subject",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.research-result",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-research",
+      "properties": {}
+    }
+  ]
+}

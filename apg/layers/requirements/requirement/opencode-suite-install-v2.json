@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "opencode-suite-install-v2",
-  "body": "apg init installs the opencode 2.x suite into the global opencode config directory, installing the tool plugins, the shared library, and the eight distributed agents, and idempotently pruning apg-owned files absent from the installed set.",
+  "body": "apg init installs the opencode 2.x suite into the global opencode config directory, installing the tool plugins, the shared library, and the nine distributed agents, and idempotently pruning apg-owned files absent from the installed set.",
   "properties": {
     "feature": "opencode-2x-support"
   },

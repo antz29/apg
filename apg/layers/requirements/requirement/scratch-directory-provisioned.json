@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scratch-directory-provisioned",
+  "body": "apg init creates the scratch directory in the main checkout, apg project start creates it in the new worktree, and the repository gitignore ignores both paths.",
+  "properties": {
+    "feature": "researcher-agent"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scratch-surface",
+      "properties": {}
+    }
+  ]
+}

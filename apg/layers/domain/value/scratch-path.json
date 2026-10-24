@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "scratch-path",
+  "body": "The scratch location an agent's edit grant matches: the main checkout's apg scratch directory or a project worktree's copy, markdown files alone.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.scratch-directory",
+      "properties": {}
+    }
+  ]
+}

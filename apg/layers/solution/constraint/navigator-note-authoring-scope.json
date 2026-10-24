@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "navigator-note-authoring-scope",
-  "body": "The navigator's durable-authoring capability serves implementation-layer notes alone: the navigator authors no requirements, domain, solution, or global node.",
+  "body": "The navigator's durable-authoring capability serves implementation-layer notes alone, and its one file write is a markdown scratch file: it authors no requirements, domain, solution, or global node and edits no project source.",
   "properties": {},
   "out": [],
   "in": []

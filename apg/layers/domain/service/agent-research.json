@@ -1,0 +1,46 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "agent-research",
+  "body": "The capability that answers a research question under read-only project access with web search and fetch and records the result as a markdown scratch file.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-web-capability",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-no-shell",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-result-file",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-research",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.researcher-prompt",
+      "properties": {}
+    }
+  ]
+}

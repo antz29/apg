@@ -2,7 +2,7 @@
   "layer": "global",
   "type": "constraint",
   "name": "worktree-isolation",
-  "body": "Every code change of a change-set is worktree-local on its project branch; the main checkout is read-only to every agent; and the merge gate is the only path a change-set enters main, save for the named main-write carve-outs.",
+  "body": "Every code change of a change-set is worktree-local on its project branch; the main checkout is read-only to every agent, save for the named main-write carve-outs and the markdown scratch carve-out; and the merge gate is the only path a change-set enters main.",
   "properties": {},
   "out": [],
   "in": []

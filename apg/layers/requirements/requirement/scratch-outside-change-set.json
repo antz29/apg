@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scratch-outside-change-set",
+  "body": "A scratch file stays outside the code graph, the git history, and the durable spec, so the scratch directory carries research artifacts beside the change-set.",
+  "properties": {
+    "feature": "researcher-agent"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scratch-surface",
+      "properties": {}
+    }
+  ]
+}

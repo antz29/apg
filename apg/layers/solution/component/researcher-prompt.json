@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "researcher-prompt",
+  "body": "The distributed researcher prompt: a hidden read-only subagent granting read, glob, grep, the read-only graph tools, web search and fetch, external-directory ask, and markdown-only scratch edits, with zero shell.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.scratch-surface",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-research",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    }
+  ]
+}

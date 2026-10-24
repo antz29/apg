@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "scratch-write-carve-out",
+  "body": "The scratch carve-out is the one main-checkout write outside the merge gate: the navigator and the researcher write markdown under the repository scratch directory and a worktree's scratch directory, and no other agent or path gains a main-checkout write.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

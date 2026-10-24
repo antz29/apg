@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "codebase-navigator-prompt",
-  "body": "The distributed navigator prompt: it carries the per-task implementation cadence and the navigator's git grant set, which excludes ref-writing, checkout, switch, merge, and unrestricted worktree forms.",
+  "body": "The distributed navigator prompt: it carries the per-task cadence, the navigator's git grant set, the researcher dispatch, and the markdown-only scratch write, excluding ref-writing, checkout, switch, merge, and unrestricted worktree forms.",
   "properties": {},
   "out": [
     {
@@ -17,11 +17,6 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.agent-roster",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
       "target": "domain.service.agent-fs-operations",
       "properties": {}
     },
@@ -32,7 +27,17 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.implementer-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.scratch-surface",
       "properties": {}
     }
   ],

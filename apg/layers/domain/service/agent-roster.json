@@ -42,6 +42,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.navigator-dispatches-migration-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.no-plan-note-grant",
       "properties": {}
     },
@@ -92,7 +97,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.navigator-dispatches-migration-agent",
+      "target": "requirements.requirement.researcher-agent-standard",
       "properties": {}
     }
   ],

@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "external-directory-ask-variant",
+  "body": "The external-directory rule set is deny-by-default, the researcher resolves every external read to ask, and no shipped agent holds a blanket external allow.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

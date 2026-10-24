@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "prompt-body-line-cap",
-  "body": "The caps, counted below the frontmatter, are agent-builder 470, codebase-navigator 427, implementation-phase-reviewer 255, spec-writer 160, plan-writer 140, plan-review 100, migration-agent 88, spec-review 64, and 1,700 for the corpus.",
+  "body": "The per-template body caps counted below the frontmatter, the researcher prompt's own cap, and one corpus total covering the nine templates.",
   "properties": {},
   "out": [],
   "in": [

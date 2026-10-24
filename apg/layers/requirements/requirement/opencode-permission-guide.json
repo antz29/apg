@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "opencode-permission-guide",
-  "body": "A tracked repository document records the verified permission model: deny-by-default, the rule shape, last-matching-rule resolution, pattern semantics, the read-guard denials, and both filesystem gates.",
+  "body": "A tracked repository document records the verified permission model: deny-by-default, the rule shape, last-match resolution, whole-value patterns, the read-guard denials, both gates, and the external-directory allow and ask variants.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.opencode-integration",
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
     }
   ]

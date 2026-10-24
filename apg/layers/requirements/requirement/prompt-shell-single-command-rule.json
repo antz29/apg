@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "prompt-shell-single-command-rule",
-  "body": "Each permissions section of the eight distributed agent templates states the same shell rule: one command per call, so a chained or redirected command is refused.",
+  "body": "Each permissions section of a distributed agent template that carries a shell grant states the same shell rule: one command per call, so a chained or redirected command is refused.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },

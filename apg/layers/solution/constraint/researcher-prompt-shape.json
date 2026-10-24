@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "researcher-prompt-shape",
+  "body": "The researcher prompt is hidden and read-only outside scratch, granting the read tools, the graph tools, web search and fetch, external-directory ask, and markdown-only scratch edits, with no shell, question, or authoring tool.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

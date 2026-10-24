@@ -177,6 +177,11 @@
       "kind": "is-role",
       "source": "solution.component.verify-feedback-stage",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.scratch-layout",
+      "properties": {}
     }
   ]
 }

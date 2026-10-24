@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "opencode-install-layout",
-  "body": "The binary's opencode-2.x install surface: the embedded plugin registry and shared lib, installed under the global opencode config directory together with the package manifest and the eight distributed agents.",
+  "body": "The binary's opencode-2.x install surface: the embedded plugin registry and shared lib, installed under the global opencode config directory together with the package manifest and the nine distributed agents.",
   "properties": {},
   "out": [
     {

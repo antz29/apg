@@ -1,0 +1,46 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "scratch-surface",
+  "body": "The capability that provides and bounds the shared scratch surface: the gitignored directory in the main checkout and every worktree, writable as markdown files alone.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scratch-directory-provisioned",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scratch-markdown-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scratch-outside-change-set",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-scratch",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.researcher-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scratch-layout",
+      "properties": {}
+    }
+  ]
+}

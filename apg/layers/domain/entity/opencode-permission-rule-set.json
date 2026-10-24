@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.value.permission-rule",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.external-directory-ask",
+      "properties": {}
     }
   ],
   "in": [

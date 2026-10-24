@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "researcher-agent-result-file",
+  "body": "The researcher writes each result to a markdown file in the scratch directory named for the research subject and returns that path to the navigator.",
+  "properties": {
+    "feature": "researcher-agent"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-research",
+      "properties": {}
+    }
+  ]
+}

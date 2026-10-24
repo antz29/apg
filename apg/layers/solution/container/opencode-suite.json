@@ -29,6 +29,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.migration-agent-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.opencode-lib-context",
       "properties": {}
     },
@@ -64,7 +69,12 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.migration-agent-prompt",
+      "target": "solution.component.researcher-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.permission-guide",
       "properties": {}
     }
   ],

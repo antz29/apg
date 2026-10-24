@@ -12,6 +12,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.navigator-cadence-marks-done-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.navigator-scan-permission",
       "properties": {}
     },
@@ -22,17 +27,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.navigator-staged-flow",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.navigator-task-cadence",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.navigator-cadence-marks-done-only",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.navigator-staged-flow",
+      "target": "requirements.requirement.navigator-research-dispatch",
       "properties": {}
     }
   ],
@@ -44,12 +49,12 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.navigator-scan-permission-coherence-test",
+      "source": "solution.component.codebase-navigator-prompt",
       "properties": {}
     },
     {
       "kind": "realises",
-      "source": "solution.component.codebase-navigator-prompt",
+      "source": "solution.component.navigator-scan-permission-coherence-test",
       "properties": {}
     },
     {

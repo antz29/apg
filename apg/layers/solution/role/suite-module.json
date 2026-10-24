@@ -30,6 +30,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.migration-agent-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.opencode-lib-context",
       "properties": {}
     },
@@ -60,7 +65,12 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.migration-agent-prompt",
+      "source": "solution.component.permission-guide",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.researcher-prompt",
       "properties": {}
     }
   ]

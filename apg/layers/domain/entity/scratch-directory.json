@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "scratch-directory",
+  "body": "The gitignored scratch directory of the apg layout and of every project worktree, created by initialization and project start, holding markdown research results alone.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.scratch-path",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-scratch",
+      "properties": {}
+    }
+  ]
+}

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "distributed-agent-roster-documented",
-  "body": "The distributed agent set is documented truthfully and completely in the agent guide, the readme, and the distributed navigator prompt: the codebase-navigator plus seven agents, the migration-agent included, each named with its purpose.",
+  "body": "The distributed agent set is documented truthfully and completely in the agent guide, the readme, and the navigator prompt: the codebase-navigator plus eight agents, the migration-agent and the researcher included, each named with its purpose.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },

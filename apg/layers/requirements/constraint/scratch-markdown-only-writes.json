@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "scratch-markdown-only-writes",
+  "body": "A scratch edit grant resolves to a `.md` path under the main scratch directory or a worktree's scratch directory, and a scratch write of any other file type is refused.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

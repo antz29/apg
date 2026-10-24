@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "agent-count",
-  "body": "The number of distributed agents apg init installs, stated as a fixed roster of eight: the codebase-navigator plus seven further agents, the migration-agent included.",
+  "body": "The number of distributed agents apg init installs, stated as a fixed roster of nine: the codebase-navigator plus eight further agents, the migration-agent and the researcher included.",
   "properties": {},
   "out": [],
   "in": [

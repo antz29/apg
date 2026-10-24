@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "external-directory-ask",
+  "body": "The external-directory rule effect under which a read outside the workspace root prompts the user and proceeds on approval.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.opencode-permission-rule-set",
+      "properties": {}
+    }
+  ]
+}

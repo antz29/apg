@@ -181,6 +181,11 @@
       "kind": "is-role",
       "target": "solution.role.scanner-container",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.scratch-layout",
+      "properties": {}
     }
   ],
   "in": [

@@ -27,6 +27,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.navigator-authors-shortcut-notes",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.navigator-no-unguarded-main-git",
       "properties": {}
     },
@@ -57,7 +62,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.navigator-authors-shortcut-notes",
+      "target": "requirements.requirement.scratch-outside-change-set",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.navigator-research-dispatch",
       "properties": {}
     }
   ],

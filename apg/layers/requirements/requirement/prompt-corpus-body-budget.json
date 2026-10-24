@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "prompt-corpus-body-budget",
-  "body": "The eight agent template bodies stay within their own line caps and at or under 1,700 lines together, with every normative rule kept, redundancy merged, and one example per rule family.",
+  "body": "The nine agent template bodies stay within their own line caps and at or under one corpus total, with every normative rule kept, redundancy merged, and one example per rule family.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.agent-roster",
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
     }
   ]

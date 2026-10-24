@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "research-subject",
+  "body": "The question a research dispatch names, which the researcher investigates and the result file is named for.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.research-dispatch",
+      "properties": {}
+    }
+  ]
+}

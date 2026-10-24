@@ -27,6 +27,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.generated-agent-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
       "properties": {}
     },
@@ -43,6 +48,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.opencode-permission-guide",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.opencode-permission-guide-shell-rule",
       "properties": {}
     },
     {
@@ -77,6 +87,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.prompt-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.prompt-structure-enforced-deterministically",
       "properties": {}
     },
@@ -97,17 +112,17 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.prompt-shell-single-command-rule",
+      "target": "requirements.requirement.scratch-markdown-only",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.generated-agent-shell-single-command-rule",
+      "target": "requirements.requirement.scratch-directory-provisioned",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.opencode-permission-guide-shell-rule",
+      "target": "requirements.requirement.researcher-agent-standard",
       "properties": {}
     }
   ],

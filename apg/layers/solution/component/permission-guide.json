@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "permission-guide",
+  "body": "The tracked permission-model guide: the deny-by-default rule shape, last-match resolution, whole-value patterns, both gates, the read guard, the shell rule, and the external-directory allow and ask variants.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.suite-module",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/PERMISSIONS.md",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.opencode-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    }
+  ]
+}

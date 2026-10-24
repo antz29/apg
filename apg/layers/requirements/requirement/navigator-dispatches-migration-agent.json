@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "navigator-dispatches-migration-agent",
-  "body": "The navigator's subagent allowlist admits every distributed agent the navigator dispatches, the migration-agent included, so a repository's layers migrate to the running durable-spec model on navigator dispatch.",
+  "body": "The navigator's subagent allowlist admits every distributed agent the navigator dispatches, the migration-agent and the researcher included, so both a layer migration and a research question reach their agent on dispatch.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.agent-roster",
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
     }
   ]

@@ -1,0 +1,73 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "researcher-agent",
+  "body": "The researcher is a standard distributed hidden subagent that investigates a research question read-only, searches and fetches the web, and records its findings as a markdown file in the scratch directory.",
+  "properties": {
+    "feature": "researcher-agent"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-standard",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-web-capability",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-result-file",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-no-shell",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scratch-directory-provisioned",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.navigator-research-dispatch",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scratch-markdown-only",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-external-directory-ask",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scratch-outside-change-set",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-research",
+      "properties": {}
+    }
+  ]
+}

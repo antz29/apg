@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "distributed-agent-install",
-  "body": "The binary's distributed-agent embed, install, and upgrade surface: the agent table, the prune list, the upgrade guide's reviewer note, and the help roster, all stating eight distributed agents.",
+  "body": "The binary's distributed-agent embed, install, and upgrade surface: the agent table, the prune list, the upgrade guide's reviewer note, and the help roster, all stating nine distributed agents.",
   "properties": {},
   "out": [
     {

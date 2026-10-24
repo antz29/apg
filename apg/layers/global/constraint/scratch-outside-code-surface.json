@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "scratch-outside-code-surface",
+  "body": "No scratch file enters the graph, the git index, or the durable spec: a scan leaves scratch paths out, and no change-set commit carries a scratch file.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

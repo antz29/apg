@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "agent-scratch",
+  "body": "The shared scratch surface of the navigator and the researcher: a gitignored directory in the apg layout and every worktree, bounded to markdown files and outside the code change-set.",
+  "properties": {
+    "attribute": "supporting",
+    "root": "scratch-directory"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.scratch-directory",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.scratch-surface",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

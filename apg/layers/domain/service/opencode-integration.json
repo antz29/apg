@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.generated-agent-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.init-reports-agent-count",
       "properties": {}
     },
@@ -47,6 +52,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.opencode-permission-guide-shell-rule",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.opencode-plugin-api-v2",
       "properties": {}
     },
@@ -67,22 +77,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.spec-model-enforcement",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.generated-agent-shell-single-command-rule",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.prompt-shell-single-command-rule",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.opencode-permission-guide-shell-rule",
+      "target": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-external-directory-ask",
       "properties": {}
     }
   ],
@@ -115,6 +120,11 @@
     {
       "kind": "realises",
       "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.permission-guide",
       "properties": {}
     }
   ]

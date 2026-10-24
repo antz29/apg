@@ -1,0 +1,40 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "researcher-agent",
+  "body": "The distributed researcher agent, dispatched by the navigator, which investigates a research question read-only and writes its findings as a markdown scratch file.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.researcher-agent-web-capability",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.researcher-agent-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.researcher-agent-external-directory-ask",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.researcher-agent-no-shell",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.researcher-agent-result-file",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
