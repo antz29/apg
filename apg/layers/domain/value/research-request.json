@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "research-request",
+  "body": "The escalation a blocked stage returns to the navigator: the question, the obstacle that blocks the stage, and the decision the answer changes.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.research-escalation",
+      "properties": {}
+    }
+  ]
+}

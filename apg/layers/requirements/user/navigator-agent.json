@@ -37,6 +37,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.navigator-research-dispatch",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.navigator-scan-permission",
       "properties": {}
     },
@@ -67,7 +72,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.navigator-research-dispatch",
+      "target": "requirements.requirement.research-escalation-triage",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     }
   ],

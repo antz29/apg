@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "research-escalation",
+  "body": "One blocked spec or plan stage's stop on an unknown: the research request it returns to the navigator and the navigator's triage of that request.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.research-request",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-research",
+      "properties": {}
+    }
+  ]
+}

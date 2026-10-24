@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "research-escalation-stop-not-guess",
+  "body": "A spec or plan stage that meets a blocking unknown outside the graph, the repository, and its own prompt stops on that point and guesses nothing, so no spec or plan statement rests on an unchecked assumption.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

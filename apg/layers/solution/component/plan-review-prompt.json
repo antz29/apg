@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "plan-review-prompt",
-  "body": "The plan-review prompt: it carries two passes over a plan against the change-set delta, a coverage pass driven by the binary's verify refusal and a semantic per-node pass biased toward fewer changes.",
+  "body": "The plan-review prompt: it carries a coverage pass driven by the verify refusal and a semantic per-node pass over a plan against the change-set delta, plus the research-escalation stop-and-report rule.",
   "properties": {},
   "out": [
     {
@@ -18,6 +18,11 @@
     {
       "kind": "realises",
       "target": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.research-escalation",
       "properties": {}
     }
   ],

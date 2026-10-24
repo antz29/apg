@@ -107,12 +107,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "target": "requirements.requirement.researcher-agent-standard",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.scratch-markdown-only",
+      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
     },
     {
@@ -122,7 +122,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.researcher-agent-standard",
+      "target": "requirements.requirement.scratch-markdown-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.research-escalation-stages",
       "properties": {}
     }
   ],

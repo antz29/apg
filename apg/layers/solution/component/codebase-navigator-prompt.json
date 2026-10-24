@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "codebase-navigator-prompt",
-  "body": "The distributed navigator prompt: it carries the per-task cadence, the navigator's git grant set, the researcher dispatch, and the markdown-only scratch write, excluding ref-writing, checkout, switch, merge, and unrestricted worktree forms.",
+  "body": "The navigator prompt: it carries the per-task cadence, the git grant set, the research-request triage and fresh re-dispatch, and the markdown-only scratch write, excluding ref-writing, checkout, switch, merge, and unrestricted worktree forms.",
   "properties": {},
   "out": [
     {
@@ -38,6 +38,11 @@
     {
       "kind": "realises",
       "target": "domain.service.scratch-surface",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.research-escalation",
       "properties": {}
     }
   ],

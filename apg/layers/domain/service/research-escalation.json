@@ -1,0 +1,56 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "research-escalation",
+  "body": "The capability that turns a blocked spec or plan stage's unknown into a navigator-triaged research dispatch and re-dispatches that stage with the result.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.research-escalation-stages",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.research-escalation-triage",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.research-escalation-request",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.research-escalation-fresh-redispatch",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.research-result-not-durable-authority",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-research",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.plan-review-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.spec-principles-prompts",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    }
+  ]
+}

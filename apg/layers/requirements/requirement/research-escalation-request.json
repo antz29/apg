@@ -1,0 +1,25 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "research-escalation-request",
+  "body": "A blocked stage returns `RESEARCH REQUEST: <question>` to the navigator, naming why it blocks and the decision the answer changes, and the navigator alone dispatches the research.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.research-escalation",
+      "properties": {}
+    }
+  ]
+}

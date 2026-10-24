@@ -1,0 +1,30 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "research-escalation-fresh-redispatch",
+  "body": "The navigator re-dispatches the requesting stage as a fresh session that reads the returned scratch file, and a stage that stops for research stays unrejected and re-enters once answered.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.research-escalation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
+      "properties": {}
+    }
+  ]
+}

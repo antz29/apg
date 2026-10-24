@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "agent-research",
-  "body": "The research subdomain of the distributed agent set: the researcher's read-only investigation, its web search and fetch, and the markdown result a dispatch produces.",
+  "body": "The research subdomain of the distributed agent set: a blocked spec or plan stage's escalation, the researcher's read-only investigation, its web search and fetch, and the markdown result a dispatch produces.",
   "properties": {
     "attribute": "supporting",
     "root": "research-dispatch"
@@ -16,6 +16,16 @@
     {
       "kind": "contains",
       "target": "domain.service.agent-research",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.research-escalation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.research-escalation",
       "properties": {}
     }
   ],

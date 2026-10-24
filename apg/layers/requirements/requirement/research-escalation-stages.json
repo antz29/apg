@@ -1,0 +1,25 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "research-escalation-stages",
+  "body": "A spec-writing, spec-reviewing, plan-writing, or plan-reviewing stage escalates an unknown that blocks it, while an implementation-phase unknown stays discovered work that re-enters planning.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.researcher-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.research-escalation",
+      "properties": {}
+    }
+  ]
+}

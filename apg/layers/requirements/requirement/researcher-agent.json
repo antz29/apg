@@ -9,42 +9,7 @@
   "out": [
     {
       "kind": "contains",
-      "target": "requirements.requirement.researcher-agent-standard",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.researcher-agent-read-only",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.researcher-agent-web-capability",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.researcher-agent-result-file",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.researcher-agent-no-shell",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.scratch-directory-provisioned",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "requirements.requirement.navigator-research-dispatch",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.scratch-markdown-only",
       "properties": {}
     },
     {
@@ -54,19 +19,79 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-no-shell",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-result-file",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-standard",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.researcher-agent-web-capability",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scratch-directory-provisioned",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scratch-markdown-only",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.scratch-outside-change-set",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.research-escalation-request",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.research-escalation-stages",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.research-result-not-durable-authority",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.research-escalation-triage",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.researcher-agent",
+      "kind": "driven-by",
+      "source": "domain.service.agent-research",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.agent-research",
+      "kind": "requires",
+      "source": "requirements.user.researcher-agent",
       "properties": {}
     }
   ]

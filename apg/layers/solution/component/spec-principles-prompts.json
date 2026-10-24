@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "spec-principles-prompts",
-  "body": "The distributed agent prompts carrying the spec rules R1 through R5 — the three writer and three reviewer prompts — each inside its body-line cap and carrying the shared permissions section, with enforcement in the spec-lint component.",
+  "body": "The distributed spec and plan writer and reviewer prompts carrying rules R1 through R5 and the research-escalation stop-and-report rule, each inside its body-line cap with the shared permissions section.",
   "properties": {},
   "out": [
     {
@@ -28,6 +28,11 @@
     {
       "kind": "realises",
       "target": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.research-escalation",
       "properties": {}
     }
   ],

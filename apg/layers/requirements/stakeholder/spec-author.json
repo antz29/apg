@@ -22,6 +22,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.prompt-corpus-model-current",
       "properties": {}
     },
@@ -32,7 +37,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
+      "target": "requirements.requirement.research-escalation-request",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.research-result-not-durable-authority",
       "properties": {}
     }
   ],
