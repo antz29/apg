@@ -2,12 +2,17 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "agent-builder-env-shell-grant",
-  "body": "The agent-builder template's grant guidance adds one narrow environment-prefixed shell rule that reaches the suite end-to-end command, with every other frontmatter grant unchanged.",
+  "body": "The agent-builder template's grant guidance adds one narrow environment-prefixed shell rule that reaches the suite end-to-end command, and its every other grant in that template is unchanged.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },
   "out": [],
   "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-fs-operations",
+      "properties": {}
+    },
     {
       "kind": "requires",
       "source": "requirements.stakeholder.agent-suite-maintainer",
@@ -16,11 +21,6 @@
     {
       "kind": "requires",
       "source": "requirements.user.code-writer-agent",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "source": "domain.service.agent-fs-operations",
       "properties": {}
     }
   ]
