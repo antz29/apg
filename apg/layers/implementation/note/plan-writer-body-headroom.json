@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-writer-body-headroom",
+  "body": "The plan-writer body sits at 139 of its 140-line cap, so its next change replaces wording rather than appending a line; raise the cap if the rule needs more room.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/agents/plan-writer.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

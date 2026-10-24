@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "spec-writer-shell-operator-list",
+  "body": "The spec-writer shell rule enumerates chaining as `&&`, `;`, and `|` without `$()`; extend the operator list if the shell-wall prose must enumerate every operator.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/agents/spec-writer.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
