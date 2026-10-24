@@ -42,6 +42,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.opencode-permission-guide",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.opencode-plugin-api-v2",
       "properties": {}
     },
@@ -52,7 +57,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.spec-model-enforcement",
+      "target": "requirements.requirement.prompt-permission-guard-surfaces",
       "properties": {}
     },
     {
@@ -62,12 +67,22 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.prompt-permission-guard-surfaces",
+      "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.opencode-permission-guide",
+      "target": "requirements.requirement.generated-agent-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.prompt-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.opencode-permission-guide-shell-rule",
       "properties": {}
     }
   ],

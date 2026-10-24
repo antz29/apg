@@ -32,6 +32,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.navigator-dispatches-migration-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.opencode-2x-support",
       "properties": {}
     },
@@ -92,7 +97,17 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.navigator-dispatches-migration-agent",
+      "target": "requirements.requirement.prompt-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.generated-agent-shell-single-command-rule",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.opencode-permission-guide-shell-rule",
       "properties": {}
     }
   ],
