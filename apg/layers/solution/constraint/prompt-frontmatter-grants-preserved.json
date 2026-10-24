@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "prompt-frontmatter-grants-preserved",
-  "body": "Every shipped frontmatter grant block stays as it ships, and exactly two sanctioned deltas exist: the agent-builder template's one narrow environment-prefixed shell rule and the navigator template's one `migration-agent` subagent allow, with nothing else added or removed.",
+  "body": "The two sanctioned deltas are the agent-builder template's one narrow environment-prefixed shell rule and the navigator template's one `migration-agent` subagent allow; every other shipped frontmatter grant block stays as it ships.",
   "properties": {},
   "out": [],
   "in": []
