@@ -339,6 +339,9 @@ above: a durable node/edge mutation is a session act.
   is granted `apg_session` and drives start/save/end/abort through its `action` argument — never through `shell`.
 - **No permission workarounds.** A refused tool or permission is a stop-and-report, never routed through another
   allowed command.
+- **Shell one-command rule in every generated body.** Every generated implementer and test-implementer body states
+  it: exactly one command runs per shell call, and a chained (`&&`, `;`, `|`) or redirected command is refused by
+  whole-value matching, so each command runs on its own.
 - **Question dropped.** No generated agent grants `question`; questions route through the coordinator.
 - **Stop-and-report.** Tool-failure prose is terminal: when a graph tool errors or returns nothing the agent stops
   and reports the exact failure (which tool, the invocation, what it returned or errored, the graph state) to the
