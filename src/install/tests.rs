@@ -140,4 +140,286 @@ Patch only.
         let guide = render_migration_guide(CHANGELOG, None, env!("CARGO_PKG_VERSION"));
         assert!(guide.contains("No migration required"), "{guide}");
     }
+
+    /// The eight shipped agent templates share one prompt shape — a closed
+    /// frontmatter block, then a body carrying exactly the fixed six-section
+    /// skeleton. Pinned over the embedded `AGENTS` bytes alone.
+    #[test]
+    fn shipped_agent_templates_carry_the_skeleton_and_body_budget() {
+        const SKELETON: [&str; 5] = [
+            "## Role",
+            "## Permissions",
+            "## Process",
+            "## Hard limits",
+            "## Report",
+        ];
+        const CAPS: [(&str, usize); 8] = [
+            ("agent-builder.md", 470),
+            ("codebase-navigator.md", 427),
+            ("implementation-phase-reviewer.md", 255),
+            ("spec-writer.md", 160),
+            ("plan-writer.md", 140),
+            ("plan-review.md", 100),
+            ("migration-agent.md", 88),
+            ("spec-review.md", 64),
+        ];
+
+        /// The template's lines, without the empty element a trailing newline
+        /// would split out (so the count matches the file's line count).
+        fn lines_of(content: &str) -> Vec<&str> {
+            content
+                .strip_suffix('\n')
+                .unwrap_or(content)
+                .split('\n')
+                .collect()
+        }
+
+        fn unquote(value: &str) -> &str {
+            value
+                .strip_prefix('"')
+                .and_then(|inner| inner.strip_suffix('"'))
+                .unwrap_or(value)
+        }
+
+        /// The `permissions:` value as ordered `{action, resource, effect}`
+        /// rules: one `  - ` item, its keys at four spaces, in that order.
+        fn permission_rules<'a>(
+            name: &str,
+            block: &'a [&'a str],
+        ) -> Vec<(&'a str, &'a str, &'a str)> {
+            let mut items: Vec<Vec<&'a str>> = Vec::new();
+            for &line in block {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                assert!(
+                    line.starts_with("  "),
+                    "{name}: only the indented `permissions:` sequence may follow that key: {line:?}"
+                );
+                if let Some(rest) = line.strip_prefix("  - ") {
+                    items.push(vec![rest]);
+                } else if let Some(rest) = line.strip_prefix("    ") {
+                    items
+                        .last_mut()
+                        .unwrap_or_else(|| {
+                            panic!("{name}: permission key without a rule: {line:?}")
+                        })
+                        .push(rest);
+                } else {
+                    panic!("{name}: malformed permission line: {line:?}");
+                }
+            }
+            assert!(
+                !items.is_empty(),
+                "{name}: `permissions:` declares no rules"
+            );
+            items
+                .into_iter()
+                .map(|item| {
+                    assert_eq!(
+                        item.len(),
+                        3,
+                        "{name}: a permission rule is one {{action, resource, effect}} mapping: {item:?}"
+                    );
+                    (
+                        permission_value(name, &item, 0, "action:"),
+                        permission_value(name, &item, 1, "resource:"),
+                        permission_value(name, &item, 2, "effect:"),
+                    )
+                })
+                .collect()
+        }
+
+        fn permission_value<'a>(name: &str, rule: &[&'a str], index: usize, key: &str) -> &'a str {
+            rule[index]
+                .strip_prefix(key)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{name}: permission rule `{key}` missing or empty: {:?}",
+                        rule[index]
+                    )
+                })
+        }
+
+        assert_eq!(
+            AGENTS.len(),
+            CAPS.len(),
+            "the shipped corpus is exactly the eight capped templates"
+        );
+        let mut total = 0;
+        for &(name, content) in AGENTS {
+            let cap = CAPS
+                .iter()
+                .find(|(template, _)| *template == name)
+                .map(|(_, cap)| *cap)
+                .unwrap_or_else(|| panic!("{name}: no body cap declared"));
+
+            let lines = lines_of(content);
+            assert_eq!(lines[0], "---", "{name}: the frontmatter opens on line 1");
+            let close = lines
+                .iter()
+                .skip(1)
+                .position(|line| *line == "---")
+                .map(|index| index + 1)
+                .unwrap_or_else(|| panic!("{name}: the frontmatter is never closed by `---`"));
+            let frontmatter = &lines[1..close];
+            let body = &lines[close + 1..];
+
+            // (a) `permissions:` is the block's last top-level key, and only
+            // its ordered sequence follows it.
+            let last_key = frontmatter
+                .iter()
+                .rposition(|line| !line.is_empty() && !line.starts_with(' ') && line.contains(':'))
+                .unwrap_or_else(|| panic!("{name}: the frontmatter declares no top-level key"));
+            assert_eq!(
+                frontmatter[last_key], "permissions:",
+                "{name}: `permissions:` must be the frontmatter's last top-level key"
+            );
+            let rules = permission_rules(name, &frontmatter[last_key + 1..]);
+
+            // The body: one H1 then exactly the five `##` sections, in order.
+            let h1: Vec<&str> = body
+                .iter()
+                .copied()
+                .filter(|line| line.starts_with("# "))
+                .collect();
+            assert_eq!(
+                h1.len(),
+                1,
+                "{name}: the body carries exactly one H1: {h1:?}"
+            );
+            assert!(
+                !h1[0][2..].trim().is_empty(),
+                "{name}: the H1 names the agent"
+            );
+            assert_eq!(
+                body.iter().find(|line| !line.trim().is_empty()).copied(),
+                Some(h1[0]),
+                "{name}: the H1 opens the body"
+            );
+            let headings: Vec<&str> = body
+                .iter()
+                .copied()
+                .filter(|line| line.starts_with("## "))
+                .collect();
+            assert_eq!(
+                headings, SKELETON,
+                "{name}: the body carries exactly the six-section skeleton, in order"
+            );
+
+            // `## Permissions`: 4-6 lines of model explanation, then both lists.
+            let section_at = body
+                .iter()
+                .position(|line| *line == "## Permissions")
+                .unwrap_or_else(|| panic!("{name}: no `## Permissions` section"));
+            let section_end = body[section_at + 1..]
+                .iter()
+                .position(|line| line.starts_with("## "))
+                .map(|index| section_at + 1 + index)
+                .unwrap_or(body.len());
+            let section = &body[section_at + 1..section_end];
+            let you_can = section
+                .iter()
+                .position(|line| *line == "You can:")
+                .unwrap_or_else(|| panic!("{name}: `## Permissions` has no `You can:` list"));
+            let you_cannot = section
+                .iter()
+                .position(|line| *line == "You cannot:")
+                .unwrap_or_else(|| panic!("{name}: `## Permissions` has no `You cannot:` list"));
+            assert!(
+                you_can < you_cannot,
+                "{name}: `You can:` must precede `You cannot:`"
+            );
+            let explanation = section[..you_can]
+                .iter()
+                .filter(|line| !line.trim().is_empty())
+                .count();
+            assert!(
+                (4..=6).contains(&explanation),
+                "{name}: the `## Permissions` model explanation is 4-6 lines, got {explanation}"
+            );
+            let can_entries = section[you_can + 1..you_cannot]
+                .iter()
+                .filter(|line| line.starts_with("- "))
+                .count();
+            let cannot_entries = section[you_cannot + 1..]
+                .iter()
+                .filter(|line| line.starts_with("- "))
+                .count();
+            assert!(
+                can_entries > 0 && cannot_entries > 0,
+                "{name}: both permission lists carry an entry ({can_entries} can, {cannot_entries} cannot)"
+            );
+
+            // (b) The shell rules: deny-all base, then allows; only
+            // agent-builder carries the single env-prefixed narrow rule.
+            let shell: Vec<(&str, &str, &str)> = rules
+                .iter()
+                .copied()
+                .filter(|(action, _, _)| unquote(action) == "shell")
+                .collect();
+            assert!(
+                !shell.is_empty(),
+                "{name}: the frontmatter declares no shell rules"
+            );
+            let (_, resource, effect) = shell[0];
+            assert!(
+                unquote(resource) == "*" && unquote(effect) == "deny",
+                "{name}: the shell rules open with a deny-all `*` rule, got {:?}",
+                shell[0]
+            );
+            for (_, resource, effect) in &shell {
+                assert!(
+                    matches!(unquote(effect), "deny" | "allow"),
+                    "{name}: shell rule `{}` has an unexpected effect {effect}",
+                    unquote(resource)
+                );
+            }
+            if name == "agent-builder.md" {
+                let e2e: Vec<&(&str, &str, &str)> = shell
+                    .iter()
+                    .filter(|(_, resource, _)| unquote(resource).starts_with("APG_SUITE_E2E=1 "))
+                    .collect();
+                assert_eq!(
+                    e2e.len(),
+                    1,
+                    "{name}: exactly one narrow `APG_SUITE_E2E=1` shell rule"
+                );
+                assert_eq!(
+                    unquote(e2e[0].2),
+                    "allow",
+                    "{name}: the env-prefixed shell rule is an allow"
+                );
+            } else {
+                assert!(
+                    !shell
+                        .iter()
+                        .any(|(_, resource, _)| unquote(resource).starts_with("APG_SUITE_E2E=")),
+                    "{name}: no shell rule may be env-prefixed with `APG_SUITE_E2E=`"
+                );
+            }
+
+            // The retired edge-kind vocabulary, matched as backticked kind
+            // tokens so the English verb "drives" never false-positives.
+            for token in ["`drives`", "`realised-by`", "`depends-on`"] {
+                assert!(
+                    !content.contains(token),
+                    "{name}: the retired edge-kind token {token} must be absent"
+                );
+            }
+
+            total += body.len();
+            assert!(
+                body.len() <= cap,
+                "{name}: the body is {} lines, over its {cap}-line cap",
+                body.len()
+            );
+        }
+        assert!(
+            total <= 1_700,
+            "the eight bodies total {total} lines, over the 1,700-line corpus cap"
+        );
+    }
 }
