@@ -9,6 +9,26 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.26.0
+
+Minor release: the distributed navigator can now dispatch the `migration-agent`,
+and every distributed agent template states the shell rule explicitly.
+
+The navigator prompt gains one `subagent` allow plus the roster/purpose prose at
+three body sites, so the eight-agent roster `apg init` installs is fully
+dispatchable from the navigator — including `migration-agent` for
+`apg/migration-guide.md` work. Every distributed agent template now states the
+shell rule: one command per call, and a chained (`&&`, `;`, `|`) or redirected
+command is refused; the agent-builder template also states that the
+implementer/test-implementer bodies it generates carry that rule, and
+`opencode-suite/PERMISSIONS.md` records the whole-value consequence. The spec
+records the corresponding requirements: the navigator prompt is a third roster
+documentation surface alongside the `apg init` roster and the README, exactly
+two frontmatter deltas (the `subagent` allow and the prose) are sanctioned, and
+three requirements cover the shell rule and its propagation.
+
+No durable-spec model change.
+
 ## v0.25.0
 
 Minor release: filesystem-operation permission scoping now works from a code
