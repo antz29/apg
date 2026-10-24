@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "opencode-permission-guide-shell-rule",
-  "body": "The tracked permission guide records that under whole-value matching a chained or redirected shell command matches no allow rule, so the shell runs one command per call.",
+  "body": "The tracked permission guide records that under whole-value matching a chained or redirected shell command is outside every allow pattern, so the shell runs one command per call.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.opencode-integration",
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
     }
   ]
