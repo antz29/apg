@@ -568,8 +568,7 @@ dispatch (no `subagent_id`); a re-dispatch is a new dispatch, never a resume:
 A `--wont-fix` is a **proposal** only: actioning it is not acceptance — the reviewer makes it
 terminal by resolving or reopens it by rejecting. You never resolve or reject.
 ### Discovered work (stop → re-plan → implement)
-Implementation discovers work a plan did not enumerate; that is expected, and **discovered work
-is planned before it is implemented.**
+Implementation discovers work a plan did not enumerate; that is expected: **discovered work is planned before it is implemented.**
 - An implementer whose task's verb/target does not cover the change — a unit no task owns, a
   different mechanism, a spec the code contradicts — **stops before editing** and returns the
   diagnosis (findings, units needed, "nothing written yet", a proposed task shape).
