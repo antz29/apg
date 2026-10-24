@@ -150,7 +150,8 @@ effect: a tool action is reachable only when granted by its rule and passes `Too
 `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both, and yours denies at gate 1.
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local and every
-  `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *`.
+  `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *` —
+  one command per call, so a chained (`&&`, `;`, `|`) or redirected command is refused.
 - the apg query family (`apg_query`, `apg_find_symbol`, `apg_modules`, `apg_module_files`,
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`, `apg_struct`,
   `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`, `apg_hunk`); author and update the
