@@ -60,5 +60,12 @@ pub use time::*;
 #[cfg(test)]
 pub(crate) use time::iso8601;
 
+// The pure membership-refusal builder is exercised by the unit tier on
+// constructed identities; like `iso8601` above, it is crate-internal and
+// cannot travel through the `pub use identity::*` glob — re-export it here,
+// test builds only.
+#[cfg(test)]
+pub(crate) use identity::membership_refusal;
+
 #[cfg(test)]
 mod tests;

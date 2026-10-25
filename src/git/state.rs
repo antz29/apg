@@ -34,11 +34,11 @@ pub(crate) fn graph_jsonl_path(apg_root: &Path) -> PathBuf {
 // git2 plumbing helpers
 // ---------------------------------------------------------------------------
 
-/// Discovers the repo enclosing `dir` (walking up, like the git CLI).
+/// Discovers the repo enclosing `dir` (walking up, like `git CLI`).
 pub(crate) fn discover_repo(dir: &Path) -> anyhow::Result<git2::Repository> {
     git2::Repository::discover(dir).map_err(|e| {
         anyhow::anyhow!(
-            "{} is not inside a git repository ({e}) — a project context requires git; run `git init`, commit an initial state, then `apg init`",
+            "mutation refused — no project context: the checkout holds no branch ({e} — {} is not inside a git repository). Fix: run `git init`, commit an initial state, then `apg init`; from the main checkout run `apg project start <name>` and work inside its worktree.",
             dir.display()
         )
     })

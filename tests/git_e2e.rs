@@ -510,6 +510,64 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The refined project-context wording (phase-01): every refusal states the
+    /// current branch (or that the checkout holds none) and carries exactly one
+    /// `Fix:` line naming `apg project start` and the move into the worktree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn project_context_refusal_names_branch_or_absence_with_one_fix() {
+        let assert_fix = |msg: &str| {
+            assert_eq!(msg.matches("Fix:").count(), 1, "one Fix line: {msg}");
+            assert!(msg.starts_with("mutation refused — "), "{msg}");
+            assert!(msg.contains("apg project start"), "{msg}");
+            assert!(msg.contains("work inside its worktree"), "{msg}");
+        };
+
+        // Detached HEAD: the checkout holds no branch.
+        let repo = fixture_repo("ctx-detached");
+        let git = git2_repo(&repo);
+        let oid = git.head().unwrap().peel_to_commit().unwrap().id();
+        git.set_head_detached(oid).unwrap();
+        let msg = format!(
+            "{:#}",
+            require_project_context(&repo.apg_root()).unwrap_err()
+        );
+        assert!(msg.contains("holds no branch"), "{msg}");
+        assert!(!msg.contains("branch `"), "{msg}");
+        assert_fix(&msg);
+        testutil::remove(&repo);
+
+        // The main checkout: names `main` and the default-branch rule.
+        let repo = fixture_repo("ctx-main");
+        let msg = format!(
+            "{:#}",
+            require_project_context(&repo.apg_root()).unwrap_err()
+        );
+        assert!(msg.contains("branch `main`"), "{msg}");
+        assert!(msg.contains("the repo's default branch"), "{msg}");
+        assert!(
+            msg.contains("default branch is never a mutation place"),
+            "{msg}"
+        );
+        assert_fix(&msg);
+        testutil::remove(&repo);
+
+        // Not a git repository: the checkout holds no branch either.
+        let dir = std::env::temp_dir().join(format!("apg-ctx-nongit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
+        let msg = format!(
+            "{:#}",
+            require_project_context(&dir.join("apg")).unwrap_err()
+        );
+        assert!(msg.contains("holds no branch"), "{msg}");
+        assert!(msg.contains("not inside a git repository"), "{msg}");
+        assert!(msg.contains("git init"), "{msg}");
+        assert!(msg.contains("apg init"), "{msg}");
+        assert_fix(&msg);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // ------------------------------------------------------------------
     // Lifecycle cleanup helpers (merge self-cleanup / delete): the shared
     // git2 worktree-removal + branch-deletion primitives.

@@ -770,6 +770,57 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-01 task-7: the central write funnel keeps its guard (defence in
+    /// depth). On the MAIN checkout both the project-scoped plan target
+    /// (membership guard) and the shared `_invariants.jsonl` target (universal
+    /// guard) refuse, naming branch `main`, and neither file is created.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/git); run via cargo test-e2e"]
+    fn write_funnel_refuses_outside_a_project_worktree() {
+        let repo = Repo::new("artifacts-main-guard");
+        let apg_root = repo.apg_root();
+        let commits_before = testutil::commit_count(&repo.root);
+        let recs = baseline_records();
+
+        let assert_refusal = |msg: &str| {
+            assert!(msg.starts_with("mutation refused — "), "{msg}");
+            assert!(msg.contains("branch `main`"), "{msg}");
+            assert_eq!(msg.matches("Fix:").count(), 1, "one Fix line: {msg}");
+            assert!(msg.contains("apg project start"), "{msg}");
+        };
+
+        // A project-scoped plan target: the membership guard.
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        let msg = format!(
+            "{:#}",
+            write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &recs).unwrap_err()
+        );
+        assert_refusal(&msg);
+        assert!(
+            !plan_path.exists(),
+            "a refused write must not create the plan"
+        );
+
+        // The shared `_invariants.jsonl` ledger: the universal guard.
+        let invariants = apg_root.join("_invariants.jsonl");
+        let msg = format!(
+            "{:#}",
+            write_jsonl_and_reingest(&apg_root, &invariants, "foo", &recs).unwrap_err()
+        );
+        assert_refusal(&msg);
+        assert!(
+            !invariants.exists(),
+            "a refused write must not create _invariants.jsonl"
+        );
+
+        assert_eq!(
+            testutil::commit_count(&repo.root),
+            commits_before,
+            "a refused write must not create a commit"
+        );
+        testutil::remove(&repo);
+    }
+
     /// Phase-02 task-8: `code_universes_from_export` classifies Real
     /// (graph.jsonl) / Planned (plan store) / absent with NO `db.lbug` open.
     ///

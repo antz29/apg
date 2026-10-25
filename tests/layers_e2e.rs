@@ -872,6 +872,45 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-01 task-6: the node-file write path keeps its guard (defence in
+    /// depth) — `write_project` from the MAIN checkout refuses with the
+    /// project-context wording naming branch `main`, and writes neither a node
+    /// file nor a commit.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/git); run via cargo test-e2e"]
+    fn write_project_refuses_outside_a_project_worktree() {
+        let repo = Repo::new("layers-main-guard");
+        let apg_root = repo.apg_root();
+        let head_before = repo.head_sha();
+        let commits_before = testutil::commit_count(&repo.root);
+
+        let err = write_project(&apg_root, &[sample_node()], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.starts_with("mutation refused — "), "{msg}");
+        assert!(msg.contains("branch `main`"), "{msg}");
+        assert!(
+            msg.contains("default branch is never a mutation place"),
+            "{msg}"
+        );
+        assert_eq!(msg.matches("Fix:").count(), 1, "one Fix line: {msg}");
+        assert!(msg.contains("apg project start"), "{msg}");
+        assert!(
+            !apg_root.join("layers").exists(),
+            "a refused write must not create apg/layers"
+        );
+        assert_eq!(
+            repo.head_sha(),
+            head_before,
+            "a refused write must not move HEAD"
+        );
+        assert_eq!(
+            testutil::commit_count(&repo.root),
+            commits_before,
+            "a refused write must not create a commit"
+        );
+        testutil::remove(&repo);
+    }
+
     /// The delete write-through removes the node file AND rewrites the
     /// referencing file (incident edge dropped), leaving a pairing-consistent
     /// set — the §4.1 atomic delete. Runs in a REAL git repo, because the

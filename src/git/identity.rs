@@ -246,18 +246,24 @@ pub fn require_project_context(apg_root: &Path) -> anyhow::Result<()> {
     let identity = repo_identity(apg_root)?;
     let Some(branch) = identity.branch.clone() else {
         anyhow::bail!(
-            "mutation refused — no project context: the checkout is not on a branch (detached or unborn HEAD). Fix: run `apg project start <name>` from the main checkout and work inside its worktree."
+            "mutation refused — no project context: the checkout holds no branch (detached or unborn HEAD). Fix: run `apg project start <name>` from the main checkout and work inside its worktree."
         );
     };
     if membership_holds(&identity, &branch) {
         return Ok(());
     }
+    if identity.default_branch.as_deref() == Some(branch.as_str()) {
+        anyhow::bail!(
+            "mutation refused — no project context: you are on branch `{branch}`, the repo's default branch, and the default branch is never a mutation place. Fix: run `apg project start <name>` from the main checkout and work inside its worktree."
+        );
+    }
     Err(membership_refusal(&identity, &branch))
 }
 
 /// The two-part refusal message (R3 error UX): which membership half failed
-/// plus one actionable fix line.
-fn membership_refusal(identity: &RepoIdentity, project: &str) -> anyhow::Error {
+/// plus one actionable fix line. `pub(crate)` (test-only re-export in `git`)
+/// so the unit tier can exercise every flavour on constructed identities.
+pub(crate) fn membership_refusal(identity: &RepoIdentity, project: &str) -> anyhow::Error {
     let current = identity.branch.as_deref().unwrap_or("<detached>");
     let expected = project_worktree_dir(&identity.main_root, project);
     if current != project {
@@ -274,14 +280,14 @@ fn membership_refusal(identity: &RepoIdentity, project: &str) -> anyhow::Error {
     }
     if identity.default_branch.as_deref() == Some(project) {
         return anyhow::anyhow!(
-            "mutation refused — membership half 1 (branch) failed: `{project}` is the repo's default branch, and the default branch is never a mutation place. Fix: start a change-set project with a different name (`apg project start <name>`) from the main checkout."
+            "mutation refused — membership half 1 (branch) failed: `{project}` is the repo's default branch (you are on branch `{current}`), and the default branch is never a mutation place. Fix: run `apg project start <name>` from the main checkout and work inside its worktree."
         );
     }
     // Half 2 (worktree): on the right branch, but this checkout is not the
     // project's worktree (and the bootstrap carve-out does not apply — the
     // carve-out only covers the main checkout holding the project branch).
     anyhow::anyhow!(
-        "mutation refused — membership half 2 (worktree) failed: {} is not the project's worktree (expected {}). Fix: work inside the project worktree, or run `apg project start {project}` from the main checkout to create it.",
+        "mutation refused — membership half 2 (worktree) failed: you are on branch `{current}` at {}, which is not the project's worktree (expected {}). Fix: run `apg project start {project}` from the main checkout and work inside its worktree.",
         identity.checkout_root.display(),
         expected.display()
     )
