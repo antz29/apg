@@ -5567,11 +5567,25 @@ mod e2e {
         );
         scratch_commit_all(&repo_dir, "apg init");
 
+        // The researcher agent's markdown result: written AFTER the init
+        // commit, so it is untracked and covered by the committed
+        // `apg/.scratch/` entry — it must stay outside the code graph.
+        let scratch_rel = "apg/.scratch/research-subject.md";
+        let scratch_md = repo_dir.join(scratch_rel);
+        std::fs::create_dir_all(scratch_md.parent().unwrap()).unwrap();
+        std::fs::write(
+            &scratch_md,
+            "# research subject\n\nsource: pkg/pkg.go\n\nA scratch research result outside the code graph.\n",
+        )
+        .unwrap();
+
         // Independent (not the production predicate) segment check: a
-        // record from a build-output / gitignored tree is a leak.
+        // record from a build-output / gitignored tree (or the gitignored
+        // scratch dir) is a leak.
         let is_leak = |p: &str| {
-            p.split(['/', '\\'])
-                .any(|s| s == ".git" || s == "target" || s == "build-out")
+            p.replace('\\', "/").starts_with("apg/.scratch/")
+                || p.split(['/', '\\'])
+                    .any(|s| s == ".git" || s == "target" || s == "build-out")
         };
         let assert_hygienic = |checkout: &Path, tag: &str| {
             let records = export_records(checkout);
@@ -5594,6 +5608,16 @@ mod e2e {
                 files.contains("targets/keep.ts"),
                 "{tag}: `targets/` is not `target/**` and must be scanned: {files:?}"
             );
+            // Never vacuous: the untracked scratch markdown was present for
+            // this scan, so its absence from the graph is meaningful.
+            assert!(
+                checkout.join(scratch_rel).is_file(),
+                "{tag}: the untracked scratch markdown must exist for the exclusion to be meaningful"
+            );
+            assert!(
+                !files.contains(scratch_rel),
+                "{tag}: the gitignored scratch markdown must not enter the graph: {files:?}"
+            );
 
             let mut offenders: Vec<String> = Vec::new();
             let mut testmain: Vec<String> = Vec::new();
@@ -5613,7 +5637,7 @@ mod e2e {
             }
             assert!(
                 offenders.is_empty(),
-                "{tag}: no File/Struct/Function may come from .git/**, target/** or a gitignored tree: {offenders:?}"
+                "{tag}: no File/Struct/Function may come from .git/**, target/**, apg/.scratch/** or a gitignored tree: {offenders:?}"
             );
             assert!(
                 testmain.is_empty(),
@@ -5649,6 +5673,16 @@ mod e2e {
                 .unwrap();
         }
         std::fs::create_dir_all(wt.join("apg/.trans")).unwrap();
+        // The worktree checks out the committed `.gitignore` (it carries
+        // `apg/.scratch/`): a second untracked markdown under the scratch dir
+        // must stay outside the code graph, exactly as on the main checkout.
+        let scratch_wt = wt.join(scratch_rel);
+        std::fs::create_dir_all(scratch_wt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &scratch_wt,
+            "# research subject\n\nsource: src/app.ts\n\nA worktree scratch research result outside the code graph.\n",
+        )
+        .unwrap();
         let ignored_wt = wt.join("build-out/leak.ts");
         std::fs::create_dir_all(ignored_wt.parent().unwrap()).unwrap();
         std::fs::write(
