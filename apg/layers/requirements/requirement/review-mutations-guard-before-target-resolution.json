@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "review-mutations-guard-before-target-resolution",
+  "body": "The review verbs add, action, resolve, and reject report the project-context refusal on the main checkout before they resolve the target feedback item or artifact.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.reviewer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-context-guard",
+      "properties": {}
+    }
+  ]
+}

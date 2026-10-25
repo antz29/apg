@@ -154,6 +154,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.scratch-layout",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.spec-lint",
       "properties": {}
     },
@@ -184,7 +189,7 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.scratch-layout",
+      "target": "solution.component.project-context-guard",
       "properties": {}
     }
   ],

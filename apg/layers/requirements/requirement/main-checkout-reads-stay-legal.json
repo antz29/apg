@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "main-checkout-reads-stay-legal",
+  "body": "`apg review list`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_plan_render`, `apg_query`, `apg_spec_lint`, and `apg_project` start and merge run on the main checkout outside a project worktree.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-context-guard",
+      "properties": {}
+    }
+  ]
+}

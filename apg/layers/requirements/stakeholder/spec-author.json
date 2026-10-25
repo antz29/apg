@@ -32,17 +32,32 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.spec-model-enforcement",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
       "target": "requirements.requirement.research-escalation-request",
       "properties": {}
     },
     {
       "kind": "requires",
       "target": "requirements.requirement.research-result-not-durable-authority",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.node-edge-mutations-guard-before-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.bookkeeping-write-funnel-retains-guard",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-context-refusal-names-branch-and-fix",
       "properties": {}
     }
   ],

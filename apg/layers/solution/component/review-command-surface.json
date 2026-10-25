@@ -29,6 +29,11 @@
       "kind": "realises",
       "target": "domain.service.feedback-lifecycle",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
     }
   ],
   "in": [

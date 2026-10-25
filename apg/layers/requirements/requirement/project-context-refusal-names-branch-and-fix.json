@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "project-context-refusal-names-branch-and-fix",
+  "body": "The project-context refusal names the current branch and one fix line that starts a project and moves into its worktree.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-context-guard",
+      "properties": {}
+    }
+  ]
+}

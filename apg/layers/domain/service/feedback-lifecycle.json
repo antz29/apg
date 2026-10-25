@@ -7,12 +7,7 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.feedback-survives-target-removal",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "target": "requirements.requirement.cli-session-warning-visibility",
       "properties": {}
     },
     {
@@ -22,22 +17,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.unresolved-feedback-blocks-verify",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.reviewer-reviews-notes",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.reviewer-senior-review-discipline",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.reviewer-reviews-the-phase-under-review",
+      "target": "requirements.requirement.feedback-survives-target-removal",
       "properties": {}
     },
     {
@@ -47,7 +27,32 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-warning-visibility",
+      "target": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-reviews-notes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-reviews-the-phase-under-review",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reviewer-senior-review-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-feedback-blocks-verify",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.review-missing-target-names-searched-context",
       "properties": {}
     }
   ],
@@ -55,16 +60,6 @@
     {
       "kind": "contains",
       "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.verify-feedback-stage",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.review-record-retention",
       "properties": {}
     },
     {
@@ -85,6 +80,16 @@
     {
       "kind": "realises",
       "source": "solution.component.review-command-surface",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.review-record-retention",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.verify-feedback-stage",
       "properties": {}
     }
   ]

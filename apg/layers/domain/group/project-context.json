@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "project-context",
+  "body": "The project-context boundary of the durable write surface: the branch-and-worktree state a bookkeeping mutation requires, the positional refusal before any resolution, and the reads and main-checkout operations outside it.",
+  "properties": {
+    "attribute": "core",
+    "root": "project-context"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.project-context",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

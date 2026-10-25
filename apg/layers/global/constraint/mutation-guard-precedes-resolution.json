@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "mutation-guard-precedes-resolution",
+  "body": "A bookkeeping mutation's project-context guard runs before any target, argument, or store resolution, and the central write funnel keeps the same guard as defence in depth.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

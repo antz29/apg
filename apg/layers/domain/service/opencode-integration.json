@@ -82,12 +82,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-external-directory-ask",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.researcher-agent-external-directory-ask",
+      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
       "properties": {}
     }
   ],

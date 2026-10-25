@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "review-missing-target-names-searched-context",
+  "body": "A review target absent inside a project produces an error naming the project root and the branch searched, so an absent target reads distinctly from a missing project context.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.reviewer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.feedback-lifecycle",
+      "properties": {}
+    }
+  ]
+}

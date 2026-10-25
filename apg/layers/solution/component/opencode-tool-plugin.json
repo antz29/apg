@@ -194,6 +194,11 @@
       "kind": "realises",
       "target": "domain.service.plan-tooling",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
     }
   ],
   "in": [

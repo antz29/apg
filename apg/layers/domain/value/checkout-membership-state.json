@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "checkout-membership-state",
+  "body": "The membership state of a checkout: a project worktree on its project branch, the main checkout on the default branch, or a detached or unborn HEAD.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.project-context",
+      "properties": {}
+    }
+  ]
+}

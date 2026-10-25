@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "project-context",
+  "body": "The branch-and-worktree state that qualifies a checkout for a bookkeeping mutation, named by the project branch and its worktree path.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.checkout-membership-state",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.project-context",
+      "properties": {}
+    }
+  ]
+}

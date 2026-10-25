@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bookkeeping-tool-directory-names-project-worktree",
+  "body": "Each bookkeeping mutation tool describes `directory` as the project worktree it acts on and omits the workspace-root default.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    }
+  ]
+}

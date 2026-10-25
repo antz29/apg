@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bookkeeping-write-funnel-retains-guard",
+  "body": "The central bookkeeping write funnel and the node-file write path retain the project-context guard, so every write reaching them refuses outside a project worktree.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-context-guard",
+      "properties": {}
+    }
+  ]
+}

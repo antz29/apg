@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "node-edge-mutations-guard-before-resolution",
+  "body": "The node and edge verbs add, update, and rm report the project-context refusal on the main checkout before the session requirement, endpoint lookup, or existence check.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-context-guard",
+      "properties": {}
+    }
+  ]
+}

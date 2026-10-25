@@ -1,0 +1,86 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "project-context-guard",
+  "body": "The capability that refuses every bookkeeping mutation for lack of project context before any target or argument resolves, while every read and main-checkout project operation stays available.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.review-mutations-guard-before-target-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-mutations-guard-before-store-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.node-edge-mutations-guard-before-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bookkeeping-write-funnel-retains-guard",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-context-refusal-names-branch-and-fix",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.main-checkout-reads-stay-legal",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.project-context",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.review-command-surface",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-routing",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-lifecycle-guards",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.spec-lint",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.feedback-projection",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-start-seeder",
+      "properties": {}
+    }
+  ]
+}

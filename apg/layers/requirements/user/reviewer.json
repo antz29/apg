@@ -12,12 +12,22 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.reviewer-reviews-notes",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.reviewer-senior-review-discipline",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.reviewer-reviews-notes",
+      "target": "requirements.requirement.review-missing-target-names-searched-context",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.review-mutations-guard-before-target-resolution",
       "properties": {}
     }
   ],

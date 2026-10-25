@@ -39,6 +39,11 @@
       "kind": "realises",
       "target": "domain.service.spec-authoring",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
     }
   ],
   "in": [

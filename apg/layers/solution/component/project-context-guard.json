@@ -1,0 +1,41 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "project-context-guard",
+  "body": "The project-context guard: the shared project-context check and refusal wording that the bookkeeping dispatchers and the central write funnel apply, plus the plan dispatcher's positional guard.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.identity.require_project_context",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.identity.membership_refusal",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.cmd_plan",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}
