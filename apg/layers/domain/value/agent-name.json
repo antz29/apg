@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "agent-name",
-  "body": "An Agent node's name: the agent definition file's basename verbatim, hyphenated segments intact and never shortened, normalized, or renamed.",
+  "body": "An Agent node's name: the agent definition file's basename verbatim, with its full hyphenated identity preserved across every scan.",
   "properties": {},
   "out": [],
   "in": [

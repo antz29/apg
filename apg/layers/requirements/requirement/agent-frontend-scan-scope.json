@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "agent-frontend-scan-scope",
-  "body": "The agent frontend claims only `.opencode/agents/` and no other path, so every file outside that directory keeps the scanner that already claims it and no file is claimed twice.",
+  "body": "The agent frontend claims exactly `.opencode/agents/`, so every agent definition in that directory is its own claim and every other tracked file stays with the scanner that already claims it.",
   "properties": {
     "feature": "schema-model"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "kind": "driven-by",
+      "source": "domain.service.agent-definition-scanning",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.agent-definition-scanning",
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
     }
   ]

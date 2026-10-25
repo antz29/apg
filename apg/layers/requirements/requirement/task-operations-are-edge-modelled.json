@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "task-operations-are-edge-modelled",
-  "body": "A task names the code it touches through a per-kind operation edge to a live Module, File, Struct, or Function or to the matching planned node, and a task that touches no code carries no such edge.",
+  "body": "A task names the code it touches through a per-kind operation edge to a live Module, File, Struct, or Function or to the matching planned node, and a target-less activity carries an empty edge set.",
   "properties": {
     "feature": "task-assignment"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.navigator-agent",
+      "kind": "driven-by",
+      "source": "domain.service.plan-tooling",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.plan-tooling",
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
       "properties": {}
     }
   ]

@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "constraint-scope-is-its-layer",
-  "body": "A constraint is prose that names no node and whose layer is its scope, so a tier constraint binds that tier and a global constraint binds the whole durable spec.",
+  "body": "A constraint is prose whose layer is its scope, so a tier constraint binds that tier and a global constraint binds the whole durable spec.",
   "properties": {
     "feature": "schema-model"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.spec-author",
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.schema-documentation",
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }
   ]

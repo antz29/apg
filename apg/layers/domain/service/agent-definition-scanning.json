@@ -2,17 +2,17 @@
   "layer": "domain",
   "type": "service",
   "name": "agent-definition-scanning",
-  "body": "The capability that graphs agent definitions: one Agent node per file under `.opencode/agents/`, named from the filename and claimed by no other scanner.",
+  "body": "The capability that graphs agent definitions: one Agent node per file under `.opencode/agents/`, named from the filename and owned by the agent frontend alone.",
   "properties": {},
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.agent-node-from-agent-file",
+      "target": "requirements.requirement.agent-frontend-scan-scope",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.agent-frontend-scan-scope",
+      "target": "requirements.requirement.agent-node-from-agent-file",
       "properties": {}
     }
   ],

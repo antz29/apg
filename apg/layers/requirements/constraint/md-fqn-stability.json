@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "md-fqn-stability",
-  "body": "The set of non-root Markdown module and heading identities produced by a post-change scan is identical to the pre-change set, the repo-root module rendering repository-relative as the one deliberate exception.",
+  "body": "Markdown module and heading identities hold stable across scans, with two deliberate exceptions: the repo-root module's repository-relative rendering and the agent-definition directory owned by the agent frontend.",
   "properties": {},
   "out": [],
   "in": []

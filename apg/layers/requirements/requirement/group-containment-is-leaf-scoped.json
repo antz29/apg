@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "group-containment-is-leaf-scoped",
-  "body": "A Group holds subgroups or leaf contents but never both; only a leaf Group holds Entities and Services, and every leaf Group holds at least one Service.",
+  "body": "A Group holds either subgroups or leaf contents, and its leaf mode holds Entities and Services with at least one Service.",
   "properties": {
     "feature": "schema-model"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.spec-author",
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.schema-documentation",
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }
   ]
