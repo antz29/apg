@@ -671,7 +671,8 @@ fn write_migration_guide(apg_dir: &Path, old_version: Option<&str>) {
 
 /// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
 /// the binary-managed layout `version` + `.trans/` + the project-worktrees
-/// dir + the changelog-sliced `migration-guide.md`), install (or update) the
+/// dir + the gitignored `.scratch/` research dir + the changelog-sliced
+/// `migration-guide.md`), install (or update) the
 /// opencode apg tool suite + the eight
 /// distributed agents + the upgrade guide into `~/.config/opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
@@ -701,6 +702,11 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     // project's worktree under it). Scaffolded even before git exists — the
     // dir itself is what libgit2's worktree add needs as a parent.
     std::fs::create_dir_all(apg_dir.join(git::WORKTREES))?;
+    // The scratch dir (gitignored; the researcher agent writes its markdown
+    // research results here, nothing else). Scaffolded by init so the write
+    // grant has a parent the moment a project exists, and so a worktree copy
+    // of the layout carries it.
+    std::fs::create_dir_all(apg_dir.join(specs::SCRATCH))?;
     let cfg_path = apg_dir.join("config.json");
     if !cfg_path.exists() {
         std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
@@ -746,7 +752,7 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     if suite_files == 0 && agents == 0 {
         println!(
-            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/); {} suite files + {} agents already up to date in {}",
+            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/ + .scratch/); {} suite files + {} agents already up to date in {}",
             env!("CARGO_PKG_VERSION"),
             SUITE_TOOLS.len() + 2,
             AGENTS.len(),
@@ -754,7 +760,7 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
         );
     } else {
         println!(
-            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/) and installed/updated {} of {} suite files + {} of {} agents in {}",
+            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/ + .scratch/) and installed/updated {} of {} suite files + {} of {} agents in {}",
             env!("CARGO_PKG_VERSION"),
             suite_files,
             SUITE_TOOLS.len() + 2,
