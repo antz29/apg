@@ -153,20 +153,23 @@ Patch only.
             "## Hard limits",
             "## Report",
         ];
-        // The five phase-4 templates carry rewrite headroom; the corpus cap
-        // tracks this sum at the established 140-line margin.
+        // Each cap is the template's current body plus a small deliberate
+        // margin, so a growth edit fails the cap and forces a re-pin rather
+        // than silently eating slack. The corpus cap tracks the sum of these
+        // caps plus 20: it flags aggregate re-pinning, while a single
+        // template's growth is caught by its own cap.
         const CAPS: [(&str, usize); 9] = [
             ("agent-builder.md", 470),
-            ("codebase-navigator.md", 455),
+            ("codebase-navigator.md", 454),
             ("implementation-phase-reviewer.md", 255),
-            ("spec-writer.md", 175),
-            ("plan-writer.md", 155),
-            ("plan-review.md", 115),
+            ("spec-writer.md", 168),
+            ("plan-writer.md", 159),
+            ("plan-review.md", 117),
             ("migration-agent.md", 88),
-            ("spec-review.md", 79),
+            ("spec-review.md", 81),
             ("researcher.md", 56),
         ];
-        const CORPUS_CAP: usize = 1_990;
+        const CORPUS_CAP: usize = 1_868;
 
         /// The template's lines, without the empty element a trailing newline
         /// would split out (so the count matches the file's line count).
