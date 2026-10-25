@@ -1557,9 +1557,9 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
     fn start_self_heals_missing_worktrees_gitignore_entry() {
-        // A repo whose .gitignore dropped the worktrees entry (or was
-        // cloned before it existed): start must scaffold it + commit the
-        // scaffold (the main checkout stays clean), then proceed.
+        // Case A — both apg layout entries dropped (or the repo cloned before
+        // they existed): start must scaffold them + commit the scaffold (the
+        // main checkout stays clean), then proceed.
         let repo = Repo::new("start-selfheal");
         repo.write(
             "code/seed.scan.jsonl",
@@ -1571,16 +1571,48 @@ mod e2e {
         start_scan(&repo.root).unwrap();
         let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
         assert!(wt.is_dir());
-        // The entry is back in the main checkout's .gitignore — committed,
+        // The entries are back in the main checkout's .gitignore — committed,
         // so the main checkout is clean again (a later start would refuse a
         // dirty main).
         let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
         assert!(ignore.contains("apg/.worktrees/"), "{ignore}");
+        assert!(ignore.contains("apg/.scratch/"), "{ignore}");
         assert!(repo.is_clean(), "self-heal must commit the scaffold");
-        // The worktree (checked out from the scaffolded HEAD) carries it too.
+        // The worktree (checked out from the scaffolded HEAD) carries them too,
+        // plus its own scratch dir.
         let wt_ignore = std::fs::read_to_string(wt.join(".gitignore")).unwrap();
         assert!(wt_ignore.contains("apg/.worktrees/"), "{wt_ignore}");
+        assert!(wt_ignore.contains("apg/.scratch/"), "{wt_ignore}");
+        assert!(wt.join(specs::LAYOUT).join(specs::SCRATCH).is_dir());
         testutil::remove(&repo);
+
+        // Case B — only the scratch entry dropped while `apg/.worktrees/`
+        // stays: the dir-only entry (`apg/.scratch/`) matches the probe path
+        // only because that dir exists, so start re-heals it — and commits the
+        // scaffold ONCE, not once per missing entry.
+        let repo2 = Repo::new("start-selfheal-scratch");
+        repo2.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo2.write(".gitignore", "apg/.trans/\napg/.worktrees/\n");
+        repo2.commit_all("drop scratch ignore");
+        start_scan(&repo2.root).unwrap();
+        let before = testutil::commit_count(&repo2.root);
+        let wt2 = project_start_at(&repo2.apg_root(), "foo").unwrap();
+        assert!(wt2.is_dir());
+        let ignore2 = std::fs::read_to_string(repo2.root.join(".gitignore")).unwrap();
+        assert!(ignore2.contains("apg/.scratch/"), "{ignore2}");
+        assert_eq!(
+            testutil::commit_count(&repo2.root),
+            before + 1,
+            "self-heal must commit the scaffold exactly once"
+        );
+        assert!(repo2.is_clean(), "self-heal must commit the scaffold");
+        assert!(wt2.join(specs::LAYOUT).join(specs::SCRATCH).is_dir());
+        let wt2_ignore = std::fs::read_to_string(wt2.join(".gitignore")).unwrap();
+        assert!(wt2_ignore.contains("apg/.scratch/"), "{wt2_ignore}");
+        testutil::remove(&repo2);
     }
 
     // ------------------------------------------------------------------
