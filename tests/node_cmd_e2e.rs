@@ -247,6 +247,46 @@ fn run_edge_burst_attributed(wt: &Path, home: &Path, n: usize) -> BTreeMap<&'sta
     hist
 }
 
+/// Asserts a mutation refusal is the unified project-context one: the
+/// `mutation refused — ` prefix, naming branch `main` (the repo's default
+/// branch) and the `apg project start` fix, and NEVER any of `preempted` — the
+/// downstream errors the positional guard must precede (the live-session
+/// requirement, an absent node/edge).
+fn assert_refused_on_main(out: &std::process::Output, argv: &[&str], preempted: &[&str]) {
+    assert!(!out.status.success(), "{argv:?} must refuse on main");
+    let msg = String::from_utf8_lossy(&out.stderr);
+    // The CLI prefixes `apg: `; the message itself begins with the unified
+    // refusal prefix.
+    let refusal = msg.strip_prefix("apg: ").unwrap_or(&msg);
+    assert!(
+        refusal.starts_with("mutation refused — "),
+        "{argv:?}: {msg}"
+    );
+    assert!(msg.contains("branch `main`"), "{argv:?}: {msg}");
+    assert!(msg.contains("apg project start"), "{argv:?}: {msg}");
+    for preempted in preempted {
+        assert!(
+            !msg.contains(preempted),
+            "{argv:?} must refuse context, never `{preempted}`: {msg}"
+        );
+    }
+}
+
+/// Asserts a refused mutation left no durable trace: no file under
+/// `apg/layers/` and no commit on `checkout`.
+fn assert_no_durable_trace(apg_root: &Path, checkout: &Path, before_commits: usize) {
+    let layers_dir = apg_root.join(layers::LAYERS_DIR);
+    assert!(
+        !layers_dir.exists() || std::fs::read_dir(&layers_dir).unwrap().next().is_none(),
+        "a refused mutation must not write apg/layers"
+    );
+    assert_eq!(
+        testutil::commit_count(checkout),
+        before_commits,
+        "a refused mutation must not create a commit"
+    );
+}
+
 /// e2e tier -- real I/O: every test here drives real git repos, node-file
 /// writes, `db.lbug` reads or spawned `apg` processes. Each is `#[ignore]`d,
 /// so a plain `cargo test` never runs one; the only entry point is the named
@@ -5493,22 +5533,28 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-24 (d): a session started in a detached-HEAD checkout
-    /// (the Coordinator's resolved project is `None`) warns on NOTHING,
-    /// matching the direct path's `git::repo_identity(...).branch` `None` case.
+    /// Phase-05 task-24 (d), updated for the phase-04 project-context guard: a
+    /// session started in a detached-HEAD checkout (the Coordinator's resolved
+    /// project is `None`) still warns on NOTHING — its project-scoped
+    /// outstanding-feedback read matches the direct path's
+    /// `git::repo_identity(...).branch` `None` case.
     ///
     /// A committed-and-scanned durable requirement (`reviewed`) plus a
-    /// `Feedback -[:Reviews]-> reviewed` pair seeded into `.trans` before start
+    /// `Feedback -[:Reviews]-> reviewed` pair sealed into `.trans` before start
     /// (so the start seed still projects the pair into the held DB, and the DB
     /// demonstrably carries it). HEAD is then detached at the scanned commit, so
-    /// `Coordinator::start` resolves its `project` field to `None`. A routed rm
-    /// of `reviewed` still ADMITS (the mandatory-session path does not guard on
-    /// branch membership) but carries NO outstanding-feedback warning, exactly
-    /// like `node_cmd::build_change` (the direct-path builder) over the same
-    /// intact `.trans` under a detached HEAD.
+    /// `Coordinator::start` resolves its `project` field to `None`.
+    ///
+    /// A detached checkout carries NO branch, so it is not a project context:
+    /// the CLI client now REFUSES the rm before admission, naming the absent
+    /// branch and the project-start fix. The coordinator's own admission (still
+    /// a public path, just unreachable through the guarded CLI) applies the rm
+    /// and carries NO outstanding-feedback warning, exactly like
+    /// `node_cmd::build_change` (the direct-path builder) over the same intact
+    /// `.trans` under a detached HEAD.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
-    fn routed_rm_warns_on_nothing_in_a_detached_head_checkout() {
+    fn detached_head_rm_refuses_context_while_the_session_warns_on_nothing() {
         const REVIEWS: &str = "MATCH (f:Feedback)-[:Reviews]->\
              (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN f.fqn";
 
@@ -5589,25 +5635,42 @@ mod e2e {
             "a detached-HEAD direct-path builder must warn on nothing"
         );
 
-        // The routed rm admits but carries no warning.
+        // The project-context guard: a detached checkout holds no branch, so
+        // the CLI client refuses the rm BEFORE session admission — never the
+        // session requirement or a missing node.
         let out =
             testutil::ApgCommand::new(&["node", "rm", "requirements", "requirement", "reviewed"])
                 .cwd(&wt)
                 .env("HOME", home.to_str().unwrap())
                 .output();
         assert!(
-            out.status.success(),
-            "the routed rm must admit under a detached HEAD: {}",
-            String::from_utf8_lossy(&out.stderr)
+            !out.status.success(),
+            "a detached-HEAD checkout must refuse the mutation"
         );
+        let msg = String::from_utf8_lossy(&out.stderr);
+        let refusal = msg.strip_prefix("apg: ").unwrap_or(&msg);
+        assert!(refusal.starts_with("mutation refused — "), "{msg}");
+        assert!(msg.contains("holds no branch"), "{msg}");
+        assert!(msg.contains("apg project start"), "{msg}");
+        assert!(!msg.contains("apg session start"), "{msg}");
+
+        // The coordinator's own admission still applies the rm and carries no
+        // warning: the session's resolved project is `None`.
+        let forwarded = apg::session::Coordinator::forward_mutation_with_id(
+            &wt_apg,
+            "detached-rm",
+            "node",
+            &args,
+        )
+        .unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&out.stdout).trim(),
+            forwarded.output,
             "Removed node requirements.requirement.reviewed"
         );
         assert!(
-            !String::from_utf8_lossy(&out.stderr).contains("apg: warning:"),
-            "a detached-HEAD session must warn on nothing: {}",
-            String::from_utf8_lossy(&out.stderr)
+            forwarded.warnings.is_empty(),
+            "a detached-HEAD session must warn on nothing: {:?}",
+            forwarded.warnings
         );
 
         // Clean release: save (the single durability point) then end.
@@ -5928,6 +5991,386 @@ mod e2e {
             String::from_utf8_lossy(&out.stderr)
         );
 
+        testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-3 (E2E): on the MAIN checkout with no live session, every
+    /// node mutation refuses for project context — BEFORE the live-session
+    /// requirement and before any existence resolution — so `node add`,
+    /// `node update` and `node rm` never read as `apg session start` or an
+    /// absent-node error, and no node file or commit lands.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn node_mutations_on_main_refuse_context_before_session_and_existence() {
+        let repo = Repo::new("node-guard-main");
+        let apg_root = repo.apg_root();
+        let before_commits = testutil::commit_count(&repo.root);
+
+        for argv in [
+            vec![
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "fresh",
+                "--body",
+                "must not land",
+            ],
+            vec![
+                "node",
+                "update",
+                "requirements",
+                "requirement",
+                "ghost",
+                "--body",
+                "absent",
+            ],
+            vec!["node", "rm", "requirements", "requirement", "ghost"],
+        ] {
+            let out = testutil::spawn_apg(&argv, &repo.root);
+            assert_refused_on_main(&out, &argv, &["apg session start", "does not exist"]);
+        }
+
+        assert_no_durable_trace(&apg_root, &repo.root, before_commits);
+        testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-4 (E2E): on the MAIN checkout with no live session, every
+    /// edge mutation refuses for project context BEFORE either endpoint is
+    /// resolved — so `edge add`, `edge update` and `edge rm` over endpoints
+    /// absent from that DB never report the absent node/edge, and no node file
+    /// or commit lands.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn edge_mutations_on_main_refuse_context_before_endpoint_resolution() {
+        let repo = Repo::new("edge-guard-main");
+        let apg_root = repo.apg_root();
+        let before_commits = testutil::commit_count(&repo.root);
+
+        for argv in [
+            vec![
+                "edge",
+                "add",
+                "contains",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+            ],
+            vec![
+                "edge",
+                "update",
+                "contains",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+                "--property",
+                "note=1",
+            ],
+            vec![
+                "edge",
+                "rm",
+                "contains",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+            ],
+        ] {
+            let out = testutil::spawn_apg(&argv, &repo.root);
+            assert_refused_on_main(&out, &argv, &["apg session start", "does not exist"]);
+        }
+
+        assert_no_durable_trace(&apg_root, &repo.root, before_commits);
+        testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-5 (E2E): with a live session in the SCANNED main checkout,
+    /// absent-target node and edge mutations still refuse on the CLIENT, for
+    /// project context — the guard precedes session admission, so the session
+    /// reply never carries the live-session requirement or a missing-node
+    /// error. The write-back buffer stays empty (`session end` succeeds) and
+    /// nothing durable is written.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn node_and_edge_mutations_on_main_refuse_context_before_session_admission() {
+        let repo = Repo::new("node-guard-live-main");
+        let apg_root = repo.apg_root();
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        testutil::scan_checkout(&repo.root).unwrap();
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&repo.root, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the main checkout's session must be live"
+        );
+        let before_commits = testutil::commit_count(&repo.root);
+
+        for argv in [
+            vec![
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "fresh",
+                "--body",
+                "must not land",
+            ],
+            vec![
+                "node",
+                "update",
+                "requirements",
+                "requirement",
+                "ghost",
+                "--body",
+                "absent",
+            ],
+            vec!["node", "rm", "requirements", "requirement", "ghost"],
+            vec![
+                "edge",
+                "add",
+                "contains",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+            ],
+            vec![
+                "edge",
+                "update",
+                "contains",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+                "--property",
+                "note=1",
+            ],
+            vec![
+                "edge",
+                "rm",
+                "contains",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+            ],
+        ] {
+            let out = testutil::ApgCommand::new(&argv)
+                .cwd(&repo.root)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert_refused_on_main(&out, &argv, &["apg session start", "does not exist"]);
+        }
+
+        // Nothing was admitted: `session end` (which refuses while the buffer is
+        // dirty) releases the session cleanly.
+        let child = end_session(&repo.root, session);
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must be released"
+        );
+        assert_no_durable_trace(&apg_root, &repo.root, before_commits);
+        testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-6 (E2E): inside the PROJECT worktree on the project branch
+    /// the guard admits a genuine project context, so all six mutations —
+    /// `node add`/`update`/`rm` and `edge add`/`update`/`rm` — still succeed
+    /// through ONE live session and land durably (one commit) on
+    /// `apg session save`; the mandatory-session requirement is unchanged.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn all_six_node_and_edge_mutations_save_through_one_session_in_the_worktree() {
+        let (wt_apg, repo, wt) = mutation_fixture("guard-six-mutations");
+        let home = repo.root.join("home");
+
+        // A whole-model-valid durable base plus one isolated `global.constraint`
+        // for `node rm` (a lone constraint has no cardinality minimums).
+        let mut base = testutil::valid_model();
+        base.push(node("global", "constraint", "retire"));
+        layers::write_project(&wt_apg, &base, &[]).unwrap();
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the six mutations must run under a live session"
+        );
+        let before_commits = testutil::commit_count(&wt);
+
+        let fresh_path =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "fresh");
+        let retire_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "retire");
+        assert!(!fresh_path.exists(), "the fixture must start without fresh");
+        assert!(retire_path.exists(), "the fixture must carry retire");
+
+        let run = |args: &[&str], expected: &str| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                expected,
+                "apg {args:?}"
+            );
+        };
+
+        // The new requirement's two structural edges make it whole-model-valid
+        // (rooted through `place-order`'s contains decomposition, driven-by the
+        // Service) before the save boundary.
+        run(
+            &["node", "add", "requirements", "requirement", "fresh"],
+            "Added node requirements.requirement.fresh",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "contains",
+                "requirements.requirement.place-order",
+                "requirements.requirement.fresh",
+            ],
+            "Added edge contains requirements.requirement.place-order -> requirements.requirement.fresh",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "driven-by",
+                "domain.service.place-order",
+                "requirements.requirement.fresh",
+            ],
+            "Added edge driven-by domain.service.place-order -> requirements.requirement.fresh",
+        );
+        run(
+            &[
+                "node",
+                "update",
+                "requirements",
+                "requirement",
+                "fresh",
+                "--body",
+                "fresh body",
+            ],
+            "Updated node requirements.requirement.fresh",
+        );
+        run(
+            &[
+                "edge",
+                "update",
+                "contains",
+                "requirements.requirement.place-order",
+                "requirements.requirement.fresh",
+                "--property",
+                "note=1",
+            ],
+            "Updated edge contains requirements.requirement.place-order -> requirements.requirement.fresh",
+        );
+        // `reads` is optional (unlike `writes`), so its removal keeps the model
+        // valid.
+        run(
+            &[
+                "edge",
+                "rm",
+                "reads",
+                "domain.service.place-order",
+                "domain.entity.order",
+            ],
+            "Removed edge reads domain.service.place-order -> domain.entity.order",
+        );
+        run(
+            &["node", "rm", "global", "constraint", "retire"],
+            "Removed node global.constraint.retire",
+        );
+
+        // Every mutation is BUFFERED: the durable store and the history are
+        // untouched until the single durability point.
+        assert!(!fresh_path.exists(), "a buffered add must not write a file");
+        assert!(retire_path.exists(), "a buffered rm must not delete a file");
+        let svc = layers::read_node_file(&wt_apg, Layer::Domain, "service", "place-order").unwrap();
+        assert!(
+            svc.out.iter().any(|e| e.kind == "reads"),
+            "a buffered edge rm must not drop the out-half"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered mutation must not commit"
+        );
+
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole buffered set must land in exactly one commit"
+        );
+
+        // The durable effects of all six verbs.
+        let fresh =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "fresh").unwrap();
+        assert_eq!(fresh.body, "fresh body", "the node update landed");
+        assert!(!retire_path.exists(), "the node rm landed durably on save");
+        let place_order =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "place-order")
+                .unwrap();
+        let contains = place_order
+            .out
+            .iter()
+            .find(|e| e.kind == "contains" && e.target == "requirements.requirement.fresh")
+            .expect("the added contains out-half must be durable");
+        assert_eq!(
+            contains.properties.get("note").map(String::as_str),
+            Some("1"),
+            "the edge update merge landed on the out-half"
+        );
+        assert!(
+            fresh.in_edges.iter().any(|e| {
+                e.kind == "contains"
+                    && e.source == "requirements.requirement.place-order"
+                    && e.properties.get("note").map(String::as_str) == Some("1")
+            }),
+            "the added edge's in-half carries the identical merged map"
+        );
+        assert!(
+            fresh
+                .in_edges
+                .iter()
+                .any(|e| e.kind == "driven-by" && e.source == "domain.service.place-order"),
+            "the added driven-by edge is durable"
+        );
+        let svc = layers::read_node_file(&wt_apg, Layer::Domain, "service", "place-order").unwrap();
+        assert!(
+            !svc.out.iter().any(|e| e.kind == "reads"),
+            "the edge rm dropped the out-half durably"
+        );
+        let order = layers::read_node_file(&wt_apg, Layer::Domain, "entity", "order").unwrap();
+        assert!(
+            !order
+                .in_edges
+                .iter()
+                .any(|e| { e.kind == "reads" && e.source == "domain.service.place-order" }),
+            "the edge rm dropped the in-half durably"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         testutil::remove(&repo);
     }
 }

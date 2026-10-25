@@ -85,6 +85,12 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg node <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
+    // Every node mutation is a project-context act (R3). The guard runs BEFORE
+    // the live-session requirement and before any subcommand argument,
+    // endpoint or existence resolution, so on a main checkout `node add`,
+    // `node update` and `node rm` refuse as a context error — never as the
+    // session requirement or an absent-node error.
+    crate::git::require_project_context(&apg_root)?;
     // Durable mutations are mandatory-session (spec
     // `requirements.requirement.cli-session-required-for-durable-mutations` /
     // `requirements.constraint.cli-session-mandatory`): when a session is live
@@ -117,6 +123,11 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg edge <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
+    // Every edge mutation is a project-context act (R3). The guard runs BEFORE
+    // the live-session requirement and before either endpoint is looked up, so
+    // on a main checkout `edge add`, `edge update` and `edge rm` refuse as a
+    // context error — never as the session requirement or a missing node/edge.
+    crate::git::require_project_context(&apg_root)?;
     // Durable mutations are mandatory-session (spec
     // `requirements.requirement.cli-session-required-for-durable-mutations` /
     // `requirements.constraint.cli-session-mandatory`): when a session is live
