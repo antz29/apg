@@ -800,16 +800,19 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// The apg-owned entries `apg init` scaffolds into the repo `.gitignore`:
-/// the gitignored transient `apg/.trans/` (db, export, plans, renders, logs)
-/// and the project worktrees dir `apg/.worktrees/` — one entry covers every
-/// `<project>` nested under it (R9). Durable `apg/` data (config, specs,
-/// notes) stays committed above both.
-const GITIGNORE_APG_ENTRIES: &[&str] = &["apg/.trans/", "apg/.worktrees/"];
+/// the gitignored transient `apg/.trans/` (db, export, plans, renders, logs),
+/// the project worktrees dir `apg/.worktrees/` — one entry covers every
+/// `<project>` nested under it (R9) — and the scratch dir `apg/.scratch/`,
+/// which holds the gitignored markdown research results the researcher agent
+/// writes. Durable `apg/` data (config, specs, notes) stays committed above
+/// them.
+const GITIGNORE_APG_ENTRIES: &[&str] = &["apg/.trans/", "apg/.worktrees/", "apg/.scratch/"];
 
 /// Ensures the repo `.gitignore` carries the apg layout entries (each added
 /// if missing; other lines untouched), so the durable `apg/` data is
-/// committed and only transient state (db, export, plans, renders, logs) and
-/// project worktrees are ignored. `apg init` scaffolds both; `apg project
+/// committed and only transient state (db, export, plans, renders, logs),
+/// project worktrees and the researcher agent's markdown research results in
+/// the scratch dir are ignored. `apg init` scaffolds all three; `apg project
 /// start` calls the same scaffolder to self-heal a repo whose entries were
 /// dropped (it commits the change itself). Returns whether the file was
 /// modified.
