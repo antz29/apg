@@ -3,6 +3,9 @@ description: A hidden read-only research subagent dispatched by the navigator wh
 mode: subagent
 hidden: true
 permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
   - action: read
     resource: "*"
     effect: allow

@@ -2609,14 +2609,15 @@ mod e2e {
         ))
         .unwrap();
 
-        // The researcher's COMPLETE ordered array: the broad read/glob/grep
-        // allows come FIRST, each followed by the four read guards (last match
-        // wins, so a later broad allow would shadow the guard), then the
-        // fourteen read-only graph allows (apg_spec_lint deliberately excluded),
-        // both verified web action literals (`websearch`, `webfetch`),
-        // external_directory deny-then-ask, edit deny-then the two scratch
-        // markdown allows, and shell deny only.
+        // The researcher's COMPLETE ordered array: the catch-all deny opens it
+        // (deny-by-default), then the broad read/glob/grep allows, each followed
+        // by the four read guards (last match wins, so a later broad allow would
+        // shadow the guard), then the fourteen read-only graph allows
+        // (apg_spec_lint deliberately excluded), both verified web action
+        // literals (`websearch`, `webfetch`), external_directory deny-then-ask,
+        // edit deny-then the two scratch markdown allows, and shell deny only.
         let expected: Vec<(&str, &str, &str)> = vec![
+            ("*", "*", "deny"),
             ("read", "*", "allow"),
             ("read", "apg/.trans/**", "deny"),
             ("read", "apg/layers/**", "deny"),
@@ -2662,8 +2663,8 @@ mod e2e {
             .collect();
         assert_eq!(
             actual.len(),
-            37,
-            "the researcher grant array is pinned at 37 rules"
+            38,
+            "the researcher grant array is pinned at 38 rules"
         );
         assert_eq!(
             actual, expected,
