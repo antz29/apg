@@ -35,7 +35,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -1221,7 +1221,9 @@ impl Coordinator {
 
     /// `apg session end` (client side): signal the live session to shut down.
     /// Idempotent — a missing/stale socket is reclaimed and reported as no live
-    /// session. The client never releases a DB/socket it does not own.
+    /// session. The client never releases a DB/socket it does not own. Returns
+    /// only once the server's socket is gone (bounded), so a caller never
+    /// observes the reply-before-unlink window `is_fresh` reads as unfresh.
     pub fn signal_end(apg_root: &Path) -> anyhow::Result<()> {
         let socket = socket_path(apg_root);
         if !socket.exists() {
@@ -1239,6 +1241,19 @@ impl Coordinator {
                 // release, a dirty buffer comes back as an Err naming the
                 // pending changes (the session stays live).
                 println!("{}", expect_ok(reply)?);
+                // The server writes its reply BEFORE it releases the socket, so
+                // wait (bounded) for the unlink: a present-but-dead socket is
+                // what `is_fresh` reads as NOT fresh.
+                let deadline = Instant::now() + Duration::from_secs(1);
+                while socket.exists() {
+                    if Instant::now() >= deadline {
+                        anyhow::bail!(
+                            "session stopped but its socket {} was not removed",
+                            socket.display()
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
                 Ok(())
             }
             Err(_) => {
@@ -1297,7 +1312,9 @@ impl Coordinator {
     /// buffered node-file set and release the session. Idempotent — a
     /// missing/stale socket is reclaimed and reported as no live session. The
     /// client never releases a DB or node file it does not own; it only carries
-    /// the request and prints the coordinator's reply output.
+    /// the request and prints the coordinator's reply output. Like
+    /// [`signal_end`](Self::signal_end), it returns only once the server's
+    /// socket is gone (bounded).
     pub fn signal_abort(apg_root: &Path) -> anyhow::Result<()> {
         let socket = socket_path(apg_root);
         if !socket.exists() {
@@ -1312,6 +1329,19 @@ impl Coordinator {
         match result {
             Ok(reply) => {
                 println!("{}", expect_ok(reply)?);
+                // The server writes its reply BEFORE it releases the socket, so
+                // wait (bounded) for the unlink: a present-but-dead socket is
+                // what `is_fresh` reads as NOT fresh.
+                let deadline = Instant::now() + Duration::from_secs(1);
+                while socket.exists() {
+                    if Instant::now() >= deadline {
+                        anyhow::bail!(
+                            "session stopped but its socket {} was not removed",
+                            socket.display()
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
                 Ok(())
             }
             Err(_) => {
