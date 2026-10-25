@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "init-refuses-inside-linked-worktree",
+  "body": "`apg init` inside a linked worktree reports a refusal naming the main checkout as the fix, while the main checkout and a directory that is not yet a git repository both remain initializable.",
+  "properties": {
+    "feature": "project-context-guard"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.apg-upgrader",
+      "properties": {}
+    }
+  ]
+}

@@ -9,6 +9,11 @@
       "kind": "requires",
       "target": "requirements.requirement.reviewer-upgrade-removal-guide",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.init-refuses-inside-linked-worktree",
+      "properties": {}
     }
   ],
   "in": []

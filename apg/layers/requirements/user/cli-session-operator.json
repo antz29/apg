@@ -9,6 +9,11 @@
       "kind": "requires",
       "target": "requirements.requirement.cli-session-substrate",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-start-requires-project-context",
+      "properties": {}
     }
   ],
   "in": []

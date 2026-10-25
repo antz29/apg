@@ -7,31 +7,6 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-crash-recovery",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-required-for-durable-mutations",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-substrate",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-read-your-writes",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-warning-visibility",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.cli-session-caller-controlled-durability",
       "properties": {}
     },
@@ -42,7 +17,37 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-crash-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-lifecycle-exclusivity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-read-your-writes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-required-for-durable-mutations",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.cli-session-single-writer-receive-order",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-substrate",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cli-session-warning-visibility",
       "properties": {}
     },
     {
@@ -52,7 +57,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-lifecycle-exclusivity",
+      "target": "requirements.requirement.session-start-requires-project-context",
       "properties": {}
     }
   ],
@@ -60,16 +65,6 @@
     {
       "kind": "contains",
       "source": "domain.group.cli-session",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.cli-session-durability",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.cli-session-warning-propagation",
       "properties": {}
     },
     {
@@ -84,12 +79,22 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.cli-session-durability",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.cli-session-lifecycle-guards",
       "properties": {}
     },
     {
       "kind": "realises",
       "source": "solution.component.cli-session-routing",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-warning-propagation",
       "properties": {}
     }
   ]

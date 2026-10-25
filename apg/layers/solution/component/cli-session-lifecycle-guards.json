@@ -29,6 +29,11 @@
       "kind": "realises",
       "target": "domain.service.project-context-guard",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.session.Coordinator.start",
+      "properties": {}
     }
   ],
   "in": [

@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.generated-agent-shell-single-command-rule",
       "properties": {}
     },
@@ -92,7 +97,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
+      "target": "requirements.requirement.init-refuses-inside-linked-worktree",
       "properties": {}
     }
   ],
