@@ -78,7 +78,7 @@ USAGE:
                               version + .trans/ + .worktrees/ + the
                               changelog-sliced migration-guide.md), scaffold the
                               repo .gitignore for the apg layout entries,
-                              install/update the opencode apg tool suite + eight
+                              install/update the opencode apg tool suite + nine
                               distributed agents + the upgrade guide in
                               ~/.config/opencode/, and warn loudly about project
                               .opencode/ files that duplicate the installed
@@ -180,7 +180,7 @@ fn session_cmd(args: &[String]) -> anyhow::Result<()> {
 /// prints help
 /// for `--help`/no args, and turns a returned error into a non-zero exit. The
 /// binary embeds the apg opencode suite — the tool set (`SUITE_TOOLS`) and the
-/// eight distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
+/// nine distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
 /// carry the coordinator-mediated feedback cycle: the owning writer returns an
 /// ACTIONED/WONT-FIX claim and the coordinator performs the shallow
 /// claim-vs-change consistency check and then actions the item.
