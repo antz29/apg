@@ -1353,6 +1353,12 @@ mod e2e {
 
         // The branch DB exists after start (AC-1).
         assert!(wt.join("apg").join(specs::TRANS).join("db.lbug").exists());
+        // ... and the worktree carries its own scratch dir beside the seeded .trans.
+        assert!(
+            wt.join(specs::LAYOUT).join(specs::SCRATCH).is_dir(),
+            "expected start to create {}",
+            wt.join(specs::LAYOUT).join(specs::SCRATCH).display()
+        );
 
         // Identity correct in worktree vs main (R7).
         let id_wt = git::repo_identity(&wt.join(specs::LAYOUT)).unwrap();
