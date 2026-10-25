@@ -1838,8 +1838,9 @@ mod e2e {
 
         let (suite_files, agents, pruned) = install_suite(&dir).unwrap();
         // The two populations are counted separately: each fresh-install count
-        // matches its own population's total (40 suite files vs 7 agents), so a
-        // mixed counter would fail one of these against the other's total.
+        // matches its own population's total (`SUITE_TOOLS.len() + 2` suite
+        // files vs `AGENTS.len()` agents), so a mixed counter would fail one of
+        // these against the other's total.
         assert_eq!(
             suite_files,
             SUITE_TOOLS.len() + 2,
@@ -1849,6 +1850,20 @@ mod e2e {
             agents,
             AGENTS.len(),
             "a fresh install writes every agent, counted separately from suite files"
+        );
+        // The count alone would pass a wrong write, so pin the researcher
+        // template itself: the installed bytes are the embedded `AGENTS`
+        // entry, not a truncated or stale copy.
+        let researcher = AGENTS
+            .iter()
+            .find(|(name, _)| *name == "researcher.md")
+            .map(|(_, content)| *content)
+            .unwrap_or_else(|| panic!("researcher.md is in the embedded AGENTS set"));
+        let installed = std::fs::read(dir.join("agents").join("researcher.md")).unwrap();
+        assert_eq!(
+            installed,
+            researcher.as_bytes(),
+            "a fresh install writes the embedded researcher template byte for byte"
         );
         assert_eq!(pruned, 1, "the retired apg_spec.ts is pruned");
 
