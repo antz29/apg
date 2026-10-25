@@ -102,10 +102,12 @@ exactly two allows:
 - `apg/.worktrees/*/apg/.scratch/*.md`
 
 The rules are byte-identical to the templates, and every other path is refused.
-The `.md` suffix matches the **whole** value, so `apg/.scratch/notes.txt` and
-`apg/.scratch/sub/x.md` match neither pattern and are refused — see *Whole-value
-pattern matching* above and
-`requirements.constraint.scratch-markdown-only-writes`. Gate 1 is the `edit`
+The `.md` suffix must match the **whole** value, so `apg/.scratch/notes.txt`
+matches neither pattern and is refused. A nested markdown such as
+`apg/.scratch/sub/x.md` **does** match, because `*` spans `/` — and that is
+permitted by `requirements.constraint.scratch-markdown-only-writes` (a `.md`
+path anywhere under the scratch directory). See *Whole-value pattern matching*
+above. Gate 1 is the `edit`
 action rule set: a native `edit`/`write`/`patch` scratch write is admitted by
 those rules alone. Gate 2 (`fsScopeDecision`) re-asserts the same main-anchored
 paths through that same `edit` rule set, and runs only when the write goes
