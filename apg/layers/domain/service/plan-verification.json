@@ -14,6 +14,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-verify-stays-branch-scoped",
+      "properties": {}
     }
   ],
   "in": [
@@ -24,12 +29,17 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.plan-coverage-check",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.plan-review-prompt",
       "properties": {}
     },
     {
       "kind": "realises",
-      "source": "solution.component.plan-coverage-check",
+      "source": "solution.component.verify-feedback-stage",
       "properties": {}
     }
   ]

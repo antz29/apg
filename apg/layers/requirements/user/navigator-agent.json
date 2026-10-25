@@ -22,6 +22,16 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.main-checkout-reads-stay-legal",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
       "properties": {}
     },
@@ -67,6 +77,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.plan-mutations-guard-before-store-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     },
@@ -82,17 +97,7 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.plan-mutations-guard-before-store-resolution",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.main-checkout-reads-stay-legal",
+      "target": "requirements.requirement.plan-verify-stays-branch-scoped",
       "properties": {}
     }
   ],
