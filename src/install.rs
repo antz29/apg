@@ -682,8 +682,9 @@ fn write_migration_guide(apg_dir: &Path, old_version: Option<&str>) {
 /// opencode apg tool suite + the nine
 /// distributed agents + the upgrade guide into `~/.config/opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
-/// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
-/// files that duplicate the installed suite (never deletes anything).
+/// `apg/.worktrees/`, `apg/.scratch/`), and warn loudly about any project-local
+/// `.opencode/` files that duplicate the installed suite (never deletes
+/// anything).
 /// Project-specific implementer/reviewer agents are installed into the
 /// project `.opencode/` by the agent-builder, not by init; that template
 /// delivers the coordinator-mediated writer/reviewer grant shape — writers
