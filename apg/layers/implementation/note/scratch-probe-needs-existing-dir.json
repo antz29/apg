@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "scratch-probe-needs-existing-dir",
-  "body": "`project_start_at` probes the main checkout's `apg/.scratch` path directly, and libgit2 matches a directory-only ignore entry against that exact path only while the directory exists. The probe therefore reads `apg/.scratch/` as ignored only after `apg init` has created the directory; with the entry present and the directory absent, the self-heal finds nothing to write and refuses with the shadowing-negation message. The main-checkout directory is init's to create, the worktree copy is start's, and every test fixture that drives start seeds the directory beside the entry. Upgrade by probing a path beneath the scratch entry, or by creating the directory in start, when the probe is next touched.",
+  "body": "`project_start_at` heals the main checkout's `apg/.scratch` directory before its gitignore probe, because libgit2 matches a directory-only ignore entry against that exact path only while the directory exists and a gitignored directory is never cloned. Start therefore proceeds with the committed entry alone (no scaffold, no commit), with the entry and the directory both absent (the scaffold writes the entries and commits once), and with both present (no write, no commit); `apg init` remains the layout's creator and the worktree copy remains start's. Upgrade by probing a path beneath the scratch entry only if start must stop creating the main-checkout directory.",
   "properties": {},
   "out": [
     {
