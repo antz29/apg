@@ -102,7 +102,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.task-implementer-names-a-roster-agent",
+      "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
       "properties": {}
     }
   ],

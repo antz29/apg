@@ -47,6 +47,16 @@
       "kind": "contains",
       "target": "domain.service.graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.agent-definition-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.agent",
+      "properties": {}
     }
   ],
   "in": []

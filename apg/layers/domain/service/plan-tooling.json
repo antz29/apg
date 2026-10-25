@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "plan-tooling",
-  "body": "The capability that defines and reports a project's transient plan: the task record naming its implementer, verb and code target, read against the durable spec and scoped to the requirements the project branch owns.",
+  "body": "The capability that defines and reports a project's transient plan: the title-and-status task record bound to an assigned Agent and to per-kind operation edges, read against the durable spec and scoped to the branch's requirements.",
   "properties": {},
   "out": [
     {
@@ -17,7 +17,12 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.task-implementer-names-a-roster-agent",
+      "target": "requirements.requirement.task-operations-are-edge-modelled",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
       "properties": {}
     }
   ],

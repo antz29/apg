@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "implementation-constraint-language-scope",
+  "body": "An implementation constraint binds all of tier 4, or exactly the Languages its applies-to edge names, and an applies-to target is a Language node rather than any other node.",
+  "properties": {
+    "feature": "schema-model"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
+      "properties": {}
+    }
+  ]
+}

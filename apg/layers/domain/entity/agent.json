@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent",
+  "body": "The tier-4 graph node of an agent definition: one per file under `.opencode/agents/`, named by the file's basename verbatim and identified by that scanned node's code identity.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.agent-name",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-identity",
+      "properties": {}
+    }
+  ]
+}

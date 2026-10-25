@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "task-operations-are-edge-modelled",
+  "body": "A task names the code it touches through a per-kind operation edge to a live Module, File, Struct, or Function or to the matching planned node, and a task that touches no code carries no such edge.",
+  "properties": {
+    "feature": "task-assignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-tooling",
+      "properties": {}
+    }
+  ]
+}

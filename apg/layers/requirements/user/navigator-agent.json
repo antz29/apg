@@ -42,6 +42,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.navigator-dispatches-task-implementer",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.navigator-no-unguarded-main-git",
       "properties": {}
     },
@@ -107,17 +112,17 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.task-implementer-names-a-roster-agent",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.navigator-dispatches-task-implementer",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
       "target": "requirements.requirement.task-record-field-set",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.task-operations-are-edge-modelled",
       "properties": {}
     }
   ],

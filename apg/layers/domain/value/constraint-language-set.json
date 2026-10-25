@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "constraint-language-set",
+  "body": "The Languages an implementation constraint's applies-to edge names, empty when the constraint binds all of tier 4.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.implementation-constraint",
+      "properties": {}
+    }
+  ]
+}

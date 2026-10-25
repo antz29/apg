@@ -42,6 +42,11 @@
       "kind": "is-role",
       "source": "solution.component.ts-package-rooting",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.agent-frontend-artifact",
+      "properties": {}
     }
   ]
 }

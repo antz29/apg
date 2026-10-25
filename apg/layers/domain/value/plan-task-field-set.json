@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "plan-task-field-set",
-  "body": "The field set of one plan task record: its title, status, implementer, verb, target, and the destination FQN of a rename or move.",
+  "body": "The property set of one plan task record: its title and its status alone, with the assigned Agent, the implemented Component, and every code target carried as edges.",
   "properties": {},
   "out": [],
   "in": [

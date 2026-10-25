@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "constraint-scope",
-  "body": "The layer-scoped constraint check: the shared structural validation that the write path and the scan path both call, establishing a constraint's layer as its scope.",
+  "body": "The layer-scoped constraint check: the shared structural validation the write path and the scan path both call, establishing a constraint's layer as its scope and an implementation constraint's applies-to Languages.",
   "properties": {},
   "out": [
     {

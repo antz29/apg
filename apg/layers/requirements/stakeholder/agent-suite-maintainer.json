@@ -107,6 +107,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.research-escalation-stages",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.researcher-agent-standard",
       "properties": {}
     },
@@ -127,7 +132,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.research-escalation-stages",
+      "target": "requirements.requirement.agent-node-from-agent-file",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.agent-frontend-scan-scope",
       "properties": {}
     }
   ],

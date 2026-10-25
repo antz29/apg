@@ -2,24 +2,9 @@
   "layer": "solution",
   "type": "component",
   "name": "plan-task-record",
-  "body": "The transient plan task record and its surfaces: the Task record with its implementer, verb, and target fields, the add and update validation, and the markdown task list.",
+  "body": "The transient plan task record and its surfaces: the title and status properties, the assigned-to, implements, and per-kind operation edges, the authoring validation, and the markdown task list.",
   "properties": {},
   "out": [
-    {
-      "kind": "is-role",
-      "target": "solution.role.scan-module",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "target": "domain.service.plan-tooling",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.schema.Record.Task",
-      "properties": {}
-    },
     {
       "kind": "implemented-by",
       "target": "rust.apg.load.export.Export.Task",
@@ -43,6 +28,21 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.render.render_phase_tasks",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.schema.Record.Task",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.plan-tooling",
       "properties": {}
     }
   ],

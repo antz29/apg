@@ -59,6 +59,11 @@
       "kind": "contains",
       "target": "solution.container.ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.agent-frontend",
+      "properties": {}
     }
   ],
   "in": []

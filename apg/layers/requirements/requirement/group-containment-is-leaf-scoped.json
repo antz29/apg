@@ -1,10 +1,10 @@
 {
   "layer": "requirements",
   "type": "requirement",
-  "name": "schema-document-implemented-by-is-exclusive",
-  "body": "SCHEMA.md states that exactly one Component claims each code node, with the at-least-one-claim presence check at the merge gate.",
+  "name": "group-containment-is-leaf-scoped",
+  "body": "A Group holds subgroups or leaf contents but never both; only a leaf Group holds Entities and Services, and every leaf Group holds at least one Service.",
   "properties": {
-    "feature": "schema-document-alignment"
+    "feature": "schema-model"
   },
   "out": [],
   "in": [

@@ -14,12 +14,17 @@
     },
     {
       "kind": "contains",
+      "target": "domain.entity.plan-task",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.service.plan-tooling",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.entity.plan-task",
+      "target": "domain.entity.agent-assignment",
       "properties": {}
     }
   ],

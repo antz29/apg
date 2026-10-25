@@ -42,6 +42,11 @@
       "kind": "is-role",
       "source": "solution.container.ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.container.agent-frontend",
+      "properties": {}
     }
   ]
 }

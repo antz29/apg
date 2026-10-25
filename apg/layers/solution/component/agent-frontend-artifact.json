@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "agent-frontend-artifact",
+  "body": "The agent frontend's scanner: it walks `.opencode/agents/` alone and emits one Agent record per definition file, named from the file's basename.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.agent-definition-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.agent-frontend",
+      "properties": {}
+    }
+  ]
+}

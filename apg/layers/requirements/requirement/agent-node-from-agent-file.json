@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "agent-node-from-agent-file",
+  "body": "Each agent definition file under `.opencode/agents/` is one tier-4 Agent node whose name is the file's basename verbatim, so an agent's full identity survives every scan.",
+  "properties": {
+    "feature": "schema-model"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-definition-scanning",
+      "properties": {}
+    }
+  ]
+}

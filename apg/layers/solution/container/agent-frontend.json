@@ -1,0 +1,28 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "agent-frontend",
+  "body": "The agent-definition frontend artifact: a dedicated scanner that reads only `.opencode/agents/` and yields one Agent per agent definition file.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-frontend-artifact",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent-assignment",
+  "body": "A plan task's binding to one Agent through the assigned-to edge, resolved against the scanned graph so a missing Agent is drift rather than an assignment.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.assigned-agent",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.plan-tooling",
+      "properties": {}
+    }
+  ]
+}

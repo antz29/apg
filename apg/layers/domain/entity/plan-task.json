@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "plan-task",
-  "body": "One unit of plan work: the transient record naming its implementer agent, the verb it applies to one code identity, and that target with the destination FQN of a rename or move.",
+  "body": "One unit of plan work: the transient record whose properties are its title and status, bound to one Agent by assigned-to, to at most one Component by implements, and to the code it touches by per-kind operation edges.",
   "properties": {
     "kind": "entity"
   },

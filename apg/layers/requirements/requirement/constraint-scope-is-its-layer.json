@@ -1,10 +1,10 @@
 {
   "layer": "requirements",
   "type": "requirement",
-  "name": "schema-document-group-containment-is-leaf-scoped",
-  "body": "SCHEMA.md states the Group modes as exclusive: a Group holds subgroups or leaf contents, and a leaf Group holds at least one Service.",
+  "name": "constraint-scope-is-its-layer",
+  "body": "A constraint is prose that names no node and whose layer is its scope, so a tier constraint binds that tier and a global constraint binds the whole durable spec.",
   "properties": {
-    "feature": "schema-document-alignment"
+    "feature": "schema-model"
   },
   "out": [],
   "in": [

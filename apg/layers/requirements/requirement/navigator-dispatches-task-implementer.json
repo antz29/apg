@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "navigator-dispatches-task-implementer",
-  "body": "The navigator dispatches each plan task to the `*-implementer` agent its implementer field names and, when that agent is absent, sends the task to the agent-builder instead of dispatching it.",
+  "body": "The navigator dispatches each plan task to the Agent its assigned-to edge names and, when that Agent is absent from the graph, sends the task to the agent-builder instead of dispatching it.",
   "properties": {
-    "feature": "task-implementer-model"
+    "feature": "task-assignment"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.navigator-agent",
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.agent-navigation",
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
       "properties": {}
     }
   ]

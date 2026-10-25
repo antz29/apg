@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "prompt-corpus-model-current",
-  "body": "The nine agent templates under `opencode-suite/agents/` state the live durable-spec vocabulary: `driven-by` from Service to Requirement, tier-scoped constraints, the event entity kind, the actor and role types, and acyclic contains.",
+  "body": "The nine agent templates state the live durable-spec vocabulary: `driven-by`, tier-scoped constraints, the event entity kind, actor and role types, acyclic contains, and a task's assigned Agent and operation edges.",
   "properties": {
     "feature": "agent-prompt-clarity"
   },

@@ -1,10 +1,10 @@
 {
   "layer": "requirements",
   "type": "requirement",
-  "name": "schema-document-task-section-states-fields",
-  "body": "SCHEMA.md's plan section shows the plan and phase containment links and states each task through its implementer, verb, target, and new-FQN fields.",
+  "name": "implemented-by-is-exclusive",
+  "body": "Exactly one Component claims each code node through implemented-by, every Component claims at least one code node, and the merge gate enforces that presence.",
   "properties": {
-    "feature": "schema-document-alignment"
+    "feature": "schema-model"
   },
   "out": [],
   "in": [

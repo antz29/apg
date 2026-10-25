@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "task-assigned-to-names-a-scanned-agent",
+  "body": "Every plan task's assigned-to edge names exactly one scanned Agent, any task is assignable to any agent, and a task whose Agent does not resolve is drift the navigator routes to the agent-builder.",
+  "properties": {
+    "feature": "task-assignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-tooling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    }
+  ]
+}

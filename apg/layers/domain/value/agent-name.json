@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "agent-name",
+  "body": "An Agent node's name: the agent definition file's basename verbatim, hyphenated segments intact and never shortened, normalized, or renamed.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent",
+      "properties": {}
+    }
+  ]
+}

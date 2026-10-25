@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "assigned-agent",
+  "body": "The single Agent identity a task's assigned-to edge names, resolved against the scanned graph.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.agent-assignment",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "implementation-constraint-applies-to-language",
+  "body": "An implementation constraint binds all of tier 4 unless its applies-to edge names Languages, and every applies-to target is a Language node.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
