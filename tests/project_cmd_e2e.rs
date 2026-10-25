@@ -1060,10 +1060,14 @@ fn warm_scratch(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
     }
     std::fs::write(
         repo_dir.join(".gitignore"),
-        "apg/.trans/\napg/.worktrees/\n",
+        "apg/.trans/\napg/.worktrees/\napg/.scratch/\n",
     )
     .unwrap();
     std::fs::create_dir_all(repo_dir.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
+    // `apg init` scaffolds the scratch dir too, and libgit2's dir-only ignore
+    // entry (`apg/.scratch/`) only matches an existing directory — absent,
+    // `project start`'s self-heal probe reads it as unignored and commits.
+    std::fs::create_dir_all(repo_dir.join(specs::LAYOUT).join(specs::SCRATCH)).unwrap();
     std::fs::write(
         repo_dir.join(specs::LAYOUT).join("config.json"),
         format!(
