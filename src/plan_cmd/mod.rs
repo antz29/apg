@@ -68,13 +68,26 @@ pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan <add|update|rm|done|undone|note|complete|render|verify> …");
     };
     match sub {
-        "add" => plan_add(&args[1..]),
-        "update" => plan_update(&args[1..]),
-        "rm" => plan_rm(&args[1..]),
-        "done" => plan_done(&args[1..]),
-        "undone" => plan_undone(&args[1..]),
-        "note" => plan_note(&args[1..]),
-        "complete" => plan_complete(&args[1..]),
+        // Every mutating verb is a project-context act (R3). The guard runs
+        // BEFORE dispatch, so no verb core resolves or loads the project's
+        // `.trans/plans/<project>.jsonl` first — an absent context refuses as
+        // such, never as `no plan for project …`.
+        "add" | "update" | "rm" | "done" | "undone" | "note" | "complete" => {
+            let apg_root = require_apg_root()?;
+            crate::git::require_project_context(&apg_root)?;
+            match sub {
+                "add" => plan_add(&args[1..]),
+                "update" => plan_update(&args[1..]),
+                "rm" => plan_rm(&args[1..]),
+                "done" => plan_done(&args[1..]),
+                "undone" => plan_undone(&args[1..]),
+                "note" => plan_note(&args[1..]),
+                _ => plan_complete(&args[1..]),
+            }
+        }
+        // Reads and the gate stay legal on main: `render` reads the plan store,
+        // and `verify` takes its own `require_membership` inside
+        // `plan_verify_at` (the gate is scoped to the project's branch).
         "render" => plan_render(&args[1..]),
         "verify" => plan_verify(&args[1..]),
         // R5: `apg plan apply` was renamed `verify` — the binary applies

@@ -5350,4 +5350,198 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-03 task-2 (E2E): on the MAIN checkout — with the invoked project
+    /// absent from main's own `.trans/plans` store — every mutating plan verb
+    /// refuses with the project-context refusal, never `no plan for project`,
+    /// because the dispatcher guards BEFORE any verb core loads the store. The
+    /// controls prove the guard is not a blanket refusal: `render` of a plan
+    /// seeded in main's own store is a legal read (exit 0), and a real project
+    /// worktree runs a mutating verb happily.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn plan_mutations_refuse_context_before_store_resolution_on_main() {
+        let repo = Repo::new("plan-guard-main");
+        let ghost_task = "ghost/plan.phase-01.task-1";
+        // The invoked project is absent from main's own store — the refusal
+        // below must not be that absence.
+        assert!(!specs::plan_jsonl_path(&repo.apg_root(), "ghost").exists());
+
+        for argv in [
+            vec!["plan", "add", "ghost"],
+            vec!["plan", "update", "ghost", "--title", "T"],
+            vec!["plan", "rm", "ghost"],
+            vec!["plan", "done", "ghost", ghost_task],
+            vec!["plan", "undone", "ghost", ghost_task],
+            vec!["plan", "note", "ghost", ghost_task, "--body", "why"],
+            vec!["plan", "complete", "ghost", "1"],
+        ] {
+            let out = testutil::spawn_apg(&argv, &repo.root);
+            assert!(!out.status.success(), "{argv:?} must refuse on main");
+            let msg = String::from_utf8_lossy(&out.stderr);
+            // The CLI prefixes `apg: `; the message itself begins with the
+            // unified refusal prefix.
+            let refusal = msg.strip_prefix("apg: ").unwrap_or(&msg);
+            assert!(
+                refusal.starts_with("mutation refused — "),
+                "{argv:?}: {msg}"
+            );
+            assert!(msg.contains("branch `main`"), "{argv:?}: {msg}");
+            assert!(msg.contains("apg project start"), "{argv:?}: {msg}");
+            assert!(
+                !msg.contains("no plan for project"),
+                "{argv:?} must refuse context, never an absent store: {msg}"
+            );
+        }
+
+        // A read is never a mutation place: `render` of a plan that IS seeded
+        // in main's own store succeeds, unguarded. Seeded with the plain JSONL
+        // primitive — `write_jsonl_and_reingest` refuses on main by design.
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.apg_root(), "foo"),
+            &bare_plan(),
+        )
+        .unwrap();
+        let rendered = testutil::spawn_apg(&["plan", "render", "foo", "--out", "-"], &repo.root);
+        assert!(
+            rendered.status.success(),
+            "render must stay legal on main: {}",
+            String::from_utf8_lossy(&rendered.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&rendered.stdout).contains("# Plan — P"),
+            "render must print the seeded plan"
+        );
+
+        // The same verb the main checkout refuses runs happily inside a real
+        // project worktree (the guard admits the project context).
+        let wt = repo.start_project("foo");
+        let added = testutil::spawn_apg(
+            &["plan", "add", "foo", "--title", "W", "--strategy", "S"],
+            &wt,
+        );
+        assert!(
+            added.status.success(),
+            "a mutating verb must run inside the project worktree: {}",
+            String::from_utf8_lossy(&added.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&added.stderr).contains("mutation refused"),
+            "the worktree context must not be refused"
+        );
+        assert!(
+            specs::plan_jsonl_path(&wt.join(specs::LAYOUT), "foo").exists(),
+            "the worktree store must hold the created plan"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-3 (E2E), half (a): `apg plan verify` stays branch-scoped —
+    /// on the main checkout it refuses through the `require_membership` inside
+    /// `plan_verify_at` (which precedes `load_plan`), naming the branch framing
+    /// and never `no plan for project`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn plan_verify_on_main_refuses_via_membership_not_missing_plan() {
+        let repo = Repo::new("plan-verify-main");
+        assert!(!specs::plan_jsonl_path(&repo.apg_root(), "ghost").exists());
+
+        let out = testutil::spawn_apg(&["plan", "verify", "ghost"], &repo.root);
+        assert!(
+            !out.status.success(),
+            "verify must refuse outside the project's branch"
+        );
+        let msg = String::from_utf8_lossy(&out.stderr);
+        let refusal = msg.strip_prefix("apg: ").unwrap_or(&msg);
+        assert!(refusal.starts_with("mutation refused — "), "{msg}");
+        assert!(msg.contains("branch `main`"), "{msg}");
+        assert!(msg.contains("default branch"), "{msg}");
+        assert!(msg.contains("apg project start ghost"), "{msg}");
+        assert!(
+            !msg.contains("no plan for project"),
+            "membership must refuse before the plan store is resolved: {msg}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-3 (E2E), half (b): the merge half needs no second green
+    /// round-trip (project_cmd's e2e owns the happy path and the merge-strength
+    /// refusal). The non-duplicating proof is a merge refused by the plan-store
+    /// blocker class: an open Feedback in the WORKTREE's plan store makes
+    /// `apg project merge` refuse at the verify gate naming the item, leaving
+    /// the main checkout, worktree and project branch untouched.
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/db.lbug/git/merge); run via cargo test-e2e"]
+    fn merge_refuses_unresolved_plan_feedback_and_leaves_everything_untouched() {
+        let (apg_root, repo, wt) = fixture("merge-feedback");
+
+        // An OPEN feedback in the worktree's plan store — the transient record
+        // files are the gate's source of truth. Written through the re-ingesting
+        // funnel so the branch DB's authored/transient digest agrees with the
+        // tree (a bare JSONL write would read as a stale branch graph).
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &plan_path,
+            "foo",
+            &[
+                Record::Plan {
+                    fqn: "foo/plan".to_string(),
+                    title: "P".to_string(),
+                    strategy: String::new(),
+                },
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "open".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "foo/plan".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        let main_tip_before = main_repo.head().unwrap().peel_to_commit().unwrap().id();
+        // The rebuild must never run: the verify gate refuses first.
+        let rebuild = |_: &Path| -> anyhow::Result<()> {
+            panic!("the verify gate must refuse before the main rebuild")
+        };
+        let err = apg::project_cmd::project_merge_at(&repo.apg_root(), "foo", Some(&rebuild))
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("unresolved review feedback"), "{msg}");
+        assert!(msg.contains("foo/feedback-1"), "{msg}");
+
+        assert_eq!(
+            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+            main_tip_before,
+            "a verify refusal must not move the main checkout"
+        );
+        assert!(
+            repo.is_clean(),
+            "a verify refusal must leave the main checkout untouched"
+        );
+        assert!(
+            wt.is_dir(),
+            "a verify refusal must leave the worktree in place"
+        );
+        assert!(
+            main_repo.find_worktree("foo").is_ok(),
+            "a verify refusal must leave the worktree registered"
+        );
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_ok(),
+            "a verify refusal must leave the project branch in place"
+        );
+
+        testutil::remove(&repo);
+    }
 }
