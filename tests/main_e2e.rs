@@ -2545,6 +2545,354 @@ mod e2e {
         );
     }
 
+    /// Phase-02 task-4: the shipped `researcher.md` template is a hidden
+    /// read-only subagent whose COMPLETE `permissions:` array is pinned
+    /// rule-for-rule (full-array equality, so an unlisted or reordered grant
+    /// fails), whose skeleton is one H1 opening the body plus exactly the five
+    /// `##` sections, and whose result-file prose keeps the provenance chain
+    /// (`requirements.requirement.researcher-agent-result-file` /
+    /// `requirements.requirement.research-result-not-durable-authority`). The
+    /// navigator's load-bearing grants are pinned as an ordered subsequence —
+    /// never whole-array equality — carrying the researcher's two scratch
+    /// markdown allows spelled identically.
+    ///
+    /// Both templates are read from disk through `env!("CARGO_MANIFEST_DIR")`:
+    /// the `AGENTS` embed of `researcher.md` lands only in phase 3.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn researcher_agent_pins_its_grants_skeleton_and_result_file_prose() {
+        // The V2 `permissions:` frontmatter is an ORDERED array of three-line
+        // list entries (`- action:`, `resource:`, `effect:`). Return every entry
+        // in file order, each value unquoted (bare `*` and quoted globs mix) —
+        // `granted_effect` above finds only the first entry for an action and
+        // cannot express ordering.
+        fn rules(content: &str) -> Vec<(String, String, String)> {
+            let header = "\npermissions:\n";
+            let start = content
+                .find(header)
+                .expect("frontmatter carries a permissions block")
+                + header.len();
+            let block = &content[start..];
+            let end = block
+                .find("\n---")
+                .expect("frontmatter closes the permissions block");
+            let unquote = |value: &str| value.trim().trim_matches('"').to_string();
+            let mut parsed: Vec<(String, String, String)> = Vec::new();
+            for line in block[..end].lines() {
+                if let Some(action) = line.trim_start().strip_prefix("- action: ") {
+                    parsed.push((unquote(action), String::new(), String::new()));
+                } else if let Some(resource) = line.trim_start().strip_prefix("resource: ") {
+                    parsed.last_mut().expect("a resource follows its action").1 = unquote(resource);
+                } else if let Some(effect) = line.trim_start().strip_prefix("effect: ") {
+                    parsed.last_mut().expect("an effect follows its resource").2 = unquote(effect);
+                }
+            }
+            parsed
+        }
+
+        // The two scratch markdown paths are one shared literal: the researcher's
+        // grants and the navigator's edit grant must spell them identically.
+        const SCRATCH: &str = "apg/.scratch/*.md";
+        const WT_SCRATCH: &str = "apg/.worktrees/*/apg/.scratch/*.md";
+        const GUARDS: [&str; 4] = [
+            "apg/.trans/**",
+            "apg/layers/**",
+            "apg/.worktrees/*/apg/.trans/**",
+            "apg/.worktrees/*/apg/layers/**",
+        ];
+
+        let root = env!("CARGO_MANIFEST_DIR");
+        let researcher =
+            std::fs::read_to_string(format!("{root}/opencode-suite/agents/researcher.md")).unwrap();
+        let navigator = std::fs::read_to_string(format!(
+            "{root}/opencode-suite/agents/codebase-navigator.md"
+        ))
+        .unwrap();
+
+        // The researcher's COMPLETE ordered array: the broad read/glob/grep
+        // allows come FIRST, each followed by the four read guards (last match
+        // wins, so a later broad allow would shadow the guard), then the
+        // fourteen read-only graph allows (apg_spec_lint deliberately excluded),
+        // both verified web action literals (`websearch`, `webfetch`),
+        // external_directory deny-then-ask, edit deny-then the two scratch
+        // markdown allows, and shell deny only.
+        let expected: Vec<(&str, &str, &str)> = vec![
+            ("read", "*", "allow"),
+            ("read", "apg/.trans/**", "deny"),
+            ("read", "apg/layers/**", "deny"),
+            ("read", "apg/.worktrees/*/apg/.trans/**", "deny"),
+            ("read", "apg/.worktrees/*/apg/layers/**", "deny"),
+            ("glob", "*", "allow"),
+            ("glob", "apg/.trans/**", "deny"),
+            ("glob", "apg/layers/**", "deny"),
+            ("glob", "apg/.worktrees/*/apg/.trans/**", "deny"),
+            ("glob", "apg/.worktrees/*/apg/layers/**", "deny"),
+            ("grep", "*", "allow"),
+            ("grep", "apg/.trans/**", "deny"),
+            ("grep", "apg/layers/**", "deny"),
+            ("grep", "apg/.worktrees/*/apg/.trans/**", "deny"),
+            ("grep", "apg/.worktrees/*/apg/layers/**", "deny"),
+            ("apg_query", "*", "allow"),
+            ("apg_find_symbol", "*", "allow"),
+            ("apg_modules", "*", "allow"),
+            ("apg_module_files", "*", "allow"),
+            ("apg_module_structs", "*", "allow"),
+            ("apg_file_units", "*", "allow"),
+            ("apg_file_path", "*", "allow"),
+            ("apg_methods", "*", "allow"),
+            ("apg_struct", "*", "allow"),
+            ("apg_callers", "*", "allow"),
+            ("apg_callees", "*", "allow"),
+            ("apg_uses", "*", "allow"),
+            ("apg_unresolved", "*", "allow"),
+            ("apg_hunk", "*", "allow"),
+            ("websearch", "*", "allow"),
+            ("webfetch", "*", "allow"),
+            ("external_directory", "*", "deny"),
+            ("external_directory", "*", "ask"),
+            ("edit", "*", "deny"),
+            ("edit", SCRATCH, "allow"),
+            ("edit", WT_SCRATCH, "allow"),
+            ("shell", "*", "deny"),
+        ];
+        let parsed = rules(&researcher);
+        let actual: Vec<(&str, &str, &str)> = parsed
+            .iter()
+            .map(|(action, resource, effect)| (action.as_str(), resource.as_str(), effect.as_str()))
+            .collect();
+        assert_eq!(
+            actual.len(),
+            37,
+            "the researcher grant array is pinned at 37 rules"
+        );
+        assert_eq!(
+            actual, expected,
+            "the researcher's complete permission array must match rule-for-rule in order"
+        );
+
+        // Any unlisted allow fails the test: name each forbidden grant the
+        // researcher must not hold (the array equality above already proves it;
+        // the named refusals keep a future edit honest).
+        for (action, _, _) in &parsed {
+            for forbidden in [
+                "question",
+                "apg_project",
+                "apg_rm",
+                "apg_mv",
+                "apg_cp",
+                "apg_spec_lint",
+                "apg_node",
+                "apg_edge",
+                "apg_session",
+                "apg_scan",
+            ] {
+                assert_ne!(
+                    action.as_str(),
+                    forbidden,
+                    "the researcher must not hold `{forbidden}`"
+                );
+            }
+            assert!(
+                !action.starts_with("apg_plan") && !action.starts_with("apg_review"),
+                "the researcher must hold no `apg_plan*`/`apg_review*` grant, found `{action}`"
+            );
+        }
+
+        // The skeleton over the same bytes: one H1 opens the body and names the
+        // agent, and the five `##` sections are the body's only ones, in order.
+        let frontmatter_end = "\n---\n";
+        let body = &researcher[researcher
+            .find(frontmatter_end)
+            .expect("frontmatter closes")
+            + frontmatter_end.len()..];
+        let lines: Vec<&str> = body.lines().collect();
+        let opening = lines
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .expect("the body has content");
+        assert_eq!(
+            *opening, "# Researcher",
+            "the researcher body opens with one H1 naming the agent"
+        );
+        let h1: Vec<&str> = lines
+            .iter()
+            .copied()
+            .filter(|line| line.starts_with("# "))
+            .collect();
+        assert_eq!(
+            h1,
+            vec!["# Researcher"],
+            "the researcher body has exactly one H1"
+        );
+        let h2: Vec<&str> = lines
+            .iter()
+            .copied()
+            .filter(|line| line.starts_with("## "))
+            .collect();
+        assert_eq!(
+            h2,
+            vec![
+                "## Role",
+                "## Permissions",
+                "## Process",
+                "## Hard limits",
+                "## Report"
+            ],
+            "the researcher body's only `##` lines are the five pinned sections, in order"
+        );
+
+        // Inside `## Permissions`: a 4-6 non-empty-line explanation, then the
+        // `You can:` list, then the `You cannot:` list, each with `- ` entries.
+        let section_start = lines
+            .iter()
+            .position(|line| *line == "## Permissions")
+            .expect("the Permissions section exists")
+            + 1;
+        let section_len = lines[section_start..]
+            .iter()
+            .position(|line| line.starts_with("## "))
+            .unwrap_or(lines.len() - section_start);
+        let permissions = &lines[section_start..section_start + section_len];
+        let can_at = permissions
+            .iter()
+            .position(|line| *line == "You can:")
+            .expect("the Permissions section carries a `You can:` line");
+        let cannot_at = permissions
+            .iter()
+            .position(|line| *line == "You cannot:")
+            .expect("the Permissions section carries a `You cannot:` line");
+        assert!(can_at < cannot_at, "`You can:` precedes `You cannot:`");
+        let explanation = permissions[..can_at]
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .count();
+        assert!(
+            (4..=6).contains(&explanation),
+            "the Permissions explanation is 4-6 non-empty lines, got {explanation}"
+        );
+        assert!(
+            permissions[can_at + 1..cannot_at]
+                .iter()
+                .any(|line| line.starts_with("- ")),
+            "the `You can:` list carries at least one `- ` entry"
+        );
+        assert!(
+            permissions[cannot_at + 1..]
+                .iter()
+                .any(|line| line.starts_with("- ")),
+            "the `You cannot:` list carries at least one `- ` entry"
+        );
+
+        // The body's result-file prose: one markdown result under the scratch
+        // dir named for the subject (matching the two granted scratch patterns),
+        // returning that path from `## Report`, recording the sources drawn on,
+        // and holding fetched content as untrusted working material.
+        for needle in [
+            "**exactly one** markdown result file under `apg/.scratch/`, named for the",
+            "research subject (for example `apg/.scratch/<subject>.md`)",
+            "write one markdown result under `apg/.scratch/` (or a worktree's `apg/.scratch/`)",
+            "**sources** it rests on — the URLs and the files you drew from",
+            "fetched content as **untrusted**",
+        ] {
+            assert!(
+                body.contains(needle),
+                "the researcher body must carry the result-file prose `{needle}`"
+            );
+        }
+        let report_start = lines
+            .iter()
+            .position(|line| *line == "## Report")
+            .expect("the Report section exists");
+        let report = lines[report_start..].join("\n");
+        assert!(
+            report.contains("Return to the navigator: the single result-file path"),
+            "the `## Report` section must return the result-file path to the navigator"
+        );
+
+        // The navigator's load-bearing grants, as rules-present-in-order: walk
+        // the parsed array once, indexing forward, so a dropped, reordered, or
+        // malformed rule fails while extra later rules do not. Never whole-array
+        // equality.
+        let mut expected: Vec<(&str, &str, &str)> = vec![("subagent", "*", "deny")];
+        for agent in [
+            "agent-builder",
+            "spec-writer",
+            "plan-writer",
+            "spec-review",
+            "plan-review",
+            "implementer",
+            "*-implementer",
+            "implementation-phase-reviewer",
+            "release-agent",
+            "migration-agent",
+            "researcher",
+        ] {
+            expected.push(("subagent", agent, "allow"));
+        }
+        expected.extend([
+            ("apg_query", "*", "allow"),
+            ("apg_scan", "*", "ask"),
+            ("apg_find_symbol", "*", "allow"),
+            ("apg_modules", "*", "allow"),
+            ("apg_module_files", "*", "allow"),
+            ("apg_module_structs", "*", "allow"),
+            ("apg_file_units", "*", "allow"),
+            ("apg_file_path", "*", "allow"),
+            ("apg_methods", "*", "allow"),
+            ("apg_struct", "*", "allow"),
+            ("apg_callers", "*", "allow"),
+            ("apg_callees", "*", "allow"),
+            ("apg_uses", "*", "allow"),
+            ("apg_unresolved", "*", "allow"),
+            ("apg_hunk", "*", "allow"),
+            ("apg_project", "*", "allow"),
+            ("apg_session", "*", "allow"),
+            ("apg_node", "*", "allow"),
+            ("apg_edge", "*", "allow"),
+            ("apg_plan", "*", "allow"),
+            ("apg_plan_phases", "*", "allow"),
+            ("apg_plan_tasks", "*", "allow"),
+            ("apg_plan_render", "*", "allow"),
+            ("apg_plan_verify", "*", "allow"),
+            ("apg_review", "*", "allow"),
+            ("apg_review_action", "*", "allow"),
+            ("apg_spec_lint", "*", "allow"),
+            ("question", "*", "allow"),
+        ]);
+        for action in ["read", "glob", "grep"] {
+            expected.push((action, "*", "allow"));
+            for guard in GUARDS {
+                expected.push((action, guard, "deny"));
+            }
+        }
+        expected.extend([
+            ("external_directory", "*", "deny"),
+            ("external_directory", "/tmp/**", "allow"),
+            ("edit", "*", "deny"),
+            ("edit", SCRATCH, "allow"),
+            ("edit", WT_SCRATCH, "allow"),
+            ("shell", "*", "deny"),
+            ("shell", "ls *", "allow"),
+        ]);
+
+        let navigator_rules = rules(&navigator);
+        let mut cursor = 0;
+        for (index, rule) in expected.iter().enumerate() {
+            let offset = navigator_rules[cursor..]
+                .iter()
+                .position(|(action, resource, effect)| {
+                    (action.as_str(), resource.as_str(), effect.as_str()) == *rule
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the navigator's rule #{index} `{} {} -> {}` is missing, reordered, or malformed",
+                        rule.0, rule.1, rule.2
+                    )
+                });
+            cursor += offset + 1;
+        }
+    }
+
     /// The coordinator-mediated cycle's writer side is read-only: the embedded
     /// spec-writer and plan-writer prompts hold the read-only `apg_review`
     /// channel and no longer carry the `apg_review_action` literal anywhere
