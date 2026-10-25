@@ -1809,15 +1809,21 @@ mod e2e {
         std::fs::write(dir.join("plugins").join("my_custom_tool.ts"), "x").unwrap();
         // A current distributed agent: kept.
         std::fs::write(dir.join("agents").join("codebase-navigator.md"), "x").unwrap();
+        // A current distributed agent (the newer one): kept; its AGENTS entry
+        // keeps KNOWN_AGENT_FILES in step with the installed roster.
+        std::fs::write(dir.join("agents").join("researcher.md"), "x").unwrap();
         // A user's own agent: preserved.
         std::fs::write(dir.join("agents").join("my-reviewer.md"), "x").unwrap();
 
         let pruned = prune_stale_suite(&dir).unwrap();
+        // Only the stale tool goes; a researcher.md wrongly absent from AGENTS
+        // would both delete it and make this count 2.
         assert_eq!(pruned, 1);
         assert!(!dir.join("plugins").join("apg_oldtool.ts").exists());
         assert!(dir.join("plugins").join("apg_query.ts").exists());
         assert!(dir.join("plugins").join("my_custom_tool.ts").exists());
         assert!(dir.join("agents").join("codebase-navigator.md").exists());
+        assert!(dir.join("agents").join("researcher.md").exists());
         assert!(dir.join("agents").join("my-reviewer.md").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
