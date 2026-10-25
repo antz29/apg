@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "review-absence-detail-inline",
+  "body": "The `searched at project root … on branch …` detail for a genuinely absent review target is built inline at the two absence sites — `apply_review_add`'s absent-target arm and `set_feedback_at`'s not-found bail — rather than through a shared helper, because the change-set declares no new production unit; each site is a three-line `repo_identity` lookup and the wording is pinned by one e2e test. Upgrade when a third absence site needs the same detail: extract one helper and route all of them through it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.review_cmd.apply_review_add",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
