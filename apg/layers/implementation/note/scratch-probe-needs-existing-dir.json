@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scratch-probe-needs-existing-dir",
+  "body": "`project_start_at` probes the main checkout's `apg/.scratch` path directly, and libgit2 matches a directory-only ignore entry against that exact path only while the directory exists. The probe therefore reads `apg/.scratch/` as ignored only after `apg init` has created the directory; with the entry present and the directory absent, the self-heal finds nothing to write and refuses with the shadowing-negation message. The main-checkout directory is init's to create, the worktree copy is start's, and every test fixture that drives start seeds the directory beside the entry. Upgrade by probing a path beneath the scratch entry, or by creating the directory in start, when the probe is next touched.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.start.project_start_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
