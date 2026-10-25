@@ -2874,6 +2874,17 @@ mod e2e {
             ("edit", WT_SCRATCH, "allow"),
             ("shell", "*", "deny"),
             ("shell", "ls *", "allow"),
+            ("shell", "wc *", "allow"),
+            ("shell", "file *", "allow"),
+            ("shell", "stat *", "allow"),
+            ("shell", "diff *", "allow"),
+            ("shell", "which *", "allow"),
+            ("shell", "git status *", "allow"),
+            ("shell", "git diff *", "allow"),
+            ("shell", "git log *", "allow"),
+            ("shell", "git branch --show-current", "allow"),
+            ("shell", "git worktree list *", "allow"),
+            ("shell", "git rebase *", "allow"),
         ]);
 
         let navigator_rules = rules(&navigator);
