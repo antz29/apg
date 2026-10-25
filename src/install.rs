@@ -277,10 +277,11 @@ a repo never created by `apg init` has no versioned layout at all.
 const CODEBASE_NAVIGATOR_AGENT: &str =
     include_str!("../opencode-suite/agents/codebase-navigator.md");
 
-/// The eight distributed agents that `apg init` installs into
-/// `~/.config/opencode/agents/` (SPEC R13/R15): the navigator plus the seven
-/// spec/plan/review/builder/migration agents — including the
-/// `implementation-phase-reviewer` — single-sourced from the repo's
+/// The nine distributed agents that `apg init` installs into
+/// `~/.config/opencode/agents/` (SPEC R13/R15): the navigator plus the eight
+/// spec/plan/review/builder/research/migration agents — including the
+/// `implementation-phase-reviewer` and the hidden read-only `researcher` that
+/// settles escalated questions — single-sourced from the repo's
 /// `opencode-suite/agents/`.
 pub const AGENTS: &[(&str, &str)] = &[
     ("codebase-navigator.md", CODEBASE_NAVIGATOR_AGENT),
@@ -312,9 +313,13 @@ pub const AGENTS: &[(&str, &str)] = &[
         "migration-agent.md",
         include_str!("../opencode-suite/agents/migration-agent.md"),
     ),
+    (
+        "researcher.md",
+        include_str!("../opencode-suite/agents/researcher.md"),
+    ),
 ];
 
-/// The eight distributed agent filenames — the apg-owned names in
+/// The nine distributed agent filenames — the apg-owned names in
 /// `~/.config/opencode/agents/`. `apg init` prunes any of these that a newer release
 /// dropped from the suite (a user's own same-named agent is the accepted edge).
 const KNOWN_AGENT_FILES: &[&str] = &[
@@ -326,6 +331,7 @@ const KNOWN_AGENT_FILES: &[&str] = &[
     "implementation-phase-reviewer.md",
     "agent-builder.md",
     "migration-agent.md",
+    "researcher.md",
 ];
 
 /// The committed changelog at the repo root, embedded so the binary carries the
@@ -474,7 +480,7 @@ pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
 /// Installs (or updates) the apg suite into the V2 `opencode_dir` layout: every
 /// `SUITE_TOOLS` plugin file into `plugins/`, the shared lib + upgrade guide
 /// into `lib/` (beside the plugins, outside opencode's plugin discovery), the
-/// eight distributed agents into `agents/`, and `package.json` at the root —
+/// nine distributed agents into `agents/`, and `package.json` at the root —
 /// each written only when missing or changed — then prunes stale apg-owned
 /// files. Returns `(suite files written/updated, agents written/updated, files
 /// pruned)` — the two populations counted separately. `cmd_init` calls it
@@ -673,7 +679,7 @@ fn write_migration_guide(apg_dir: &Path, old_version: Option<&str>) {
 /// the binary-managed layout `version` + `.trans/` + the project-worktrees
 /// dir + the gitignored `.scratch/` research dir + the changelog-sliced
 /// `migration-guide.md`), install (or update) the
-/// opencode apg tool suite + the eight
+/// opencode apg tool suite + the nine
 /// distributed agents + the upgrade guide into `~/.config/opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
 /// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`

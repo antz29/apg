@@ -141,7 +141,7 @@ Patch only.
         assert!(guide.contains("No migration required"), "{guide}");
     }
 
-    /// The eight shipped agent templates share one prompt shape — a closed
+    /// The nine shipped agent templates share one prompt shape — a closed
     /// frontmatter block, then a body carrying exactly the fixed six-section
     /// skeleton. Pinned over the embedded `AGENTS` bytes alone.
     #[test]
@@ -153,7 +153,7 @@ Patch only.
             "## Hard limits",
             "## Report",
         ];
-        const CAPS: [(&str, usize); 8] = [
+        const CAPS: [(&str, usize); 9] = [
             ("agent-builder.md", 470),
             ("codebase-navigator.md", 427),
             ("implementation-phase-reviewer.md", 255),
@@ -162,6 +162,7 @@ Patch only.
             ("plan-review.md", 100),
             ("migration-agent.md", 88),
             ("spec-review.md", 64),
+            ("researcher.md", 56),
         ];
 
         /// The template's lines, without the empty element a trailing newline
@@ -246,7 +247,7 @@ Patch only.
         assert_eq!(
             AGENTS.len(),
             CAPS.len(),
-            "the shipped corpus is exactly the eight capped templates"
+            "the shipped corpus is exactly the nine capped templates"
         );
         let mut total = 0;
         for &(name, content) in AGENTS {
@@ -418,8 +419,8 @@ Patch only.
             );
         }
         assert!(
-            total <= 1_700,
-            "the eight bodies total {total} lines, over the 1,700-line corpus cap"
+            total <= 1_900,
+            "the nine bodies total {total} lines, over the 1,900-line corpus cap"
         );
     }
 }
