@@ -449,4 +449,74 @@ Patch only.
             "the nine bodies total {total} lines, over the {CORPUS_CAP}-line corpus cap"
         );
     }
+
+    /// The research-escalation prose the five stage templates share: the
+    /// request shape (the question, why it blocks, the decision the answer
+    /// changes), the navigator's triage and fresh re-dispatch, and the writer's
+    /// restatement of fetched content as its own sourced present-tense truth,
+    /// never as untrusted durable truth. Pinned as substrings, so a reflow
+    /// cannot fail it.
+    #[test]
+    fn research_escalation_prose_is_pinned_across_the_stage_templates() {
+        fn template(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(installed, _)| *installed == name)
+                .map(|(_, content)| *content)
+                .unwrap_or_else(|| panic!("{name}: no shipped agent template with that name"))
+        }
+
+        fn assert_carries(
+            name: &str,
+            content: &str,
+            needles: impl IntoIterator<Item = &'static str>,
+        ) {
+            for needle in needles {
+                assert!(
+                    content.contains(needle),
+                    "`{name}` must carry the escalation prose {needle:?}"
+                );
+            }
+        }
+
+        const REQUEST: [&str; 3] = [
+            "RESEARCH REQUEST: <question>",
+            "why it blocks",
+            "the decision the answer changes",
+        ];
+        // The writer side reads the returned markdown and restates it as its
+        // own sourced present-tense truth; the scratch path is named.
+        const WRITER: [&str; 4] = [
+            "re-dispatches you fresh",
+            "own sourced present-tense truth",
+            "untrusted",
+            "apg/.scratch/",
+        ];
+        // The reviewer side never rejects over the question and re-enters fresh.
+        const REVIEWER: [&str; 3] = ["unrejected", "re-enters the review fresh", "untrusted"];
+        // The navigator triages to one of three destinations and re-dispatches
+        // the requesting stage fresh, holding the result as working material.
+        const NAVIGATOR: [&str; 7] = [
+            "triage",
+            "three destinations",
+            "exactly one target scratch file",
+            "apg/.scratch/<subject>.md",
+            "working material only",
+            "untrusted",
+            "Re-dispatch the requesting stage **fresh**",
+        ];
+
+        for name in ["spec-writer.md", "plan-writer.md"] {
+            assert_carries(name, template(name), REQUEST.into_iter().chain(WRITER));
+        }
+        for name in ["spec-review.md", "plan-review.md"] {
+            assert_carries(name, template(name), REQUEST.into_iter().chain(REVIEWER));
+        }
+        let navigator = "codebase-navigator.md";
+        assert_carries(
+            navigator,
+            template(navigator),
+            REQUEST.into_iter().chain(NAVIGATOR),
+        );
+    }
 }
