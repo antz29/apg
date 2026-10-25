@@ -2,20 +2,20 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "session-start-requires-project-context",
-  "body": "`apg session start` reports the project-context refusal outside a project worktree before it reclaims a socket, takes the spec lock, or opens the database, and a session started inside a project worktree is the one durable mutations reach.",
+  "body": "`apg session start` reports the project-context refusal outside a project context before it reclaims a socket, takes the spec lock, or opens the database, and a checkout's durable mutations reach the session started in that same checkout.",
   "properties": {
     "feature": "project-context-guard"
   },
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.cli-session-operator",
+      "kind": "driven-by",
+      "source": "domain.service.cli-session-routing",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.cli-session-routing",
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
       "properties": {}
     }
   ]
