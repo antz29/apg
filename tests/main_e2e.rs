@@ -9800,22 +9800,49 @@ mod e2e {
     // REAL `apg init` + REAL `apg scan` in a scratch `/tmp` git repo (the only
     // e2e crate with that harness — plan_cmd_e2e/review_cmd_e2e fixtures build
     // their DB synthetically and git_e2e never scans), then probe the very next
-    // command in the same project worktree.
+    // command in the same project worktree. The first test carries three
+    // windows: A (the sequential post-commit scan → immediate verify loop), B
+    // (a session teardown followed immediately by a scan and verify — the
+    // post-fix integration guard, not a reproducer) and C (a verify spawned
+    // while a real scan is still in flight — the cause-2 reproducer).
     // -------------------------------------------------------------------
 
     /// Phase-09 task-1 (e2e, scratch /tmp repo, real `apg init` + real
     /// `apg scan`): a successful scan of a checkout leaves that checkout's
-    /// graph fresh, so an IMMEDIATE `apg plan verify` in the same worktree
-    /// never reports the stale refusal and verifies green; a second immediate
-    /// verify with no scan between agrees.
+    /// graph fresh. Three windows in one test:
     ///
-    /// The loop reproduces the reported failure's shape: every iteration
-    /// commits a real source change in the project worktree (so the following
-    /// scan is a REAL scan, never the unchanged-tree fast path the report says
-    /// always verified cleanly) and probes the freshness verdict immediately.
-    /// Authored to fail pre-fix; the reported false stale was intermittent, so
-    /// a pre-fix run that never trips it is a diagnosis finding, never a
-    /// weakened assertion.
+    /// - **A (sequential).** Every iteration commits a real source change in
+    ///   the project worktree (so the following scan is a REAL scan, never the
+    ///   unchanged-tree fast path the report says always verified cleanly) and
+    ///   probes the freshness verdict immediately: the scan is pinned
+    ///   non-fast-path, the immediate `apg plan verify` never reports the stale
+    ///   refusal and verifies green, and a second immediate verify with no scan
+    ///   between agrees.
+    /// - **B (session teardown — the post-fix integration guard, not a
+    ///   reproducer).** Ten times: a detached `apg session start`, one durable
+    ///   `apg node add` admitted through it, `apg session save`, `apg session
+    ///   end`, then IMMEDIATELY a real `apg scan` (exit 0 asserted) and
+    ///   IMMEDIATELY `apg plan verify`, plus a second verify with no scan
+    ///   between that agrees. With the bounded socket-gone wait in place, that
+    ///   teardown leaves the checkout fresh. GREEN BEFORE that fix is the
+    ///   EXPECTED outcome here — the raced window is microseconds wide and this
+    ///   arm's next readers are spawned long afterwards — so it is recorded as
+    ///   the expected pre-fix result, never a diagnosis finding and never a
+    ///   reason to weaken the arm. The deterministic evidence for the teardown
+    ///   mechanism is `git_e2e::dead_session_socket_makes_the_graph_unfresh`.
+    /// - **C (concurrent — the cause-2 reproducer).** A committed source change
+    ///   makes the next scan a real rebuild (pinned non-fast-path exactly as
+    ///   the loop above pins its scans); while that `apg scan` is still in
+    ///   flight, `apg plan verify` is spawned in the same worktree. Pre-fix the
+    ///   verify's staleness check runs before the spec lock, so an overlapping
+    ///   verify can read the half-rebuilt state and refuse stale — that refusal
+    ///   IS the reproduction. The window passes when the verify never prints the
+    ///   stale refusal and exits 0, whether it waited for the scan or ran after
+    ///   it; the run records whether the two processes actually overlapped.
+    ///
+    /// Authored to fail pre-fix in window C; the reported false stale was
+    /// intermittent, so a pre-fix run that never trips a window is a diagnosis
+    /// finding, never a weakened assertion.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh() {
@@ -9933,6 +9960,111 @@ mod e2e {
                 "iteration {i}: the two immediate verifies must agree"
             );
         }
+
+        // --- Window B (session teardown, the post-fix integration guard — NOT
+        // a reproducing arm): a clean teardown followed IMMEDIATELY by a real
+        // scan and a verify must leave the checkout's graph fresh. Green before
+        // the bounded socket-gone wait is the EXPECTED pre-fix outcome (the
+        // raced window is microseconds wide and this arm's next readers are
+        // spawned long after it); the deterministic evidence for the teardown
+        // mechanism is `git_e2e::dead_session_socket_makes_the_graph_unfresh`.
+        for i in 0..10 {
+            let session = testutil::start_session_process(&wt, &home);
+            let name = format!("teardown-{i}");
+            run(&wt, &["node", "add", "global", "constraint", name.as_str()]);
+            run(&wt, &["session", "save"]);
+            run(&wt, &["session", "end"]);
+
+            // IMMEDIATELY, with no reaping wait between `end` and the scan: the
+            // session process is reaped only after both verifies have run, so
+            // this keeps the teardown → scan → verify sequence inside the
+            // window under guard. `run` asserts the scan's exit 0.
+            run(&wt, &["scan", "."]);
+
+            let first = run(&wt, &["plan", "verify", "demo"]);
+            assert!(
+                !format!("{}{}", stdout_of(&first), stderr_of(&first)).contains(STALE),
+                "window B iteration {i}: the immediate post-teardown verify must not \
+                 refuse stale: {}{}",
+                stdout_of(&first),
+                stderr_of(&first)
+            );
+
+            // A second verify with no scan between agrees.
+            let second = run(&wt, &["plan", "verify", "demo"]);
+            assert!(
+                !format!("{}{}", stdout_of(&second), stderr_of(&second)).contains(STALE),
+                "window B iteration {i}: the repeated post-teardown verify must agree the \
+                 graph is fresh: {}{}",
+                stdout_of(&second),
+                stderr_of(&second)
+            );
+            assert_eq!(
+                second.status.success(),
+                first.status.success(),
+                "window B iteration {i}: the two immediate verifies must agree"
+            );
+
+            let ended = session.child.wait_with_output().unwrap();
+            assert!(
+                ended.status.success(),
+                "window B iteration {i}: the session must end cleanly: {}",
+                String::from_utf8_lossy(&ended.stderr)
+            );
+        }
+
+        // --- Window C (cause 2, the deterministic reproducer): a verify that
+        // overlaps an in-flight REAL scan must never refuse stale. The scan
+        // follows a committed source change, so it is a genuine rebuild and is
+        // pinned non-fast-path exactly as the loop above pins its scans.
+        std::fs::write(
+            wt.join("main.go"),
+            "package main\n\nfunc main() {}\n\nfunc concurrent() {}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "concurrent change");
+
+        let mut scan = testutil::ApgCommand::new(&["scan", "."])
+            .cwd(&wt)
+            .env("HOME", &home_s)
+            .spawn();
+        // Spawn the verify while that scan is in flight. Observing the scan
+        // still running right after the verify exists proves both processes
+        // were alive at the same time; the freshness assertion holds either way
+        // (a verify that runs after the scan exits 0 satisfies it), so a
+        // non-overlapped run is UNEXERCISED rather than settled by weakening it.
+        let verify = testutil::ApgCommand::new(&["plan", "verify", "demo"])
+            .cwd(&wt)
+            .env("HOME", &home_s)
+            .spawn();
+        let overlapped = scan.try_wait().unwrap().is_none();
+        let verify = verify.wait_with_output().unwrap();
+        let scan_out = scan.wait_with_output().unwrap();
+        let scan_stderr = stderr_of(&scan_out);
+        assert!(
+            scan_out.status.success(),
+            "window C: the concurrent scan must succeed: {scan_stderr}"
+        );
+        assert!(
+            !scan_stderr.contains("fast-path"),
+            "window C: the concurrent scan must be a real rebuild, never the fast path: {scan_stderr}"
+        );
+        let verify_output = format!("{}{}", stdout_of(&verify), stderr_of(&verify));
+        assert!(
+            !verify_output.contains(STALE),
+            "window C (overlapped: {overlapped}): a verify overlapping an in-flight scan \
+             must never refuse stale: {verify_output}"
+        );
+        assert!(
+            verify.status.success(),
+            "window C (overlapped: {overlapped}): the overlapping verify must pass — it \
+             either waited for the scan then verified green, or ran after the scan exited: \
+             {verify_output}"
+        );
+        eprintln!(
+            "window C: overlapped = {overlapped}; verify exit = {:?}",
+            verify.status
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
