@@ -15,3 +15,4 @@ apg-frontend.log
 # apg transient state (rebuildable; committed apg/ data lives above it)
 apg/.trans/
 apg/.worktrees/
+apg/.scratch/
