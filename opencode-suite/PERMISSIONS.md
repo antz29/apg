@@ -105,10 +105,15 @@ The rules are byte-identical to the templates, and every other path is refused.
 The `.md` suffix matches the **whole** value, so `apg/.scratch/notes.txt` and
 `apg/.scratch/sub/x.md` match neither pattern and are refused — see *Whole-value
 pattern matching* above and
-`requirements.constraint.scratch-markdown-only-writes`. Both gates apply: gate 1
-admits the tool action and gate 2 (`fsScopeDecision`) asserts the same
-main-anchored paths, so a scratch write needs both. The navigator holds the same
-grant because it dispatches the researcher and reads the markdown it produces.
+`requirements.constraint.scratch-markdown-only-writes`. Gate 1 is the `edit`
+action rule set: a native `edit`/`write`/`patch` scratch write is admitted by
+those rules alone. Gate 2 (`fsScopeDecision`) re-asserts the same main-anchored
+paths through that same `edit` rule set, and runs only when the write goes
+through the suite's filesystem tools (`apg_rm`, `apg_mv`, `apg_cp`), which call
+it themselves. Neither the navigator nor the researcher holds those tools, so
+for both the `edit` rules decide every scratch write. The navigator holds the
+same grant because it dispatches the researcher and reads the markdown it
+produces.
 
 ## `external_directory`
 
