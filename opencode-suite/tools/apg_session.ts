@@ -1,5 +1,10 @@
 import { Plugin } from "@opencode/plugin"
-import { runCli, startDetachedSession, type ToolContext } from "../lib/apg.ts"
+import {
+  PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+  runCli,
+  startDetachedSession,
+  type ToolContext,
+} from "../lib/apg.ts"
 
 export default Plugin.define({
   id: "apg_session",
@@ -20,7 +25,7 @@ export default Plugin.define({
             },
             directory: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
             },
           },
           required: [],

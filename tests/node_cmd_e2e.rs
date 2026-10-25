@@ -4363,6 +4363,12 @@ mod e2e {
     /// and a subsequent `apg session start` then succeeds and ends cleanly.
     /// The refusal is raised by the DB open, which precedes the socket bind, so
     /// a refused start is a side-effect-free no-op on the worktree.
+    ///
+    /// project-context-guard phase-07.task-6: the project-context guard ADMITS
+    /// this project worktree, so the refusal is pinned to the DB cause ALONE —
+    /// its stderr carries NEITHER the guard's `mutation refused` prefix NOR the
+    /// `project context` wording, proving the absent-`db.lbug` refusal still
+    /// follows the (admitting) guard unchanged.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_start_refuses_without_db_naming_scan() {
@@ -4398,6 +4404,16 @@ mod e2e {
         assert!(
             err.contains("apg scan"),
             "the refusal must name `apg scan`: {err}"
+        );
+        // The guard admits this worktree, so the DB cause is the ONLY cause on
+        // stderr — never the guard's project-context wording.
+        assert!(
+            !err.contains("mutation refused"),
+            "the guard must admit the project worktree: {err}"
+        );
+        assert!(
+            !err.contains("project context"),
+            "the guard must admit the project worktree: {err}"
         );
 
         // (b) Nothing left behind: no DB conjured, no socket bound, no live
@@ -4438,6 +4454,203 @@ mod e2e {
         );
 
         testutil::remove(&repo);
+    }
+
+    /// project-context-guard phase-07.task-3 (E2E): `apg session start` on the
+    /// MAIN checkout refuses for project context BEFORE it reclaims a stale
+    /// socket or takes `db.lbug`.
+    ///
+    /// (i) With NO `db.lbug` the refusal carries the project-context wording —
+    /// naming branch `main` (the repo's default branch) and the `apg project
+    /// start` fix — and NEVER `apg scan`: a guard placed after `open_owned_db`
+    /// would report the absent-DB remedy instead. No socket is bound.
+    ///
+    /// (ii) After a hermetic scan (so the DB exists) and with a stale socket
+    /// planted at the session socket path holding known bytes, the second start
+    /// refuses identically and the socket survives byte-identically: a guard
+    /// placed after `reclaim_stale_socket` would delete it, and one after
+    /// `acquire_spec_lock`/`open_owned_db` would take the DB. No flock assertion
+    /// is possible from outside the process, so the socket survival plus the
+    /// absent-DB wording are the cross-process discriminators.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db/process); run via cargo test-e2e"]
+    fn session_start_on_main_refuses_context_before_reclaim_lock_and_db() {
+        let repo = Repo::new("session-start-main");
+        let apg_root = repo.apg_root();
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let socket = apg::session::socket_path(&apg_root);
+        let db = apg_root.join(specs::TRANS).join("db.lbug");
+
+        let start = || {
+            testutil::ApgCommand::new(&["session", "start"])
+                .cwd(&repo.root)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+        let assert_refusal = |out: &std::process::Output| {
+            assert!(!out.status.success(), "session start must refuse on main");
+            let msg = String::from_utf8_lossy(&out.stderr);
+            let refusal = msg.strip_prefix("apg: ").unwrap_or(&msg);
+            assert!(refusal.starts_with("mutation refused — "), "{msg}");
+            for needle in [
+                "branch `main`",
+                "the repo's default branch",
+                "apg project start",
+            ] {
+                assert!(
+                    msg.contains(needle),
+                    "the refusal must name `{needle}`: {msg}"
+                );
+            }
+            assert!(
+                !msg.contains("apg scan"),
+                "the guard must precede the DB refusal: {msg}"
+            );
+            assert!(
+                !apg::session::live_session(&apg_root),
+                "a refused start leaves no live session"
+            );
+        };
+
+        // (i) Absent DB: the project-context refusal, not the `apg scan` remedy.
+        assert!(!db.exists(), "fixture must start with no db.lbug");
+        assert_refusal(&start());
+        assert!(
+            !socket.exists(),
+            "a refused start on main must bind no socket"
+        );
+
+        // (ii) The DB now exists, and a stale socket holds known bytes.
+        testutil::scan_checkout(&repo.root).unwrap();
+        assert!(db.exists(), "the scan must create db.lbug");
+        let stale: &[u8] = b"stale session socket bytes\n";
+        std::fs::write(&socket, stale).unwrap();
+
+        let before_commits = testutil::commit_count(&repo.root);
+        assert_refusal(&start());
+        assert!(
+            socket.exists(),
+            "a refused start must leave a stale session.sock in place"
+        );
+        assert_eq!(
+            std::fs::read(&socket).unwrap().as_slice(),
+            stale,
+            "the stale socket must survive byte-identically (the guard precedes reclaim)"
+        );
+        assert_no_durable_trace(&apg_root, &repo.root, before_commits);
+
+        testutil::remove(&repo);
+    }
+
+    /// project-context-guard phase-07.task-4 (E2E): `apg session start`
+    /// refuses a checkout with no project context, and binds no socket.
+    ///
+    /// (i) A DETACHED HEAD (at the scanned commit) holds no branch, so the
+    /// refusal states exactly that and carries the one `apg project start` fix
+    /// line — never the `apg scan` DB remedy and never `already live`.
+    ///
+    /// (ii) A plain directory (no git repository) carrying a real `db.lbug`
+    /// refuses naming `not inside a git repository`, `holds no branch`,
+    /// `git init` and `apg project start`; neither case binds a socket or
+    /// writes a node file.
+    #[test]
+    #[ignore = "e2e tier: real I/O (fs/git/db/process); run via cargo test-e2e"]
+    fn session_start_refuses_detached_head_and_non_git() {
+        // (i) Detached HEAD at the scanned commit.
+        let repo = Repo::new("session-start-detached");
+        let apg_root = repo.apg_root();
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        testutil::scan_checkout(&repo.root).unwrap();
+        {
+            let git_repo = git2::Repository::open(&repo.root).unwrap();
+            let head = git_repo.head().unwrap().peel_to_commit().unwrap().id();
+            git_repo.set_head_detached(head).unwrap();
+            assert!(
+                git_repo.head_detached().unwrap(),
+                "HEAD must be detached for this scenario"
+            );
+        }
+
+        let out = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !out.status.success(),
+            "a detached HEAD must refuse session start"
+        );
+        let msg = String::from_utf8_lossy(&out.stderr);
+        let refusal = msg.strip_prefix("apg: ").unwrap_or(&msg);
+        assert!(refusal.starts_with("mutation refused — "), "{msg}");
+        assert!(msg.contains("holds no branch"), "{msg}");
+        assert_eq!(
+            msg.matches("Fix:").count(),
+            1,
+            "exactly one Fix: line: {msg}"
+        );
+        assert!(msg.contains("apg project start"), "{msg}");
+        assert!(!msg.contains("apg scan"), "{msg}");
+        assert!(!msg.contains("already live"), "{msg}");
+        let socket = apg::session::socket_path(&apg_root);
+        assert!(!socket.exists(), "a refused start must bind no socket");
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "a refused start leaves no live session"
+        );
+        testutil::remove(&repo);
+
+        // (ii) A non-git directory carrying a real db.lbug.
+        let dir =
+            std::env::temp_dir().join(format!("apg-project-{}-session-nongit", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let apg_root = dir.join(specs::LAYOUT);
+        std::fs::create_dir_all(apg_root.join(specs::TRANS)).unwrap();
+        testutil::touch_db(&apg_root);
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let out = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&dir)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !out.status.success(),
+            "a non-git directory must refuse session start"
+        );
+        let msg = String::from_utf8_lossy(&out.stderr);
+        for needle in [
+            "not inside a git repository",
+            "holds no branch",
+            "git init",
+            "apg project start",
+        ] {
+            assert!(
+                msg.contains(needle),
+                "the refusal must name `{needle}`: {msg}"
+            );
+        }
+        assert!(
+            !apg::session::socket_path(&apg_root).exists(),
+            "a refused start must bind no socket: {msg}"
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "a refused start leaves no live session"
+        );
+        let layers_dir = apg_root.join(layers::LAYERS_DIR);
+        assert!(
+            !layers_dir.exists() || std::fs::read_dir(&layers_dir).unwrap().next().is_none(),
+            "a refused start must write nothing under apg/layers"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// feedback-18: a DURABLE node that is first updated (buffering an entry)
@@ -5533,31 +5746,26 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-24 (d), updated for the phase-04 project-context guard: a
-    /// session started in a detached-HEAD checkout (the Coordinator's resolved
-    /// project is `None`) still warns on NOTHING — its project-scoped
-    /// outstanding-feedback read matches the direct path's
-    /// `git::repo_identity(...).branch` `None` case.
+    /// Phase-05 task-24 (d), updated for the phase-04 project-context guard and
+    /// trimmed by project-context-guard phase-07.task-8: a DETACHED HEAD is not
+    /// a project context, so the CLI refuses the rm, and the direct-path builder
+    /// (`node_cmd::build_change`) over the intact `.trans` warns on NOTHING —
+    /// exactly the `git::repo_identity(...).branch` `None` case.
     ///
     /// A committed-and-scanned durable requirement (`reviewed`) plus a
-    /// `Feedback -[:Reviews]-> reviewed` pair sealed into `.trans` before start
-    /// (so the start seed still projects the pair into the held DB, and the DB
-    /// demonstrably carries it). HEAD is then detached at the scanned commit, so
-    /// `Coordinator::start` resolves its `project` field to `None`.
+    /// `Feedback -[:Reviews]-> reviewed` pair is sealed into `.trans` before the
+    /// direct-path builder runs, so the builder sees the outstanding feedback.
+    /// HEAD is then detached at the scanned commit.
     ///
-    /// A detached checkout carries NO branch, so it is not a project context:
-    /// the CLI client now REFUSES the rm before admission, naming the absent
-    /// branch and the project-start fix. The coordinator's own admission (still
-    /// a public path, just unreachable through the guarded CLI) applies the rm
-    /// and carries NO outstanding-feedback warning, exactly like
-    /// `node_cmd::build_change` (the direct-path builder) over the same intact
-    /// `.trans` under a detached HEAD.
+    /// COVERAGE NOTE: the routed half is unreachable by construction once a live
+    /// session requires a project context — `apg session start` on a detached
+    /// checkout now refuses before binding, so no detached-HEAD session exists
+    /// to forward a mutation to. The `Some(project)` warning path (the shape that
+    /// warns about a same-project outstanding feedback) stays covered by
+    /// `routed_rm_feedback_warning_is_scoped_to_the_session_project`.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
-    fn detached_head_rm_refuses_context_while_the_session_warns_on_nothing() {
-        const REVIEWS: &str = "MATCH (f:Feedback)-[:Reviews]->\
-             (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN f.fqn";
-
+    fn detached_head_rm_refuses_context_and_the_direct_path_warns_on_nothing() {
         let (repo, wt, wt_apg) = testutil::project_with_db("routed-rm-detached-head");
         let home = repo.root.join("home");
 
@@ -5568,10 +5776,8 @@ mod e2e {
         testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable reviewed node");
         testutil::scan_checkout(&wt).unwrap();
 
-        // Seed the Feedback + Reviews pair into `.trans` BEFORE start: the start
-        // seed still projects it into the held DB (the seed does not depend on
-        // the branch). The plan review's warning source is project-scoped, not
-        // the seed.
+        // Seed the Feedback + Reviews pair into `.trans` so the direct-path
+        // builder sees the outstanding feedback.
         let mirror = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
         specs::write_jsonl(
             &mirror,
@@ -5590,8 +5796,7 @@ mod e2e {
         )
         .unwrap();
 
-        // Detach HEAD at the scanned commit, so `repo_identity` yields no branch
-        // and `Coordinator::start` resolves `project` to `None`.
+        // Detach HEAD at the scanned commit, so `repo_identity` yields no branch.
         {
             let git_repo = git2::Repository::open(&wt).unwrap();
             let head = git_repo.head().unwrap().peel_to_commit().unwrap().id();
@@ -5606,26 +5811,8 @@ mod e2e {
             );
         }
 
-        let session = testutil::start_session_process(&wt, &home);
-
-        let routed = |q: &str| -> String {
-            let out = testutil::spawn_apg(&["query", q], &wt);
-            assert!(
-                out.status.success(),
-                "routed query `{q}` failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            String::from_utf8(out.stdout).unwrap()
-        };
-
-        // The start seed still projected the pair into the held DB.
-        assert!(
-            routed(REVIEWS).contains("foo/feedback-1"),
-            "the start seed must project the pair into the held DB regardless of HEAD"
-        );
-
         // The direct-path builder over the intact `.trans` warns on nothing when
-        // HEAD is detached (branch None) — the case the routed path mirrors.
+        // HEAD is detached (branch None).
         let args = av(&["rm", "requirements", "requirement", "reviewed"]);
         assert!(
             build_change(&wt_apg, "node", &args)
@@ -5636,8 +5823,8 @@ mod e2e {
         );
 
         // The project-context guard: a detached checkout holds no branch, so
-        // the CLI client refuses the rm BEFORE session admission — never the
-        // session requirement or a missing node.
+        // the CLI client refuses the rm — never the session requirement or a
+        // missing node.
         let out =
             testutil::ApgCommand::new(&["node", "rm", "requirements", "requirement", "reviewed"])
                 .cwd(&wt)
@@ -5653,39 +5840,6 @@ mod e2e {
         assert!(msg.contains("holds no branch"), "{msg}");
         assert!(msg.contains("apg project start"), "{msg}");
         assert!(!msg.contains("apg session start"), "{msg}");
-
-        // The coordinator's own admission still applies the rm and carries no
-        // warning: the session's resolved project is `None`.
-        let forwarded = apg::session::Coordinator::forward_mutation_with_id(
-            &wt_apg,
-            "detached-rm",
-            "node",
-            &args,
-        )
-        .unwrap();
-        assert_eq!(
-            forwarded.output,
-            "Removed node requirements.requirement.reviewed"
-        );
-        assert!(
-            forwarded.warnings.is_empty(),
-            "a detached-HEAD session must warn on nothing: {:?}",
-            forwarded.warnings
-        );
-
-        // Clean release: save (the single durability point) then end.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let out = end_session(&wt, session);
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
 
         testutil::remove(&repo);
     }
@@ -6080,16 +6234,20 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-5 (E2E): with a live session in the SCANNED main checkout,
-    /// absent-target node and edge mutations still refuse on the CLIENT, for
-    /// project context — the guard precedes session admission, so the session
-    /// reply never carries the live-session requirement or a missing-node
-    /// error. The write-back buffer stays empty (`session end` succeeds) and
-    /// nothing durable is written.
+    /// Phase-04 task-5, repaired by project-context-guard phase-07.task-7: the
+    /// live-session-in-main premise is now impossible, so the pair proven here
+    /// is the START refusal plus the CLIENT refusal.
+    ///
+    /// `apg session start` on the scanned main checkout exits non-zero with the
+    /// project-context refusal (naming branch `main` and the `apg project start`
+    /// fix, never `already live`), binds no socket and leaves no live session.
+    /// Then the same six absent-target node/edge mutations still refuse on the
+    /// CLIENT for project context — never the session requirement or a missing
+    /// node — with `apg/layers` untouched and no commit.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
-    fn node_and_edge_mutations_on_main_refuse_context_before_session_admission() {
-        let repo = Repo::new("node-guard-live-main");
+    fn main_session_start_and_mutations_refuse_project_context() {
+        let repo = Repo::new("node-guard-main");
         let apg_root = repo.apg_root();
         repo.write(
             "code/seed.scan.jsonl",
@@ -6098,11 +6256,26 @@ mod e2e {
         repo.commit_all("seed code");
         testutil::scan_checkout(&repo.root).unwrap();
         let home = repo.root.join("home");
-        let session = testutil::start_session_process(&repo.root, &home);
-        assert!(
-            apg::session::live_session(&apg_root),
-            "the main checkout's session must be live"
+
+        // The start refusal: no live session is reachable on main.
+        let refused = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert_refused_on_main(
+            &refused,
+            &["session", "start"],
+            &["already live", "apg scan"],
         );
+        assert!(
+            !apg::session::socket_path(&apg_root).exists(),
+            "a refused start on main must bind no socket"
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "a refused start leaves no live session"
+        );
+
         let before_commits = testutil::commit_count(&repo.root);
 
         for argv in [
@@ -6156,19 +6329,132 @@ mod e2e {
             assert_refused_on_main(&out, &argv, &["apg session start", "does not exist"]);
         }
 
-        // Nothing was admitted: `session end` (which refuses while the buffer is
-        // dirty) releases the session cleanly.
-        let child = end_session(&repo.root, session);
-        assert!(
-            child.status.success(),
-            "{}",
-            String::from_utf8_lossy(&child.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&apg_root),
-            "the session must be released"
-        );
         assert_no_durable_trace(&apg_root, &repo.root, before_commits);
+        testutil::remove(&repo);
+    }
+
+    /// project-context-guard phase-07.task-5 (E2E): the two checkouts of one
+    /// repo have distinct session sockets, so a session started in the project
+    /// worktree is the one ITS checkout's durable mutations reach.
+    ///
+    /// An `apg node add` spawned with cwd inside the worktree (no directory
+    /// override) is admitted by the live worktree session — its row is visible
+    /// to a routed `apg query` before any save — and `apg session save` lands
+    /// exactly one commit. The SAME mutation from the main checkout refuses
+    /// client-side for project context (never `apg session start`), and a
+    /// following save over the now-clean buffer adds no commit: the main
+    /// checkout can never reach the worktree session.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db/process); run via cargo test-e2e"]
+    fn worktree_session_admits_its_checkout_and_main_never_reaches_it() {
+        const COUNT: &str =
+            "MATCH (n:Constraint {fqn: 'global.constraint.fresh-rule'}) RETURN count(n)";
+
+        let (wt_apg, repo, wt) = mutation_fixture("worktree-session-scope");
+        let home = repo.root.join("home");
+
+        // A whole-model-valid durable base; a lone `global.constraint` has no
+        // cardinality minimums.
+        layers::write_project(&wt_apg, &testutil::valid_model(), &[]).unwrap();
+
+        assert_ne!(
+            apg::session::socket_path(&wt_apg),
+            apg::session::socket_path(&repo.apg_root()),
+            "the two checkouts must have distinct session sockets"
+        );
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the project worktree's session must be live"
+        );
+        let before_commits = testutil::commit_count(&wt);
+
+        let argv = [
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "fresh-rule",
+            "--body",
+            "admitted by the worktree session",
+        ];
+        let out = testutil::ApgCommand::new(&argv)
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            out.status.success(),
+            "the worktree mutation must be admitted: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // The admission projected the row into the held DB, visible to a routed
+        // read before any save; the durable store and history are untouched.
+        let routed = testutil::spawn_apg(&["query", COUNT], &wt);
+        assert!(
+            routed.status.success(),
+            "routed query: {}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&routed.stdout).contains('1'),
+            "the buffered row must be visible through the session's DB: {}",
+            String::from_utf8_lossy(&routed.stdout)
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "fresh-rule").exists(),
+            "an admitted mutation must not write a node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "an admitted mutation must not commit before save"
+        );
+
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the admitted mutation must land in exactly one commit"
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "fresh-rule").exists(),
+            "the node file must be durable after save"
+        );
+
+        // The SAME mutation from the main checkout refuses client-side, and can
+        // never reach the worktree session: a following save adds no commit.
+        let main_out = testutil::spawn_apg(&argv, &repo.root);
+        assert_refused_on_main(&main_out, &argv, &["apg session start"]);
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the main-checkout refusal must never route to the worktree session"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended cleanly"
+        );
+
         testutil::remove(&repo);
     }
 

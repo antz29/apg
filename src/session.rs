@@ -392,15 +392,23 @@ enum ConnOutcome {
 }
 
 impl Coordinator {
-    /// `apg session start`: reclaim any stale socket, take the extended flock,
-    /// open (and own) `db.lbug` once, seed its transient projection from
-    /// `.trans`, resolve the worktree's project (best-effort), bind the
-    /// worktree socket, and serve until an `end` request arrives.
+    /// `apg session start`: assert the project context, reclaim any stale
+    /// socket, take the extended flock, open (and own) `db.lbug` once, seed its
+    /// transient projection from `.trans`, resolve the worktree's project
+    /// (best-effort), bind the worktree socket, and serve until an `end`
+    /// request arrives.
     ///
-    /// A session always holds a database: an absent `db.lbug` is a hard
-    /// refusal naming `apg scan` (via [`open_owned_db`](Self::open_owned_db)),
-    /// raised before the socket is bound, so a refused start leaves no socket
-    /// bound and no flock held behind.
+    /// The project-context guard runs FIRST, before the socket reclaim, the
+    /// flock, the DB open and the bind: a session is a durable mutation engine,
+    /// so it is only legal inside a project worktree. A refused start therefore
+    /// leaves any stale `session.sock` untouched and takes no DB.
+    ///
+    /// The guard admits a project worktree, so the absent-`db.lbug` refusal
+    /// still follows it unchanged: a session always holds a database, and an
+    /// absent `db.lbug` is a hard refusal naming `apg scan` (via
+    /// [`open_owned_db`](Self::open_owned_db)), raised before the socket is
+    /// bound, so a refused start leaves no socket bound and no flock held
+    /// behind.
     ///
     /// The seed makes the held DB's transient rows (the plan store and the
     /// five tier mirrors — `Reviews`/`Gates`/`Satisfies` edges among them)
@@ -411,6 +419,9 @@ impl Coordinator {
     /// any socket is bound and leaves the held DB unchanged (the seed applies
     /// through one `BEGIN`/`COMMIT` that ROLLBACKs on error).
     pub fn start(apg_root: &Path) -> anyhow::Result<()> {
+        // The project-context guard precedes every side effect: a refused start
+        // must leave a stale socket in place and take no DB/flock.
+        crate::git::require_project_context(apg_root)?;
         let apg_root = apg_root.to_path_buf();
         // One session per worktree DB: a live session refuses a second start.
         Self::reclaim_stale_socket(&apg_root)?;

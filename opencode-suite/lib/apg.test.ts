@@ -25,9 +25,10 @@ import {
   PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
 } from "./apg.ts"
 
-// project-context-guard phase-06.task-13: the 11 bookkeeping mutation tools
-// (whose `directory` input must name the project worktree) plus the two read
-// tools (`apg_plan`, `apg_review`) whose existing description must stay put.
+// project-context-guard phase-06.task-13 (extended by phase-07.task-9): the 12
+// bookkeeping mutation tools (whose `directory` input must name the project
+// worktree) plus the two read tools (`apg_plan`, `apg_review`) whose existing
+// description must stay put.
 import apgPlanAdd from "../tools/apg_plan_add.ts"
 import apgPlanDone from "../tools/apg_plan_done.ts"
 import apgPlanUndone from "../tools/apg_plan_undone.ts"
@@ -39,6 +40,7 @@ import apgReviewResolve from "../tools/apg_review_resolve.ts"
 import apgReviewReject from "../tools/apg_review_reject.ts"
 import apgNode from "../tools/apg_node.ts"
 import apgEdge from "../tools/apg_edge.ts"
+import apgSession from "../tools/apg_session.ts"
 import apgPlan from "../tools/apg_plan.ts"
 import apgReview from "../tools/apg_review.ts"
 
@@ -833,10 +835,11 @@ const MUTATION_TOOLS: Record<string, { setup: (ctx: never) => unknown }> = {
   apg_review_reject: apgReviewReject,
   apg_node: apgNode,
   apg_edge: apgEdge,
+  apg_session: apgSession,
 }
 
 test("every bookkeeping mutation tool names the project worktree, with no workspace-root default", async () => {
-  expect(Object.keys(MUTATION_TOOLS)).toHaveLength(11)
+  expect(Object.keys(MUTATION_TOOLS)).toHaveLength(12)
   for (const [name, plugin] of Object.entries(MUTATION_TOOLS)) {
     const tool = await registeredTool(plugin)
     expect(tool.name).toBe(name)
