@@ -181,9 +181,9 @@ alternative, decision/provenance note, or time-relative phrasing ("today",
 ### Blocking research (RESEARCH REQUEST)
 A finding you cannot settle from the graph, the code, or the spec's own inputs — an external fact,
 a library's or protocol's behaviour, a version's capability — is never guessed, and the artifact is
-never rejected to force a decision. Return a **`RESEARCH REQUEST`** to the coordinator instead of a
-verdict: name the question, **why it blocks** (which node or spine assertion cannot be judged
-without it), and **the decision the answer changes**; one request per blocking question. The review
+never rejected to force a decision. Return **`RESEARCH REQUEST: <question>`** to the coordinator instead
+of a verdict, naming **why it blocks** (which node or spine assertion cannot be judged without it)
+and **the decision the answer changes**; one request per blocking question. The review
 stays **unrejected**: no Feedback item records merely that an answer is missing, and the artifact is
 not rejected over it — the coordinator triages (the human, the graph, a fresh researcher) and
 **re-enters the review fresh** once answered. On that fresh re-entry judge the rewritten artifact

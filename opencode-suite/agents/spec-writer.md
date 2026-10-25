@@ -256,10 +256,10 @@ spec-review cycle — only then is the implementer re-dispatched.
 ### Blocking research (RESEARCH REQUEST)
 A blocking question about the outside world — a library's or protocol's behaviour, a version's
 capability, an external spec, a fact neither the code nor the graph carries — is never guessed and
-never settled with an invented fact. Return a **`RESEARCH REQUEST`** to the coordinator instead of
-authoring the affected nodes: name the question, **why it blocks** (which node or decision cannot be
-authored without it), and **the decision the answer changes** (the requirement, constraint, or spine
-edge that would differ). One request per blocking question; list several together. The coordinator
+never settled with an invented fact. Return **`RESEARCH REQUEST: <question>`** to the coordinator instead
+of authoring the affected nodes, naming **why it blocks** (which node or decision cannot be authored
+without it) and **the decision the answer changes** (the requirement, constraint, or spine edge that
+would differ). One request per blocking question; list several together. The coordinator
 triages to the human, the graph, or a fresh researcher and **re-dispatches you fresh** with the
 answer; you never block mid-authoring and never leave a half-authored node behind. On re-entry read
 the returned result — a markdown file under `apg/.scratch/` (e.g. `apg/.scratch/<subject>.md`) — as

@@ -257,9 +257,9 @@ and the acceptance criteria against the spec and the graph, then report the adde
 ### Blocking research (RESEARCH REQUEST)
 A blocking question about the outside world — a library's or protocol's behaviour, a version's capability,
 an external spec, a fact neither the code nor the graph carries — is never guessed and never settled with
-an invented fact; do not author the affected phase, task, or planned node. Return a **`RESEARCH REQUEST`**
-to the coordinator instead of the plan: name the question, **why it blocks** (which phase, task verb/target,
-or planned node cannot be authored without it), and **the decision the answer changes**; one request per
+an invented fact; do not author the affected phase, task, or planned node. Return **`RESEARCH REQUEST: <question>`**
+to the coordinator instead of the plan, naming **why it blocks** (which phase, task verb/target,
+or planned node cannot be authored without it) and **the decision the answer changes**; one request per
 blocking question. The coordinator triages (the human, the graph, or a fresh researcher) and
 **re-dispatches you fresh** with the answer; you never block mid-authoring and never leave a half-written
 plan behind. On re-entry read the returned `apg/.scratch/<subject>.md` markdown file as **working material
