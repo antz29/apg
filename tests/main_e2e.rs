@@ -2754,8 +2754,13 @@ mod e2e {
         std::fs::write(d.join(".gitignore"), "/target\n").unwrap();
         assert!(scaffold_gitignore(&d).unwrap(), "first scaffold writes");
         let once = std::fs::read_to_string(d.join(".gitignore")).unwrap();
-        assert!(once.contains("apg/.trans/"));
-        assert!(once.contains("apg/.worktrees/"));
+        for entry in ["apg/.trans/", "apg/.worktrees/", "apg/.scratch/"] {
+            assert_eq!(
+                once.matches(entry).count(),
+                1,
+                "{entry} written exactly once: {once}"
+            );
+        }
         assert!(
             once.starts_with("/target\n"),
             "other lines untouched: {once}"
