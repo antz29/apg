@@ -100,6 +100,19 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
     // negation shadowing the entries), refuse naming the actual state. The
     // `.worktrees/` dir itself is created below (libgit2's worktree add does
     // not create intermediate dirs; `apg init` scaffolds it, start heals it).
+    //
+    // The main checkout's scratch dir is healed HERE, before the probe (as the
+    // worktrees parent is healed before the worktree add below): a gitignored
+    // directory is never cloned, so a fresh clone carries the committed
+    // `apg/.scratch/` entry but no directory — and libgit2 matches a dir-only
+    // ignore entry only against a directory that exists, so probing an absent
+    // `.scratch` reads "not ignored", the scaffold finds nothing missing, and
+    // start would refuse over a negation that is not there (or, with the entry
+    // also dropped, commit the scaffold and then refuse anyway). Creating it
+    // first makes all three states converge: both present (no-op), entry
+    // without dir (probe passes, no commit), neither (the scaffold writes the
+    // entries and commits once).
+    std::fs::create_dir_all(identity.main_root.join(specs::LAYOUT).join(specs::SCRATCH))?;
     let probes = [
         git::project_worktree_dir(&identity.main_root, name),
         identity.main_root.join(specs::LAYOUT).join(specs::SCRATCH),
