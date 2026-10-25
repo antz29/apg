@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "task-assigned-to-names-a-scanned-agent",
-  "body": "Every plan task's assigned-to edge names exactly one scanned Agent, any agent is assignable to any task, and a task naming an Agent the graph lacks is drift the navigator routes to the agent-builder.",
+  "body": "Every plan task's assigned-to edge names exactly one scanned Agent, any agent is assignable to any task, and a task naming an Agent the graph lacks is drift, which the navigator routes to the agent-builder.",
   "properties": {
     "feature": "task-assignment"
   },
