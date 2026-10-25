@@ -703,6 +703,39 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     };
     let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
 
+    // `apg init` is a main-checkout operation: it scaffolds the committed
+    // `apg/` layout and the repo `.gitignore`, which belong to the main
+    // checkout whose tree every linked worktree shares. Discovered tolerantly
+    // FROM THE TARGET DIR (not cwd): a target outside any git repository is the
+    // pre-git bootstrap init must keep serving, so a discovery error proceeds.
+    if let Ok(repo) = git2::Repository::discover(&dir) {
+        // A linked worktree's gitdir is `<main>/.git/worktrees/<name>`; the
+        // main checkout's own gitdir is `<main>/.git` (the `git::repo_identity`
+        // derivation).
+        let gitdir = repo
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| repo.path().to_path_buf());
+        let gitdir_parent = gitdir.parent().unwrap_or(&gitdir);
+        if gitdir_parent.file_name().is_some_and(|n| n == "worktrees") {
+            let main_root = gitdir_parent
+                .parent()
+                .and_then(|g| g.parent())
+                .unwrap_or(&gitdir);
+            let worktree = repo
+                .workdir()
+                .map(|w| w.canonicalize().unwrap_or_else(|_| w.to_path_buf()))
+                .unwrap_or_else(|| dir.clone());
+            anyhow::bail!(
+                "refused: `apg init` is a main-checkout operation — the target {} is inside the linked worktree {} (main checkout: {}). Fix: run `apg init` from the main checkout {}.",
+                dir.display(),
+                worktree.display(),
+                main_root.display(),
+                main_root.display()
+            );
+        }
+    }
+
     let apg_dir = dir.join(specs::LAYOUT);
     std::fs::create_dir_all(apg_dir.join(specs::TRANS))?;
     // The project-worktrees dir (gitignored; `project start` nests each

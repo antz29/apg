@@ -126,6 +126,54 @@ fn scratch_commit_all(dir: &Path, msg: &str) {
         .unwrap();
 }
 
+/// A scratch git repo (from [`scratch_repo_init`]) whose **committed** main
+/// checkout carries the versioned `apg/config.json` + the apg `.gitignore`
+/// entries, and which hosts a linked worktree `proj` at
+/// `<main>/apg/.worktrees/proj` (raw git2 — the production `apg project start`
+/// is exercised by project_cmd's own tests). Returns
+/// `(base, main_checkout, home, worktree)`; `home` is a fresh isolated HOME
+/// with the suite dependency dir pre-created so a real `apg init` never shells
+/// out to `bun install`, and `base` is for teardown.
+fn init_worktree_scratch(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    let base = std::env::temp_dir().join(format!("apg-init-wt-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let repo_dir = base.join("repo");
+    let home = base.join("home");
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
+    scratch_repo_init(&repo_dir);
+    std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+    // The committed layout is written directly (not by `apg init`), so the
+    // refused init under test is the only layout writer that could change it.
+    let apg_dir = repo_dir.join(specs::LAYOUT);
+    std::fs::create_dir_all(&apg_dir).unwrap();
+    std::fs::write(
+        apg_dir.join("config.json"),
+        format!(
+            "{{\n  \"default\": \"src\",\n  \"types\": [],\n  \"version\": \"{}\"\n}}\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        repo_dir.join(".gitignore"),
+        "apg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+    )
+    .unwrap();
+    scratch_commit_all(&repo_dir, "init source");
+    let worktree = repo_dir.join(specs::LAYOUT).join(".worktrees").join("proj");
+    std::fs::create_dir_all(worktree.parent().unwrap()).unwrap();
+    git2::Repository::open(&repo_dir)
+        .unwrap()
+        .worktree("proj", &worktree, None)
+        .unwrap();
+    let wt_repo = git2::Repository::open(&worktree).unwrap();
+    wt_repo.set_head("refs/heads/proj").unwrap();
+    wt_repo
+        .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    (base, repo_dir, home, worktree)
+}
+
 /// A scratch repo with real Go sources, a `go.mod`, and an `apg/` layout at
 /// the binary's version. Returns `(base, repo_dir)` (base for teardown).
 fn winb_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
@@ -2322,6 +2370,347 @@ mod e2e {
             upgraded,
             "a same-version re-init leaves the pending migration guide untouched"
         );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `apg init` inside a linked worktree refuses naming the main checkout as
+    /// the fix and leaves that worktree's layout untouched — the checked-out
+    /// `apg/config.json` bytes identical, no migration guide, no suite/agent
+    /// install in the fresh isolated HOME and a clean worktree. The second
+    /// variant deletes the tracked config first: the refusal still precedes
+    /// every write, so the file stays absent (its dirty status is expected and
+    /// deliberately unasserted).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/linked worktree/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
+    fn init_refuses_inside_a_linked_worktree_and_leaves_its_layout_untouched() {
+        let (base, main_checkout, home, worktree) = init_worktree_scratch("refuse");
+        let main_checkout = main_checkout.canonicalize().unwrap();
+        let worktree = worktree.canonicalize().unwrap();
+        let config = worktree.join(specs::LAYOUT).join("config.json");
+        let config_before = std::fs::read(&config).unwrap();
+        let run = || {
+            testutil::ApgCommand::new(&["init", "."])
+                .cwd(&worktree)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+
+        let out = run();
+        assert!(
+            !out.status.success(),
+            "`apg init` inside a linked worktree must refuse; stdout:\n{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let first = stderr.lines().next().unwrap_or_default();
+        assert!(
+            first.starts_with("apg: refused: "),
+            "the first stderr line opens `apg: refused: `; got:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("mutation refused"),
+            "the init refusal speaks in main-checkout-operation voice, not the bookkeeping refusal; got:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(&worktree.display().to_string()),
+            "the refusal names the target/worktree {}; got:\n{stderr}",
+            worktree.display()
+        );
+        assert!(
+            stderr.contains(&main_checkout.display().to_string()),
+            "the refusal names the main checkout {}; got:\n{stderr}",
+            main_checkout.display()
+        );
+        assert_eq!(
+            stderr.matches("Fix:").count(),
+            1,
+            "exactly one Fix: line; got:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("run `apg init`"),
+            "the fix line runs `apg init`; got:\n{stderr}"
+        );
+
+        // Untouched layout: identical config bytes, no migration guide, no
+        // suite or agent written into the fresh HOME.
+        assert_eq!(
+            std::fs::read(&config).unwrap(),
+            config_before,
+            "the checked-out apg/config.json is unchanged"
+        );
+        assert!(
+            !worktree.join(specs::LAYOUT).join(MIGRATION_GUIDE).exists(),
+            "the refusal precedes the migration-guide write"
+        );
+        for populated in ["plugins", "agents", "lib", "package.json"] {
+            assert!(
+                !home.join(".config/opencode").join(populated).exists(),
+                "the refusal precedes the suite/agent install: `{populated}` must not exist"
+            );
+        }
+        let wt_repo = git2::Repository::open(&worktree).unwrap();
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(true);
+        assert!(
+            wt_repo.statuses(Some(&mut opts)).unwrap().is_empty(),
+            "the refused init leaves the worktree clean"
+        );
+
+        // Deleted tracked config: the refusal still precedes the write.
+        std::fs::remove_file(&config).unwrap();
+        let out = run();
+        assert!(
+            !out.status.success(),
+            "the deleted-config variant still refuses"
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).starts_with("apg: refused: "),
+            "the deleted-config variant refuses with the same voice; got:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !config.exists(),
+            "the refusal precedes the config write — the deleted file stays absent"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The refusal is TARGET-based, not cwd-based: naming the linked worktree
+    /// as `apg init`'s argument from the MAIN checkout refuses with the same
+    /// content and writes nothing there either.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/linked worktree/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
+    fn init_refuses_a_linked_worktree_named_as_its_target() {
+        let (base, main_checkout, home, worktree) = init_worktree_scratch("target");
+        let main_checkout = main_checkout.canonicalize().unwrap();
+        let worktree = worktree.canonicalize().unwrap();
+
+        let out = testutil::ApgCommand::new(&["init", worktree.to_str().unwrap()])
+            .cwd(&main_checkout)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !out.status.success(),
+            "`apg init <linked worktree>` from the main checkout must refuse; stdout:\n{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let first = stderr.lines().next().unwrap_or_default();
+        assert!(
+            first.starts_with("apg: refused: "),
+            "the first stderr line opens `apg: refused: `; got:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("mutation refused"),
+            "the target-based init refusal is main-checkout-operation voice; got:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(&worktree.display().to_string()),
+            "the refusal names the linked worktree {}; got:\n{stderr}",
+            worktree.display()
+        );
+        assert!(
+            stderr.contains(&main_checkout.display().to_string()),
+            "the refusal names the main checkout {}; got:\n{stderr}",
+            main_checkout.display()
+        );
+        assert_eq!(
+            stderr.matches("Fix:").count(),
+            1,
+            "exactly one Fix: line; got:\n{stderr}"
+        );
+        assert!(
+            !worktree.join(specs::LAYOUT).join(MIGRATION_GUIDE).exists(),
+            "the refused target writes no layout"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The guard admits every target it must not refuse: (c) the main checkout
+    /// initialises (version write + gitignore scaffold) and an immediate re-run
+    /// is byte-identical and reports both populations up to date; (d) a plain
+    /// directory outside any git repository still initialises (the pre-git
+    /// bootstrap); (e) a directory nested under the main checkout is not
+    /// mistaken for a linked worktree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/non-git dir/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
+    fn init_admits_the_main_checkout_a_non_git_dir_and_a_main_subdirectory() {
+        let base = std::env::temp_dir().join(format!("apg-init-admit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        // Isolated HOME with the suite dependency dir pre-created so `apg init`
+        // never shells out to `bun install`.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+        let run = |dir: &Path| {
+            testutil::ApgCommand::new(&["init", "."])
+                .cwd(dir)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+
+        // (c) The main checkout.
+        let out = run(&repo_dir);
+        assert!(
+            out.status.success(),
+            "main-checkout init must succeed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let apg_dir = repo_dir.join(specs::LAYOUT);
+        assert_eq!(
+            apg::version_gate::config_version(&apg_dir).as_deref(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "init writes the binary version into config.json"
+        );
+        let gitignore = std::fs::read_to_string(repo_dir.join(".gitignore")).unwrap();
+        for entry in ["apg/.trans/", "apg/.worktrees/", "apg/.scratch/"] {
+            assert!(
+                gitignore.contains(entry),
+                "init scaffolds the `{entry}` gitignore entry; got:\n{gitignore}"
+            );
+        }
+        let config_before = std::fs::read(apg_dir.join("config.json")).unwrap();
+        let guide_before = std::fs::read(apg_dir.join(MIGRATION_GUIDE)).unwrap();
+        let out = run(&repo_dir);
+        assert!(
+            out.status.success(),
+            "the immediate re-run exits 0: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("suite files +") && stdout.contains("agents already up to date"),
+            "the re-run reports both populations already up to date; got:\n{stdout}"
+        );
+        assert_eq!(
+            std::fs::read(apg_dir.join("config.json")).unwrap(),
+            config_before,
+            "the re-run leaves apg/config.json byte-identical"
+        );
+        assert_eq!(
+            std::fs::read(apg_dir.join(MIGRATION_GUIDE)).unwrap(),
+            guide_before,
+            "the re-run leaves the rest of apg/ byte-identical"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo_dir.join(".gitignore")).unwrap(),
+            gitignore,
+            "the re-run leaves .gitignore byte-identical"
+        );
+
+        // (d) A plain non-git directory still initialises (pre-git bootstrap).
+        let plain = base.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let out = run(&plain);
+        assert!(
+            out.status.success(),
+            "a directory outside any git repository must still initialise: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        for rel in ["config.json", ".trans", ".worktrees", ".scratch"] {
+            assert!(
+                plain.join(specs::LAYOUT).join(rel).exists(),
+                "init lays down apg/{rel} in a non-git directory"
+            );
+        }
+
+        // (e) A directory nested under the main checkout.
+        let nested = repo_dir.join("nested/dir");
+        std::fs::create_dir_all(&nested).unwrap();
+        let out = run(&nested);
+        assert!(
+            out.status.success(),
+            "a main-checkout subdirectory is not a linked worktree: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            nested.join(specs::LAYOUT).join("config.json").exists(),
+            "the nested layout is created"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The one NEW non-regression assertion for init's duplicate-install
+    /// warning with the guard in place: a project `.opencode/` file shadowing
+    /// an installed suite file is named on its own indented stderr line beside
+    /// the installed suite dir, and init still exits 0 and deletes nothing.
+    ///
+    /// Deliberately NOT re-asserted here — the retained harnesses own those
+    /// claims: `init_report_line_counts_suite_files_and_agents_separately`
+    /// pins the per-population report counts, the never-folded regression and
+    /// the idempotent re-run, and
+    /// `init_writes_the_changelog_sliced_migration_guide` pins the
+    /// `config.json` version write.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
+    fn init_duplicate_warning_names_the_shadowing_project_file() {
+        let base = std::env::temp_dir().join(format!("apg-init-dupe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+        let run = || {
+            testutil::ApgCommand::new(&["init", "."])
+                .cwd(&repo_dir)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+        assert!(
+            run().status.success(),
+            "the first init (which installs the suite) exits 0"
+        );
+
+        // A project-local copy of an installed suite plugin: the shadow init
+        // warns about and never deletes.
+        let shadow = repo_dir.join(".opencode/plugins/apg_query.ts");
+        std::fs::create_dir_all(shadow.parent().unwrap()).unwrap();
+        std::fs::write(&shadow, "shadow\n").unwrap();
+
+        let out = run();
+        assert!(
+            out.status.success(),
+            "the duplicate warning never fails init: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let installed = home.join(".config/opencode");
+        assert!(
+            stderr.contains("!! WARNING:"),
+            "the loud warning block; got:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("duplicate the installed apg suite in"),
+            "the warning names the duplicate-install cause; got:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(&installed.display().to_string()),
+            "the warning names the installed suite dir {}; got:\n{stderr}",
+            installed.display()
+        );
+        assert!(
+            stderr
+                .lines()
+                .any(|l| l == "     .opencode/plugins/apg_query.ts"),
+            "the shadowing file sits on its own indented line; got:\n{stderr}"
+        );
+        assert!(shadow.exists(), "init never deletes the shadowing file");
 
         let _ = std::fs::remove_dir_all(&base);
     }
