@@ -82,6 +82,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.plan-verify-stays-branch-scoped",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     },
@@ -97,7 +102,7 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.plan-verify-stays-branch-scoped",
+      "target": "requirements.requirement.scan-leaves-graph-fresh",
       "properties": {}
     }
   ],

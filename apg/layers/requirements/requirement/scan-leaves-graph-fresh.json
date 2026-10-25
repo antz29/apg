@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-leaves-graph-fresh",
+  "body": "A successful scan of a checkout leaves that checkout's graph fresh, so a plan verification or bookkeeping mutation run immediately afterwards in that same checkout treats the graph as fresh.",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    }
+  ]
+}
