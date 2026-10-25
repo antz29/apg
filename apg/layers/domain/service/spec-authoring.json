@@ -22,6 +22,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.implementation-constraint-language-scope",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
       "properties": {}
     },
@@ -47,7 +52,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.implementation-constraint-language-scope",
+      "target": "requirements.requirement.constraint-scope-is-its-layer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.implemented-by-is-exclusive",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.group-containment-is-leaf-scoped",
       "properties": {}
     }
   ],

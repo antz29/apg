@@ -17,6 +17,11 @@
       "kind": "requires",
       "source": "requirements.stakeholder.spec-author",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
+      "properties": {}
     }
   ]
 }
