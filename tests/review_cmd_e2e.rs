@@ -1226,6 +1226,152 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-4 (E2E): on the MAIN checkout (no project context) every
+    /// review mutation refuses with the project-context refusal — the message
+    /// begins `mutation refused —`, never target-not-found — even though the
+    /// target is absent too: the guard runs before any target or feedback-store
+    /// resolution. `review list` stays a legal read on main and succeeds.
+    #[test]
+    #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
+    fn review_mutations_refuse_context_before_target_on_main() {
+        let repo = Repo::new("review-main-context");
+        // The read path opens the DB; an empty one with the full schema is
+        // enough for `list` (no records on main's branch-local store).
+        testutil::touch_db(&repo.apg_root());
+
+        let assert_context_refusal = |out: &std::process::Output| {
+            assert!(!out.status.success(), "the mutation must refuse");
+            let msg = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                msg.contains("mutation refused — "),
+                "the refusal must be the project-context one, not target-not-found: {msg}"
+            );
+            assert!(msg.contains("branch `main`"), "{msg}");
+            assert!(
+                !msg.contains("does not exist in the graph"),
+                "main's absent target must not be reported as an absent target: {msg}"
+            );
+            assert!(
+                !msg.contains("not found in"),
+                "main's absent feedback must not be reported as an absent item: {msg}"
+            );
+        };
+
+        // `review add` with a plan-family target absent from main's graph: the
+        // guard fires before the DB lookup.
+        assert_context_refusal(&spawn_apg(
+            &["review", "add", "ghost/plan.phase-01.task-1", "--body", "x"],
+            &repo.root,
+        ));
+
+        // `action`/`resolve`/`reject` with an absent feedback fqn: the guard
+        // fires before the transient-store search.
+        for verb in ["action", "resolve", "reject"] {
+            let mut args = vec!["review", verb, "ghost/feedback-1"];
+            if verb == "action" {
+                args.push("--fix");
+            }
+            assert_context_refusal(&spawn_apg(&args, &repo.root));
+        }
+
+        // `review list` is a legal read on main (a read is never a mutation
+        // place) — the guard leaves it unguarded.
+        let listed = spawn_apg(&["review", "list"], &repo.root);
+        assert!(
+            listed.status.success(),
+            "review list must stay legal on main: {}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.starts_with("f.fqn,f.status,f.disposition,n.fqn"),
+            "the list header must be printed: {out}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-02 task-5 (E2E): inside a project worktree the guard admits the
+    /// mutation, so a genuinely absent target reports its own absence naming
+    /// the searched project root and branch — distinct from the context
+    /// refusal — and `review add` plus `review list` still succeed there.
+    #[test]
+    #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
+    fn review_absent_target_names_searched_project_context() {
+        let (_apg_root, repo, wt) = fixture("absent-context");
+        let project_root = std::fs::canonicalize(&wt).unwrap();
+        let searched_root = format!("project root {}", project_root.display());
+
+        let assert_absent = |out: &std::process::Output, absent: &str| {
+            assert!(!out.status.success(), "the absent {absent} must error");
+            let msg = String::from_utf8_lossy(&out.stderr);
+            assert!(msg.contains(absent), "the error must name it: {msg}");
+            assert!(
+                msg.contains(&searched_root),
+                "the error must name the searched project root: {msg}"
+            );
+            assert!(
+                msg.contains("on branch `foo`"),
+                "the error must name the branch searched: {msg}"
+            );
+            assert!(
+                !msg.contains("mutation refused"),
+                "inside the project this is an absent-target error, not a context refusal: {msg}"
+            );
+        };
+
+        // An absent plan-family target.
+        assert_absent(
+            &spawn_apg(
+                &["review", "add", "ghost/plan.phase-01.task-1", "--body", "x"],
+                &wt,
+            ),
+            "ghost/plan.phase-01.task-1",
+        );
+
+        // An absent feedback fqn for each status verb.
+        for verb in ["action", "resolve", "reject"] {
+            let mut args = vec!["review", verb, "foo/feedback-99"];
+            if verb == "action" {
+                args.push("--fix");
+            }
+            assert_absent(&spawn_apg(&args, &wt), "foo/feedback-99");
+        }
+
+        // The guard admits the worktree: a real review attaches and lists.
+        let added = spawn_apg(
+            &[
+                "review",
+                "add",
+                "domain.entity.order",
+                "--body",
+                "in project",
+                "--project",
+                "foo",
+            ],
+            &wt,
+        );
+        assert!(
+            added.status.success(),
+            "review add must succeed in the project worktree: {}",
+            String::from_utf8_lossy(&added.stderr)
+        );
+        let listed = spawn_apg(&["review", "list"], &wt);
+        assert!(
+            listed.status.success(),
+            "review list must succeed in the project worktree: {}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.lines()
+                .any(|l| l == "foo/feedback-1,open,,domain.entity.order"),
+            "the attached review must list in the worktree: {out}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
 
 /// The worktree branch's HEAD sha — the branch an auto-commit would land

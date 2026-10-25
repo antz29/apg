@@ -43,11 +43,21 @@ pub fn cmd_review(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg review <add|action|resolve|reject|list> …");
     };
     match sub {
-        "add" => review_add(&args[1..]),
-        "action" => review_action(&args[1..]),
-        "resolve" => review_set(&args[1..], "resolved", None),
-        "reject" => review_set(&args[1..], "open", Some("rejected".to_string())),
+        // A read is never a mutation place: `list` stays legal on main.
         "list" => review_list(&args[1..]),
+        // Every mutating verb is a project-context act (R3). The guard runs
+        // BEFORE any subcommand argument, target or feedback-store resolution,
+        // so an absent context refuses as such — never as an absent target.
+        "add" | "action" | "resolve" | "reject" => {
+            let apg_root = require_apg_root()?;
+            crate::git::require_project_context(&apg_root)?;
+            match sub {
+                "add" => review_add(&args[1..]),
+                "action" => review_action(&args[1..]),
+                "resolve" => review_set(&args[1..], "resolved", None),
+                _ => review_set(&args[1..], "open", Some("rejected".to_string())),
+            }
+        }
         other => anyhow::bail!("unknown apg review subcommand: {other}"),
     }
 }
@@ -141,7 +151,15 @@ pub fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
                 (proj, tier)
             }
             None => {
-                anyhow::bail!("review target `{target}` does not exist in the graph");
+                // Name the searched project context beside the target: a
+                // genuinely absent target reads distinctly from the
+                // project-context refusal, which fires earlier at the CLI.
+                let identity = crate::git::repo_identity(apg_root)?;
+                anyhow::bail!(
+                    "review target `{target}` does not exist in the graph searched at project root {} on branch `{}`",
+                    identity.checkout_root.display(),
+                    identity.branch.as_deref().unwrap_or("<detached>")
+                );
             }
         }
     };
@@ -337,8 +355,13 @@ pub fn set_feedback_at(
         }
     }
     let Some(file) = file else {
+        // Name the searched project context beside the feedback fqn (the
+        // malformed-fqn and `!found` bails below are not genuine absence).
+        let identity = crate::git::repo_identity(apg_root)?;
         anyhow::bail!(
-            "feedback `{fqn}` not found in {project}'s transient plan store or feedback mirrors"
+            "feedback `{fqn}` not found in {project}'s transient plan store or feedback mirrors searched at project root {} on branch `{}`",
+            identity.checkout_root.display(),
+            identity.branch.as_deref().unwrap_or("<detached>")
         );
     };
     let mut records = specs::read_jsonl(&file)?;
