@@ -1726,7 +1726,7 @@ mod e2e {
     /// Phase-05 task-4 (E2E): on the MAIN checkout `apg query` — plain CSV and
     /// `--json` — serves the transient Plan/PlanPhase/Task/Feedback projections
     /// the `apg_plan` / `apg_plan_phases` / `apg_plan_tasks` readers run (plus
-    /// the Satisfies/Reviews joins those readers use), so main's own
+    /// the Satisfies/Reviews/Gates joins those readers use), so main's own
     /// branch-local `.trans` store is readable, not refused.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/spawned apg/db.lbug); run via cargo test-e2e"]
@@ -1760,6 +1760,25 @@ mod e2e {
             schema::Record::Satisfies {
                 from: "main/plan.phase-01".to_string(),
                 to: "requirements.requirement.timer".to_string(),
+            },
+            // A second phase gated by the first, so the Gates projection
+            // `apg_plan_phases` reads for cycle detection has real rows — the
+            // shape `apg plan add phase` authors (parent Contains + Gates).
+            schema::Record::PlanPhase {
+                fqn: "main/plan.phase-02".to_string(),
+                number: 2,
+                title: "P2".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            schema::Record::Contains {
+                from: "main/plan".to_string(),
+                to: "main/plan.phase-02".to_string(),
+                properties: layers::NodeProperties::default(),
+            },
+            schema::Record::Gates {
+                from: "main/plan.phase-01".to_string(),
+                to: "main/plan.phase-02".to_string(),
             },
             schema::Record::Task {
                 fqn: "main/plan.phase-01.task-1".to_string(),
@@ -1800,6 +1819,7 @@ mod e2e {
         artifacts::reingest_layers(&apg_root, &BTreeSet::new(), &records).unwrap();
 
         // The readers' own projection shapes.
+        let gates_query = "MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH 'main/plan.phase-' RETURN a.fqn, b.fqn";
         let projections: &[(&str, &str)] = &[
             (
                 "MATCH (p:Plan) RETURN p.fqn, p.title, p.strategy",
@@ -1821,6 +1841,7 @@ mod e2e {
                 "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn",
                 "main/plan.phase-01,requirements.requirement.timer",
             ),
+            (gates_query, "main/plan.phase-01,main/plan.phase-02"),
         ];
         for (query, row) in projections {
             let out = testutil::spawn_apg(&["query", query], &repo.root);
@@ -1837,6 +1858,23 @@ mod e2e {
                 "`{query}` must return `{row}`:\n{stdout}"
             );
         }
+
+        // Directional guard: `apg_plan_phases` cycle detection reads Gates as
+        // `a → b`, so a projection that swapped the endpoints (or wrote both
+        // directions) must fail even though the forward row above is present.
+        let out = testutil::spawn_apg(&["query", gates_query], &repo.root);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let gates = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !gates
+                .lines()
+                .any(|l| l == "main/plan.phase-02,main/plan.phase-01"),
+            "the Gates edge runs phase-01 → phase-02 only:\n{gates}"
+        );
 
         // `--json` renders the same rows as a keyed JSON array.
         let out = testutil::spawn_apg(
