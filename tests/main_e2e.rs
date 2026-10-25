@@ -10164,8 +10164,15 @@ mod e2e {
     ///
     /// The mutation family's stale gate is the `is_stale` the write funnel
     /// shares with `plan verify`, so this pins that the two agree after a real
-    /// scan. The harness lives here because `main_e2e` is the only e2e crate
-    /// that can run a real `apg scan` in a scratch repo.
+    /// scan. The harness lives here because this file owns the scratch harness —
+    /// `scratch_repo_init`, `scratch_commit_all`, the isolated `HOME` and
+    /// `ApgCommand` — that a real `apg init` + committed change + real
+    /// `apg scan` recipe needs. `plan_cmd_e2e` and `review_cmd_e2e` fixtures are
+    /// synthetic (no `apg scan`) and `git_e2e` never scans; `project_cmd_e2e`
+    /// does drive real `apg scan` on scratch repos
+    /// (tests/project_cmd_e2e.rs:1166, with the go-frontend-spawn assertion at
+    /// :1175–1178, plus :2941, :3173, :3223, :3254) but carries neither
+    /// `scratch_repo_init` nor `scratch_commit_all`.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn post_scan_non_session_bookkeeping_mutations_treat_the_graph_as_fresh() {
