@@ -23,6 +23,8 @@ use crate::schema::Record;
 pub const LAYOUT: &str = "apg";
 /// The gitignored transient subdir.
 pub const TRANS: &str = ".trans";
+/// The gitignored scratch subdir; only markdown research results live there.
+pub const SCRATCH: &str = ".scratch";
 
 /// Walks up from `start` looking for the committed `apg/` layout root (a
 /// directory named `apg` carrying the gitignored `apg/.trans/` subdir, which
