@@ -32,10 +32,10 @@ use crate::specs;
 pub static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A fresh git repo (main checkout on branch `main`) with an initial commit
-/// whose `.gitignore` covers `apg/.trans/` and `apg/.worktrees/`, and whose
-/// `apg/config.json` carries the binary-managed `version` field at the
-/// binary's own version — the R10 layout gate passes on every fixture, and
-/// version-gate tests override the field explicitly.
+/// whose `.gitignore` covers `apg/.trans/`, `apg/.worktrees/` and
+/// `apg/.scratch/`, and whose `apg/config.json` carries the binary-managed
+/// `version` field at the binary's own version — the R10 layout gate passes on
+/// every fixture, and version-gate tests override the field explicitly.
 pub struct Repo {
     /// The main checkout root.
     pub root: PathBuf,
@@ -63,8 +63,16 @@ impl Repo {
         opts.initial_head("refs/heads/main");
         let repo = git2::Repository::init_opts(&root, &opts).unwrap();
         git_config(&repo);
-        std::fs::write(root.join(".gitignore"), "apg/.trans/\napg/.worktrees/\n").unwrap();
+        std::fs::write(
+            root.join(".gitignore"),
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
+        // `apg init` scaffolds the scratch dir too, and libgit2's dir-only
+        // ignore entry (`apg/.scratch/`) only matches an existing directory —
+        // absent, `project start`'s self-heal probe reads it as unignored.
+        std::fs::create_dir_all(root.join(specs::LAYOUT).join(specs::SCRATCH)).unwrap();
         // The versioned layout config (R10): the gate passes with the
         // binary's own major.minor; version-gate tests rewrite this field.
         std::fs::write(
