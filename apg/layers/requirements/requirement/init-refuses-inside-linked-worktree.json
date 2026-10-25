@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "init-refuses-inside-linked-worktree",
-  "body": "`apg init` inside a linked worktree reports a refusal naming the main checkout as the fix, while the main checkout and a directory that is not yet a git repository both remain initializable.",
+  "body": "`apg init` inside a linked worktree reports a refusal naming the main checkout as the fix, and the main checkout and a directory outside any git repository both stay initializable.",
   "properties": {
     "feature": "project-context-guard"
   },
