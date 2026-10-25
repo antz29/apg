@@ -176,7 +176,7 @@ apg --help
 In your project directory:
 
 ```sh
-apg init    # creates apg/ (committed config + gitignored .trans/), installs the opencode apg tool suite + eight agents
+apg init    # creates apg/ (committed config + gitignored .trans/), installs the opencode apg tool suite + nine agents
 apg scan    # scans the project, writes apg/.trans/db.lbug and apg/.trans/graph.jsonl
 apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 ```
@@ -187,14 +187,15 @@ Sets up the project:
 
 - creates `apg/` with a default `config.json` (classification rules + a
   binary-managed `version` field) and the gitignored `apg/.trans/`,
-  scaffolds the repo `.gitignore` for `apg/.trans/` and `apg/.worktrees/`
-  (added if missing, other lines untouched),
+  `apg/.worktrees/` and `apg/.scratch/`, and scaffolds the repo `.gitignore`
+  for all three (`apg/.trans/`, `apg/.worktrees/`, `apg/.scratch/`; added if
+  missing, other lines untouched),
 - installs the **apg tool suite** into `~/.config/opencode/plugins/` (query tools +
   `apg_scan` + the spec/plan/review suite, shared plumbing in
   `~/.config/opencode/lib/`) and writes `~/.config/opencode/package.json` naming
   the `@opencode/plugin` dependency + runs `bun install` if needed,
-- installs the **eight distributed agents** into `~/.config/opencode/agents/` —
-  the `codebase-navigator` plus seven, each with a one-line purpose:
+- installs the **nine distributed agents** into `~/.config/opencode/agents/` —
+  the `codebase-navigator` plus eight, each with a one-line purpose:
   - `codebase-navigator` — navigates the graph and dispatches the other agents.
   - `spec-writer` — authors the four-tier spec and spine as durable nodes.
   - `plan-writer` — turns a spec into a phased plan with tasks and planned nodes.
@@ -203,6 +204,7 @@ Sets up the project:
   - `implementation-phase-reviewer` — reviews a phase's code against plan and spec.
   - `agent-builder` — scaffolds a repo's implementer/reviewer agents.
   - `migration-agent` — rewrites `apg/layers/**` for a migration, then validates.
+  - `researcher` — investigates one research question read-only and returns a markdown result in `apg/.scratch/`.
 
 The suite installs the first time and is then kept in sync (files are
 re-written only when their contents change), so running `apg init` again after
