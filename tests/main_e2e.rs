@@ -4346,7 +4346,50 @@ mod e2e {
         // Real `apg init` in the scratch main checkout, then commit the scaffold
         // (so the main checkout is clean for `project start`).
         run_in(&repo_dir_s, &["init", "."]);
+        let scratch_dir = repo_dir.join("apg").join(".scratch");
+        assert!(
+            scratch_dir.is_dir(),
+            "real `apg init` must create the scratch dir at {}",
+            scratch_dir.display()
+        );
+        // A researcher's result file — a scratch markdown output that must stay
+        // out of the commit and out of the checkout's change-set.
+        let scratch_result = scratch_dir.join("research-subject.md");
+        std::fs::write(&scratch_result, "# Subject\n\nsource: main.go\n").unwrap();
+
         scratch_commit_all(&repo_dir, "apg init");
+        assert!(
+            scratch_result.is_file(),
+            "the scratch result must still exist on disk at {}",
+            scratch_result.display()
+        );
+        let scratch_repo = git2::Repository::open(&repo_dir).unwrap();
+        assert!(
+            scratch_repo
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .tree()
+                .unwrap()
+                .get_path(Path::new("apg/.scratch/research-subject.md"))
+                .is_err(),
+            "the scratch result must stay out of the committed tree at apg/.scratch/research-subject.md"
+        );
+        // The checkout's change-set carries nothing: the scratch result is
+        // ignored (not untracked), so `git status` flags the `apg/.scratch/`
+        // entry itself as IGNORED rather than listing the file.
+        let mut status_opts = git2::StatusOptions::new();
+        status_opts.include_ignored(false);
+        let statuses = scratch_repo.statuses(Some(&mut status_opts)).unwrap();
+        assert!(
+            statuses.is_empty(),
+            "the scaffolded `apg/.scratch/` gitignore entry must keep the scratch result out of the checkout's change-set; git status: {:?}",
+            statuses
+                .iter()
+                .map(|e| e.path().map(str::to_string))
+                .collect::<Vec<_>>()
+        );
 
         // Real `apg scan` in the scratch main checkout.
         run_in(&repo_dir_s, &["scan", "."]);
