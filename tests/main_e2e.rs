@@ -9794,4 +9794,285 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&repo.root);
     }
+
+    // -------------------------------------------------------------------
+    // Phase-09: a scan leaves its checkout's graph fresh. Both tests drive a
+    // REAL `apg init` + REAL `apg scan` in a scratch `/tmp` git repo (the only
+    // e2e crate with that harness — plan_cmd_e2e/review_cmd_e2e fixtures build
+    // their DB synthetically and git_e2e never scans), then probe the very next
+    // command in the same project worktree.
+    // -------------------------------------------------------------------
+
+    /// Phase-09 task-1 (e2e, scratch /tmp repo, real `apg init` + real
+    /// `apg scan`): a successful scan of a checkout leaves that checkout's
+    /// graph fresh, so an IMMEDIATE `apg plan verify` in the same worktree
+    /// never reports the stale refusal and verifies green; a second immediate
+    /// verify with no scan between agrees.
+    ///
+    /// The loop reproduces the reported failure's shape: every iteration
+    /// commits a real source change in the project worktree (so the following
+    /// scan is a REAL scan, never the unchanged-tree fast path the report says
+    /// always verified cleanly) and probes the freshness verdict immediately.
+    /// Authored to fail pre-fix; the reported false stale was intermittent, so
+    /// a pre-fix run that never trips it is a diagnosis finding, never a
+    /// weakened assertion.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh() {
+        let base = std::env::temp_dir().join(format!("apg-scan-fresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let stderr_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+        let stdout_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        const STALE: &str = "the branch graph is stale";
+
+        // Real `apg init` in the scratch main checkout, committed so the
+        // checkout is clean for `project start`; a real `apg scan` then seeds
+        // the branch DB `project start` copies.
+        run(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        run(&repo_dir, &["scan", "."]);
+        run(&repo_dir, &["project", "start", "demo"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+
+        // A green plan in the worktree: the plan store is branch-local.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan", "add", "demo", "task", "1", "1", "--title", "T1", "--kind", "source",
+                "--verb", "creates",
+            ],
+        );
+
+        for i in 0..10 {
+            std::fs::write(
+                wt.join("main.go"),
+                format!("package main\n\nfunc main() {{}}\n\nfunc h{i}() {{}}\n"),
+            )
+            .unwrap();
+            scratch_commit_all(&wt, &format!("change {i}"));
+
+            // The post-commit scan must be a REAL scan: the fast path would
+            // prove nothing about a scan leaving the graph fresh.
+            let scan_stderr = stderr_of(&run(&wt, &["scan", "."]));
+            assert!(
+                !scan_stderr.contains("fast-path"),
+                "iteration {i}: the post-commit scan must not take the fast path: {scan_stderr}"
+            );
+
+            let first = run(&wt, &["plan", "verify", "demo"]);
+            assert!(
+                !stderr_of(&first).contains(STALE),
+                "iteration {i}: the scan must leave the branch graph fresh — verify #1 refused stale: {}",
+                stderr_of(&first)
+            );
+            assert!(
+                stdout_of(&first).contains("Verify gate passed for demo"),
+                "iteration {i}: the seeded plan must verify: {}{}",
+                stdout_of(&first),
+                stderr_of(&first)
+            );
+
+            // A second immediate verify with no scan between agrees.
+            let second = run(&wt, &["plan", "verify", "demo"]);
+            assert!(
+                !stderr_of(&second).contains(STALE),
+                "iteration {i}: the repeated verify must agree the graph is fresh: {}",
+                stderr_of(&second)
+            );
+            assert_eq!(
+                second.status.success(),
+                first.status.success(),
+                "iteration {i}: the two immediate verifies must agree"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Phase-09 task-3 (e2e, scratch /tmp repo, real `apg init` + real
+    /// `apg scan`): after a real scan, an immediate NON-SESSION bookkeeping
+    /// mutation proceeds instead of refusing stale, a second non-session
+    /// mutation agrees, and `apg review list` then shows the attached feedback.
+    ///
+    /// The mutation family's stale gate is the `is_stale` the write funnel
+    /// shares with `plan verify`, so this pins that the two agree after a real
+    /// scan. The harness lives here because `main_e2e` is the only e2e crate
+    /// that can run a real `apg scan` in a scratch repo.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn post_scan_non_session_bookkeeping_mutations_treat_the_graph_as_fresh() {
+        let base = std::env::temp_dir().join(format!("apg-scan-mutate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let stderr_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+        let stdout_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        const STALE: &str = "the branch graph is stale";
+
+        run(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        run(&repo_dir, &["scan", "."]);
+        run(&repo_dir, &["project", "start", "demo"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+
+        // The plan and its target exist before the mutation under test.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan", "add", "demo", "task", "1", "1", "--title", "T1", "--kind", "source",
+                "--verb", "creates",
+            ],
+        );
+
+        // A real (non-fast-path) scan of a committed source change.
+        std::fs::write(
+            wt.join("main.go"),
+            "package main\n\nfunc main() {}\n\nfunc changed() {}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "change");
+        let scan_stderr = stderr_of(&run(&wt, &["scan", "."]));
+        assert!(
+            !scan_stderr.contains("fast-path"),
+            "the post-commit scan must not take the fast path: {scan_stderr}"
+        );
+
+        // (1) an immediate non-session mutation proceeds, never stale.
+        let review = run(
+            &wt,
+            &[
+                "review",
+                "add",
+                "demo/plan.phase-01.task-1",
+                "--body",
+                "post-scan",
+                "--project",
+                "demo",
+            ],
+        );
+        assert!(
+            !stderr_of(&review).contains(STALE),
+            "review add must not refuse stale after a scan: {}",
+            stderr_of(&review)
+        );
+        assert!(
+            stdout_of(&review).contains("demo/feedback-1"),
+            "review add must attach the feedback item: {}",
+            stdout_of(&review)
+        );
+
+        // (2) a second immediate non-session mutation agrees.
+        let update = run(
+            &wt,
+            &["plan", "update", "demo", "--title", "Demo after scan"],
+        );
+        assert!(
+            !stderr_of(&update).contains(STALE),
+            "a second mutation must not refuse stale after a scan: {}",
+            stderr_of(&update)
+        );
+
+        // (3) the feedback is listed in that worktree.
+        let list = stdout_of(&run(&wt, &["review", "list"]));
+        assert!(
+            list.contains("demo/feedback-1") && list.contains("demo/plan.phase-01.task-1"),
+            "review list must show the attached feedback: {list}"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

@@ -1177,4 +1177,106 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    // ------------------------------------------------------------------
+    // Phase-09 task-4: the two fail-closed freshness arms no existing test
+    // exercises at the predicate. Retained coverage (NOT duplicated here):
+    //   * `dirty_tree_at_same_sha_is_stale` — the dirty-tree arm;
+    //   * `content_identity_byte_edit_invalidates` — the changed-bytes arm;
+    //   * `is_fresh_requires_the_live_db` — absent DB / a DB with no `Scan`
+    //     row / no export;
+    //   * `diverged_authored_rows_are_not_fast_pathed` (tests/splice_e2e.rs) —
+    //     the DB↔tree authored-digest arm.
+    // ------------------------------------------------------------------
+
+    /// A present-but-dead `session.sock` is a fail-closed freshness arm: the
+    /// on-disk DB reflects only the last saved state while a phantom
+    /// projection may exist, so `is_fresh` is false and `is_stale` true.
+    /// Removing the dead socket restores freshness — which discriminates this
+    /// arm from the recorded-state half (both halves here agree throughout).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug/socket); run via cargo test-e2e"]
+    #[cfg(unix)]
+    fn dead_session_socket_makes_the_graph_unfresh() {
+        let repo = fixture_repo("fresh-dead-socket");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the agreeing pair starts fresh");
+
+        // Bind then drop the listener: the socket PATH survives with no
+        // process behind it — exactly the unclean-exit shape.
+        let socket = apg::session::socket_path(&apg);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        assert!(socket.exists(), "the dead socket must persist");
+        assert!(
+            !apg::session::live_session_at(&socket),
+            "nothing answers the probe"
+        );
+        assert!(
+            !is_fresh(&apg),
+            "a present-but-dead session socket must fail closed"
+        );
+        assert!(is_stale(&apg), "the gate must refuse on a dead socket");
+
+        std::fs::remove_file(&socket).unwrap();
+        assert!(
+            is_fresh(&apg),
+            "removing the dead socket restores freshness (the socket arm fired)"
+        );
+        assert!(!is_stale(&apg));
+        testutil::remove(&repo);
+    }
+
+    /// The DB↔export agreement arm is fail-closed: a DB whose own `Scan` row
+    /// disagrees with `graph.jsonl`'s `scan_meta` makes `is_fresh` false and
+    /// `is_stale` true — for a divergent content key AND a divergent sha — and
+    /// bringing both halves to one state restores freshness. No authored rows
+    /// are involved, so the authored-digest arm stays with
+    /// `diverged_authored_rows_are_not_fast_pathed`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug); run via cargo test-e2e"]
+    fn db_scan_row_diverging_from_the_export_is_unfresh() {
+        let repo = fixture_repo("fresh-db-export");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the two agreeing halves start fresh");
+
+        // Re-anchor ONLY the DB half: a content key the export does not name.
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(Some(&sha), Some(true), Some("diverged-content-key"))
+            .unwrap();
+        drop(db);
+        assert!(
+            !is_fresh(&apg),
+            "a DB content key that disagrees with the export must not be fresh"
+        );
+        assert!(is_stale(&apg));
+
+        // Re-anchor ONLY the DB half again: the export's sha, a foreign sha.
+        let key = git_state(&apg).content_key;
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(
+            Some("0000000000000000000000000000000000000000"),
+            Some(true),
+            key.as_deref(),
+        )
+        .unwrap();
+        drop(db);
+        assert!(
+            !is_fresh(&apg),
+            "a DB sha that disagrees with the export must not be fresh"
+        );
+        assert!(is_stale(&apg));
+
+        // Re-anchoring BOTH halves to one state restores freshness.
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "an agreeing pair is fresh again");
+        assert!(!is_stale(&apg));
+        testutil::remove(&repo);
+    }
 }
