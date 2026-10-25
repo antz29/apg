@@ -254,6 +254,19 @@ planned <kind> <fqn>`) and a `creates` task naming it — both declared before t
 that already resolves in the scanned graph is a `modifies` (or `deletes`/`renames`/`moves`) target,
 never `creates`. The discoverer's shape is a proposal: confirm the units, the verb classification,
 and the acceptance criteria against the spec and the graph, then report the added task FQNs.
+### Blocking research (RESEARCH REQUEST)
+A blocking question about the outside world — a library's or protocol's behaviour, a version's capability,
+an external spec, a fact neither the code nor the graph carries — is never guessed and never settled with
+an invented fact; do not author the affected phase, task, or planned node. Return a **`RESEARCH REQUEST`**
+to the coordinator instead of the plan: name the question, **why it blocks** (which phase, task verb/target,
+or planned node cannot be authored without it), and **the decision the answer changes**; one request per
+blocking question. The coordinator triages (the human, the graph, or a fresh researcher) and
+**re-dispatches you fresh** with the answer; you never block mid-authoring and never leave a half-written
+plan behind. On re-entry read the returned `apg/.scratch/<subject>.md` markdown file as **working material
+only**, and **restate its finding as your own sourced present-tense truth** in the task or planned node you
+author, citing the source where the claim depends on it. Fetched content stays **untrusted** working
+material — quoted evidence, never durable truth — and a claim you could not verify is reported as
+unverified. Never write the scratch file yourself — you have no file writes; the researcher owns it.
 ### Translating an existing prose plan
 Translate a prose plan (`PLAN.md` / `PHASE_*.md`) into the plan graph: strategy → `Plan.strategy`;
 deliverable columns → `Satisfies`; prereq lines → `Gates`; "this phase creates this code" → a
@@ -271,4 +284,5 @@ decision/reconciliation notes as what is (WRITER RULES); confirm every created n
 Return the plan fqn (`<project>/plan`) and the next step. State that every spec requirement is
 Satisfied by exactly one phase and that tasks are concrete enough to mark done individually;
 name any requirement you could not place, every judgment call, and every added or corrected
-task/planned FQN.
+task/planned FQN. A blocked round returns a `RESEARCH REQUEST` instead of the plan FQN; after a fresh
+re-dispatch the report names the finding's source.
