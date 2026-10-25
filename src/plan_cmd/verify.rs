@@ -73,12 +73,15 @@ pub(crate) fn realization_candidates(fqn: &str) -> Vec<String> {
 /// R5).
 pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
+    // Take the extended lock BEFORE judging staleness: `apg scan` holds the same
+    // blocking flock for its whole rebuild, so a verify overlapping a scan waits
+    // for it and judges the finished DB/export instead of a transient one.
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     if crate::git::is_stale(apg_root) {
         anyhow::bail!(
             "cannot verify `{project}`: the branch graph is stale — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)"
         );
     }
-    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let records = load_plan(apg_root, project)?;
     let db = artifacts::ArtifactDb::open(apg_root)?;
 
