@@ -1615,6 +1615,81 @@ mod e2e {
         testutil::remove(&repo2);
     }
 
+    /// A gitignored directory is never cloned, so a fresh clone carries the
+    /// committed `apg/.scratch/` entry but no directory — start heals the dir
+    /// before probing, so all three states converge.
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+    fn start_proceeds_when_the_scratch_dir_is_absent() {
+        // Case A — fresh-clone shape: the committed `apg/.scratch/` entry is
+        // present, the directory is not. start heals the dir if needed, the
+        // committed entry satisfies the probe, and no scaffold commit lands.
+        let repo = Repo::new("start-scratch-clone");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        let main_scratch = repo.root.join(specs::LAYOUT).join(specs::SCRATCH);
+        std::fs::remove_dir_all(&main_scratch).unwrap();
+        // start seeds from main's scan, so main needs a fresh scan.
+        start_scan(&repo.root).unwrap();
+        let before = testutil::commit_count(&repo.root);
+        let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
+        assert!(wt.is_dir());
+        assert!(
+            wt.join(specs::LAYOUT).join(specs::SCRATCH).is_dir(),
+            "expected start to provision the worktree scratch dir"
+        );
+        assert_eq!(
+            testutil::commit_count(&repo.root),
+            before,
+            "the entry was already committed — start must commit nothing"
+        );
+        assert!(
+            repo.is_clean(),
+            "healing the (ignored) dir must leave the main checkout clean"
+        );
+        let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+        assert!(ignore.contains("apg/.scratch/"), "{ignore}");
+        assert!(
+            main_scratch.is_dir(),
+            "start must heal the main scratch dir"
+        );
+        testutil::remove(&repo);
+
+        // Case B — neither state: entry and dir both absent, so the scaffold
+        // writes the entries and commits the scaffold ONCE, then start proceeds.
+        let repo2 = Repo::new("start-scratch-missing");
+        repo2.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo2.write(".gitignore", "apg/.trans/\napg/.worktrees/\n");
+        std::fs::remove_dir_all(repo2.root.join(specs::LAYOUT).join(specs::SCRATCH)).unwrap();
+        repo2.commit_all("drop scratch ignore");
+        start_scan(&repo2.root).unwrap();
+        let before2 = testutil::commit_count(&repo2.root);
+        let wt2 = project_start_at(&repo2.apg_root(), "foo").unwrap();
+        assert!(wt2.is_dir());
+        let ignore2 = std::fs::read_to_string(repo2.root.join(".gitignore")).unwrap();
+        assert!(ignore2.contains("apg/.scratch/"), "{ignore2}");
+        assert_eq!(
+            testutil::commit_count(&repo2.root),
+            before2 + 1,
+            "the scaffold must commit exactly once"
+        );
+        assert!(
+            repo2.is_clean(),
+            "the scaffold commit must clean the main checkout"
+        );
+        assert!(
+            wt2.join(specs::LAYOUT).join(specs::SCRATCH).is_dir(),
+            "expected start to provision the worktree scratch dir"
+        );
+        testutil::remove(&repo2);
+    }
+
     // ------------------------------------------------------------------
     // R10 version gate on start (task-3/task-5): blocks — never warns —
     // on missing version and on major/minor mismatch in either direction,
