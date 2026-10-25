@@ -16,8 +16,8 @@ use crate::frontends::{
 use crate::logging::{Log, emit_timing};
 use crate::warm::{reuse_universe, warm_prepared, warm_universe};
 use crate::{
-    cache, classify, find_or_create_apg_root, git, graph, incremental, ingest, layers, progress,
-    run_pipeline, schema, session, specs, timing, version_gate,
+    artifacts, cache, classify, find_or_create_apg_root, git, graph, incremental, ingest, layers,
+    progress, run_pipeline, schema, session, specs, timing, version_gate,
 };
 
 pub fn temp_dir() -> PathBuf {
@@ -166,6 +166,12 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             apg_root.join(specs::TRANS).join("db.lbug").display()
         );
     }
+    // Hold the extended spec/plan/review write lock across the whole rebuild:
+    // a staleness-gated reader (plan verify, a mutation) takes the same flock,
+    // so it waits for this scan instead of judging a half-rebuilt DB. Taken
+    // after the refusals above so a refusing scan never holds it, and dropped
+    // when this function returns (the fast path included).
+    let _lock = artifacts::acquire_spec_lock(&apg_root)?;
     let trans_dir = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans_dir)?;
     std::env::set_current_dir(&trans_dir)?;
