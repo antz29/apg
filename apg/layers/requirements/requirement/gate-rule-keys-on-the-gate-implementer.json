@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "gate-rule-keys-on-the-gate-implementer",
+  "body": "A task whose implementer owns the repository gate is done only on an observed green run, and a red gate leaves its phase incomplete.",
+  "properties": {
+    "feature": "task-implementer-model"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.plan-review-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
+      "properties": {}
+    }
+  ]
+}

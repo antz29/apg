@@ -9,6 +9,11 @@
       "kind": "requires",
       "target": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
+      "properties": {}
     }
   ],
   "in": []

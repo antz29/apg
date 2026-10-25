@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "task-record-field-set",
+  "body": "The transient plan task record is composed of its title, status, implementer, verb, target, and new FQN, and the plan and review surfaces author, list, read, and render that field set.",
+  "properties": {
+    "feature": "task-implementer-model"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-tooling",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "schema-document",
+  "body": "The repository's normative schema document: the mermaid model of tier namespaces, node types, edge kinds, and cardinalities, with its cardinality legend and per-tier notes.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.schema-cardinality",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
+    }
+  ]
+}

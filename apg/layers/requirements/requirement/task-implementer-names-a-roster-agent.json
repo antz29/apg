@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "task-implementer-names-a-roster-agent",
+  "body": "A plan task's implementer field names a repository-defined `*-implementer` agent from the agent-builder roster, and the plan-writer sets it for every task it authors.",
+  "properties": {
+    "feature": "task-implementer-model"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-roster",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-tooling",
+      "properties": {}
+    }
+  ]
+}

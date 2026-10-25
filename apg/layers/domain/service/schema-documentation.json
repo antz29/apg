@@ -1,0 +1,41 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "schema-documentation",
+  "body": "The capability that states the product's graph model in one normative schema document: its tier namespaces, node types, edge kinds, and cardinalities, kept identical to what the binary and the durable-spec write surface enforce.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.schema-document-constraints-are-layer-prose",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.schema-document-task-section-states-fields",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.schema-document-implemented-by-is-exclusive",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.schema-document-group-containment-is-leaf-scoped",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.schema-document",
+      "properties": {}
+    }
+  ]
+}

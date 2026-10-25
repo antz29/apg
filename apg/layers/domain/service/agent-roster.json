@@ -87,6 +87,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.researcher-agent-standard",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
     },
@@ -97,7 +102,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.researcher-agent-standard",
+      "target": "requirements.requirement.task-implementer-names-a-roster-agent",
       "properties": {}
     }
   ],

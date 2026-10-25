@@ -110,6 +110,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.project-start-seeder",
       "properties": {}
     },
@@ -185,7 +190,12 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.project-context-guard",
+      "source": "solution.component.plan-task-record",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.schema-document",
       "properties": {}
     }
   ]

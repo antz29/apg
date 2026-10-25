@@ -109,6 +109,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.project-start-seeder",
       "properties": {}
     },
@@ -189,7 +194,12 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.project-context-guard",
+      "target": "solution.component.plan-task-record",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.schema-document",
       "properties": {}
     }
   ],

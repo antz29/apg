@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "schema-document-implemented-by-is-exclusive",
+  "body": "SCHEMA.md states that exactly one Component claims each code node, with the at-least-one-claim presence check at the merge gate.",
+  "properties": {
+    "feature": "schema-document-alignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
+      "properties": {}
+    }
+  ]
+}

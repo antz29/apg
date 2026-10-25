@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "plan-task-field-set",
+  "body": "The field set of one plan task record: its title, status, implementer, verb, target, and the destination FQN of a rename or move.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.plan-task",
+      "properties": {}
+    }
+  ]
+}

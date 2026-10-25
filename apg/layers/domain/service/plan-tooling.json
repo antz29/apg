@@ -2,12 +2,22 @@
   "layer": "domain",
   "type": "service",
   "name": "plan-tooling",
-  "body": "The capability that reports a project's plan health against the durable spec, scoped to the requirements the project branch is responsible for.",
+  "body": "The capability that defines and reports a project's transient plan: the task record naming its implementer, verb and code target, read against the durable spec and scoped to the requirements the project branch owns.",
   "properties": {},
   "out": [
     {
       "kind": "driven-by",
       "target": "requirements.requirement.plan-phases-project-scoping",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.task-record-field-set",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.task-implementer-names-a-roster-agent",
       "properties": {}
     }
   ],
@@ -20,6 +30,11 @@
     {
       "kind": "realises",
       "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.plan-task-record",
       "properties": {}
     }
   ]

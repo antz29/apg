@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "schema-document-group-containment-is-leaf-scoped",
+  "body": "SCHEMA.md states the Group modes as exclusive: a Group holds subgroups or leaf contents, and a leaf Group holds at least one Service.",
+  "properties": {
+    "feature": "schema-document-alignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
+      "properties": {}
+    }
+  ]
+}

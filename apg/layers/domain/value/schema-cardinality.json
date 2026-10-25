@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "schema-cardinality",
+  "body": "A cardinality annotation on a schema-document edge: exactly one, one or many, zero or one, or zero or many, with an unmarked endpoint unspecified.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.schema-document",
+      "properties": {}
+    }
+  ]
+}

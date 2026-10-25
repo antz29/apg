@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "plan-task",
+  "body": "One unit of plan work: the transient record naming its implementer agent, the verb it applies to one code identity, and that target with the destination FQN of a rename or move.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.plan-task-field-set",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.plan-tooling",
+      "properties": {}
+    }
+  ]
+}

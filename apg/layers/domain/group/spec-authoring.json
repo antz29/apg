@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "spec-authoring",
-  "body": "The authoring discipline of the durable spec: the content contract each spec-writing and reviewing agent applies, and the deterministic lint that checks the spec's structural rules and its change-set gates.",
+  "body": "The authoring discipline of the durable spec: the content contract each spec-writing and reviewing agent applies, the normative schema document, and the deterministic lint over the spec's structural rules and change-set gates.",
   "properties": {
     "attribute": "supporting"
   },
@@ -25,6 +25,16 @@
     {
       "kind": "contains",
       "target": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.schema-document",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.schema-documentation",
       "properties": {}
     }
   ],

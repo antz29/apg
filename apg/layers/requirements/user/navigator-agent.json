@@ -97,12 +97,27 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.scan-leaves-graph-fresh",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.scratch-outside-change-set",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.scan-leaves-graph-fresh",
+      "target": "requirements.requirement.task-implementer-names-a-roster-agent",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.navigator-dispatches-task-implementer",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.task-record-field-set",
       "properties": {}
     }
   ],

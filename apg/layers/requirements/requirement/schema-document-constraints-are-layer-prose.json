@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "schema-document-constraints-are-layer-prose",
+  "body": "SCHEMA.md shows a constraint as layer-scoped prose that names no node, and its only applies-to is the Role property carrying container, component, or both.",
+  "properties": {
+    "feature": "schema-document-alignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
+      "properties": {}
+    }
+  ]
+}

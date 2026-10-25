@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "plan-tooling",
-  "body": "The plan-tooling subdomain: the suite tools that read a project's transient plan together with the durable spec and report plan health to the writer and reviewer agents.",
+  "body": "The plan-tooling subdomain: the transient plan's phase and task records and the suite tools that read them with the durable spec to report plan health to the writer and reviewer agents.",
   "properties": {
     "attribute": "supporting"
   },
@@ -15,6 +15,11 @@
     {
       "kind": "contains",
       "target": "domain.service.plan-tooling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.plan-task",
       "properties": {}
     }
   ],

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "schema-document-task-section-states-fields",
+  "body": "SCHEMA.md's plan section shows the plan and phase containment links and states each task through its implementer, verb, target, and new-FQN fields.",
+  "properties": {
+    "feature": "schema-document-alignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
+      "properties": {}
+    }
+  ]
+}

@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.bookkeeping-write-funnel-retains-guard",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.details-target-set-consistency",
       "properties": {}
     },
@@ -23,6 +28,16 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.model-vocabulary-live-across-surfaces",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.node-edge-mutations-guard-before-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-context-refusal-names-branch-and-fix",
       "properties": {}
     },
     {
@@ -47,17 +62,22 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.node-edge-mutations-guard-before-resolution",
+      "target": "requirements.requirement.schema-document-constraints-are-layer-prose",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.bookkeeping-write-funnel-retains-guard",
+      "target": "requirements.requirement.schema-document-group-containment-is-leaf-scoped",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.project-context-refusal-names-branch-and-fix",
+      "target": "requirements.requirement.schema-document-implemented-by-is-exclusive",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.schema-document-task-section-states-fields",
       "properties": {}
     }
   ],

@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "schema-document",
+  "body": "The repository's normative schema document: the mermaid class model of tier namespaces, node and edge catalog, and cardinality legend that states the graph model the binary implements.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.schema-documentation",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "SCHEMA.md",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

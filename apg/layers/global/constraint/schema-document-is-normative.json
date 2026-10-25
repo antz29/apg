@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "schema-document-is-normative",
+  "body": "The repository's schema document is the normative statement of the product's graph model: every node type, edge kind, and cardinality it shows is the one the binary and the durable-spec write surface enforce.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
