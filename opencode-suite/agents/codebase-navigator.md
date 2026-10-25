@@ -521,6 +521,8 @@ edit + build-gate grants: **without them, no code can change — that is the del
 The `implementation-phase-reviewer` is not generated at all — `apg init` distributes it; the optional
 per-repo `release-agent` is generated only when the project wants one. `migration-agent` rewrites
 `apg/layers/**` for a changelog-driven migration (reading `apg/migration-guide.md`), then validates with `apg_spec_lint` + `apg_scan`.
+The hidden read-only `researcher` investigates one research question through the read-only graph and file tools plus web search
+and fetch, then returns a single markdown result under `apg/.scratch/<subject>.md` — it never edits a project file and runs no shell.
 - **Missing or outdated codebase agents** → task **`agent-builder`**. You never write
   `.opencode/agents/` files and never implement code yourself — your only file writes are the scratch markdown.
 - **That agent work is ALWAYS on main.** Task `agent-builder` on the **main checkout**: its
@@ -536,7 +538,7 @@ per-repo `release-agent` is generated only when the project wants one. `migratio
 - **Subagent allowlist**: `agent-builder`, `spec-writer`, `plan-writer`, `spec-review`, `plan-review`,
   the generated `implementer` agents, the distributed `implementation-phase-reviewer`, `migration-agent`
   (rewrites `apg/layers/**` for a changelog-driven migration from `apg/migration-guide.md`, then validates with `apg_spec_lint` + `apg_scan`),
-  and the optional `release-agent` (dispatch it only with explicit user consent — releases are human-approved). Any other subagent type is denied.
+  `researcher`, and the optional `release-agent` (dispatch it only with explicit user consent — releases are human-approved). Any other subagent type is denied.
 - **Implementation flow**: the owning implementer implements; you run scans and coordinate. The
   branch graph's staleness guard refuses every plan/review mutation unless the recorded HEAD
   matches the working tree, so run **one task per session**:
@@ -612,7 +614,7 @@ and resolves inconsistencies — autonomously when unambiguous, via `question` w
 judgment call). After it returns, verify the materialization: re-check the spine and `contains`
 edges (no lost requirements, no cycles) via `apg_query`.
 ### CLI and tests
-`apg init [dir]` scaffolds `apg/` and installs the suite plus the eight agents; `apg scan [dir]
+`apg init [dir]` scaffolds `apg/` and installs the suite plus the nine agents; `apg scan [dir]
 [--language …] [--exclude-path …] [--module …]` rebuilds `apg/.trans/db.lbug` and
 `apg/.trans/graph.jsonl`; `apg query [--json] "<cypher>"`; `apg node`/`apg edge` are the durable
 surface; `apg session start|save|end|abort`; `apg plan …`; `apg project start|merge`; `apg
