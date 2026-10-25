@@ -9797,19 +9797,23 @@ mod e2e {
 
     // -------------------------------------------------------------------
     // Phase-09: a scan leaves its checkout's graph fresh. Both tests drive a
-    // REAL `apg init` + REAL `apg scan` in a scratch `/tmp` git repo (the only
-    // e2e crate with that harness — plan_cmd_e2e/review_cmd_e2e fixtures build
-    // their DB synthetically and git_e2e never scans), then probe the very next
-    // command in the same project worktree. The first test carries three
-    // windows: A (the sequential post-commit scan → immediate verify loop), B
-    // (a session teardown followed immediately by a scan and verify — the
-    // post-fix integration guard, not a reproducer) and C (a verify spawned
-    // while a real scan is still in flight — the cause-2 reproducer).
+    // REAL `apg init` + REAL `apg scan` in a scratch `/tmp` git repo (main_e2e
+    // owns that harness — plan_cmd_e2e/review_cmd_e2e fixtures build their DB
+    // synthetically and git_e2e never scans), then probe the very next command
+    // in the same project worktree. The first test (task-1) carries four arms:
+    // A (the sequential post-commit scan → immediate verify loop), B (a session
+    // teardown followed immediately by a scan and verify — the post-fix
+    // integration guard, not a reproducer), plus the two DETERMINISTIC
+    // inverse-hold arms C1 (a verify blocked on the extended lock, then still
+    // refusing a genuinely stale graph) and C2 (a scan blocked on the same
+    // lock, publishing nothing while it is held and leaving the graph fresh
+    // once released). The reproduce-or-diagnose contract rests on C1 and C2,
+    // never on a process-spawn race.
     // -------------------------------------------------------------------
 
     /// Phase-09 task-1 (e2e, scratch /tmp repo, real `apg init` + real
     /// `apg scan`): a successful scan of a checkout leaves that checkout's
-    /// graph fresh. Three windows in one test:
+    /// graph fresh. Four arms in one test:
     ///
     /// - **A (sequential).** Every iteration commits a real source change in
     ///   the project worktree (so the following scan is a REAL scan, never the
@@ -9830,19 +9834,36 @@ mod e2e {
     ///   the expected pre-fix result, never a diagnosis finding and never a
     ///   reason to weaken the arm. The deterministic evidence for the teardown
     ///   mechanism is `git_e2e::dead_session_socket_makes_the_graph_unfresh`.
-    /// - **C (concurrent — the cause-2 reproducer).** A committed source change
-    ///   makes the next scan a real rebuild (pinned non-fast-path exactly as
-    ///   the loop above pins its scans); while that `apg scan` is still in
-    ///   flight, `apg plan verify` is spawned in the same worktree. Pre-fix the
-    ///   verify's staleness check runs before the spec lock, so an overlapping
-    ///   verify can read the half-rebuilt state and refuse stale — that refusal
-    ///   IS the reproduction. The window passes when the verify never prints the
-    ///   stale refusal and exits 0, whether it waited for the scan or ran after
-    ///   it; the run records whether the two processes actually overlapped.
+    /// - **C1 (task 6 — the extended lock precedes the staleness check;
+    ///   deterministic inverse hold).** A committed-but-unscanned source change
+    ///   leaves the branch graph genuinely stale; the TEST acquires the
+    ///   extended `apg/.trans/specs.lock` via
+    ///   `apg::artifacts::acquire_spec_lock` and holds it while spawning
+    ///   `apg plan verify demo`. The child is a separate process, so the
+    ///   per-process-reentrant flock blocks it cross-process: by a bounded
+    ///   deadline it has NOT exited, then the test drops the guard and the child
+    ///   still exits non-zero carrying the stale refusal — the fail-closed
+    ///   predicate refuses after the wait, nothing weakened. Before task 6 the
+    ///   child refused immediately while the test held the lock, so this arm is
+    ///   red.
+    /// - **C2 (task 5 — the scan holds the lock across its whole rebuild;
+    ///   deterministic inverse hold).** The TEST acquires the same lock and
+    ///   holds it across a real non-fast-path `apg scan .` (pinned by the same
+    ///   `fast-path` stderr assertion): by the same bounded deadline the scan has
+    ///   NOT exited and `apg::git::is_stale` still reports the graph stale —
+    ///   nothing was published under the hold, and `is_stale` is false on a
+    ///   missing DB, so a rebuild that unlinked it fails this conjunct too.
+    ///   Dropping the guard lets the scan exit 0 with its normal output and the
+    ///   graph then reads fresh. Before task 5 the scan completed and/or
+    ///   published while the test held the lock, so this arm is red.
     ///
-    /// Authored to fail pre-fix in window C; the reported false stale was
-    /// intermittent, so a pre-fix run that never trips a window is a diagnosis
-    /// finding, never a weakened assertion.
+    /// No spawn race: a verify spawned a few milliseconds after a scan can win
+    /// the flock before the scan's preflight and legitimately refuse stale on
+    /// the genuinely stale pre-scan graph (verify: membership → lock →
+    /// `is_stale`; scan: preflight → lock), so process-spawn ordering cannot
+    /// prove the wait. The reproduce-or-diagnose contract is carried by the
+    /// deterministic inverse-hold arms C1 and C2 alone; A and B stay the
+    /// sequential and session-teardown integration guards.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh() {
@@ -10013,58 +10034,125 @@ mod e2e {
             );
         }
 
-        // --- Window C (cause 2, the deterministic reproducer): a verify that
-        // overlaps an in-flight REAL scan must never refuse stale. The scan
-        // follows a committed source change, so it is a genuine rebuild and is
-        // pinned non-fast-path exactly as the loop above pins its scans.
+        // --- Window C1 (task 6, deterministic inverse hold): take the extended
+        // lock BEFORE judging staleness. A committed-but-unscanned source change
+        // makes the graph genuinely stale; while this process holds the flock a
+        // verify spawned in the same worktree is a SEPARATE process, so it
+        // blocks on the cross-process flock instead of reading the pre-scan
+        // state. Releasing the guard must let it judge the same (still stale)
+        // graph and refuse — the fail-closed predicate is not weakened.
+        let apg_root = wt.join("apg");
         std::fs::write(
             wt.join("main.go"),
-            "package main\n\nfunc main() {}\n\nfunc concurrent() {}\n",
+            "package main\n\nfunc main() {}\n\nfunc held_verify() {}\n",
         )
         .unwrap();
-        scratch_commit_all(&wt, "concurrent change");
+        scratch_commit_all(&wt, "held verify change");
+        assert!(
+            apg::git::is_stale(&apg_root),
+            "window C1: the committed-but-unscanned change must leave the branch graph stale"
+        );
 
+        let hold = apg::artifacts::acquire_spec_lock(&apg_root).unwrap();
+        let c1_start = std::time::Instant::now();
+        let mut verify = testutil::ApgCommand::new(&["plan", "verify", "demo"])
+            .cwd(&wt)
+            .env("HOME", &home_s)
+            .spawn();
+        let mut c1_exited_under_hold = false;
+        loop {
+            if verify.try_wait().unwrap().is_some() {
+                c1_exited_under_hold = true;
+                break;
+            }
+            if c1_start.elapsed() >= std::time::Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let c1_held = c1_start.elapsed();
+        drop(hold);
+        let verify_out = verify.wait_with_output().unwrap();
+        let verify_output = format!("{}{}", stdout_of(&verify_out), stderr_of(&verify_out));
+        assert!(
+            !c1_exited_under_hold,
+            "window C1: the verify must block on the held lock, not exit while it is held \
+             (observed after {c1_held:?}): {verify_output}"
+        );
+        assert!(
+            !verify_out.status.success(),
+            "window C1: a genuinely stale graph must still refuse after the lock is released: \
+             {verify_output}"
+        );
+        assert!(
+            stderr_of(&verify_out).contains(STALE),
+            "window C1: the released verify must carry the stale refusal: {verify_output}"
+        );
+        eprintln!("window C1: blocked on the held lock for {c1_held:?}, then refused stale");
+
+        // --- Window C2 (task 5, deterministic inverse hold): the scan takes the
+        // same flock across its whole rebuild. While this process holds it a
+        // real scan must neither exit nor publish — `is_stale` still reports the
+        // committed-but-unscanned state, so no rebuild reached the DB. Release
+        // the guard and the scan completes as a real (non-fast-path) rebuild
+        // that leaves the graph fresh.
+        std::fs::write(
+            wt.join("main.go"),
+            "package main\n\nfunc main() {}\n\nfunc held_scan() {}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "held scan change");
+        assert!(
+            apg::git::is_stale(&apg_root),
+            "window C2: the committed-but-unscanned change must leave the branch graph stale"
+        );
+
+        let hold = apg::artifacts::acquire_spec_lock(&apg_root).unwrap();
+        let c2_start = std::time::Instant::now();
         let mut scan = testutil::ApgCommand::new(&["scan", "."])
             .cwd(&wt)
             .env("HOME", &home_s)
             .spawn();
-        // Spawn the verify while that scan is in flight. Observing the scan
-        // still running right after the verify exists proves both processes
-        // were alive at the same time; the freshness assertion holds either way
-        // (a verify that runs after the scan exits 0 satisfies it), so a
-        // non-overlapped run is UNEXERCISED rather than settled by weakening it.
-        let verify = testutil::ApgCommand::new(&["plan", "verify", "demo"])
-            .cwd(&wt)
-            .env("HOME", &home_s)
-            .spawn();
-        let overlapped = scan.try_wait().unwrap().is_none();
-        let verify = verify.wait_with_output().unwrap();
+        let mut c2_exited_under_hold = false;
+        loop {
+            if scan.try_wait().unwrap().is_some() {
+                c2_exited_under_hold = true;
+                break;
+            }
+            if c2_start.elapsed() >= std::time::Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let c2_still_stale = apg::git::is_stale(&apg_root);
+        let c2_held = c2_start.elapsed();
+        drop(hold);
         let scan_out = scan.wait_with_output().unwrap();
         let scan_stderr = stderr_of(&scan_out);
         assert!(
+            !c2_exited_under_hold,
+            "window C2: the scan must block on the held lock, not exit while it is held \
+             (observed after {c2_held:?}): {scan_stderr}"
+        );
+        assert!(
+            c2_still_stale,
+            "window C2: nothing may be published while the lock is held — the graph must still \
+             read stale (observed after {c2_held:?}): {scan_stderr}"
+        );
+        assert!(
             scan_out.status.success(),
-            "window C: the concurrent scan must succeed: {scan_stderr}"
+            "window C2: the released scan must succeed: {scan_stderr}"
         );
         assert!(
             !scan_stderr.contains("fast-path"),
-            "window C: the concurrent scan must be a real rebuild, never the fast path: {scan_stderr}"
-        );
-        let verify_output = format!("{}{}", stdout_of(&verify), stderr_of(&verify));
-        assert!(
-            !verify_output.contains(STALE),
-            "window C (overlapped: {overlapped}): a verify overlapping an in-flight scan \
-             must never refuse stale: {verify_output}"
+            "window C2: the released scan must be a real rebuild, never the fast path: \
+             {scan_stderr}"
         );
         assert!(
-            verify.status.success(),
-            "window C (overlapped: {overlapped}): the overlapping verify must pass — it \
-             either waited for the scan then verified green, or ran after the scan exited: \
-             {verify_output}"
+            apg::git::is_fresh(&apg_root),
+            "window C2: the released scan must leave the checkout's graph fresh: {scan_stderr}"
         );
-        eprintln!(
-            "window C: overlapped = {overlapped}; verify exit = {:?}",
-            verify.status
-        );
+        eprintln!("window C2: blocked on the held lock for {c2_held:?}, then rebuilt fresh");
 
         let _ = std::fs::remove_dir_all(&base);
     }
