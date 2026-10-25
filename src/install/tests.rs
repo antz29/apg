@@ -153,17 +153,20 @@ Patch only.
             "## Hard limits",
             "## Report",
         ];
+        // The five phase-4 templates carry rewrite headroom; the corpus cap
+        // tracks this sum at the established 140-line margin.
         const CAPS: [(&str, usize); 9] = [
             ("agent-builder.md", 470),
-            ("codebase-navigator.md", 427),
+            ("codebase-navigator.md", 455),
             ("implementation-phase-reviewer.md", 255),
-            ("spec-writer.md", 160),
-            ("plan-writer.md", 140),
-            ("plan-review.md", 100),
+            ("spec-writer.md", 175),
+            ("plan-writer.md", 155),
+            ("plan-review.md", 115),
             ("migration-agent.md", 88),
-            ("spec-review.md", 64),
+            ("spec-review.md", 79),
             ("researcher.md", 56),
         ];
+        const CORPUS_CAP: usize = 1_990;
 
         /// The template's lines, without the empty element a trailing newline
         /// would split out (so the count matches the file's line count).
@@ -249,6 +252,26 @@ Patch only.
             CAPS.len(),
             "the shipped corpus is exactly the nine capped templates"
         );
+        // The prune roster must mirror the installed one: `apg init` deletes a
+        // `KNOWN_AGENT_FILES` name `AGENTS` no longer ships, so a stale name
+        // would remove a live agent.
+        assert_eq!(
+            KNOWN_AGENT_FILES.len(),
+            AGENTS.len(),
+            "KNOWN_AGENT_FILES and AGENTS are both the nine shipped agents"
+        );
+        for &(name, _) in AGENTS {
+            assert!(
+                KNOWN_AGENT_FILES.contains(&name),
+                "{name}: installed by AGENTS but missing from KNOWN_AGENT_FILES"
+            );
+        }
+        for name in KNOWN_AGENT_FILES {
+            assert!(
+                AGENTS.iter().any(|(installed, _)| installed == name),
+                "{name}: listed in KNOWN_AGENT_FILES but no longer installed"
+            );
+        }
         let mut total = 0;
         for &(name, content) in AGENTS {
             let cap = CAPS
@@ -419,8 +442,8 @@ Patch only.
             );
         }
         assert!(
-            total <= 1_900,
-            "the nine bodies total {total} lines, over the 1,900-line corpus cap"
+            total <= CORPUS_CAP,
+            "the nine bodies total {total} lines, over the {CORPUS_CAP}-line corpus cap"
         );
     }
 }
