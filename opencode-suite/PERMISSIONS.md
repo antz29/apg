@@ -91,12 +91,54 @@ string is granted. The suite's single deliberate env-prefixed grant is
 `APG_SUITE_E2E=1 bun test tests/boundary.e2e.test.ts`, held by the
 agent-builder template alone.
 
+## The scratch markdown grant
+
+An agent's `edit` grant is what admits `edit`, `write`, and `patch` — `edit` is
+the action that covers all three, so one rule list governs every file write.
+The navigator's and the researcher's `edit` grant is a deny-base followed by
+exactly two allows:
+
+- `apg/.scratch/*.md`
+- `apg/.worktrees/*/apg/.scratch/*.md`
+
+The rules are byte-identical to the templates, and every other path is refused.
+The `.md` suffix matches the **whole** value, so `apg/.scratch/notes.txt` and
+`apg/.scratch/sub/x.md` match neither pattern and are refused — see *Whole-value
+pattern matching* above and
+`requirements.constraint.scratch-markdown-only-writes`. Both gates apply: gate 1
+admits the tool action and gate 2 (`fsScopeDecision`) asserts the same
+main-anchored paths, so a scratch write needs both. The navigator holds the same
+grant because it dispatches the researcher and reads the markdown it produces.
+
 ## `external_directory`
 
-`external_directory` gates paths outside the workspace root with exactly two
-rules: `{resource: "*", effect: "deny"}` followed by
-`{resource: "/tmp/**", effect: "allow"}`. Every generated agent carries this
-shape; a broader external grant is a regression, not an option.
+`external_directory` gates paths outside the workspace root. Two shapes exist,
+and which one an agent carries is part of its grant.
+
+The generated agents — every scaffolded `*-implementer` and the rest — and the
+`codebase-navigator` carry exactly two rules: `{resource: "*", effect: "deny"}`
+followed by `{resource: "/tmp/**", effect: "allow"}`. Every generated agent
+carries this shape, and for them a broader external grant is a regression, not
+an option.
+
+The researcher carries `{resource: "*", effect: "deny"}` followed by
+`{resource: "*", effect: "ask"}` — **no external allow exception at all**. Asking
+for every external path is **tighter** than the navigator's `/tmp/**` allow: it
+pre-grants nothing and surfaces each decision, so this shape is **not** a
+relaxation of the regression law above. The researcher is the one agent that
+asks rather than holding a `/tmp` allow because one research question can need an
+arbitrary external source, so the decision is put to the caller per path instead
+of pre-granted.
+
+## The web actions
+
+The two web actions are `websearch`, which matches the search query, and
+`webfetch`, which matches the requested URL. Both are
+`{resource: "*", effect: "allow"}`, and only the researcher template declares
+them. The spellings are resolved from the OpenCode V2 permissions reference —
+https://opencode.ai/v2/docs/permissions, its *Actions* table — not inferred: a
+guessed or V1 spelling would silently deny the action (or degrade it to `ask`) at
+runtime instead of failing loudly.
 
 ## Refusals
 
@@ -120,6 +162,9 @@ nothing.
 - `opencode-suite/agents/agent-builder.md` — the scaffold rules: ordered
   deny-first grants, the gate 1/gate 2 explanation, the read guard, the shell
   policy (including the env-prefix rule), and `external_directory`.
+- `opencode-suite/agents/researcher.md` — the deny-then-ask
+  `external_directory` shape (the stricter external variant), the two scratch
+  markdown `edit` allows, and the `websearch`/`webfetch` grants.
 - The remaining `opencode-suite/agents/*.md` templates — each declares its own
   ordered `permissions` array and restates the model in its `## Permissions`
   section, including the read guard and its shell allowlist.
