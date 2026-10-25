@@ -22,7 +22,25 @@ import {
   REQUIREMENT_FQN_PREFIX,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
+  PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
 } from "./apg.ts"
+
+// project-context-guard phase-06.task-13: the 11 bookkeeping mutation tools
+// (whose `directory` input must name the project worktree) plus the two read
+// tools (`apg_plan`, `apg_review`) whose existing description must stay put.
+import apgPlanAdd from "../tools/apg_plan_add.ts"
+import apgPlanDone from "../tools/apg_plan_done.ts"
+import apgPlanUndone from "../tools/apg_plan_undone.ts"
+import apgPlanComplete from "../tools/apg_plan_complete.ts"
+import apgPlanNote from "../tools/apg_plan_note.ts"
+import apgReviewAdd from "../tools/apg_review_add.ts"
+import apgReviewAction from "../tools/apg_review_action.ts"
+import apgReviewResolve from "../tools/apg_review_resolve.ts"
+import apgReviewReject from "../tools/apg_review_reject.ts"
+import apgNode from "../tools/apg_node.ts"
+import apgEdge from "../tools/apg_edge.ts"
+import apgPlan from "../tools/apg_plan.ts"
+import apgReview from "../tools/apg_review.ts"
 
 test("lit single-quotes and escapes \\ ' \" and newlines", () => {
   expect(lit("plain")).toBe("'plain'")
@@ -775,4 +793,66 @@ test("mainAnchoredResource takes no canonicaliser argument", () => {
   // Canonicalisation is fsScopeDecision's injected seam, never this mapping's:
   // the helper is exactly `(path, root)` and stays pure.
   expect(mainAnchoredResource.length).toBe(2)
+})
+
+// project-context-guard phase-06.task-13: the bookkeeping MUTATION tools say
+// `directory` is the project worktree they act on (no workspace-root default),
+// while the read tools keep the description they already had. A tool is a V2
+// `Plugin.define` plugin: its `setup(ctx)` registers through
+// `ctx.tool.transform(editor.add)`, faked below; `execute` never runs, so the
+// test stays pure in-memory.
+
+type AddedTool = {
+  name?: string
+  input?: { properties?: Record<string, { description?: string }> }
+}
+
+/** Register one tool against a faked plugin context and return what it added. */
+async function registeredTool(plugin: { setup: (ctx: never) => unknown }): Promise<AddedTool> {
+  const added: AddedTool[] = []
+  const editor = { add: (tool: AddedTool) => added.push(tool) }
+  const ctx = {
+    location: { directory: "/tmp" },
+    permission: { assert: async () => {} },
+    tool: { transform: async (fn: (e: typeof editor) => void) => void fn(editor) },
+  }
+  await plugin.setup(ctx as never)
+  expect(added).toHaveLength(1)
+  return added[0]
+}
+
+const MUTATION_TOOLS: Record<string, { setup: (ctx: never) => unknown }> = {
+  apg_plan_add: apgPlanAdd,
+  apg_plan_done: apgPlanDone,
+  apg_plan_undone: apgPlanUndone,
+  apg_plan_complete: apgPlanComplete,
+  apg_plan_note: apgPlanNote,
+  apg_review_add: apgReviewAdd,
+  apg_review_action: apgReviewAction,
+  apg_review_resolve: apgReviewResolve,
+  apg_review_reject: apgReviewReject,
+  apg_node: apgNode,
+  apg_edge: apgEdge,
+}
+
+test("every bookkeeping mutation tool names the project worktree, with no workspace-root default", async () => {
+  expect(Object.keys(MUTATION_TOOLS)).toHaveLength(11)
+  for (const [name, plugin] of Object.entries(MUTATION_TOOLS)) {
+    const tool = await registeredTool(plugin)
+    expect(tool.name).toBe(name)
+    const description = tool.input?.properties?.directory?.description
+    expect(description).toBe(PROJECT_WORKTREE_DIRECTORY_DESCRIPTION)
+    expect(description).toContain("project worktree")
+    expect(description).not.toContain("Defaults to the workspace root")
+  }
+})
+
+test("the apg_plan and apg_review read tools keep their existing directory description", async () => {
+  const existing =
+    "Project root directory (a worktree path to operate on). Defaults to the workspace root."
+  for (const [name, plugin] of Object.entries({ apg_plan: apgPlan, apg_review: apgReview })) {
+    const tool = await registeredTool(plugin)
+    expect(tool.name).toBe(name)
+    expect(tool.input?.properties?.directory?.description).toBe(existing)
+  }
 })

@@ -836,10 +836,12 @@ test.skipIf(!enabled || !binary)(
     })
     process.env.HOME = home
 
-    const run = (args: string[]) =>
-      Bun.spawnSync({ cmd: [bin, ...args], cwd: repo, stdout: "pipe", stderr: "pipe" })
+    const runIn = (dir: string, args: string[]) =>
+      Bun.spawnSync({ cmd: [bin, ...args], cwd: dir, stdout: "pipe", stderr: "pipe" })
+    const run = (args: string[]) => runIn(repo, args)
 
     let live: DetachedSession | null = null
+    let worktree: string | null = null
     try {
       expect(run(["init", "."]).exitCode).toBe(0)
       // Commit the scaffold (the documented scratch flow) so the session's own
@@ -852,14 +854,24 @@ test.skipIf(!enabled || !binary)(
       const scan = run(["scan", "."])
       if (scan.exitCode !== 0) throw new Error(`scan failed: ${scan.stderr.toString()}`)
 
-      const context = v2Context(repo)
+      // Durable mutations are legal only inside a project worktree on the
+      // project branch (R3), so start a project from the scanned main checkout
+      // and drive the session from its worktree — the documented flow.
+      const project = "suite-session"
+      const startedProject = run(["project", "start", project])
+      if (startedProject.exitCode !== 0) {
+        throw new Error(`project start failed: ${startedProject.stderr.toString()}`)
+      }
+      worktree = path.join(repo, "apg", ".worktrees", project)
+
+      const context = v2Context(worktree)
 
       // The tool's plugin-free core: detached `apg session start`, returning
       // once the socket answers live while the coordinator keeps running.
-      const started = await startDetachedSession(context, repo, { timeoutMs: 30000 })
+      const started = await startDetachedSession(context, worktree, { timeoutMs: 30000 })
       expect(typeof started).not.toBe("string")
       live = started as DetachedSession
-      expect(live.root).toBe(repo)
+      expect(live.root).toBe(worktree)
       expect(existsSync(live.socket)).toBe(true)
       expect(await sessionLiveAt(live.socket)).toBe(true)
 
@@ -869,14 +881,22 @@ test.skipIf(!enabled || !binary)(
       // `validate_cardinalities(Context::Save)` accepts a bare one (a lone
       // `requirement` would be refused: it must be driven-by a Service, §3.4).
       const nodeFile = path.join(
-        repo,
+        worktree,
         "apg",
         "layers",
         "global",
         "constraint",
         "session-node.json",
       )
-      const added = run(["node", "add", "global", "constraint", "session-node", "--body", "routed"])
+      const added = runIn(worktree, [
+        "node",
+        "add",
+        "global",
+        "constraint",
+        "session-node",
+        "--body",
+        "routed",
+      ])
       expect(added.exitCode).toBe(0)
       expect(added.stdout.toString().trim()).toBe("Added node global.constraint.session-node")
       expect(existsSync(nodeFile)).toBe(false)
@@ -884,18 +904,18 @@ test.skipIf(!enabled || !binary)(
       // A SECOND detached start while one is live fails cleanly: `apg session
       // start` exits early (one session per worktree DB), so no socket ever
       // appears and the helper reports an error string instead of blocking.
-      const second = await startDetachedSession(context, repo, { timeoutMs: 30000 })
+      const second = await startDetachedSession(context, worktree, { timeoutMs: 30000 })
       expect(typeof second).toBe("string")
       expect(second as string).toContain("apg session start failed")
 
       // `apg session save` flushes the whole buffer in one commit …
-      const save = run(["session", "save"])
+      const save = runIn(worktree, ["session", "save"])
       expect(save.exitCode).toBe(0)
       expect(save.stdout.toString().trim()).toBe("Session saved")
       expect(existsSync(nodeFile)).toBe(true)
 
       // … and `apg session end` releases the live session.
-      const ended = run(["session", "end"])
+      const ended = runIn(worktree, ["session", "end"])
       expect(ended.exitCode).toBe(0)
       expect(ended.stdout.toString().trim()).toBe("Session ended")
       // The session is released: its socket is reclaimed. (Poll briefly: the
@@ -926,9 +946,11 @@ test.skipIf(!enabled || !binary)(
     } finally {
       // Best-effort teardown: end a still-live session (or kill it if the end
       // never reaches it) so no detached coordinator outlives the test.
-      try {
-        run(["session", "end"])
-      } catch {}
+      if (worktree) {
+        try {
+          runIn(worktree, ["session", "end"])
+        } catch {}
+      }
       if (live) {
         try {
           process.kill(live.pid)

@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { runCli, type ToolContext } from "../lib/apg.ts"
+import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
 
 export default Plugin.define({
   id: "apg_edge",
@@ -15,7 +15,7 @@ export default Plugin.define({
           properties: {
             directory: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
             },
             action: { type: "string", description: '"add", "update", or "rm" (required).' },
             kind: {

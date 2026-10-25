@@ -56,6 +56,12 @@ export interface ToolContext {
   location?: { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
 }
 
+/** The `directory` description every bookkeeping mutation tool gives its input:
+ *  the mutations are legal only inside a project worktree, so there is no
+ *  workspace-root fallback to name. */
+export const PROJECT_WORKTREE_DIRECTORY_DESCRIPTION =
+  "The project worktree the tool acts on (the worktree path printed by `apg project start`); there is no workspace-root default."
+
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
 export function apgBinary(): string {
   return process.env.APG_BINARY || "apg"
