@@ -95,7 +95,9 @@ fn newer_minor_version() -> String {
 /// requirement node rooted in a User through `requires` (the minimum a
 /// whole-model merge-strength check accepts), written through the node-file
 /// mutation funnel (guard → validate → atomic write → commit → re-merge).
-fn write_spec_node(wt_apg: &Path) {
+/// `implemented_by` is the Component's single `implemented-by` target — a real
+/// scanned-code FQN in the calling fixture's code universe.
+fn write_spec_node(wt_apg: &Path, implemented_by: &str) {
     let mut requirement = nf(
         "requirements",
         "requirement",
@@ -129,8 +131,7 @@ fn write_spec_node(wt_apg: &Path) {
     let mut cmp = nf("solution", "component", "tick-cmp", "tick component", &[]);
     cmp.out.push(out_e("realises", "domain.service.tick-svc"));
     cmp.out.push(out_e("is-role", "solution.role.tick-role"));
-    cmp.out
-        .push(out_e("implemented-by", "go.fixture.mod.Store"));
+    cmp.out.push(out_e("implemented-by", implemented_by));
     let mut role = nf(
         "solution",
         "role",
@@ -2573,7 +2574,7 @@ mod e2e {
         // rebuilds main, and then cleans up after itself.
         let wt = project_start_at(&repo.apg_root(), "test").unwrap();
         let wt_apg = wt.join(specs::LAYOUT);
-        write_spec_node(&wt_apg);
+        write_spec_node(&wt_apg, "go.fixture.mod.Store");
         let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");
         artifacts::write_jsonl_and_reingest(
             &wt_apg,
@@ -3231,6 +3232,157 @@ mod e2e {
             "a subsequent scan must not mask the authored-row loss"
         );
         drop(db);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Phase-05 task-5 (E2E): the MINIMAL success run of the project lifecycle
+    /// SPAWNED from the main checkout's CLI — `apg project start` exits 0 and
+    /// creates the worktree, branch and branch DB; after exactly one branch
+    /// commit (a whole-model-valid spec plus a verify-passing plan: one
+    /// Satisfies'd phase and one task over the implemented-by target),
+    /// `apg project merge` exits 0 and fast-forwards the default branch to the
+    /// branch tip. No session/mutate/realize/resolve lifecycle; the verify
+    /// gate's refusal halves stay with phase-3 task-3 and the merge round trip.
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/db.lbug/git/spawned apg); run via cargo test-e2e"]
+    fn project_start_and_merge_from_the_main_cli_succeed() {
+        let (base, repo_dir, home) = warm_scratch("merge-cli");
+
+        // Main must carry a fresh scan: `project start` seeds the branch DB
+        // from it, and the merge rebuild re-scans main.
+        let scan = warm_run(&repo_dir, &home, &["scan", "."]);
+        assert!(
+            scan.status.success(),
+            "main scan: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+
+        // `apg project start` from the MAIN checkout's CLI.
+        let start = warm_run(&repo_dir, &home, &["project", "start", "mini"]);
+        assert!(
+            start.status.success(),
+            "project start: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        let wt = repo_dir.join(specs::LAYOUT).join(".worktrees").join("mini");
+        let wt_apg = wt.join(specs::LAYOUT);
+        let main_repo = git2::Repository::open(&repo_dir).unwrap();
+        assert!(
+            main_repo
+                .find_branch("mini", git2::BranchType::Local)
+                .is_ok(),
+            "start must create the project branch"
+        );
+        assert!(
+            main_repo.find_worktree("mini").is_ok(),
+            "start must register the worktree"
+        );
+        assert!(
+            wt_apg.join(specs::TRANS).join("db.lbug").exists(),
+            "start must seed the branch db.lbug"
+        );
+
+        // One branch commit: a whole-model-valid spec whose Component claims a
+        // real scanned-code `implemented-by` target (`go.scratch/a.A`, the warm
+        // fixture's `type A struct`), written through the node-file funnel.
+        write_spec_node(&wt_apg, "go.scratch/a.A");
+
+        // The verify-passing plan: one phase Satisfies'ing the authored
+        // requirement, one `modifies` task touching the implemented-by target.
+        // The transient store never commits.
+        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("mini.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "mini",
+            &[
+                Record::Plan {
+                    fqn: "mini/plan".into(),
+                    title: "Mini plan".into(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "mini/plan.phase-01".into(),
+                    number: 1,
+                    title: "P1".into(),
+                    deliverable: "the landed spec".into(),
+                    status: "pending".into(),
+                },
+                Record::Contains {
+                    from: "mini/plan".into(),
+                    to: "mini/plan.phase-01".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::Satisfies {
+                    from: "mini/plan.phase-01".into(),
+                    to: "requirements.requirement.timer".into(),
+                },
+                Record::Task {
+                    fqn: "mini/plan.phase-01.task-1".into(),
+                    title: "touch go.scratch/a.A".into(),
+                    kind: "source".into(),
+                    tier: String::new(),
+                    status: "pending".into(),
+                    verb: "modifies".into(),
+                    target: "go.scratch/a.A".into(),
+                    new_fqn: String::new(),
+                },
+                Record::Contains {
+                    from: "mini/plan.phase-01".into(),
+                    to: "mini/plan.phase-01.task-1".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // The branch is exactly one commit beyond the default branch.
+        let main_tip = main_repo.head().unwrap().peel_to_commit().unwrap();
+        let branch_tip = main_repo
+            .find_branch("mini", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap();
+        assert_eq!(
+            main_repo
+                .merge_base(main_tip.id(), branch_tip.id())
+                .unwrap(),
+            main_tip.id(),
+            "the branch must sit directly on the default branch"
+        );
+        let mut walk = main_repo.revwalk().unwrap();
+        walk.push(branch_tip.id()).unwrap();
+        walk.hide(main_tip.id()).unwrap();
+        assert_eq!(
+            walk.count(),
+            1,
+            "the phase authors exactly one branch commit"
+        );
+
+        // `apg project merge` from the MAIN checkout's CLI: verify gate ->
+        // fast-forward -> main rebuild -> self-cleanup.
+        let merge = warm_run(&repo_dir, &home, &["project", "merge", "mini"]);
+        assert!(
+            merge.status.success(),
+            "project merge: {}",
+            String::from_utf8_lossy(&merge.stderr)
+        );
+        let after = git2::Repository::open(&repo_dir).unwrap();
+        assert_eq!(
+            after.head().unwrap().peel_to_commit().unwrap().id(),
+            branch_tip.id(),
+            "merge must fast-forward the default branch to the branch tip"
+        );
+        assert!(
+            !wt.exists(),
+            "the merged project's worktree must be removed"
+        );
+        assert!(
+            after.find_branch("mini", git2::BranchType::Local).is_err(),
+            "the merged project's branch must be deleted"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

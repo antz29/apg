@@ -7,8 +7,9 @@
 
 mod common;
 
+use apg::layers;
 use apg::specs;
-use apg::testutil::{self, Repo, wt_commit};
+use apg::testutil::{self, Repo, spawn_apg, wt_commit};
 use std::path::{Path, PathBuf};
 
 /// The module/file namespace the hermetic scan payload uses.
@@ -665,6 +666,49 @@ mod e2e {
         assert!(
             !apg::session::live_session(&apg_root),
             "the session must be ended cleanly"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-2 (E2E): on the MAIN checkout `apg spec lint` reads MAIN's
+    /// own `apg/layers` store and REPORTS its violations — the non-zero exit is
+    /// the findings case, not a project-context refusal. The seeded R4 shape
+    /// (a lone implementation note with no `details` edge) is the finding the
+    /// report must name; no `mutation refused` text is printed.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/spawned apg); run via cargo test-e2e"]
+    fn spec_lint_reads_main_checkout_layers_and_reports_findings() {
+        let repo = Repo::new("speclint-main");
+        let apg_root = repo.apg_root();
+
+        // Seeded through the unguarded single-node writer: `write_project`
+        // refuses on main by design, and a guarded seed would defeat this read.
+        layers::write_node(
+            &apg_root,
+            &testutil::node("implementation", "note", "orphan"),
+        )
+        .unwrap();
+
+        let out = spawn_apg(&["spec", "lint"], &repo.root);
+        assert!(
+            !out.status.success(),
+            "spec lint must exit non-zero on a seeded violation"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        for needle in [
+            "R4",
+            "implementation.note.orphan",
+            "has 0 `details` edge(s)",
+        ] {
+            assert!(
+                stderr.contains(needle),
+                "main's seeded violation must be reported (`{needle}`):\n{stderr}"
+            );
+        }
+        assert!(
+            !stderr.contains("mutation refused"),
+            "spec lint is a read and must not refuse a main checkout:\n{stderr}"
         );
 
         testutil::remove(&repo);

@@ -5437,6 +5437,78 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-05 task-3 (E2E): on the MAIN checkout `apg plan render <project>
+    /// --out -` reads MAIN's own `.trans/plans` store and prints its content —
+    /// the strategy, the phase-table row, the phase heading and the grouped
+    /// task line — the content remainder beyond phase-3 task-2's exit-0 read
+    /// control. Seeded with the plain JSONL primitive
+    /// (`write_jsonl_and_reingest` refuses on main by design); no `mutation
+    /// refused` text.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/plan store/process); run via cargo test-e2e"]
+    fn plan_render_on_main_prints_main_store_content() {
+        let repo = Repo::new("plan-render-main");
+        let records = vec![
+            Record::Plan {
+                fqn: "main/plan".to_string(),
+                title: "Main plan".to_string(),
+                strategy: "read the store".to_string(),
+            },
+            Record::PlanPhase {
+                fqn: "main/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "the read".to_string(),
+                status: "done".to_string(),
+            },
+            Record::Contains {
+                from: "main/plan".to_string(),
+                to: "main/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
+            },
+            Record::Task {
+                fqn: "main/plan.phase-01.task-1".to_string(),
+                title: "Read the store".to_string(),
+                kind: "test".to_string(),
+                tier: "e2e".to_string(),
+                status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "main/plan.phase-01".to_string(),
+                to: "main/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
+            },
+        ];
+        specs::write_jsonl(&specs::plan_jsonl_path(&repo.apg_root(), "main"), &records).unwrap();
+
+        let out = testutil::spawn_apg(&["plan", "render", "main", "--out", "-"], &repo.root);
+        assert!(
+            out.status.success(),
+            "render must stay legal on main: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("mutation refused"), "{stderr}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for needle in [
+            "# Plan — Main plan",
+            "## Strategy\nread the store",
+            "| 1 | done | the read |  |  |",
+            "## Phase 1 (complete)",
+            "- [x] `main/plan.phase-01.task-1` — Read the store (test/e2e)",
+        ] {
+            assert!(
+                stdout.contains(needle),
+                "main's plan store content must render (`{needle}`):\n{stdout}"
+            );
+        }
+
+        testutil::remove(&repo);
+    }
+
     /// Phase-03 task-3 (E2E), half (a): `apg plan verify` stays branch-scoped —
     /// on the main checkout it refuses through the `require_membership` inside
     /// `plan_verify_at` (which precedes `load_plan`), naming the branch framing

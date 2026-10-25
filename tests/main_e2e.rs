@@ -1723,6 +1723,143 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase-05 task-4 (E2E): on the MAIN checkout `apg query` — plain CSV and
+    /// `--json` — serves the transient Plan/PlanPhase/Task/Feedback projections
+    /// the `apg_plan` / `apg_plan_phases` / `apg_plan_tasks` readers run (plus
+    /// the Satisfies/Reviews joins those readers use), so main's own
+    /// branch-local `.trans` store is readable, not refused.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn main_checkout_query_serves_the_plan_reader_projections() {
+        let repo = testutil::Repo::new("query-main-readers");
+        let apg_root = repo.apg_root();
+        testutil::touch_db(&apg_root);
+
+        // Main's own branch-local plan store (project key = branch `main`)
+        // seeded with the plain JSONL primitive; the durable Requirement its
+        // `Satisfies` edge names is merged alongside so the reader join
+        // resolves. `write_jsonl_and_reingest` refuses on main by design.
+        let plan = vec![
+            schema::Record::Plan {
+                fqn: "main/plan".to_string(),
+                title: "Main plan".to_string(),
+                strategy: "ship".to_string(),
+            },
+            schema::Record::PlanPhase {
+                fqn: "main/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            schema::Record::Contains {
+                from: "main/plan".to_string(),
+                to: "main/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
+            },
+            schema::Record::Satisfies {
+                from: "main/plan.phase-01".to_string(),
+                to: "requirements.requirement.timer".to_string(),
+            },
+            schema::Record::Task {
+                fqn: "main/plan.phase-01.task-1".to_string(),
+                title: "Read".to_string(),
+                kind: "test".to_string(),
+                tier: "e2e".to_string(),
+                status: "done".to_string(),
+                verb: "modifies".to_string(),
+                target: "go.seed.Store".to_string(),
+                new_fqn: String::new(),
+            },
+            schema::Record::Contains {
+                from: "main/plan.phase-01".to_string(),
+                to: "main/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
+            },
+            schema::Record::Feedback {
+                fqn: "main/feedback-1".to_string(),
+                body: "look".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            schema::Record::Reviews {
+                from: "main/feedback-1".to_string(),
+                to: "main/plan.phase-01.task-1".to_string(),
+            },
+        ];
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "main"), &plan).unwrap();
+        let mut records = plan.clone();
+        records.push(schema::Record::Requirement {
+            fqn: "requirements.requirement.timer".to_string(),
+            id: "R1".to_string(),
+            title: "timer".to_string(),
+            body: String::new(),
+            feature: String::new(),
+            properties: layers::NodeProperties::default(),
+        });
+        artifacts::reingest_layers(&apg_root, &BTreeSet::new(), &records).unwrap();
+
+        // The readers' own projection shapes.
+        let projections: &[(&str, &str)] = &[
+            (
+                "MATCH (p:Plan) RETURN p.fqn, p.title, p.strategy",
+                "main/plan,Main plan,ship",
+            ),
+            (
+                "MATCH (pp:PlanPhase) WHERE pp.fqn STARTS WITH 'main/plan.phase-' RETURN pp.fqn, pp.number, pp.title, pp.deliverable",
+                "main/plan.phase-01,1,P1,D",
+            ),
+            (
+                "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status, t.verb, t.target",
+                "main/plan.phase-01,main/plan.phase-01.task-1,Read,test,e2e,done,modifies,go.seed.Store",
+            ),
+            (
+                "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn",
+                "main/feedback-1,open,,main/plan.phase-01.task-1",
+            ),
+            (
+                "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn",
+                "main/plan.phase-01,requirements.requirement.timer",
+            ),
+        ];
+        for (query, row) in projections {
+            let out = testutil::spawn_apg(&["query", query], &repo.root);
+            assert!(
+                out.status.success(),
+                "main-checkout query must serve `{query}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(!stderr.contains("mutation refused"), "{stderr}");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                stdout.lines().any(|l| l == *row),
+                "`{query}` must return `{row}`:\n{stdout}"
+            );
+        }
+
+        // `--json` renders the same rows as a keyed JSON array.
+        let out = testutil::spawn_apg(
+            &[
+                "query",
+                "--json",
+                "MATCH (p:Plan) RETURN p.fqn, p.title, p.strategy",
+            ],
+            &repo.root,
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&out.stdout).expect("--json emits a JSON array");
+        assert_eq!(parsed[0]["p.fqn"], "main/plan");
+        assert_eq!(parsed[0]["p.title"], "Main plan");
+
+        testutil::remove(&repo);
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn duplicate_install_files_detects_overlap() {

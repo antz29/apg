@@ -1292,6 +1292,78 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-05 task-1 (E2E): on the MAIN checkout `apg review list` is a legal
+    /// read of MAIN's own branch-local transient store — the content remainder
+    /// beyond the phase-2 task-4 exit-0 control. The Feedback record seeded in
+    /// main's `.trans/plans/main.jsonl` (the branch name is the project key)
+    /// is listed with its status, disposition and reviewed target, and no
+    /// `mutation refused` text is printed.
+    #[test]
+    #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
+    fn review_list_on_main_lists_main_branch_local_feedback() {
+        let repo = Repo::new("review-main-list");
+        let apg_root = repo.apg_root();
+        // The read opens main's DB; seed it with the records so the reviewed
+        // target resolves (an unprojected target would read `(removed target)`).
+        testutil::touch_db(&apg_root);
+
+        let records = vec![
+            Record::Plan {
+                fqn: "main/plan".to_string(),
+                title: "Main plan".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "main/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "main/plan".to_string(),
+                to: "main/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
+            },
+            Record::Feedback {
+                fqn: "main/feedback-1".to_string(),
+                body: "main-branch review".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "main/feedback-1".to_string(),
+                to: "main/plan.phase-01".to_string(),
+            },
+        ];
+        // Main's own branch-local transient store, seeded with the plain JSONL
+        // primitive — `write_jsonl_and_reingest` refuses on main by design.
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "main"), &records).unwrap();
+        artifacts::reingest_layers(&apg_root, &std::collections::BTreeSet::new(), &records)
+            .unwrap();
+
+        let listed = spawn_apg(&["review", "list"], &repo.root);
+        assert!(
+            listed.status.success(),
+            "review list must stay legal on main: {}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&listed.stderr);
+        assert!(!stderr.contains("mutation refused"), "{stderr}");
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.starts_with("f.fqn,f.status,f.disposition,n.fqn"),
+            "the list header must be printed: {out}"
+        );
+        assert!(
+            out.lines()
+                .any(|l| l == "main/feedback-1,open,,main/plan.phase-01"),
+            "main's own branch-local Feedback must be listed with its reviewed target: {out}"
+        );
+
+        testutil::remove(&repo);
+    }
+
     /// Phase-02 task-5 (E2E): inside a project worktree the guard admits the
     /// mutation, so a genuinely absent target reports its own absence naming
     /// the searched project root and branch — distinct from the context
