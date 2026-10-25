@@ -116,12 +116,13 @@ vocabulary — **the parent can never depend on its future child**:
 The project builds a single `apg` binary (package `apg`):
 
 - `apg init [dir]` — create `apg/` (committed `config.json` carrying the
-  binary-managed `version` field + gitignored `.trans/`), scaffold the repo
-  `.gitignore` for `apg/.trans/` and `apg/.worktrees/` (added if
-  missing, other lines untouched), and install (or update, where contents
-  differ) the opencode apg tool suite into `~/.config/opencode/plugins/` +
+  binary-managed `version` field + gitignored `apg/.trans/`, `apg/.worktrees/`
+  and `apg/.scratch/`), scaffold the repo `.gitignore` for `apg/.trans/`,
+  `apg/.worktrees/` and `apg/.scratch/` (added if missing, other lines
+  untouched), and install (or update, where contents differ) the opencode apg
+  tool suite into `~/.config/opencode/plugins/` +
   `~/.config/opencode/lib/` (with the plugin's `package.json` beside them)
-  plus the **eight distributed agents** — `codebase-navigator` (explore code
+  plus the **nine distributed agents** — `codebase-navigator` (explore code
   structure through the graph and delegate spec/plan/agent work), `spec-writer`
   (author the durable spec through `apg_node`/`apg_edge`), `plan-writer` (author
   the phased plan through the `apg_plan_*` tools), `spec-review` (review the
@@ -129,7 +130,9 @@ The project builds a single `apg` binary (package `apg`):
   implementations), `implementation-phase-reviewer` (review a phase's code
   against its plan and spec), `agent-builder` (scaffold a repo's code-writer
   agents), `migration-agent` (migrate `apg/layers/**` to the running
-  durable-spec model) — into `~/.config/opencode/agents/`.
+  durable-spec model), and `researcher` (investigate a research question
+  read-only and return a markdown result under `apg/.scratch/`) — into
+  `~/.config/opencode/agents/`.
   Project-specific implementer/reviewer agents are installed into the project's
   `.opencode/agents/` by the **`agent-builder`** agent, never by init. If the
   project's `.opencode/` holds files that duplicate the installed suite
