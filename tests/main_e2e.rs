@@ -2780,8 +2780,12 @@ mod e2e {
         let d = std::env::temp_dir().join(format!("apg-gitignore-spell-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        // No trailing slashes: both entries are present for git purposes.
-        std::fs::write(d.join(".gitignore"), "apg/.trans\napg/.worktrees\n").unwrap();
+        // No trailing slashes: all three entries are present for git purposes.
+        std::fs::write(
+            d.join(".gitignore"),
+            "apg/.trans\napg/.worktrees\napg/.scratch\n",
+        )
+        .unwrap();
         assert!(!scaffold_gitignore(&d).unwrap());
         let _ = std::fs::remove_dir_all(&d);
     }
