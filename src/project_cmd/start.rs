@@ -89,18 +89,29 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
         );
     }
 
-    // Self-heal (R9): when the worktree location is not gitignored — the
-    // repo .gitignore dropped the `apg/.worktrees/` entry, or the repo was
-    // cloned before it existed — scaffold the apg layout entries and commit
+    // Self-heal (R9): when either apg layout location — the worktree dir or
+    // the main checkout's scratch dir — is not gitignored (the repo .gitignore
+    // dropped the `apg/.worktrees/` or `apg/.scratch/` entry, or the repo was
+    // cloned before it existed), scaffold the apg layout entries and commit
     // the scaffold on the current branch. The dirty-main refusal above
     // guarantees the tree was clean at entry, and a dropped entry must not
-    // leave the main checkout dirty (a later start would refuse it). If the
+    // leave the main checkout dirty (a later start would refuse it). If a
     // location still is not ignored after the scaffold (e.g. an explicit
     // negation shadowing the entries), refuse naming the actual state. The
     // `.worktrees/` dir itself is created below (libgit2's worktree add does
     // not create intermediate dirs; `apg init` scaffolds it, start heals it).
-    let probe = git::project_worktree_dir(&identity.main_root, name);
-    if !git::path_is_ignored(&identity.main_root, &probe) {
+    let probes = [
+        git::project_worktree_dir(&identity.main_root, name),
+        identity.main_root.join(specs::LAYOUT).join(specs::SCRATCH),
+    ];
+    let unignored = || {
+        probes
+            .iter()
+            .filter(|probe| !git::path_is_ignored(&identity.main_root, probe))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    if !unignored().is_empty() {
         if crate::scaffold_gitignore(&identity.main_root)? {
             git::commit_file(
                 &identity.main_root,
@@ -108,9 +119,9 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
                 "apg: scaffold .gitignore entries for the apg layout",
             )?;
         }
-        if !git::path_is_ignored(&identity.main_root, &probe) {
+        if let Some(probe) = unignored().first() {
             anyhow::bail!(
-                "refused: {} is still not gitignored after scaffolding the apg layout entries — an explicit .gitignore negation must be shadowing them. Fix: remove the negation (or append `apg/.worktrees/` at the end of the .gitignore), then re-run `apg project start {name}`.",
+                "refused: {} is still not gitignored after scaffolding the apg layout entries — an explicit .gitignore negation must be shadowing them. Fix: remove the negation (or append the matching apg layout entry — `apg/.worktrees/` or `apg/.scratch/` — at the end of the .gitignore), then re-run `apg project start {name}`.",
                 probe.display()
             );
         }
@@ -139,6 +150,9 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
     // during walk-up discovery.
     let wt_apg = wt_dir.join(specs::LAYOUT);
     copy_trans_artifacts(&apg_root.join(specs::TRANS), &wt_apg.join(specs::TRANS))?;
+    // The copy only seeds `.trans`; the worktree also needs the scratch dir
+    // the researcher writes its result markdown into.
+    std::fs::create_dir_all(wt_apg.join(specs::SCRATCH))?;
     Ok(wt_dir)
 }
 
