@@ -2432,6 +2432,16 @@ mod e2e {
             "the fix line runs `apg init`; got:\n{stderr}"
         );
 
+        // The refusal precedes the three scaffold `create_dir_all`s, not merely
+        // the config write: they are gitignored, so the clean-status probe
+        // below cannot see them.
+        for scaffold in [specs::TRANS, git::WORKTREES, specs::SCRATCH] {
+            assert!(
+                !worktree.join(specs::LAYOUT).join(scaffold).exists(),
+                "the refusal precedes the `{scaffold}` scaffold create"
+            );
+        }
+
         // Untouched layout: identical config bytes, no migration guide, no
         // suite or agent written into the fresh HOME.
         assert_eq!(
