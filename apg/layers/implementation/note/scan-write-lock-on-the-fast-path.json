@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-write-lock-on-the-fast-path",
+  "body": "`cmd_scan` holds the per-checkout extended write lock (`artifacts::acquire_spec_lock`, a blocking `LOCK_EX` flock on `apg/.trans/specs.lock`) for the whole scan pipeline, including the freshness fast path where the tree is unchanged and the DB is reused with no frontend spawn and no rebuild. That means a read-only scan of an unchanged tree still takes an exclusive lock and can briefly block a concurrent staleness-gated reader (a plan verify or a bookkeeping mutation). This is deliberate and safe — it keeps the reuse decision and the rebuild under one lock, so a reader never judges a half-decided state — but it is a coarse trade: the fast path does no writes, so a shared lock would suffice there. Upgrade trigger: if a freshness-checked scan's brief exclusivity ever measurably delays a concurrent reader (for example an agent loop that scans and verifies back to back), acquire a shared (`LOCK_SH`) lock for the reusable branch only, which needs a second lock mode in `artifacts::acquire_spec_lock`; do not weaken the exclusive hold on the discard-and-rebuild path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.scan.cmd_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

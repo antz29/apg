@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "signal-end-socket-wait-bound",
+  "body": "The client-side wait in `Coordinator::signal_end` / `signal_abort` that closes the post-reply/pre-unlink socket window is bounded at ~1 s, polling the socket path every 10 ms. That bound assumes the server's teardown after writing the `End`/`Abort` reply — releasing the extended flock and removing `session.sock` in `Coordinator::end`/`abort` — completes within one second. It is a shortcut, not a guarantee: on a slow filesystem, a heavily swapped host, or a server descheduled between the reply and the unlink, the wait can time out. The timeout fails loudly, naming the socket path (`session stopped but its socket <path> was not removed`), so it never mis-reports a stopped session as clean. Upgrade trigger: if the timeout ever fires on a healthy host, or if session teardown starts doing work beyond dropping the flock and unlinking the socket, replace the fixed 1 s / 10 ms bound with a longer or adaptive deadline. A second residual: the wait cannot distinguish the server's unlink from a fresh `apg session start` recreating the socket at the same path; that case also ends in the path-naming timeout rather than a false success.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.signal_end",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

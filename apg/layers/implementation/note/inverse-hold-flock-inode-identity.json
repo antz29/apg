@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "inverse-hold-flock-inode-identity",
+  "body": "The deterministic inverse-hold arms C1 and C2 in `scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh` make a spawned `apg plan verify` / `apg scan` block by having the test process hold the extended lock itself, so the contention depends on both processes resolving the same lock file to the same inode. The test's `apg_root` spells the scratch path as `/var/...` while the spawned scan canonicalizes to `/private/var/...`; on macOS these are the same inode, so the flock contends as intended. That equivalence is a harness assumption, not a property the test asserts. Upgrade trigger: if a future harness moves the scratch root, copies `specs.lock` instead of opening the original path, or runs where `/var` and `/private/var` are distinct, re-spell the test path through `canonicalize()` before acquiring (and, if a copied lock file is ever introduced, make both sides open the same canonical path); otherwise the arms would report a false UNEXERCISED rather than a false green, but the C1/C2 determinism claim would silently stop being exercised.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
