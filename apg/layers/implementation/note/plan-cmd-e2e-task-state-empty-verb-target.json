@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-cmd-e2e-task-state-empty-verb-target",
+  "body": "The task_state closure in plan_update_task_clears_target_to_targetless returns empty verb/target strings because the retired task fields are gone and no stored classification remains. Limit: the closure cannot report a verb/target until the operation edge set is reconstructed. Upgrade when task-10/18 land: rebuild task_state from the operation edges instead of the removed fields.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.plan_update_task_clears_target_to_targetless",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

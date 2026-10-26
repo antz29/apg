@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-update-transitional-cli-validation",
+  "body": "plan_update_task_at still accepts the transitional (kind,tier) CLI arguments and validates them against the defaults \"source\"/\"\" because no stored classification exists on the edge-modelled task record. Limit: the update surface carries (kind,tier) only to satisfy transitional validation. Upgrade when phase-5 tasks 5/7 land: remove those transitional CLI arguments and drop the default-based validation.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.authoring.plan_update_task_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
