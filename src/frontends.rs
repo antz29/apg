@@ -87,6 +87,12 @@ pub fn available_languages() -> Vec<String> {
             langs.push("ts".into());
             langs.push("js".into());
         }
+        if dir.join("agentfrontend").exists() {
+            // The agent-definition frontend claims the hidden `.opencode/agents/`
+            // directory, which the extension detectors never descend into, so
+            // its id is enumerated whenever its artifact is staged.
+            langs.push("agent".into());
+        }
         if !langs.is_empty() {
             return langs;
         }
@@ -151,6 +157,9 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
                     dir.join("tsfrontend").join("scanner.mjs").display()
                 ));
             }
+            "agent" if dir.join("agentfrontend").exists() => {
+                return Some(dir.join("agentfrontend").display().to_string());
+            }
             _ => {}
         }
     }
@@ -168,6 +177,9 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         // One built artifact, two ids: `js`-only repos run the same unified
         // JS/TS frontend under the `js` id.
         "ts" | "js" => option_env!("APG_FRONTEND_TS"),
+        // The agent-definition frontend is its own artifact (`build.rs` stages
+        // `agentfrontend`).
+        "agent" => option_env!("APG_FRONTEND_AGENT"),
         _ => None,
     };
     baked.map(|s| s.to_string())
@@ -316,6 +328,14 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             out.push(lang.to_string());
         }
     }
+    // The agent-definition frontend is not extension-detectable either: its
+    // claim is the hidden `.opencode/agents/` directory the detector never
+    // descends into (`has_extension` skips dot-names), so whenever
+    // `agentfrontend` is installed the `agent` id is appended as a whole — like
+    // the structural bundle, never by an extension walk.
+    if available.iter().any(|l| l == "agent") {
+        out.push("agent".to_string());
+    }
     out
 }
 
@@ -347,6 +367,10 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "ini" => "ini",
         "misc" => "mi",
         "py" => "py",
+        // The agent-definition frontend's stream keeps its own prefix, distinct
+        // from `x` (the unknown-id fallback) so a merged agent stream cannot
+        // collide opaque ids.
+        "agent" => "ag",
         _ => "x",
     }
 }
@@ -512,13 +536,13 @@ pub fn should_spawn_language(
 
 /// The scan-time tools a selected language's frontend requires on `PATH` when
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
-/// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`) and
-/// the bundled structural scanner's every stream id (`md`, `sh`, `yaml`,
-/// `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`) require
-/// nothing — the structural arm is explicit so the exemption is intentional,
-/// not the unknown-id catch-all — and neither does an unknown language id
-/// (never a false refusal). `ts`/`js` share the one unified frontend and its
-/// `node` runtime.
+/// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`,
+/// `agent`) and the bundled structural scanner's every stream id (`md`, `sh`,
+/// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`)
+/// require nothing — the structural and agent arms are explicit so the
+/// exemption is intentional, not the unknown-id catch-all — and neither does an
+/// unknown language id (never a false refusal). `ts`/`js` share the one unified
+/// frontend and its `node` runtime.
 pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
     match language {
         "go" => &["go"],
@@ -530,6 +554,9 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
         // tool-less.
         "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
         | "misc" => &[],
+        // The agent-definition frontend is self-contained too: it reads
+        // `.opencode/agents/` itself and never shells out.
+        "agent" => &[],
         _ => &[],
     }
 }
@@ -555,8 +582,8 @@ pub fn scan_time_tool_error(language: &str, tool: &str) -> String {
 /// Probes `PATH` for every tool `language`'s frontend needs and returns
 /// [`scan_time_tool_error`] for the first miss. This is the I/O unit (a real
 /// `PATH` probe); a tool-less language probes nothing and succeeds — the
-/// self-contained `cpp`/`csharp`/`py` frontends and every structural stream id
-/// of the bundled scanner (`md`, `sh`, `yaml`, `json`, `toml`, `xml`,
+/// self-contained `cpp`/`csharp`/`py`/`agent` frontends and every structural
+/// stream id of the bundled scanner (`md`, `sh`, `yaml`, `json`, `toml`, `xml`,
 /// `dockerfile`, `makefile`, `ini`, `misc`) are all tool-less.
 pub fn scan_time_preflight(language: &str) -> anyhow::Result<()> {
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -595,8 +622,8 @@ pub fn spawn_frontend(
     // required tool is absent fails the whole scan here, before any spawn, with
     // the named actionable error — never the cryptic panic this replaces, never
     // a silent skip, never an empty graph. The tool-less frontends
-    // (`cpp`, `csharp`, `py`) and every structural stream id of the bundled
-    // scanner (`md`, `sh`, …) probe nothing and are unaffected.
+    // (`cpp`, `csharp`, `py`, `agent`) and every structural stream id of the
+    // bundled scanner (`md`, `sh`, …) probe nothing and are unaffected.
     scan_time_preflight(lang)?;
     let cmd = frontend_cmd(lang)
         .ok_or_else(|| anyhow::anyhow!("frontend for language '{lang}' is not installed"))?;
