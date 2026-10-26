@@ -608,7 +608,10 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
 /// the export names none — so the kind-paired Task operation edges
 /// (`struct_modify` and its siblings) survive finalize exactly as they do
 /// against the real nodes. Being a code kind, the placeholder contributes no
-/// authored row to the digest; its only effect is to keep those edges.
+/// authored row to the digest; its only effect is to keep those edges. The
+/// export's `agent` records are carried the same way, as `Agent` placeholders,
+/// so the `AssignedTo` edges targeting them survive finalize; `Agent` is not an
+/// authored kind either, so the digest gains only those edges.
 ///
 /// No database is opened. Every failure (a malformed layers/transient file, a
 /// drift ref, a bad export line) is returned as an `Err`.
@@ -646,6 +649,53 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
             name: String::new(),
             parent: String::new(),
         });
+    }
+
+    // Placeholder Agent nodes for the export's `agent` records — the analog of
+    // the real scan's actual Agent nodes, without which `ingest`'s finalize
+    // would prune every `AssignedTo` edge (the target node would be absent).
+    // `Agent` is not an authored kind, so it contributes no authored row; its
+    // only effect is to keep those edges. `agent_node` renders the FQN from the
+    // record's `name`, so the export FQN's `agent.` prefix is stripped here.
+    let export = apg_root.join(crate::specs::TRANS).join("graph.jsonl");
+    if export.exists() {
+        let text = std::fs::read_to_string(&export)?;
+        for (i, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                anyhow::anyhow!(
+                    "{}:{}: bad graph.jsonl record: {e}",
+                    export.display(),
+                    i + 1
+                )
+            })?;
+            if value.get("type").and_then(|t| t.as_str()) != Some("agent") {
+                continue;
+            }
+            let Some(name) = value
+                .get("fqn")
+                .and_then(|f| f.as_str())
+                .and_then(|fqn| fqn.strip_prefix("agent."))
+            else {
+                continue;
+            };
+            records.push(Record::Agent {
+                name: name.to_string(),
+                path: value
+                    .get("path")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                start_line: value
+                    .get("start_line")
+                    .and_then(|n| n.as_u64())
+                    .unwrap_or(0) as u32,
+                end_line: value.get("end_line").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+            });
+        }
     }
 
     let (graph, _) = crate::ingest::ingest(
