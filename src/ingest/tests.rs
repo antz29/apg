@@ -413,6 +413,31 @@ mod unit {
         ));
         assert!(!is_blacklisted("misc.src/apg", None, "misc", &opts));
     }
+
+    /// schema-alignment phase-03 task-8: the agent node builder renders the
+    /// tier-4 identity from the record alone — the FQN `agent.<file-stem>` from
+    /// the record's stem, and the Location from the definition file's
+    /// repo-relative path plus its 1-based line span (no byte span).
+    #[test]
+    fn agent_node_renders_stem_fqn_and_definition_location() {
+        let (fqn, node) = agent_node(
+            "go-frontend-implementer",
+            "/repo/.opencode/agents/go-frontend-implementer.md",
+            1,
+            274,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(fqn, "agent.go-frontend-implementer");
+        assert_eq!(node.kind, NodeKind::Agent);
+        let location = node.location.expect("agent node is located");
+        assert_eq!(
+            location.path,
+            PathBuf::from(".opencode/agents/go-frontend-implementer.md")
+        );
+        assert_eq!((location.start_line, location.end_line), (1, 274));
+        assert_eq!((location.start, location.end), (0, 0));
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no
