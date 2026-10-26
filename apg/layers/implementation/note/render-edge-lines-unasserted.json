@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "render-edge-lines-unasserted",
+  "body": "The operation-edge render lines in render_phase_tasks carry no committed assertion yet — the edge assertion is phase-4 task-9's, deferred until task-20 drops the kind grouping. Upgrade: add the edge-line assertion when task-9 rewrites the render unit test to the documented `  - <kind> <op> `<target>`` and ` -> `<dest>`` format.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.render.render_phase_tasks",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
