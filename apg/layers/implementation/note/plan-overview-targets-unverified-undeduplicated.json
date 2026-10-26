@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-overview-targets-unverified-undeduplicated",
+  "body": "The plan-overview targets column is per-task and not deduplicated (a large phase can produce a long line), and no automated test executes the overview query — task-20's registeredTool assertion only inspects registration, so the runtime path is first exercised against a current DB; the branch db.lbug is stale (no Agent table and Task still carries verb/target), so it cannot run here. Limit: the column is unverified at runtime and un-deduplicated. Upgrade: add per-phase dedup or truncation if readability suffers, and add a runtime test when the branch DB carries the task-edge tables.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/tools/apg_plan.ts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
