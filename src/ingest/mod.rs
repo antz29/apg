@@ -1069,26 +1069,12 @@ fn ingest_records(
                     },
                     None,
                 ),
-                Record::Task {
-                    fqn,
-                    title,
-                    kind,
-                    tier,
-                    status,
-                    verb,
-                    target,
-                    new_fqn,
-                } => insert_node(
+                Record::Task { fqn, title, status } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
                         title: Some(title),
-                        sub_kind: opt(kind),
-                        tier: opt(tier),
                         status: opt(status),
-                        verb: opt(verb),
-                        target: opt(target),
-                        new_fqn: opt(new_fqn),
                         ..spec_node(NodeKind::Task)
                     },
                     None,

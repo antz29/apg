@@ -375,30 +375,17 @@ pub enum Record {
         status: String,
     },
 
-    /// `{"type":"task","fqn":"<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending","verb":"creates","target":"github.com/x/y.Gateway","new_fqn":""}`
-    /// `kind` is the owning role (source/test/gate/docs); `tier`
-    /// (unit/int/e2e) is the verification depth, meaningful only for
-    /// `kind = test`. `verb` is the Task→Implementation verb (SPEC §5):
-    /// creates|modifies|deletes|renames|moves — `creates` is the default, so
-    /// task records authored before the verb model parse unchanged. `target`
-    /// is the Implementation FQN the verb applies to (the source FQN of a
-    /// renames/moves pair; empty on a target-less task); `new_fqn` is the
-    /// destination FQN of a renames/moves pair, empty otherwise.
+    /// `{"type":"task","fqn":"<project>/plan.phase-<n>.task-<k>","title":"...","status":"pending"}`
+    /// A task's own storage is its title+status record; its owning
+    /// classification, the Agent it is assigned to, the Component it
+    /// implements and its operation verbs/targets are the SCHEMA.md task
+    /// edges (`assigned-to`, `implements`, `target` and the per-kind
+    /// create/modify/delete/move/rename records).
     Task {
         fqn: String,
         title: String,
         #[serde(default)]
-        kind: String,
-        #[serde(default)]
-        tier: String,
-        #[serde(default)]
         status: String,
-        #[serde(default = "default_task_verb")]
-        verb: String,
-        #[serde(default)]
-        target: String,
-        #[serde(default)]
-        new_fqn: String,
     },
 
     // --- Task edges (SCHEMA.md, transient plan tier). A task's own storage is
@@ -619,13 +606,6 @@ pub enum Record {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         properties: NodeProperties,
     },
-}
-
-/// The default Task→Implementation verb: `creates`. A task record authored
-/// before the verb model (no `verb` key) is a `creates`-without-target task —
-/// the verb's target FQN is validated only when one is declared (SPEC §5).
-fn default_task_verb() -> String {
-    "creates".to_string()
 }
 
 #[cfg(test)]

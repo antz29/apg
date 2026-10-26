@@ -1831,12 +1831,7 @@ mod e2e {
             schema::Record::Task {
                 fqn: "main/plan.phase-01.task-1".to_string(),
                 title: "Read".to_string(),
-                kind: "test".to_string(),
-                tier: "e2e".to_string(),
                 status: "done".to_string(),
-                verb: "modifies".to_string(),
-                target: "go.seed.Store".to_string(),
-                new_fqn: String::new(),
             },
             schema::Record::Contains {
                 from: "main/plan.phase-01".to_string(),

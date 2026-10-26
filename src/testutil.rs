@@ -816,12 +816,7 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
                     Node {
                         kind: NodeKind::Task,
                         title: o("title"),
-                        sub_kind: o("kind"),
-                        tier: o("tier"),
                         status: o("status"),
-                        verb: o("verb"),
-                        target: o("target"),
-                        new_fqn: o("new_fqn"),
                         ..Node::default()
                     },
                 );
@@ -1485,26 +1480,8 @@ pub fn nf(
     }
 }
 
-/// A single-task plan record (`<project>/plan.phase-01.task-1`) with the given
-/// verb and target(s) — the coverage touch source. Shared by `plan_cmd`'s
-/// unit/int and e2e tiers, single-sourced here per
-/// `solution.constraint.test-layout-shape`.
-pub fn task_rec(verb: &str, target: &str, new_fqn: &str) -> crate::schema::Record {
-    crate::schema::Record::Task {
-        fqn: "foo/plan.phase-01.task-1".to_string(),
-        title: "T".to_string(),
-        kind: "source".to_string(),
-        tier: String::new(),
-        status: "pending".to_string(),
-        verb: verb.to_string(),
-        target: target.to_string(),
-        new_fqn: new_fqn.to_string(),
-    }
-}
-
-/// [`task_rec`]'s edge-aware sibling (SCHEMA.md task edges): the same
-/// single-task plan record plus the operation edge its verb names —
-/// `creates` → `<kind>_create` to the planned destination,
+/// [`task_recs`]'s single-task plan record plus the operation edge its verb
+/// names — `creates` → `<kind>_create` to the planned destination,
 /// `modifies`/`deletes` → `<kind>_{modify,delete}` to the live target,
 /// `renames`/`moves` → `<kind>_{rename,move}` to the live source plus a
 /// `target` edge to the planned destination — and no edge for a target-less
@@ -1520,12 +1497,7 @@ pub fn task_recs(
     let mut recs = vec![Task {
         fqn: fqn.clone(),
         title: "T".to_string(),
-        kind: kind.to_string(),
-        tier: String::new(),
         status: "pending".to_string(),
-        verb: verb.to_string(),
-        target: target.to_string(),
-        new_fqn: new_fqn.to_string(),
     }];
     if target.is_empty() {
         return recs;

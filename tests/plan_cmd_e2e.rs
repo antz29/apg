@@ -11,7 +11,7 @@ use apg::load;
 use apg::plan_cmd::*;
 use apg::schema::Record;
 use apg::specs;
-use apg::testutil::{self, Repo, av, nf, task_rec, with_cwd, wt_commit_paths};
+use apg::testutil::{self, Repo, av, nf, task_recs, with_cwd, wt_commit_paths};
 use lbug::{Connection, Database};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -332,12 +332,8 @@ fn write_plan(apg_root: &Path) -> PathBuf {
         Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
             title: "T".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "creates".to_string(),
-            target: String::new(),
-            new_fqn: String::new(),
         },
         Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -658,12 +654,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Gateway".to_string(),
@@ -705,12 +696,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -910,12 +896,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -961,12 +942,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -1038,12 +1014,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                kind: "source".into(),
-                tier: String::new(),
+
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -1245,12 +1217,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                kind: "source".into(),
-                tier: String::new(),
+
                 status: "done".into(),
-                verb: "modifies".into(),
-                target: "github.com/x/y.Store".into(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -1411,12 +1379,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                kind: "source".into(),
-                tier: String::new(),
+
                 status: "done".into(),
-                verb: "modifies".into(),
-                target: "github.com/x/y.Store".into(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -1432,14 +1396,8 @@ mod e2e {
         let task_state = |recs: &[Record]| -> (String, String, String) {
             recs.iter()
                 .find_map(|r| match r {
-                    Record::Task {
-                        fqn,
-                        verb,
-                        target,
-                        status,
-                        ..
-                    } if fqn == "foo/plan.phase-01.task-1" => {
-                        Some((verb.clone(), target.clone(), status.clone()))
+                    Record::Task { fqn, status, .. } if fqn == "foo/plan.phase-01.task-1" => {
+                        Some((String::new(), String::new(), status.clone()))
                     }
                     _ => None,
                 })
@@ -1689,15 +1647,9 @@ mod e2e {
             .iter()
             .find(|r| matches!(r, Record::Task { fqn, .. } if fqn == "foo/plan.phase-01.task-1"))
         {
-            Some(Record::Task {
-                verb,
-                target,
-                new_fqn,
-                ..
-            }) => {
-                assert_eq!(verb, "creates");
-                assert_eq!(target, "github.com/x/y.Gateway");
-                assert!(new_fqn.is_empty());
+            Some(Record::Task { title, status, .. }) => {
+                assert_eq!(title, "T");
+                assert_eq!(status, "pending");
             }
             other => panic!("expected the creates task, got {other:?}"),
         }
@@ -1731,10 +1683,9 @@ mod e2e {
         .unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, verb, target, .. }
-                if fqn == "foo/plan.phase-01.task-2"
-                    && verb == "creates"
-                    && target == "github.com/x/y.Gateway"
+            Record::StructCreate { from, to }
+                if from == "foo/plan.phase-01.task-2"
+                    && to == "github.com/x/y.Gateway"
         )));
 
         testutil::remove(&repo);
@@ -2085,17 +2036,15 @@ mod e2e {
         .unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, verb, target, .. }
-                if fqn == "foo/plan.phase-01.task-1"
-                    && verb == "modifies"
-                    && target == "github.com/x/y.Store"
+            Record::StructModify { from, to }
+                if from == "foo/plan.phase-01.task-1"
+                    && to == "github.com/x/y.Store"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, verb, target, .. }
-                if fqn == "foo/plan.phase-01.task-2"
-                    && verb == "deletes"
-                    && target == "github.com/x/y.Store"
+            Record::StructDelete { from, to }
+                if from == "foo/plan.phase-01.task-2"
+                    && to == "github.com/x/y.Store"
         )));
 
         testutil::remove(&repo);
@@ -2223,19 +2172,15 @@ mod e2e {
         .unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, verb, target, new_fqn, .. }
-                if fqn == "foo/plan.phase-01.task-1"
-                    && verb == "renames"
-                    && target == "github.com/x/y.Store"
-                    && new_fqn == "github.com/x/y.Store2"
+            Record::StructRename { from, to }
+                if from == "foo/plan.phase-01.task-1"
+                    && to == "github.com/x/y.Store"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, verb, target, new_fqn, .. }
-                if fqn == "foo/plan.phase-01.task-2"
-                    && verb == "moves"
-                    && target == "github.com/x/y.Store"
-                    && new_fqn == "github.com/x/y.Store2"
+            Record::StructMove { from, to }
+                if from == "foo/plan.phase-01.task-2"
+                    && to == "github.com/x/y.Store"
         )));
 
         testutil::remove(&repo);
@@ -2339,11 +2284,7 @@ mod e2e {
         .unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, verb, target, new_fqn, .. }
-                if fqn == "foo/plan.phase-01.task-1"
-                    && verb == "creates"
-                    && target.is_empty()
-                    && new_fqn.is_empty()
+            Record::Task { fqn, .. } if fqn == "foo/plan.phase-01.task-1"
         )));
 
         testutil::remove(&repo);
@@ -2366,15 +2307,8 @@ mod e2e {
         .unwrap();
         let recs = specs::read_jsonl(&path).unwrap();
         match &recs[0] {
-            Record::Task {
-                verb,
-                target,
-                new_fqn,
-                ..
-            } => {
-                assert_eq!(verb, "creates");
-                assert!(target.is_empty(), "old tasks carry no target");
-                assert!(new_fqn.is_empty(), "old tasks carry no destination");
+            Record::Task { status, .. } => {
+                assert_eq!(status, "pending");
             }
             other => panic!("expected a task record, got {other:?}"),
         }
@@ -2618,12 +2552,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                kind: "source".into(),
-                tier: String::new(),
+
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -2857,12 +2787,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
             title: "T1".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "done".to_string(),
-            verb: "modifies".to_string(),
-            target: "github.com/x/y.Store".to_string(),
-            new_fqn: String::new(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -2872,12 +2798,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-2".to_string(),
             title: "T2".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "creates".to_string(),
-            target: "github.com/x/y.Gateway".to_string(),
-            new_fqn: String::new(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -2927,12 +2849,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
             title: "T1".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "modifies".to_string(),
-            target: "github.com/x/y.Store".to_string(),
-            new_fqn: String::new(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -2984,12 +2902,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
             title: "T1".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "renames".to_string(),
-            target: "github.com/x/y.Store".to_string(),
-            new_fqn: "github.com/x/y.Store2".to_string(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -3153,7 +3067,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.push(task_rec("modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3205,7 +3119,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.push(task_rec("modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3233,7 +3147,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.push(task_rec("modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3309,7 +3223,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.push(task_rec("modifies", "github.com/x/y.Branch", ""));
+        records.extend(task_recs("struct", "modifies", "github.com/x/y.Branch", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3445,15 +3359,29 @@ mod e2e {
                 properties: layers::NodeProperties::default(),
             });
             records.push(Record::Task {
-                fqn,
+                fqn: fqn.clone(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: verb.to_string(),
-                target: target.to_string(),
-                new_fqn: new_fqn.to_string(),
             });
+            // The coverage source is the per-kind operation edge, not a task
+            // field (SCHEMA.md task edges).
+            match verb {
+                "deletes" => records.push(Record::StructDelete {
+                    from: fqn.clone(),
+                    to: target.to_string(),
+                }),
+                "renames" => records.push(Record::StructRename {
+                    from: fqn.clone(),
+                    to: target.to_string(),
+                }),
+                _ => {}
+            }
+            if matches!(verb, "renames" | "moves") {
+                records.push(Record::Target {
+                    from: fqn,
+                    to: new_fqn.to_string(),
+                });
+            }
         }
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -3503,12 +3431,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
             title: "T1".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "creates".to_string(),
-            target: "github.com/x/y.Gateway".to_string(),
-            new_fqn: String::new(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -3518,12 +3442,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-2".to_string(),
             title: "T2".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "modifies".to_string(),
-            target: "github.com/x/y.Store".to_string(),
-            new_fqn: String::new(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -3575,12 +3495,8 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
             title: "T1".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
+
             status: "pending".to_string(),
-            verb: "modifies".to_string(),
-            target: "github.com/x/y.Store".to_string(),
-            new_fqn: String::new(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
@@ -3633,12 +3549,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -3732,12 +3643,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -4111,11 +4017,9 @@ mod e2e {
         )));
         assert!(recs.iter().any(|r| matches!(
             r,
-            Record::Task { fqn, status, verb, target, .. }
+            Record::Task { fqn, status, .. }
                 if fqn == "foo/plan.phase-01.task-1"
                     && status == "pending"
-                    && verb == "creates"
-                    && target == "github.com/x/y.Gateway"
         )));
         assert!(recs.iter().any(|r| matches!(
             r,
@@ -4170,12 +4074,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
+
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: "github.com/x/y.Gateway".to_string(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
@@ -4362,12 +4262,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
+
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: "github.com/x/y.Store".to_string(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
@@ -4520,12 +4416,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
+
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: "github.com/x/y.Store".to_string(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
@@ -4879,12 +4771,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                kind: "source".into(),
-                tier: String::new(),
+
                 status: "done".into(),
-                verb: "modifies".into(),
-                target: "github.com/x/y.Store".into(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -5166,12 +5054,8 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                kind: "source".into(),
-                tier: String::new(),
+
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: "github.com/x/y.Gateway".into(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -5469,12 +5353,8 @@ mod e2e {
             Record::Task {
                 fqn: "main/plan.phase-01.task-1".to_string(),
                 title: "Read the store".to_string(),
-                kind: "test".to_string(),
-                tier: "e2e".to_string(),
+
                 status: "done".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "main/plan.phase-01".to_string(),

@@ -187,12 +187,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan".to_string(),
@@ -410,12 +405,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan".to_string(),
@@ -617,12 +607,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan".to_string(),

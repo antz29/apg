@@ -172,12 +172,7 @@ fn plan_records(with_feedback: bool) -> Vec<Record> {
         Record::Task {
             fqn: "foo/plan.phase-01.task-1".into(),
             title: "T".into(),
-            kind: "source".into(),
-            tier: String::new(),
             status: "pending".into(),
-            verb: "creates".into(),
-            target: String::new(),
-            new_fqn: String::new(),
         },
         Record::Contains {
             from: "foo/plan.phase-01".into(),
@@ -937,12 +932,7 @@ fn apg_projects_plan_records(project: &str) -> Vec<Record> {
         r.push(Record::Task {
             fqn: task.clone(),
             title: format!("touch {code}"),
-            kind: "source".to_string(),
-            tier: String::new(),
             status: "pending".to_string(),
-            verb: "modifies".to_string(),
-            target: code.to_string(),
-            new_fqn: String::new(),
         });
         r.push(Record::Contains {
             from: format!("{project}/plan.phase-01"),
@@ -2605,12 +2595,7 @@ mod e2e {
                 Record::Task {
                     fqn: "test/plan.phase-01.task-1".to_string(),
                     title: "touch go.fixture.mod.Store".to_string(),
-                    kind: "source".to_string(),
-                    tier: String::new(),
                     status: "pending".to_string(),
-                    verb: "modifies".to_string(),
-                    target: "go.fixture.mod.Store".to_string(),
-                    new_fqn: String::new(),
                 },
                 Record::Contains {
                     from: "test/plan.phase-01".to_string(),
@@ -3140,12 +3125,7 @@ mod e2e {
             Record::Task {
                 fqn: "spec-only/plan.phase-01.task-1".into(),
                 title: "touch go.scratch/a.A".into(),
-                kind: "source".into(),
-                tier: String::new(),
                 status: "pending".into(),
-                verb: "modifies".into(),
-                target: "go.scratch/a.A".into(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "spec-only/plan.phase-01".into(),
@@ -3321,12 +3301,7 @@ mod e2e {
                 Record::Task {
                     fqn: "mini/plan.phase-01.task-1".into(),
                     title: "touch go.scratch/a.A".into(),
-                    kind: "source".into(),
-                    tier: String::new(),
                     status: "pending".into(),
-                    verb: "modifies".into(),
-                    target: "go.scratch/a.A".into(),
-                    new_fqn: String::new(),
                 },
                 Record::Contains {
                     from: "mini/plan.phase-01".into(),

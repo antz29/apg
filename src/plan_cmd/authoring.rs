@@ -301,19 +301,17 @@ pub fn plan_update_phase_at(
 }
 
 /// Core of the `update task` arm: update a task's fields IN PLACE, preserving
-/// its `status` and every incident `Reviews` edge. The effective `(kind,
-/// tier)` and `(verb, target, new_fqn)` triples (each supplied value or the
-/// existing one) are re-validated exactly as `add` does, so an update can
-/// never introduce an invalid classification or verb/target. An absent task is
-/// refused before any mutation.
+/// its `status` and every incident `Reviews` edge. The effective `(verb,
+/// target, new_fqn)` triple (each supplied value or the stored operation edge)
+/// is re-validated exactly as `add` does, so an update can never introduce an
+/// invalid verb/target. An absent task is refused before any mutation.
 ///
-/// Transitional dual-read (SCHEMA.md task edges): the stored operation edge set
-/// is the source of truth for `(verb, target, new_fqn)`; a record carrying no
-/// operation edge falls back to the still-present fields (task-20 retires
-/// them). An update that supplies any of `verb`/`target`/`new_fqn` rewrites
-/// this task's operation edges from the effective values using `add`'s
-/// construction, and the legacy fields are kept in step; an update that
-/// supplies none leaves the existing edges untouched.
+/// The stored operation edge set (SCHEMA.md task edges) is the sole source of
+/// truth for `(verb, target, new_fqn)`; a record carrying no operation edge is
+/// a target-less task. An update that supplies any of `verb`/`target`/`new_fqn`
+/// rewrites this task's operation edges from the effective values using `add`'s
+/// construction; an update that supplies none leaves the existing edges
+/// untouched.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_update_task_at(
     apg_root: &Path,
@@ -329,32 +327,16 @@ pub fn plan_update_task_at(
     new_fqn: Option<&str>,
 ) -> anyhow::Result<()> {
     let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
-    let Some((cur_kind, cur_tier, cur_verb, cur_target, cur_new_fqn)) =
-        records.iter().find_map(|r| match r {
-            Record::Task {
-                fqn: tf,
-                kind,
-                tier,
-                verb,
-                target,
-                new_fqn,
-                ..
-            } if tf == &fqn => Some((
-                kind.clone(),
-                tier.clone(),
-                verb.clone(),
-                target.clone(),
-                new_fqn.clone(),
-            )),
-            _ => None,
-        })
-    else {
+    if !records
+        .iter()
+        .any(|r| matches!(r, Record::Task { fqn: tf, .. } if tf == &fqn))
+    {
         anyhow::bail!(
             "update task: `{fqn}` is not a task of `{project}` (author it first with `apg plan add {project} task {phase} {k} …`)"
         );
-    };
-    // Prefer the stored operation edge set; fall back to the legacy fields when
-    // the record carries none (the transitional dual-read task-20 deletes).
+    }
+    // The stored operation edge set is the sole source of the effective
+    // `(verb, target, new_fqn)` triple.
     let mut edge_op: Option<(&str, &str)> = None;
     let mut edge_new_fqn = "";
     for r in records.iter() {
@@ -405,10 +387,10 @@ pub fn plan_update_task_at(
     }
     let (cur_verb, cur_target, cur_new_fqn) = match edge_op {
         Some((v, to)) => (v.to_string(), to.to_string(), edge_new_fqn.to_string()),
-        None => (cur_verb, cur_target, cur_new_fqn),
+        None => (String::new(), String::new(), String::new()),
     };
-    let eff_kind = kind.unwrap_or(cur_kind.as_str());
-    let eff_tier = tier.unwrap_or(cur_tier.as_str());
+    let eff_kind = kind.unwrap_or("source");
+    let eff_tier = tier.unwrap_or("");
     validate_task_kind_tier(eff_kind, eff_tier)?;
     let eff_verb = verb.unwrap_or(cur_verb.as_str());
     let eff_target = target.unwrap_or(cur_target.as_str());
@@ -566,35 +548,12 @@ pub fn plan_update_task_at(
     }
     for r in records.iter_mut() {
         if let Record::Task {
-            fqn: tf,
-            title: t,
-            kind: kd,
-            tier: tr,
-            verb: vb,
-            target: tg,
-            new_fqn: nf,
-            ..
+            fqn: tf, title: t, ..
         } = r
             && tf == &fqn
+            && let Some(x) = title
         {
-            if let Some(x) = title {
-                *t = x.to_string();
-            }
-            if let Some(x) = kind {
-                *kd = x.to_string();
-            }
-            if let Some(x) = tier {
-                *tr = x.to_string();
-            }
-            if let Some(x) = verb {
-                *vb = x.to_string();
-            }
-            if let Some(x) = target {
-                *tg = x.to_string();
-            }
-            if let Some(x) = new_fqn {
-                *nf = x.to_string();
-            }
+            *t = x.to_string();
         }
     }
     Ok(())
@@ -909,9 +868,8 @@ pub fn plan_rm_task_at(
 /// PlannedNode plus its parent Contains edge (and every other incident edge).
 /// An absent planned node is an error.
 ///
-/// Transitional dual-read (SCHEMA.md task edges): a creating task is recognised
-/// by its `creates` field pair *or* by the `{kind}_create` operation edge it now
-/// also carries, so the guard keeps refusing after task-20 retires the fields.
+/// A creating task is recognised by the `{kind}_create` operation edge it
+/// carries (SCHEMA.md task edges).
 pub fn plan_rm_planned_at(
     apg_root: &Path,
     project: &str,
@@ -929,12 +887,6 @@ pub fn plan_rm_planned_at(
     let mut creators: Vec<String> = records
         .iter()
         .filter_map(|r| match r {
-            Record::Task {
-                fqn: tf,
-                verb,
-                target,
-                ..
-            } if target == fqn && (verb.is_empty() || verb == "creates") => Some(tf.clone()),
             Record::ModuleCreate { from, to }
             | Record::FileCreate { from, to }
             | Record::StructCreate { from, to }
@@ -1152,16 +1104,15 @@ pub fn plan_add_phase_at(
 /// the scanned graph and the planned-node universe, and appends the Task +
 /// Contains records.
 ///
-/// Transitional dual-write (SCHEMA.md task edges): the Task record keeps its
-/// kind/tier/verb/target/new-FQN fields until task-20 retires them, and the
-/// matching per-kind operation edge rides beside it — `creates` → `{kind}_create`
-/// to the planned destination, `modifies`/`deletes` → `{kind}_{modify,delete}`
-/// to the live target, `renames`/`moves` → `{kind}_{rename,move}` to the live
-/// source plus a `target` edge to the planned destination. `{kind}` is the
-/// target's Implementation kind, read from a planned-node declaration first and
-/// the live graph label second; an unresolvable kind writes no edge (a
-/// `creates` against an absent, undeclared FQN has no planned destination to
-/// type).
+/// The Task record stores its title+status alone; the operation rides beside it
+/// as the matching per-kind edge (SCHEMA.md task edges) — `creates` →
+/// `{kind}_create` to the planned destination, `modifies`/`deletes` →
+/// `{kind}_{modify,delete}` to the live target, `renames`/`moves` →
+/// `{kind}_{rename,move}` to the live source plus a `target` edge to the
+/// planned destination. `{kind}` is the target's Implementation kind, read from
+/// a planned-node declaration first and the live graph label second; an
+/// unresolvable kind writes no edge (a `creates` against an absent, undeclared
+/// FQN has no planned destination to type).
 #[allow(clippy::too_many_arguments)]
 pub fn plan_add_task_at(
     apg_root: &Path,
@@ -1217,12 +1168,7 @@ pub fn plan_add_task_at(
     let mut recs = vec![Record::Task {
         fqn: fqn.clone(),
         title: title.to_string(),
-        kind: kind.to_string(),
-        tier: tier.to_string(),
         status: "pending".to_string(),
-        verb: verb.to_string(),
-        target: target.to_string(),
-        new_fqn: new_fqn.to_string(),
     }];
     if let Some(node_kind) = node_kind.as_deref() {
         let op = match (node_kind, verb) {

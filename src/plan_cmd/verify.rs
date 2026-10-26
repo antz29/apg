@@ -500,8 +500,8 @@ pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
 ///    re-points, or removes (a removed edge, or a removed solution node
 ///    carrying one) obliges its code FQN to be touched by at least one plan
 ///    task. A task touches its per-kind operation edges' targets (plus the
-///    companion destination of a renames/moves), falling back to the legacy
-///    `target`/`new_fqn` fields only for a task that carries no operation edge.
+///    companion destination of a renames/moves); a target-less task (no
+///    operation edge) touches nothing.
 ///    Coverage is verb-agnostic and status-agnostic: a
 ///    `creates` over a still-planned FQN counts exactly like a `modifies` over
 ///    real code, and a renames/moves destination counts. FQNs are compared by
@@ -526,19 +526,10 @@ pub fn coverage_check(records: &[Record], delta: &SpecDelta) -> CoverageReport {
     // IDENTITIES, not raw strings, so coverage is root-agnostic.
     let mut touched: BTreeSet<&str> = BTreeSet::new();
     for r in records {
-        if let Record::Task {
-            fqn,
-            verb,
-            target,
-            new_fqn,
-            ..
-        } = r
-        {
-            // Prefer the task's per-kind operation edges; fall back to the
-            // legacy verb/target/new_fqn fields only for a record that carries
-            // none (the transitional dual-read — a renames/moves destination
-            // rides a companion `Record::Target`).
-            let mut has_op = false;
+        if let Record::Task { fqn, .. } = r {
+            // Coverage comes from the task's per-kind operation edges only; a
+            // target-less task (no operation edge) touches nothing. A
+            // renames/moves destination rides a companion `Record::Target`.
             let mut rename_move = false;
             let mut edge_dest = "";
             for e in records {
@@ -570,24 +561,14 @@ pub fn coverage_check(records: &[Record], delta: &SpecDelta) -> CoverageReport {
                     _ => continue,
                 };
                 if from == fqn {
-                    has_op = true;
                     rename_move |= rename;
                     if !to.is_empty() {
                         touched.insert(crate::layers::code_identity(to));
                     }
                 }
             }
-            if has_op {
-                if rename_move && !edge_dest.is_empty() {
-                    touched.insert(crate::layers::code_identity(edge_dest));
-                }
-            } else {
-                if !target.is_empty() {
-                    touched.insert(crate::layers::code_identity(target));
-                }
-                if matches!(verb.as_str(), "renames" | "moves") && !new_fqn.is_empty() {
-                    touched.insert(crate::layers::code_identity(new_fqn));
-                }
+            if rename_move && !edge_dest.is_empty() {
+                touched.insert(crate::layers::code_identity(edge_dest));
             }
         }
     }

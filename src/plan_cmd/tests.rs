@@ -1,6 +1,6 @@
 use super::*;
 use crate::layers::NodeProperties;
-use crate::testutil::{nf, task_rec};
+use crate::testutil::{nf, task_recs};
 
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 /// These operate on in-memory `Record`/`NodeFile` values (validation,
@@ -156,32 +156,17 @@ mod unit {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "Implement".into(),
-                kind: "source".into(),
-                tier: String::new(),
                 status: "done".into(),
-                verb: "creates".into(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-2".into(),
                 title: "Unit tests".into(),
-                kind: "test".into(),
-                tier: "unit".into(),
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-3".into(),
                 title: "Doc".into(),
-                kind: "docs".into(),
-                tier: String::new(),
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -198,21 +183,40 @@ mod unit {
                 to: "foo/plan.phase-01.task-3".into(),
                 properties: NodeProperties::default(),
             },
+            // One operation edge per task: task-1 modifies a struct, task-2
+            // creates a module, task-3 is target-less (no edge).
+            Record::StructModify {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "github.com/x/y.Store".into(),
+            },
+            Record::ModuleCreate {
+                from: "foo/plan.phase-01.task-2".into(),
+                to: "rust.apg.newmod".into(),
+            },
         ];
         let out = render_phase_tasks(&records, "foo/plan.phase-01");
-        // Grouped by kind in canonical order (source before test before docs).
-        let source_pos = out.find("**source**").unwrap();
-        let test_pos = out.find("**test**").unwrap();
-        let docs_pos = out.find("**docs**").unwrap();
-        assert!(source_pos < test_pos && test_pos < docs_pos, "order: {out}");
-        // Test depth renders as test/unit.
-        assert!(
-            out.contains("- [ ] `foo/plan.phase-01.task-2` — Unit tests (test/unit)"),
-            "{out}"
-        );
+        // The owning-kind grouping is gone (phase 5 owns Agent grouping).
+        assert!(!out.contains("**source**"), "{out}");
+        assert!(!out.contains("**test**"), "{out}");
         // Done checkbox preserved.
         assert!(
-            out.contains("- [x] `foo/plan.phase-01.task-1` — Implement (source)"),
+            out.contains("- [x] `foo/plan.phase-01.task-1` — Implement"),
+            "{out}"
+        );
+        // A pending task renders its checkbox.
+        assert!(
+            out.contains("- [ ] `foo/plan.phase-01.task-2` — Unit tests"),
+            "{out}"
+        );
+        // Each operation edge renders as one indented line.
+        assert!(
+            out.contains("  - struct modify `github.com/x/y.Store`"),
+            "{out}"
+        );
+        assert!(out.contains("  - module create `rust.apg.newmod`"), "{out}");
+        // A target-less task renders the task line alone.
+        assert!(
+            out.contains("- [ ] `foo/plan.phase-01.task-3` — Doc\n"),
             "{out}"
         );
     }
@@ -294,53 +298,52 @@ mod unit {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T1".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "modifies".to_string(),
-                target: "github.com/x/y.Store".to_string(),
-                new_fqn: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-2".to_string(),
                 title: "T2".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "deletes".to_string(),
-                target: "github.com/x/y.Store".to_string(),
-                new_fqn: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-3".to_string(),
                 title: "T3".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "renames".to_string(),
-                target: "github.com/x/y.Old".to_string(),
-                new_fqn: "github.com/x/y.Store2".to_string(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-4".to_string(),
                 title: "T4".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: "github.com/x/y.Gateway".to_string(),
-                new_fqn: String::new(),
             },
             // A target-less creates touches nothing.
             Record::Task {
                 fqn: "foo/plan.phase-01.task-5".to_string(),
                 title: "T5".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
                 status: "pending".to_string(),
-                verb: "creates".to_string(),
-                target: String::new(),
-                new_fqn: String::new(),
+            },
+            // The operation edges are the coverage source: task-1 modifies
+            // Store, task-2 deletes it (verb-agnostic), task-3 renames Old to
+            // Store2 (the `target` destination counts), task-4 creates the
+            // planned Gateway.
+            Record::StructModify {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y.Store".to_string(),
+            },
+            Record::StructDelete {
+                from: "foo/plan.phase-01.task-2".to_string(),
+                to: "github.com/x/y.Store".to_string(),
+            },
+            Record::StructRename {
+                from: "foo/plan.phase-01.task-3".to_string(),
+                to: "github.com/x/y.Old".to_string(),
+            },
+            Record::Target {
+                from: "foo/plan.phase-01.task-3".to_string(),
+                to: "github.com/x/y.Store2".to_string(),
+            },
+            Record::StructCreate {
+                from: "foo/plan.phase-01.task-4".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
             },
             // The planned-node declaration is irrelevant to coverage — the
             // creates task's touch is what counts (edge case: an
@@ -417,26 +420,51 @@ mod unit {
     /// gaps either way.
     #[test]
     fn coverage_identity_tolerates_language_root_on_both_sides() {
-        let task = |fqn: &str, verb: &str, target: &str, new_fqn: &str| Record::Task {
-            fqn: fqn.to_string(),
-            title: "T".to_string(),
-            kind: "source".to_string(),
-            tier: String::new(),
-            status: "pending".to_string(),
-            verb: verb.to_string(),
-            target: target.to_string(),
-            new_fqn: new_fqn.to_string(),
+        let task = |fqn: &str, verb: &str, target: &str, new_fqn: &str| -> Vec<Record> {
+            let mut recs = vec![Record::Task {
+                fqn: fqn.to_string(),
+                title: "T".to_string(),
+                status: "pending".to_string(),
+            }];
+            let op = match verb {
+                "modifies" => Some(Record::StructModify {
+                    from: fqn.to_string(),
+                    to: target.to_string(),
+                }),
+                "deletes" => Some(Record::StructDelete {
+                    from: fqn.to_string(),
+                    to: target.to_string(),
+                }),
+                "renames" => Some(Record::StructRename {
+                    from: fqn.to_string(),
+                    to: target.to_string(),
+                }),
+                "moves" => Some(Record::StructMove {
+                    from: fqn.to_string(),
+                    to: target.to_string(),
+                }),
+                _ => Some(Record::StructCreate {
+                    from: fqn.to_string(),
+                    to: target.to_string(),
+                }),
+            };
+            recs.extend(op);
+            if matches!(verb, "renames" | "moves") && !new_fqn.is_empty() {
+                recs.push(Record::Target {
+                    from: fqn.to_string(),
+                    to: new_fqn.to_string(),
+                });
+            }
+            recs
         };
         // Rooted task targets, BARE delta claims.
-        let rooted_tasks = vec![
-            task("foo/plan.phase-01.task-1", "modifies", "rust.apg.cache", ""),
-            task(
-                "foo/plan.phase-01.task-2",
-                "renames",
-                "rust.apg.old_mod",
-                "rust.apg.new_mod",
-            ),
-        ];
+        let mut rooted_tasks = task("foo/plan.phase-01.task-1", "modifies", "rust.apg.cache", "");
+        rooted_tasks.extend(task(
+            "foo/plan.phase-01.task-2",
+            "renames",
+            "rust.apg.old_mod",
+            "rust.apg.new_mod",
+        ));
         let bare_delta = SpecDelta {
             added_claims: vec![
                 ("solution.system.alpha".to_string(), "apg.cache".to_string()),
@@ -455,15 +483,13 @@ mod unit {
         );
 
         // BARE task targets, ROOTED delta claims (the reverse).
-        let bare_tasks = vec![
-            task("foo/plan.phase-01.task-1", "modifies", "apg.cache", ""),
-            task(
-                "foo/plan.phase-01.task-2",
-                "renames",
-                "apg.old_mod",
-                "apg.new_mod",
-            ),
-        ];
+        let mut bare_tasks = task("foo/plan.phase-01.task-1", "modifies", "apg.cache", "");
+        bare_tasks.extend(task(
+            "foo/plan.phase-01.task-2",
+            "renames",
+            "apg.old_mod",
+            "apg.new_mod",
+        ));
         let rooted_delta = SpecDelta {
             added_claims: vec![
                 (
@@ -542,9 +568,14 @@ mod unit {
         // A `renames` destination covers the added claim; a `deletes` covers
         // the removed claim (verb-agnostic); one `Satisfies` per changed
         // requirement clears the requirement gate.
-        let records = vec![
-            task_rec("renames", "github.com/x/y.Unrelated", "github.com/x/y.New"),
-            task_rec("deletes", "github.com/x/y.Old", ""),
+        let mut records = task_recs(
+            "struct",
+            "renames",
+            "github.com/x/y.Unrelated",
+            "github.com/x/y.New",
+        );
+        records.extend(task_recs("struct", "deletes", "github.com/x/y.Old", ""));
+        records.extend([
             Record::Satisfies {
                 from: "foo/plan.phase-01".to_string(),
                 to: "requirements.requirement.added-req".to_string(),
@@ -553,21 +584,24 @@ mod unit {
                 from: "foo/plan.phase-01".to_string(),
                 to: "requirements.requirement.changed-req".to_string(),
             },
-        ];
+        ]);
         let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert!(report.requirement_gaps.is_empty(), "{report:?}");
 
         // The requirement gate is per-FQN: Satisfies'ing only one leaves the
         // other a gap, independent of the (now-covered) claims.
-        let records = vec![
-            task_rec("renames", "github.com/x/y.Unrelated", "github.com/x/y.New"),
-            task_rec("deletes", "github.com/x/y.Old", ""),
-            Record::Satisfies {
-                from: "foo/plan.phase-01".to_string(),
-                to: "requirements.requirement.added-req".to_string(),
-            },
-        ];
+        let mut records = task_recs(
+            "struct",
+            "renames",
+            "github.com/x/y.Unrelated",
+            "github.com/x/y.New",
+        );
+        records.extend(task_recs("struct", "deletes", "github.com/x/y.Old", ""));
+        records.push(Record::Satisfies {
+            from: "foo/plan.phase-01".to_string(),
+            to: "requirements.requirement.added-req".to_string(),
+        });
         let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert_eq!(
@@ -600,13 +634,11 @@ mod unit {
         // pre-existing claim) and the only task touches an unrelated FQN: the
         // delta claim is STILL a gap — scope is the delta, not the spine — and
         // the Satisfies never imposes an obligation on any unchanged code.
-        let records = vec![
-            task_rec("modifies", "github.com/x/y.Unrelated", ""),
-            Record::Satisfies {
-                from: "foo/plan.phase-01".to_string(),
-                to: "requirements.requirement.r".to_string(),
-            },
-        ];
+        let mut records = task_recs("struct", "modifies", "github.com/x/y.Unrelated", "");
+        records.push(Record::Satisfies {
+            from: "foo/plan.phase-01".to_string(),
+            to: "requirements.requirement.r".to_string(),
+        });
         let report = coverage_check(&records, &delta);
         assert_eq!(
             report.gaps,
@@ -629,7 +661,7 @@ mod unit {
         // Touching the delta claim clears the claim gap, and dropping the
         // Satisfies (keeping the touch) makes ONLY the requirement a gap —
         // Satisfies discharges requirements, never implemented-by claims.
-        let records = vec![task_rec("modifies", "github.com/x/y.Delta", "")];
+        let records = task_recs("struct", "modifies", "github.com/x/y.Delta", "");
         let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert_eq!(
@@ -639,13 +671,11 @@ mod unit {
 
         // Delta claim touched AND requirement Satisfies'd -> the delta decision
         // is fully clear.
-        let records = vec![
-            task_rec("modifies", "github.com/x/y.Delta", ""),
-            Record::Satisfies {
-                from: "foo/plan.phase-01".to_string(),
-                to: "requirements.requirement.r".to_string(),
-            },
-        ];
+        let mut records = task_recs("struct", "modifies", "github.com/x/y.Delta", "");
+        records.push(Record::Satisfies {
+            from: "foo/plan.phase-01".to_string(),
+            to: "requirements.requirement.r".to_string(),
+        });
         let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert!(report.requirement_gaps.is_empty(), "{report:?}");
@@ -679,12 +709,7 @@ mod unit {
             Record::Task {
                 fqn: removed.clone(),
                 title: "T1".into(),
-                kind: "source".into(),
-                tier: String::new(),
                 status: "pending".into(),
-                verb: "creates".into(),
-                target: String::new(),
-                new_fqn: String::new(),
             },
             Record::Feedback {
                 fqn: "foo/feedback-1".into(),

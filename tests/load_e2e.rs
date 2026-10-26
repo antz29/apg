@@ -331,20 +331,15 @@ mod e2e {
             "foo/plan.phase-1.task-1",
             Node {
                 title: Some("Add RootStore".to_string()),
-                sub_kind: Some("source".to_string()),
                 status: Some("pending".to_string()),
-                verb: Some("renames".to_string()),
-                target: Some("foo.Old".to_string()),
-                new_fqn: Some("foo.New".to_string()),
                 ..sp(NodeKind::Task)
             },
         );
-        // An old-format Task node (pre-verb shape): no verb/target/new_fqn.
+        // An old-format Task node (pre-verb shape): title+status alone.
         n(
             "foo/plan.phase-1.task-2",
             Node {
                 title: Some("Legacy".to_string()),
-                sub_kind: Some("source".to_string()),
                 status: Some("pending".to_string()),
                 ..sp(NodeKind::Task)
             },
@@ -586,16 +581,14 @@ mod e2e {
             .nodes
             .get("task-verb-db/plan.phase-01.task-1")
             .expect("task-1 in graph.jsonl");
-        assert_eq!(t1.verb.as_deref(), Some("renames"));
-        assert_eq!(t1.target.as_deref(), Some("fixture.mod.Old"));
-        assert_eq!(t1.new_fqn.as_deref(), Some("fixture.mod.New"));
+        assert_eq!(t1.title.as_deref(), Some("Add RootStore"));
+        assert_eq!(t1.status.as_deref(), Some("pending"));
         let t2 = back
             .nodes
             .get("task-verb-db/plan.phase-01.task-2")
             .expect("task-2 in graph.jsonl");
-        assert_eq!(t2.verb.as_deref(), Some("creates"));
-        assert_eq!(t2.target, None);
-        assert_eq!(t2.new_fqn, None);
+        assert_eq!(t2.title.as_deref(), Some("Legacy"));
+        assert_eq!(t2.status.as_deref(), Some("pending"));
 
         testutil::remove(&repo);
     }

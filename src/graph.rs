@@ -200,23 +200,10 @@ pub struct Node {
     /// Implementation nodes carry their kind as a DB label, not a string.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_kind: Option<String>,
-    /// The Implementation FQN a `Task` node's verb applies to (the source FQN
-    /// of a renames/moves pair); `None` on a target-less task.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    /// The Task→Implementation verb of a `Task` node (creates/modifies/
-    /// deletes/renames/moves); `None` when the record carried no verb.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verb: Option<String>,
-    /// The destination FQN of a renames/moves `Task` node; `None` otherwise.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub new_fqn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deliverable: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tier: Option<String>,
     /// The node's lifecycle status. For the four Implementation node kinds a
     /// `Some("planned")` marks a plan-writer-authored placeholder (the code
     /// does not exist yet; the scanner replaces it on realization); the
@@ -269,12 +256,8 @@ impl Default for Node {
             body: None,
             number: None,
             sub_kind: None,
-            target: None,
-            verb: None,
-            new_fqn: None,
             deliverable: None,
             strategy: None,
-            tier: None,
             status: None,
             disposition: None,
             git_sha: None,

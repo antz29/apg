@@ -671,12 +671,7 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "Rename".into(),
-                kind: "source".into(),
-                tier: String::new(),
                 status: "pending".into(),
-                verb: "renames".into(),
-                target: "foo.Old".into(),
-                new_fqn: "foo.New".into(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),

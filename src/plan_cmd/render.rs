@@ -105,8 +105,8 @@ pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The markdown task list for one phase, grouped by owning kind. Verification
-/// depth renders as `test/<tier>` for test tasks, plain kind otherwise.
+/// The markdown task list for one phase. Each task renders its title, its
+/// checkbox status and one indented sub-line per operation edge.
 ///
 /// A task's operation edges (SCHEMA.md task tier) render as one indented
 /// sub-line per edge, `<kind> <operation> `<target>`` — `<kind>` is
@@ -117,7 +117,7 @@ pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
 /// `-> `<destination>``:
 ///
 /// ```text
-/// - [ ] `demo/plan.phase-01.task-1` — Rename gateway (source)
+/// - [ ] `demo/plan.phase-01.task-1` — Rename gateway
 ///   - module rename `rust.apg.old` -> `rust.apg.new`
 /// ```
 ///
@@ -135,60 +135,37 @@ pub(crate) fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
                 .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t))
         })
         .collect();
-    const KIND_ORDER: [&str; 4] = ["source", "test", "gate", "docs"];
-    type TaskLine = (String, String, String, String);
-    let mut by_kind: Vec<(String, Vec<TaskLine>)> = Vec::new();
+    let mut out = String::new();
     for t in tasks {
-        let (title, kind, tier, status) = records
+        let (title, status) = records
             .iter()
             .find_map(|r| match r {
                 Record::Task {
-                    fqn,
-                    title,
-                    kind,
-                    tier,
-                    status,
-                    ..
-                } if fqn == &t => Some((title.clone(), kind.clone(), tier.clone(), status.clone())),
+                    fqn, title, status, ..
+                } if fqn == &t => Some((title.clone(), status.clone())),
                 _ => None,
             })
             .unwrap_or_default();
-        let depth = if kind == "test" && !tier.is_empty() {
-            format!("test/{tier}")
-        } else {
-            kind.clone()
-        };
-        match by_kind.iter_mut().find(|(k, _)| *k == kind) {
-            Some((_, items)) => items.push((t, title, depth, status)),
-            None => by_kind.push((kind, vec![(t, title, depth, status)])),
-        }
-    }
-    by_kind.sort_by_key(|(k, _)| KIND_ORDER.iter().position(|x| x == k).unwrap_or(usize::MAX));
-    let mut out = String::new();
-    for (kind, items) in by_kind {
-        out.push_str(&format!("**{kind}**\n"));
-        for (t, title, depth, status) in items {
-            let check = if status == "done" { "[x]" } else { "[ ]" };
-            out.push_str(&format!("- {check} `{t}` — {title} ({depth})\n"));
-            let dest = records.iter().find_map(|r| match r {
-                Record::Target { from, to } if from == &t => Some(to.as_str()),
-                _ => None,
-            });
-            for r in records {
-                let Some((edge_kind, op, from, to)) = task_op_edge(r) else {
-                    continue;
-                };
-                if from != t.as_str() {
-                    continue;
-                }
-                let arrow = match dest {
-                    Some(d) if !d.is_empty() && matches!(op, "rename" | "move") => {
-                        format!(" -> `{d}`")
-                    }
-                    _ => String::new(),
-                };
-                out.push_str(&format!("  - {edge_kind} {op} `{to}`{arrow}\n"));
+        let check = if status == "done" { "[x]" } else { "[ ]" };
+        out.push_str(&format!("- {check} `{t}` — {title}\n"));
+        let dest = records.iter().find_map(|r| match r {
+            Record::Target { from, to } if from == &t => Some(to.as_str()),
+            _ => None,
+        });
+        for r in records {
+            let Some((edge_kind, op, from, to)) = task_op_edge(r) else {
+                continue;
+            };
+            if from != t.as_str() {
+                continue;
             }
+            let arrow = match dest {
+                Some(d) if !d.is_empty() && matches!(op, "rename" | "move") => {
+                    format!(" -> `{d}`")
+                }
+                _ => String::new(),
+            };
+            out.push_str(&format!("  - {edge_kind} {op} `{to}`{arrow}\n"));
         }
     }
     out
