@@ -30,6 +30,11 @@ mod unit {
         assert_eq!(language_of("x.tpp"), "cpp");
         assert_eq!(language_of("x.ipp"), "cpp");
         assert_eq!(language_of("x.md"), "md");
+        // A tracked `.opencode/agents/` definition is the agent frontend's
+        // claim, so it lands in the agent stream's target set ahead of the
+        // `.md` mapping; other Markdown stays on `md`.
+        assert_eq!(language_of(".opencode/agents/implementer.md"), "agent");
+        assert_eq!(language_of("docs/implementer.md"), "md");
         // apg-0.17.0 phase-03 task-17: the structural stream mappings mirror
         // the bundled scanner's `stream_for_path` taxonomy — extension-keyed
         // and filename-keyed — so each structural stream gets its own
