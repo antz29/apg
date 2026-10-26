@@ -1775,7 +1775,10 @@ mod e2e {
     /// `--json` — serves the transient Plan/PlanPhase/Task/Feedback projections
     /// the `apg_plan` / `apg_plan_phases` / `apg_plan_tasks` readers run (plus
     /// the Satisfies/Reviews/Gates joins those readers use), so main's own
-    /// branch-local `.trans` store is readable, not refused.
+    /// branch-local `.trans` store is readable, not refused. The task is the
+    /// edge model: a title+status record whose assignment and operation are
+    /// edges joining a real Agent and Struct node, never the retired
+    /// kind/tier/verb/target properties.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/spawned apg/db.lbug); run via cargo test-e2e"]
     fn main_checkout_query_serves_the_plan_reader_projections() {
@@ -1783,10 +1786,28 @@ mod e2e {
         let apg_root = repo.apg_root();
         testutil::touch_db(&apg_root);
 
+        // The graph nodes the task's edges join: the live Struct its
+        // `struct_modify` edge targets and the Agent definition its
+        // `assigned-to` edge names. Main has no durable-write path, so they are
+        // projected straight into the fixture DB the readers query.
+        {
+            let db = Database::new(
+                apg_root.join(specs::TRANS).join("db.lbug"),
+                Default::default(),
+            )
+            .unwrap();
+            let conn = Connection::new(&db).unwrap();
+            conn.query("MERGE (n:Struct {fqn: 'go.seed.Store'})")
+                .unwrap();
+            conn.query("MERGE (n:Agent {fqn: 'agent.reader'})").unwrap();
+        }
+
         // Main's own branch-local plan store (project key = branch `main`)
         // seeded with the plain JSONL primitive; the durable Requirement its
         // `Satisfies` edge names is merged alongside so the reader join
-        // resolves. `write_jsonl_and_reingest` refuses on main by design.
+        // resolves. Each task carries title+status alone and its
+        // assignment/operation are the SCHEMA.md task edges.
+        // `write_jsonl_and_reingest` refuses on main by design.
         let plan = vec![
             schema::Record::Plan {
                 fqn: "main/plan".to_string(),
@@ -1833,6 +1854,16 @@ mod e2e {
                 title: "Read".to_string(),
                 status: "done".to_string(),
             },
+            // The task's assignment and its operation edge, beside the
+            // title+status record.
+            schema::Record::AssignedTo {
+                from: "main/plan.phase-01.task-1".to_string(),
+                to: "agent.reader".to_string(),
+            },
+            schema::Record::StructModify {
+                from: "main/plan.phase-01.task-1".to_string(),
+                to: "go.seed.Store".to_string(),
+            },
             schema::Record::Contains {
                 from: "main/plan.phase-01".to_string(),
                 to: "main/plan.phase-01.task-1".to_string(),
@@ -1850,7 +1881,7 @@ mod e2e {
             },
         ];
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "main"), &plan).unwrap();
-        let mut records = plan.clone();
+        let mut records = plan;
         records.push(schema::Record::Requirement {
             fqn: "requirements.requirement.timer".to_string(),
             id: "R1".to_string(),
@@ -1873,8 +1904,17 @@ mod e2e {
                 "main/plan.phase-01,1,P1,D",
             ),
             (
-                "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status, t.verb, t.target",
-                "main/plan.phase-01,main/plan.phase-01.task-1,Read,test,e2e,done,modifies,go.seed.Store",
+                "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.title, t.status",
+                "main/plan.phase-01,main/plan.phase-01.task-1,Read,done",
+            ),
+            // The task's assignment and operation are edges, not properties.
+            (
+                "MATCH (t:Task)-[:AssignedTo]->(a:Agent) RETURN t.fqn, a.fqn",
+                "main/plan.phase-01.task-1,agent.reader",
+            ),
+            (
+                "MATCH (t:Task)-[:StructModify]->(s:Struct) RETURN t.fqn, s.fqn",
+                "main/plan.phase-01.task-1,go.seed.Store",
             ),
             (
                 "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn",
