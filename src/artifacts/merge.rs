@@ -366,26 +366,11 @@ fn node_merge(
             None,
         )),
         Record::Task {
-            fqn,
-            title,
-            kind,
-            tier,
-            status,
-            verb,
-            target,
-            new_fqn,
+            fqn, title, status, ..
         } => Some((
             "Task",
             fqn,
-            vec![
-                ("title", title.clone()),
-                ("kind", kind.clone()),
-                ("tier", tier.clone()),
-                ("status", status.clone()),
-                ("verb", verb.clone()),
-                ("target", target.clone()),
-                ("new_fqn", new_fqn.clone()),
-            ],
+            vec![("title", title.clone()), ("status", status.clone())],
             None,
         )),
         Record::Stakeholder {
