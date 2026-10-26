@@ -1642,9 +1642,11 @@ mod e2e {
             },
         ];
 
-        // A creates against an FQN absent from the scanned graph — and not yet
-        // declared anywhere — is accepted (the plan may declare the planned
-        // node later; the verb's rule is only "not existing real code").
+        // A `struct creates` edge against an FQN absent from the scanned graph —
+        // and not yet declared anywhere — is accepted, and the task lands the
+        // `struct_create` operation edge to that planned destination (the rule
+        // is only "not existing real code"; the plan may declare the node
+        // later).
         plan_add_task_at(
             &apg_root,
             "foo",
@@ -1667,8 +1669,17 @@ mod e2e {
             }
             other => panic!("expected the creates task, got {other:?}"),
         }
+        assert!(
+            records.iter().any(|r| matches!(
+                r,
+                Record::StructCreate { from, to }
+                    if from == "foo/plan.phase-01.task-1"
+                        && to == "github.com/x/y.Gateway"
+            )),
+            "the creates edge targets the absent planned destination"
+        );
 
-        // A creates against a DB `status: planned` node is accepted: the
+        // A creates edge against a DB `status: planned` node is accepted: the
         // planned-node universe is the DB's planned nodes UNION the
         // `Record::PlannedNode` records — here the planned FQN was written
         // through (re-ingested `status: planned`) while the records handed to
@@ -1699,6 +1710,88 @@ mod e2e {
                 if from == "foo/plan.phase-01.task-2"
                     && to == "github.com/x/y.Gateway"
         )));
+
+        // A creates edge against real scanned code is refused before any Task
+        // or operation-edge record lands: `github.com/x/y.Store` is a real
+        // Struct in the fixture DB.
+        let before = records.len();
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            3,
+            "T3",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "creates", "github.com/x/y.Store", "")],
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("already resolves to scanned code"),
+            "{err}"
+        );
+        assert_eq!(records.len(), before, "a refused creates leaves no record");
+
+        // A modifies/deletes edge against the planned FQN is refused too — only
+        // a creates builds a planned node, so neither may change it.
+        for verb in ["modifies", "deletes"] {
+            let err = plan_add_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                3,
+                "T3",
+                &assigned_agent(),
+                None,
+                &[task_op("struct", verb, "github.com/x/y.Gateway", "")],
+            )
+            .unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("is a planned node, not scanned code"),
+                "{verb}: {msg}"
+            );
+            assert_eq!(records.len(), before, "a refused {verb} leaves no record");
+        }
+
+        // A task with an empty operation edge set is a valid target-less
+        // activity in the scratch project worktree: only its Task, assigned-to
+        // and phase Contains records land, with no operation edge at all.
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            3,
+            "T3",
+            &assigned_agent(),
+            None,
+            &[],
+        )
+        .unwrap();
+        assert!(
+            records.iter().any(|r| matches!(
+                r,
+                Record::Task { fqn, title, .. }
+                    if fqn == "foo/plan.phase-01.task-3" && title == "T3"
+            )),
+            "the target-less task lands"
+        );
+        assert!(
+            records.iter().any(|r| matches!(
+                r,
+                Record::Contains { from, to, .. }
+                    if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-3"
+            )),
+            "the target-less task keeps its phase Contains edge"
+        );
+        assert_eq!(
+            records.len(),
+            before + 3,
+            "a target-less task adds only its Task + assigned-to + Contains records, no operation edge"
+        );
 
         testutil::remove(&repo);
     }
