@@ -697,6 +697,10 @@ pub fn plan_rm_task_at(
 /// the FQN (naming the task and the `--force` escape); `--force` removes the
 /// PlannedNode plus its parent Contains edge (and every other incident edge).
 /// An absent planned node is an error.
+///
+/// Transitional dual-read (SCHEMA.md task edges): a creating task is recognised
+/// by its `creates` field pair *or* by the `{kind}_create` operation edge it now
+/// also carries, so the guard keeps refusing after task-20 retires the fields.
 pub fn plan_rm_planned_at(
     apg_root: &Path,
     project: &str,
@@ -711,7 +715,7 @@ pub fn plan_rm_planned_at(
     {
         anyhow::bail!("no planned node `{fqn}` in plan `{project}` — nothing to remove");
     }
-    let creators: Vec<String> = records
+    let mut creators: Vec<String> = records
         .iter()
         .filter_map(|r| match r {
             Record::Task {
@@ -720,9 +724,19 @@ pub fn plan_rm_planned_at(
                 target,
                 ..
             } if target == fqn && (verb.is_empty() || verb == "creates") => Some(tf.clone()),
+            Record::ModuleCreate { from, to }
+            | Record::FileCreate { from, to }
+            | Record::StructCreate { from, to }
+            | Record::FunctionCreate { from, to }
+                if to == fqn =>
+            {
+                Some(from.clone())
+            }
             _ => None,
         })
         .collect();
+    creators.sort();
+    creators.dedup();
     if !creators.is_empty() && !force {
         anyhow::bail!(
             "planned node `{fqn}` is targeted by a creates task: {} — pass --force to remove the planned node and its parent Contains edge",
@@ -926,6 +940,17 @@ pub fn plan_add_phase_at(
 /// kind/tier, validates the Task→Implementation verb + target FQN(s) against
 /// the scanned graph and the planned-node universe, and appends the Task +
 /// Contains records.
+///
+/// Transitional dual-write (SCHEMA.md task edges): the Task record keeps its
+/// kind/tier/verb/target/new-FQN fields until task-20 retires them, and the
+/// matching per-kind operation edge rides beside it — `creates` → `{kind}_create`
+/// to the planned destination, `modifies`/`deletes` → `{kind}_{modify,delete}`
+/// to the live target, `renames`/`moves` → `{kind}_{rename,move}` to the live
+/// source plus a `target` edge to the planned destination. `{kind}` is the
+/// target's Implementation kind, read from a planned-node declaration first and
+/// the live graph label second; an unresolvable kind writes no edge (a
+/// `creates` against an absent, undeclared FQN has no planned destination to
+/// type).
 #[allow(clippy::too_many_arguments)]
 pub fn plan_add_task_at(
     apg_root: &Path,
@@ -962,6 +987,22 @@ pub fn plan_add_task_at(
     let verb = if verb.is_empty() { "creates" } else { verb };
     let (scanned, planned) = task_verb_universes(apg_root, records)?;
     validate_task_verb(verb, target, new_fqn, &scanned, &planned)?;
+    let node_kind = if target.is_empty() {
+        None
+    } else {
+        records
+            .iter()
+            .find_map(|r| match r {
+                Record::PlannedNode { fqn: pf, kind, .. } if pf == target => Some(kind.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                artifacts::ArtifactDb::open(apg_root)
+                    .ok()
+                    .and_then(|db| db.impl_label(target))
+                    .map(|label| label.to_ascii_lowercase())
+            })
+    };
     let mut recs = vec![Record::Task {
         fqn: fqn.clone(),
         title: title.to_string(),
@@ -972,6 +1013,100 @@ pub fn plan_add_task_at(
         target: target.to_string(),
         new_fqn: new_fqn.to_string(),
     }];
+    if let Some(node_kind) = node_kind.as_deref() {
+        let op = match (node_kind, verb) {
+            ("module", "creates") => Some(Record::ModuleCreate {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("module", "modifies") => Some(Record::ModuleModify {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("module", "deletes") => Some(Record::ModuleDelete {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("module", "renames") => Some(Record::ModuleRename {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("module", "moves") => Some(Record::ModuleMove {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("file", "creates") => Some(Record::FileCreate {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("file", "modifies") => Some(Record::FileModify {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("file", "deletes") => Some(Record::FileDelete {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("file", "renames") => Some(Record::FileRename {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("file", "moves") => Some(Record::FileMove {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("struct", "creates") => Some(Record::StructCreate {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("struct", "modifies") => Some(Record::StructModify {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("struct", "deletes") => Some(Record::StructDelete {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("struct", "renames") => Some(Record::StructRename {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("struct", "moves") => Some(Record::StructMove {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("function", "creates") => Some(Record::FunctionCreate {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("function", "modifies") => Some(Record::FunctionModify {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("function", "deletes") => Some(Record::FunctionDelete {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("function", "renames") => Some(Record::FunctionRename {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            ("function", "moves") => Some(Record::FunctionMove {
+                from: fqn.clone(),
+                to: target.to_string(),
+            }),
+            _ => None,
+        };
+        if let Some(op) = op {
+            recs.push(op);
+            if matches!(verb, "renames" | "moves") {
+                recs.push(Record::Target {
+                    from: fqn.clone(),
+                    to: new_fqn.to_string(),
+                });
+            }
+        }
+    }
     recs.push(Record::Contains {
         from: phase_fqn,
         to: fqn.clone(),
