@@ -432,38 +432,38 @@ mod unit {
         push_gate("foo/plan.phase-01", "foo/plan.phase-04", &records).unwrap();
     }
 
-    /// Pure semantics of the delta-scoped coverage decision. With no
-    /// pre-existing spec the whole branch spec is the delta, so every
-    /// solution node's `implemented-by` target is an ADDED claim and every
-    /// claim-less solution node a `no_claims` warning. Pins exact-FQN touch
-    /// matching, verb-agnostic touches built from operation edges (a `deletes`
-    /// touches what it deletes; a `renames`/`moves` touches its live source
-    /// AND its `target` destination; a `creates` covers a still-planned FQN),
-    /// a target-less task's empty edge set touching nothing, language-root
-    /// tolerance, and non-solution nodes (person, solution notes) ignored.
+    /// Pure semantics of the delta-scoped coverage decision over a task's
+    /// operation edges. A task touches each operation edge's target: a
+    /// `creates`, `modifies` or `deletes` covers a claim at its target, and a
+    /// `renames`/`moves` covers its live source AND its `target` destination.
+    /// One task may carry several operation edges, so two distinct
+    /// destinations are BOTH covered (no last-wins slot). A target-less task
+    /// (no operation edge) covers nothing. FQNs compare by language-agnostic
+    /// identity, so a rooted target covers a bare claim and the reverse. With
+    /// no pre-existing spec the whole branch spec is the delta, so every
+    /// solution claim is an ADDED claim and a claim-less solution node is a
+    /// `no_claims` warning; non-solution nodes are ignored.
     #[test]
     fn coverage_check_reports_gaps_no_claims_and_verb_agnostic_touches() {
-        // The operation edges are the coverage source. `task_recs` emits the
-        // title+status task record plus the verb's edge (and, for a
-        // rename/move, the `target` destination); the first call's task
-        // record is kept and the repeats' dropped, so this is ONE task
-        // carrying every verb's edge.
-        let mut records = task_recs("struct", "modifies", "github.com/x/y.Store", "");
+        // ONE task carrying every verb's operation edge: `task_recs` emits the
+        // task record (dropped on the repeats) plus the verb's edge (and, for
+        // renames/moves, the `target` destination).
+        let mut records = task_recs("struct", "creates", "github.com/x/y.Gateway", "");
         for recs in [
-            task_recs("struct", "deletes", "github.com/x/y.Store", ""),
+            task_recs("struct", "modifies", "github.com/x/y.Store", ""),
+            task_recs("struct", "deletes", "github.com/x/y.Removed", ""),
             task_recs(
                 "struct",
                 "renames",
                 "github.com/x/y.Old",
                 "github.com/x/y.Store2",
             ),
-            task_recs("struct", "creates", "github.com/x/y.Gateway", ""),
         ] {
             records.extend(recs.into_iter().skip(1));
         }
-        // The planned-node declaration is irrelevant to coverage — the
-        // creates task's touch is what counts (edge case: an implemented-by
-        // FQN already `status: planned` in the DB, awaiting its creates task).
+        // The planned-node declaration is irrelevant to coverage — the creates
+        // task's touch is what counts (an implemented-by FQN may still be
+        // `status: planned` in the DB, awaiting its creates task).
         records.push(Record::PlannedNode {
             fqn: "github.com/x/y.Gateway".to_string(),
             kind: "struct".to_string(),
@@ -471,28 +471,34 @@ mod unit {
             parent: String::new(),
         });
         let nodes = vec![
+            // Covered by the creates / modifies / deletes targets.
             nf(
                 "solution",
                 "system",
                 "payments",
-                &[
-                    ("implemented-by", "github.com/x/y.Store"),
-                    ("implemented-by", "github.com/x/y.Gateway"),
-                ],
+                &[("implemented-by", "github.com/x/y.Gateway")],
             ),
             nf(
                 "solution",
                 "container",
                 "api",
-                &[("implemented-by", "github.com/x/y.Store2")],
+                &[("implemented-by", "github.com/x/y.Store")],
             ),
-            // The rename's LIVE SOURCE is a claim too, so Old is covered by the
-            // rename edge itself, not only by its `target` destination.
+            nf(
+                "solution",
+                "component",
+                "legacy",
+                &[("implemented-by", "github.com/x/y.Removed")],
+            ),
+            // A rename covers its LIVE SOURCE and its `target` destination.
             nf(
                 "solution",
                 "component",
                 "orders",
-                &[("implemented-by", "github.com/x/y.Old")],
+                &[
+                    ("implemented-by", "github.com/x/y.Old"),
+                    ("implemented-by", "github.com/x/y.Store2"),
+                ],
             ),
             // An untouched implemented-by FQN -> the gap.
             nf(
@@ -523,10 +529,9 @@ mod unit {
         // tier).
         let delta = delta_from_solution_nodes(&nodes);
         let report = coverage_check(&records, &delta);
-        // Only the reporting component's FQN is untouched: Store is touched
-        // (modifies AND deletes — verb-agnostic), Old by the rename's live
-        // source and Store2 by its `target` destination, Gateway by the
-        // creates.
+        // Only the reporting component's FQN is untouched: Gateway by the
+        // creates, Store by the modifies, Removed by the deletes, and Old plus
+        // Store2 by the rename's live source and destination.
         assert_eq!(
             report.gaps,
             vec![CoverageGap {
@@ -535,6 +540,42 @@ mod unit {
             }]
         );
         assert_eq!(report.no_claims, vec!["solution.component.checkout"]);
+
+        // One task may carry TWO rename/move destinations; BOTH are covered —
+        // the touch set inserts every operation edge target, no last-wins slot.
+        let mut two_destinations = task_recs(
+            "struct",
+            "renames",
+            "github.com/x/y.OldA",
+            "github.com/x/y.NewA",
+        );
+        two_destinations.extend(
+            task_recs(
+                "struct",
+                "moves",
+                "github.com/x/y.OldB",
+                "github.com/x/y.NewB",
+            )
+            .into_iter()
+            .skip(1),
+        );
+        let delta = SpecDelta {
+            added_claims: vec![
+                (
+                    "solution.component.first".to_string(),
+                    "github.com/x/y.NewA".to_string(),
+                ),
+                (
+                    "solution.component.second".to_string(),
+                    "github.com/x/y.NewB".to_string(),
+                ),
+            ],
+            ..Default::default()
+        };
+        assert!(
+            coverage_check(&two_destinations, &delta).gaps.is_empty(),
+            "both destinations of one task's rename/move edge set are covered"
+        );
 
         // A target-less task carries an empty edge set, so it touches nothing:
         // the added claim stays a gap.
