@@ -22,11 +22,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.plan_cmd.authoring.validate_task_verb",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.render.render_phase_tasks",
       "properties": {}
     },
@@ -43,6 +38,11 @@
     {
       "kind": "realises",
       "target": "domain.service.plan-tooling",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.authoring.validate_task_operations",
       "properties": {}
     }
   ],
