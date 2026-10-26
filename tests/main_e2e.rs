@@ -9209,6 +9209,157 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Phase-02 task-18 (e2e): the agent language registration's
+    /// directory-bound facets. `available_languages` reports `agent` only when
+    /// an `agentfrontend` artifact is installed (driven through the real CLI
+    /// with an isolated `APG_FRONTEND_DIR`), an empty isolated frontends dir
+    /// falls back to the baked `APG_LANGUAGES` vocabulary and still selects
+    /// `agent`, and `auto_detect_languages` appends `agent` whenever
+    /// `available` carries it — like the structural bundle, even for a tree
+    /// with no `.opencode/agents/` definitions — while omitting it when
+    /// `available` lacks it.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir fs + spawned apg); run via cargo test-e2e"]
+    fn agent_language_registration_dir_probes() {
+        let base = std::env::temp_dir().join(format!("apg-agent-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        // The agent frontend is not extension-detectable: its claim directory
+        // is hidden, so `has_extension` never descends into it. `agent` is
+        // appended as a whole whenever it sits in `available` — even for a
+        // tree with no `.opencode/agents/` at all — and omitted when absent.
+        let tree = base.join("tree");
+        std::fs::create_dir_all(&tree).unwrap();
+        std::fs::write(tree.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        assert!(
+            !tree.join(".opencode/agents").exists(),
+            "the fixture must carry no agent definitions"
+        );
+        assert_eq!(
+            auto_detect_languages(&tree, &["go".to_string()]),
+            vec!["go".to_string()],
+            "agent must be omitted when available lacks it"
+        );
+        let detected = auto_detect_languages(&tree, &["go".to_string(), "agent".to_string()]);
+        assert_eq!(
+            detected,
+            vec!["go".to_string(), "agent".to_string()],
+            "agent must be appended after the code languages whenever available"
+        );
+        assert_eq!(
+            detected.iter().filter(|l| *l == "agent").count(),
+            1,
+            "agent must be selected exactly once: {detected:?}"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let (b, repo_dir, home) = py_scratch(
+                "agent-avail",
+                &[("main.go", "package main\n\nfunc main() {}\n")],
+            );
+            // An isolated frontends dir carrying only a stub `gofrontend`
+            // reports no agent (and never spawns agentfrontend); adding the
+            // REAL staged agentfrontend makes it reportable and run.
+            let fe = b.join("frontends");
+            std::fs::create_dir_all(&fe).unwrap();
+            let go_stub = fe.join("gofrontend");
+            std::fs::write(&go_stub, "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(&go_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            let run = |env: &Path| {
+                testutil::ApgCommand::new(&["scan", "."])
+                    .cwd(&repo_dir)
+                    .env("HOME", home.to_str().unwrap())
+                    .env("APG_FRONTEND_DIR", env.to_str().unwrap())
+                    .output()
+            };
+            let languages_line = |out: &str| -> Vec<String> {
+                out.lines()
+                    .find_map(|l| l.strip_prefix("Languages: "))
+                    .map(|l| l.split(", ").map(str::to_string).collect())
+                    .unwrap_or_default()
+            };
+            // The fast path would reuse a recorded DB; drop the scan record so
+            // each probe re-runs the language selection.
+            let force_rescan = || {
+                let _ = std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug"));
+                let _ = std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl"));
+                let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+            };
+
+            let scan = run(&fe);
+            let out = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan (go-only frontends): {out}");
+            let langs = languages_line(&out);
+            assert!(
+                !langs.iter().any(|l| l == "agent"),
+                "agent must NOT be reported when agentfrontend is absent: {out}"
+            );
+
+            force_rescan();
+            let real = testutil::apg_bin()
+                .parent()
+                .expect("apg binary has a parent")
+                .join("frontends")
+                .join("agentfrontend");
+            assert!(
+                real.is_file(),
+                "agentfrontend not staged at {} — run `cargo build` first",
+                real.display()
+            );
+            std::os::unix::fs::symlink(&real, fe.join("agentfrontend")).unwrap();
+
+            let scan2 = run(&fe);
+            let out2 = String::from_utf8_lossy(&scan2.stderr).to_string();
+            assert!(scan2.status.success(), "scan (agent installed): {out2}");
+            let langs2 = languages_line(&out2);
+            assert_eq!(
+                langs2.iter().filter(|l| *l == "agent").count(),
+                1,
+                "the Languages: line must list agent exactly once: {out2}"
+            );
+            assert!(
+                out2.contains("running agent frontend"),
+                "agent must run once agentfrontend is installed: {out2}"
+            );
+
+            // An EMPTY isolated frontends dir falls back to the baked
+            // APG_LANGUAGES vocabulary, which carries `agent` (build.rs appends
+            // it): `--language agent` therefore validates and runs instead of
+            // refusing the id as unavailable.
+            force_rescan();
+            let empty_fe = b.join("empty-frontends");
+            std::fs::create_dir_all(&empty_fe).unwrap();
+            let scan3 = testutil::ApgCommand::new(&["scan", ".", "--language", "agent"])
+                .cwd(&repo_dir)
+                .env("HOME", home.to_str().unwrap())
+                .env("APG_FRONTEND_DIR", empty_fe.to_str().unwrap())
+                .output();
+            let out3 = String::from_utf8_lossy(&scan3.stderr).to_string();
+            assert!(
+                scan3.status.success(),
+                "scan --language agent (baked vocabulary): {out3}"
+            );
+            let langs3 = languages_line(&out3);
+            assert_eq!(
+                langs3.iter().filter(|l| *l == "agent").count(),
+                1,
+                "the baked APG_LANGUAGES fallback must select agent exactly once: {out3}"
+            );
+            assert!(
+                out3.contains("running agent frontend"),
+                "the baked path must resolve agentfrontend: {out3}"
+            );
+
+            let _ = std::fs::remove_dir_all(&b);
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// Phase-08 task-17/20 (e2e): a mixed Go + Python repo scans BOTH
     /// frontends into ONE graph — py auto-detects alongside go, both
     /// frontends run, the merged graph carries a py symbol and its resolved
