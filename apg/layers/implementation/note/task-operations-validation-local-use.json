@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-operations-validation-local-use",
+  "body": "The task_operations_validation unit test reaches the pub(crate) validator via a function-local `use crate::plan_cmd::authoring::{TaskOperation, validate_task_operations};` because src/plan_cmd/mod.rs carries explicit #[cfg(test)] pub(crate) use re-exports for other narrow-visibility helpers but not this one. Limit: a function-local use instead of an unqualified call. Upgrade to an unqualified/super::* call if mod.rs later re-exports the validator.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.tests.unit.task_operations_validation",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
