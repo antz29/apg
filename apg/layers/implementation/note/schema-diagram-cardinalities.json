@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schema-diagram-cardinalities",
+  "body": "The diagram records Group XOR and ownership exclusivity in class notes rather than edge cardinalities; revisit this representation when a prose edge-cardinality section is added.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "SCHEMA.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
