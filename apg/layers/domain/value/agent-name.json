@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "agent-name",
-  "body": "An Agent node's name: the agent definition file's name without its `.md` extension, preserving the full hyphenated identity across every scan.",
+  "body": "An Agent node's name: the agent definition file's name with its `.md` extension stripped, preserving the full hyphenated identity across every scan.",
   "properties": {},
   "out": [],
   "in": [

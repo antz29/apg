@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "agent-node-from-agent-file",
-  "body": "Each agent definition file is one tier-4 Agent node named by its file name without the `.md` extension, so an agent's full hyphenated identity survives every scan.",
+  "body": "Each agent definition file is one tier-4 Agent node named by the file name with its `.md` extension stripped, so an agent's full hyphenated identity survives every scan.",
   "properties": {
     "feature": "schema-model"
   },
