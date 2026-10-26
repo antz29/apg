@@ -69,11 +69,13 @@ fn strict_surface_fixture(tag: &str) -> (PathBuf, testutil::Repo, PathBuf) {
     let wt = repo.start_project("foo");
     let seed = wt.join("code/seed.scan.jsonl");
     std::fs::create_dir_all(seed.parent().unwrap()).unwrap();
-    std::fs::write(
-        &seed,
-        testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
-    )
-    .unwrap();
+    // Carry the assigned-Agent roster in the scanned payload: a task names
+    // exactly one Agent from the branch graph (`--assigned-to`).
+    let mut payload = testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]);
+    payload.push_str(
+        "{\"type\":\"agent\",\"name\":\"implementer\",\"path\":\".opencode/agents/implementer.md\",\"start_line\":1,\"end_line\":1}\n",
+    );
+    std::fs::write(&seed, payload).unwrap();
     {
         let r = git2::Repository::open(&wt).unwrap();
         let mut index = r.index().unwrap();
@@ -4257,11 +4259,9 @@ mod e2e {
                 "1",
                 "--title",
                 "T",
-                "--kind",
-                "source",
-                "--verb",
-                "creates",
-                "--fqn",
+                "--assigned-to",
+                "agent.implementer",
+                "--file-create",
                 "/todo/new.ts",
             ]))
         })
@@ -4276,11 +4276,9 @@ mod e2e {
                 "1",
                 "--title",
                 "T2",
-                "--kind",
-                "source",
-                "--verb",
-                "creates",
-                "--fqn",
+                "--assigned-to",
+                "agent.implementer",
+                "--file-create",
                 "/todo/new.ts",
             ]))
             .unwrap_err()
@@ -4649,6 +4647,18 @@ mod e2e {
         let (repo, wt, wt_apg) = testutil::project_with_db("no-rescan");
         let home = repo.root.join("home");
 
+        // Seed the assigned-Agent roster into the scanned payload and re-scan,
+        // so `--assigned-to agent.implementer` resolves. The no-rescan baselines
+        // below are captured after this setup scan.
+        let seed = wt.join("code/seed.scan.jsonl");
+        let mut payload = std::fs::read_to_string(&seed).unwrap();
+        payload.push_str(
+            "{\"type\":\"agent\",\"name\":\"implementer\",\"path\":\".opencode/agents/implementer.md\",\"start_line\":1,\"end_line\":1}\n",
+        );
+        std::fs::write(&seed, payload).unwrap();
+        testutil::wt_commit(&wt, &["code/seed.scan.jsonl"], "seed agent");
+        testutil::scan_checkout(&wt).unwrap();
+
         // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
         // anchor Requirement. The durable `r2` and `reviewed` requirements
         // below are rooted by routed `requires` edges from `owner`.
@@ -4970,9 +4980,9 @@ mod e2e {
             "1",
             "--title",
             "T1",
-            "--verb",
-            "modifies",
-            "--fqn",
+            "--assigned-to",
+            "agent.implementer",
+            "--struct-modify",
             "go.fixture.mod.Store",
         ]);
         assert_eq!(
@@ -10225,6 +10235,13 @@ mod e2e {
         scratch_repo_init(&repo_dir);
         std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
         std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        // The branch graph's Agent roster supplies every task's `--assigned-to`.
+        std::fs::create_dir_all(repo_dir.join(".opencode/agents")).unwrap();
+        std::fs::write(
+            repo_dir.join(".opencode/agents/implementer.md"),
+            "# implementer\n",
+        )
+        .unwrap();
         scratch_commit_all(&repo_dir, "init source");
 
         let run = |dir: &Path, args: &[&str]| -> std::process::Output {
@@ -10281,8 +10298,16 @@ mod e2e {
         run(
             &wt,
             &[
-                "plan", "add", "demo", "task", "1", "1", "--title", "T1", "--kind", "source",
-                "--verb", "creates",
+                "plan",
+                "add",
+                "demo",
+                "task",
+                "1",
+                "1",
+                "--title",
+                "T1",
+                "--assigned-to",
+                "agent.implementer",
             ],
         );
 
@@ -10534,6 +10559,13 @@ mod e2e {
         scratch_repo_init(&repo_dir);
         std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
         std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        // The branch graph's Agent roster supplies every task's `--assigned-to`.
+        std::fs::create_dir_all(repo_dir.join(".opencode/agents")).unwrap();
+        std::fs::write(
+            repo_dir.join(".opencode/agents/implementer.md"),
+            "# implementer\n",
+        )
+        .unwrap();
         scratch_commit_all(&repo_dir, "init source");
 
         let run = |dir: &Path, args: &[&str]| -> std::process::Output {
@@ -10587,8 +10619,16 @@ mod e2e {
         run(
             &wt,
             &[
-                "plan", "add", "demo", "task", "1", "1", "--title", "T1", "--kind", "source",
-                "--verb", "creates",
+                "plan",
+                "add",
+                "demo",
+                "task",
+                "1",
+                "1",
+                "--title",
+                "T1",
+                "--assigned-to",
+                "agent.implementer",
             ],
         );
 
