@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "agent-frontend",
-  "body": "The agent frontend artifact: a dedicated scanner reading `.opencode/agents/` alone, with build-time stable Rust plus crates.io, zero scan-time dependencies, and an engine pin of the crates.io dependency set with no language-version ceiling.",
+  "body": "The agent frontend artifact: a scanner reading `.opencode/agents/` alone, with build-time stable Rust plus crates.io, zero scan-time dependencies, and an engine pin of the crates.io dependency set with its language-version ceiling unset.",
   "properties": {
     "kind": "app"
   },
