@@ -499,14 +499,12 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// The suite tools (`apg_plan_tasks`/`apg_plan`) query
-    /// `MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn`; the DB projection
-    /// must carry those columns end to end. A plan fixture in the project
-    /// worktree's `.trans/plans` is scanned through the real fixture pipeline
-    /// (ingest → parquet → COPY), the exact suite query shapes bind, an
-    /// old-format Task record (no verb keys) inserts with its serde defaults
-    /// (`verb = "creates"`, empty target/new_fqn), and graph.jsonl round-trips
-    /// the fields.
+    /// The edge-modelled task projects end to end: a scanned `Task` row carries
+    /// fqn/title/status only, each per-kind operation edge and the
+    /// renames/moves `target` destination land as rel rows against live and
+    /// planned code, a target-less task keeps an empty edge set, and
+    /// `graph.jsonl` emits the same record and edges. The retired
+    /// verb/target/new_fqn columns and the pre-verb record fallback are gone.
     #[test]
     #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
     fn scan_projects_task_verb_target_and_new_fqn_into_the_db() {
@@ -520,8 +518,10 @@ mod e2e {
         );
         repo.commit_all("seed code");
         let wt = repo.start_project("task-verb-db");
-        // The transient plan fixture: one full verb/target/new_fqn task plus an
-        // old-format record with no verb keys at all.
+        // The transient plan fixture: one task per operation verb, each its
+        // title+status record plus the matching edge, and a target-less task
+        // that carries no operation edge at all (the record the retired format
+        // defaulted to `creates`).
         let plan_path = wt
             .join(apg::specs::LAYOUT)
             .join(apg::specs::TRANS)
@@ -531,13 +531,37 @@ mod e2e {
         std::fs::write(
             &plan_path,
             concat!(
-                "{\"type\":\"plan\",\"fqn\":\"task-verb-db/plan\",\"title\":\"Task verb\",\"strategy\":\"fixture\"}\n",
+                "{\"type\":\"plan\",\"fqn\":\"task-verb-db/plan\",\"title\":\"Task edges\",\"strategy\":\"fixture\"}\n",
                 "{\"type\":\"plan_phase\",\"fqn\":\"task-verb-db/plan.phase-01\",\"number\":1,\"title\":\"P1\",\"deliverable\":\"D\",\"status\":\"pending\"}\n",
                 "{\"type\":\"contains\",\"from\":\"task-verb-db/plan\",\"to\":\"task-verb-db/plan.phase-01\"}\n",
-                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-1\",\"title\":\"Rename\",\"kind\":\"source\",\"tier\":\"\",\"status\":\"pending\",\"verb\":\"renames\",\"target\":\"fixture.mod.Old\",\"new_fqn\":\"fixture.mod.New\"}\n",
+                // task-1: modifies live code.
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-1\",\"title\":\"Modify live\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_modify\",\"from\":\"task-verb-db/plan.phase-01.task-1\",\"to\":\"go.fixture.mod.Store\"}\n",
                 "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-1\"}\n",
-                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-2\",\"title\":\"Legacy\",\"kind\":\"source\",\"tier\":\"\",\"status\":\"pending\"}\n",
+                // task-2: creates planned code.
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-2\",\"title\":\"Create planned\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_create\",\"from\":\"task-verb-db/plan.phase-01.task-2\",\"to\":\"fixture.mod.Planned\"}\n",
                 "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-2\"}\n",
+                "{\"type\":\"planned_node\",\"fqn\":\"fixture.mod.Planned\",\"kind\":\"struct\",\"name\":\"Planned\"}\n",
+                // task-3: deletes live code.
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-3\",\"title\":\"Delete live\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_delete\",\"from\":\"task-verb-db/plan.phase-01.task-3\",\"to\":\"go.fixture.mod.Store\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-3\"}\n",
+                // task-4: moves live code to a planned destination.
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-4\",\"title\":\"Move\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_move\",\"from\":\"task-verb-db/plan.phase-01.task-4\",\"to\":\"go.fixture.mod.Store\"}\n",
+                "{\"type\":\"target\",\"from\":\"task-verb-db/plan.phase-01.task-4\",\"to\":\"fixture.mod.Moved\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-4\"}\n",
+                "{\"type\":\"planned_node\",\"fqn\":\"fixture.mod.Moved\",\"kind\":\"struct\",\"name\":\"Moved\"}\n",
+                // task-5: renames live code to a planned destination.
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-5\",\"title\":\"Rename\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_rename\",\"from\":\"task-verb-db/plan.phase-01.task-5\",\"to\":\"go.fixture.mod.Store\"}\n",
+                "{\"type\":\"target\",\"from\":\"task-verb-db/plan.phase-01.task-5\",\"to\":\"fixture.mod.Renamed\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-5\"}\n",
+                "{\"type\":\"planned_node\",\"fqn\":\"fixture.mod.Renamed\",\"kind\":\"struct\",\"name\":\"Renamed\"}\n",
+                // task-6: no operation edge — the target-less task.
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-6\",\"title\":\"Untouched\",\"status\":\"pending\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-6\"}\n",
             ),
         )
         .unwrap();
@@ -545,51 +569,164 @@ mod e2e {
         testutil::scan_checkout(&wt).unwrap();
 
         let db = ArtifactDb::open(&wt.join(apg::specs::LAYOUT)).unwrap();
-        // The exact suite query shapes must bind (the defect was a binder
-        // error: `Cannot find property verb for t`).
+
+        // Every scanned Task row carries fqn/title/status; every retired field
+        // has no column, so its old query shape no longer binds.
         let out = db
-            .q("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn ORDER BY t.fqn")
+            .q("MATCH (t:Task) RETURN t.fqn, t.title, t.status ORDER BY t.fqn")
+            .unwrap();
+        for (i, title) in [
+            "Modify live",
+            "Create planned",
+            "Delete live",
+            "Move",
+            "Rename",
+            "Untouched",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let fqn = format!("task-verb-db/plan.phase-01.task-{}", i + 1);
+            assert!(out.contains(&fqn), "task row {fqn}: {out}");
+            assert!(out.contains(title), "task title {title}: {out}");
+        }
+        assert!(out.contains("pending"), "task status: {out}");
+        for retired in ["t.kind", "t.tier", "t.verb", "t.target", "t.new_fqn"] {
+            let q = format!("MATCH (t:Task) RETURN {retired}");
+            assert!(
+                db.q(&q).is_err(),
+                "the retired task property `{retired}` must not bind"
+            );
+        }
+        assert!(
+            db.q("MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn")
+                .is_err(),
+            "the old suite query shape must no longer bind"
+        );
+
+        // The per-kind operation edges join live and planned code targets.
+        let out = db
+            .q("MATCH (t:Task)-[:StructModify]->(s:Struct) RETURN t.fqn, s.fqn")
             .unwrap();
         assert!(
             out.contains("task-verb-db/plan.phase-01.task-1")
-                && out.contains("renames")
-                && out.contains("fixture.mod.Old")
-                && out.contains("fixture.mod.New"),
-            "task verb projection: {out}"
-        );
-        assert!(
-            out.contains("task-verb-db/plan.phase-01.task-2") && out.contains("creates"),
-            "old-format task defaults to creates: {out}"
+                && out.contains("go.fixture.mod.Store"),
+            "struct_modify rows: {out}"
         );
         let out = db
-            .q("MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn")
+            .q("MATCH (t:Task)-[:StructCreate]->(s:Struct) RETURN t.fqn, s.fqn, s.status")
             .unwrap();
         assert!(
-            out.contains("renames") && out.contains("fixture.mod.New"),
-            "suite query shape: {out}"
+            out.contains("task-verb-db/plan.phase-01.task-2")
+                && out.contains("fixture.mod.Planned")
+                && out.contains("planned"),
+            "struct_create planned row: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:StructDelete]->(s:Struct) RETURN t.fqn, s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-3")
+                && out.contains("go.fixture.mod.Store"),
+            "struct_delete rows: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:StructMove]->(s:Struct) RETURN t.fqn, s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-4")
+                && out.contains("go.fixture.mod.Store"),
+            "struct_move rows: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:StructRename]->(s:Struct) RETURN t.fqn, s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-5")
+                && out.contains("go.fixture.mod.Store"),
+            "struct_rename rows: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:Target]->(s:Struct) RETURN t.fqn, s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-4") && out.contains("fixture.mod.Moved"),
+            "moves destination rows: {out}"
+        );
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-5")
+                && out.contains("fixture.mod.Renamed"),
+            "renames destination rows: {out}"
+        );
+
+        // A task with no operation record keeps an empty edge set (no
+        // synthesised `creates` edge for the pre-verb record).
+        let out = db
+            .q("MATCH (t:Task {fqn: 'task-verb-db/plan.phase-01.task-6'})-[r]->(n) RETURN count(*)")
+            .unwrap();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("0"),
+            "target-less task keeps an empty edge set: {out}"
         );
         drop(db);
 
-        // The export (graph.jsonl) round-trips the new fields; an old-format
-        // task stays empty on target/new_fqn.
-        let back = read_graph_jsonl(
-            &wt.join(apg::specs::LAYOUT)
-                .join(apg::specs::TRANS)
-                .join("graph.jsonl"),
-        )
-        .unwrap();
-        let t1 = back
+        // graph.jsonl agrees with the database: the same Task record (no
+        // retired keys) and the same operation/`target` edges.
+        let export = wt
+            .join(apg::specs::LAYOUT)
+            .join(apg::specs::TRANS)
+            .join("graph.jsonl");
+        let text = std::fs::read_to_string(&export).unwrap();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v.get("type").and_then(|t| t.as_str()) == Some("task") {
+                for retired in ["kind", "tier", "verb", "target", "new_fqn"] {
+                    assert!(
+                        v.get(retired).is_none(),
+                        "exported task carries the retired `{retired}` key: {line}"
+                    );
+                }
+            }
+        }
+        let back = read_graph_jsonl(&export).unwrap();
+        for i in 1..=6 {
+            let fqn = format!("task-verb-db/plan.phase-01.task-{i}");
+            let node = back.nodes.get(&fqn).expect("task in graph.jsonl");
+            assert_eq!(node.kind, NodeKind::Task, "task node kind: {fqn}");
+            assert_eq!(
+                node.status.as_deref(),
+                Some("pending"),
+                "task status: {fqn}"
+            );
+        }
+        assert_eq!(
+            back.nodes["task-verb-db/plan.phase-01.task-1"]
+                .title
+                .as_deref(),
+            Some("Modify live")
+        );
+        let planned = back
             .nodes
-            .get("task-verb-db/plan.phase-01.task-1")
-            .expect("task-1 in graph.jsonl");
-        assert_eq!(t1.title.as_deref(), Some("Add RootStore"));
-        assert_eq!(t1.status.as_deref(), Some("pending"));
-        let t2 = back
-            .nodes
-            .get("task-verb-db/plan.phase-01.task-2")
-            .expect("task-2 in graph.jsonl");
-        assert_eq!(t2.title.as_deref(), Some("Legacy"));
-        assert_eq!(t2.status.as_deref(), Some("pending"));
+            .get("fixture.mod.Planned")
+            .expect("planned struct in graph.jsonl");
+        assert_eq!(planned.kind, NodeKind::Struct);
+        assert_eq!(planned.status.as_deref(), Some("planned"));
+        for (set, task, target) in [
+            (&back.struct_modify, "task-1", "go.fixture.mod.Store"),
+            (&back.struct_create, "task-2", "fixture.mod.Planned"),
+            (&back.struct_delete, "task-3", "go.fixture.mod.Store"),
+            (&back.struct_move, "task-4", "go.fixture.mod.Store"),
+            (&back.struct_rename, "task-5", "go.fixture.mod.Store"),
+            (&back.target, "task-4", "fixture.mod.Moved"),
+            (&back.target, "task-5", "fixture.mod.Renamed"),
+        ] {
+            let from = format!("task-verb-db/plan.phase-01.{task}");
+            assert!(
+                set.contains(&(from.clone(), target.to_string())),
+                "exported {task} edge to {target}"
+            );
+        }
 
         testutil::remove(&repo);
     }
