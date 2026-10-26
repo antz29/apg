@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "coverage-renames-refusal-pins-retired-verb-fqn-wording",
+  "body": "The coverage renames/moves e2e (coverage_renames_moves_destination_counts) pins the verify refusal's suggestion wording verbatim — `--verb creates --fqn <fqn>` — which is the retired pre-edge-model CLI vocabulary that src/plan_cmd/verify.rs still emits (the sibling coverage_refuses_when_an_implemented_by_fqn_is_untouched asserts the same substring). Upgrade — when the verify refusal message migrates to the operation-edge vocabulary (`--{kind}-{create|modify|delete|move|rename}` / `--target`), re-key this assertion and the sibling's to the new wording.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.coverage_renames_moves_destination_counts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
