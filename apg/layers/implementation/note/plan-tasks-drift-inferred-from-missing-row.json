@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-tasks-drift-inferred-from-missing-row",
+  "body": "apg_plan_tasks infers an absent assigned Agent from a missing AssignedTo row — the ingest projection drops the edge when the Agent node is absent, so the intended agent FQN is unrecoverable from the graph. Limit: drift detection names only \"(drift)\", not the missing Agent FQN. Upgrade if the Task record ever carries the assignment as a property: then the drift display can name the missing FQN.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/tools/apg_plan_tasks.ts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
