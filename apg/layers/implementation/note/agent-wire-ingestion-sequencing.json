@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agent-wire-ingestion-sequencing",
+  "body": "Agent wire records parse but still reach an unreachable edge-spool arm; remove this sequencing limit when the explicit ingestion skip arm lands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.schema.Record",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
