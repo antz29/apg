@@ -139,11 +139,6 @@
       "kind": "requires",
       "target": "requirements.requirement.scratch-markdown-only",
       "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.schema-document-states-agent-and-exclusivity-model",
-      "properties": {}
     }
   ],
   "in": []

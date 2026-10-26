@@ -19,11 +19,6 @@
       "kind": "driven-by",
       "target": "requirements.requirement.implemented-by-is-exclusive",
       "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.schema-document-states-agent-and-exclusivity-model",
-      "properties": {}
     }
   ],
   "in": [
