@@ -26,6 +26,11 @@ mod e2e {
         let plans = dir.join(TRANS).join("plans");
         std::fs::create_dir_all(&plans).unwrap();
 
+        // The task's own record is title+status alone; the Agent it is
+        // assigned to, the Component it implements and the code it touches
+        // are the SCHEMA.md task edges written beside it — one full per-kind
+        // operation family, each renames/moves destination on `target`.
+        let task = "foo/plan.phase-01.task-1".to_string();
         let recs = vec![
             Record::Plan {
                 fqn: "foo/plan".to_string(),
@@ -33,9 +38,133 @@ mod e2e {
                 strategy: "Layer-first".to_string(),
             },
             Record::Task {
-                fqn: "foo/plan.phase-01.task-1".to_string(),
+                fqn: task.clone(),
                 title: "T".to_string(),
                 status: "pending".to_string(),
+            },
+            Record::AssignedTo {
+                from: task.clone(),
+                to: "agent.go-frontend-implementer".to_string(),
+            },
+            Record::Implements {
+                from: task.clone(),
+                to: "solution.component.plan-reader".to_string(),
+            },
+            // Module operations.
+            Record::ModuleCreate {
+                from: task.clone(),
+                to: "foo.new".to_string(),
+            },
+            Record::ModuleModify {
+                from: task.clone(),
+                to: "foo.live".to_string(),
+            },
+            Record::ModuleDelete {
+                from: task.clone(),
+                to: "foo.gone".to_string(),
+            },
+            Record::ModuleMove {
+                from: task.clone(),
+                to: "foo.old".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "foo.moved".to_string(),
+            },
+            Record::ModuleRename {
+                from: task.clone(),
+                to: "foo.renamable".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "foo.renamed".to_string(),
+            },
+            // File operations.
+            Record::FileCreate {
+                from: task.clone(),
+                to: "src/new.rs".to_string(),
+            },
+            Record::FileModify {
+                from: task.clone(),
+                to: "src/live.rs".to_string(),
+            },
+            Record::FileDelete {
+                from: task.clone(),
+                to: "src/gone.rs".to_string(),
+            },
+            Record::FileMove {
+                from: task.clone(),
+                to: "src/old.rs".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "src/moved.rs".to_string(),
+            },
+            Record::FileRename {
+                from: task.clone(),
+                to: "src/renamable.rs".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "src/renamed.rs".to_string(),
+            },
+            // Struct operations.
+            Record::StructCreate {
+                from: task.clone(),
+                to: "foo.new.Widget".to_string(),
+            },
+            Record::StructModify {
+                from: task.clone(),
+                to: "foo.live.Store".to_string(),
+            },
+            Record::StructDelete {
+                from: task.clone(),
+                to: "foo.gone.Legacy".to_string(),
+            },
+            Record::StructMove {
+                from: task.clone(),
+                to: "foo.old.Widget".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "foo.moved.Widget".to_string(),
+            },
+            Record::StructRename {
+                from: task.clone(),
+                to: "foo.renamable.Widget".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "foo.renamed.Widget".to_string(),
+            },
+            // Function operations.
+            Record::FunctionCreate {
+                from: task.clone(),
+                to: "foo.new.Widget.build".to_string(),
+            },
+            Record::FunctionModify {
+                from: task.clone(),
+                to: "foo.live.Store.get".to_string(),
+            },
+            Record::FunctionDelete {
+                from: task.clone(),
+                to: "foo.gone.Legacy.drop".to_string(),
+            },
+            Record::FunctionMove {
+                from: task.clone(),
+                to: "foo.old.Widget.build".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "foo.moved.Widget.build".to_string(),
+            },
+            Record::FunctionRename {
+                from: task.clone(),
+                to: "foo.renamable.Widget.build".to_string(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "foo.renamed.Widget.build".to_string(),
             },
         ];
         write_jsonl(&plans.join("foo.jsonl"), &recs).unwrap();
