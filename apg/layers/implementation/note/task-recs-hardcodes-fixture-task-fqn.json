@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-recs-hardcodes-fixture-task-fqn",
+  "body": "testutil::task_recs hardcodes the fixture task FQN foo/plan.phase-01.task-1 in every record it emits, so a single task_recs call models one task carrying every verb's edges. Limit: a fixture that needs two distinct task FQNs cannot be built from repeated task_recs calls. Upgrade when a test needs two distinct task FQNs: extend the builder to take the task FQN as a parameter or compose one task's edges per call.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.testutil.task_recs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
