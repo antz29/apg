@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-add-single-target-and-empty-clear-marker",
+  "body": "The CLI exposes a single --target destination shared by every renames/moves operation edge, and clearing a task's operation set on update relies on the bare --target \"\" supplied-empty marker (the only way task_operations_supplied sees a replace-with-nothing). Limits: one shared destination, and an empty-clear that rides the --target flag. Upgrade: add per-edge destinations and an explicit clear flag when the CLI needs them.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.authoring.plan_add",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
