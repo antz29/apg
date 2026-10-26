@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schema-unit-test-literal-wire-name-table",
+  "body": "The 23 task-edge wire names (assigned-to, implements, target, and the four {module,file,struct,function}_{create,modify,delete,move,rename} compounds) are enumerated literally in the schema unit test's round-trip table. Limit: the test asserts each wire name by hand, so it covers exactly the 23 kinds this phase defines. Upgrade when SCHEMA.md adds a task edge kind: extend the table in the same change.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.schema.tests.unit.spec_node_records_parse",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
