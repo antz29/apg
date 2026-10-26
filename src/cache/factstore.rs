@@ -278,6 +278,7 @@ pub fn kind_str(kind: NodeKind) -> &'static str {
         NodeKind::File => "file",
         NodeKind::Struct => "struct",
         NodeKind::Function => "function",
+        NodeKind::Agent => "agent",
         _ => "unresolved",
     }
 }

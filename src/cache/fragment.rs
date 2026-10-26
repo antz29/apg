@@ -18,7 +18,7 @@ use crate::graph::{Graph, Location, Node, NodeKind};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FragNode {
     pub fqn: String,
-    /// `module` | `file` | `struct` | `function` | `unresolved`.
+    /// `module` | `file` | `struct` | `function` | `agent` | `unresolved`.
     pub kind: String,
     #[serde(default)]
     pub path: String,
@@ -72,6 +72,7 @@ impl FragNode {
             "file" => NodeKind::File,
             "struct" => NodeKind::Struct,
             "function" => NodeKind::Function,
+            "agent" => NodeKind::Agent,
             _ => NodeKind::UnresolvedTarget,
         };
         let location = if self.path.is_empty() {
@@ -170,9 +171,9 @@ impl FileFragment {
     }
 
     /// Extracts the fragment for one absolute source path from a resolved
-    /// graph. `declared` is the file's File-node FQN + every Struct/Function
-    /// node located in it; edges are attributed to the file of their `from`
-    /// node.
+    /// graph. `declared` is the file's File-node FQN + every Struct/Function/
+    /// Agent node located in it; edges are attributed to the file of their
+    /// `from` node.
     pub fn from_graph(
         graph: &Graph,
         abs_path: &str,
@@ -193,7 +194,7 @@ impl FileFragment {
         for (fqn, node) in &graph.nodes {
             let in_file = match node.kind {
                 NodeKind::File => fqn == abs_path,
-                NodeKind::Struct | NodeKind::Function => node
+                NodeKind::Struct | NodeKind::Function | NodeKind::Agent => node
                     .location
                     .as_ref()
                     .is_some_and(|l| l.path.to_string_lossy() == abs_path),
@@ -399,7 +400,7 @@ impl FileFragment {
 /// database, git or process) — so the index property stays unit-testable.
 #[derive(Debug, Default)]
 pub struct FileIndex {
-    /// File key -> the File/Struct/Function nodes located in it.
+    /// File key -> the File/Struct/Function/Agent nodes located in it.
     nodes_by_file: BTreeMap<String, Vec<FragNode>>,
     /// File key -> the edges authored by that file's declared units.
     edges_by_file: BTreeMap<String, Vec<FragEdge>>,
@@ -430,8 +431,8 @@ impl FileIndex {
                     .entry(fqn.clone())
                     .or_default()
                     .push(row.clone()),
-                // A Struct/Function keys by the file it is located in.
-                NodeKind::Struct | NodeKind::Function => {
+                // A Struct/Function/Agent keys by the file it is located in.
+                NodeKind::Struct | NodeKind::Function | NodeKind::Agent => {
                     if let Some(loc) = &node.location {
                         index
                             .nodes_by_file
@@ -492,13 +493,13 @@ impl FileIndex {
     }
 
     /// The file key a node's `from` role contributes its edges to: a File node
-    /// keys by its FQN, a Struct/Function by its location path, and every other
-    /// kind (Module, UnresolvedTarget, spec nodes) by no file.
+    /// keys by its FQN, a Struct/Function/Agent by its location path, and every
+    /// other kind (Module, UnresolvedTarget, spec nodes) by no file.
     fn file_key_of(graph: &Graph, fqn: &str) -> Option<String> {
         let node = graph.nodes.get(fqn)?;
         match node.kind {
             NodeKind::File => Some(fqn.to_string()),
-            NodeKind::Struct | NodeKind::Function => node
+            NodeKind::Struct | NodeKind::Function | NodeKind::Agent => node
                 .location
                 .as_ref()
                 .map(|l| l.path.to_string_lossy().into_owned()),
