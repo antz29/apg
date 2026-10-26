@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agentfrontend-integration-boundary",
+  "body": "The pure-memory integration test covers collection and emission, not entrypoint I/O; extend scratch e2e coverage when entrypoint admission or filtering changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.agentfrontend.tests.int.walk_and_stream_claim_only_agent_definitions",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

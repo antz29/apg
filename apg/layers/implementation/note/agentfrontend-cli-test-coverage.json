@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "agentfrontend-cli-test-coverage",
-  "body": "CLI parsing has only a doc-test and silently consumes valueless --targets; add unit coverage and require a value if malformed hand-offs must be refused.",
+  "body": "Valueless --targets and --exclude-path lack dedicated edge-case tests; add validation and edge-case coverage when malformed hand-offs must be refused.",
   "properties": {},
   "out": [
     {
