@@ -4210,7 +4210,9 @@ mod e2e {
         );
 
         // An accepted creates against an unplanned FQN lands through the
-        // funnel, verb + target on the task record.
+        // funnel, verb + target on the task record. The planned-node
+        // declaration (the `plan add planned` write) goes in the SAME write so
+        // the creates target is never briefly dangling.
         plan_add_task_at(
             &apg_root,
             "foo",
@@ -4223,9 +4225,6 @@ mod e2e {
             &[task_op("struct", "creates", "github.com/x/y.Gateway", "")],
         )
         .unwrap();
-        write_through(&apg_root, "foo", &records).unwrap();
-
-        // The planned-node declaration (the `plan add planned` write).
         records.push(Record::PlannedNode {
             fqn: "github.com/x/y.Gateway".to_string(),
             kind: "struct".to_string(),
