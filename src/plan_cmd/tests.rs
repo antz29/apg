@@ -188,6 +188,117 @@ mod unit {
         );
     }
 
+    /// A task's operation contract (SPEC §5): an empty edge set is a valid
+    /// target-less activity; `creates` accepts a planned or still-absent target
+    /// but refuses real scanned code; `modifies`/`deletes` require real scanned
+    /// code (a planned or absent FQN is refused); `renames`/`moves` validate
+    /// BOTH FQNs — a live source and a destination that collides with no
+    /// existing code. Pure in-memory: the caller supplies the two code
+    /// universes as `BTreeSet`s.
+    #[test]
+    fn task_operations_validation() {
+        use crate::plan_cmd::authoring::{TaskOperation, validate_task_operations};
+
+        let scanned: BTreeSet<String> = [
+            "rust.apg.cmd_scan".to_string(),
+            "rust.apg.plan_cmd.authoring.validate_task_assignment".to_string(),
+        ]
+        .into();
+        let planned: BTreeSet<String> =
+            ["rust.apg.plan_cmd.authoring.validate_task_operations".to_string()].into();
+        let op = |kind: &str, verb: &str, target: &str, new_fqn: &str| TaskOperation {
+            kind: kind.to_string(),
+            verb: verb.to_string(),
+            target: target.to_string(),
+            new_fqn: new_fqn.to_string(),
+        };
+        let check = |ops: &[TaskOperation]| validate_task_operations(ops, &scanned, &planned);
+
+        // An empty edge set is a valid target-less activity.
+        assert!(check(&[]).is_ok());
+
+        // creates: planned and absent targets are valid; real code is refused.
+        assert!(
+            check(&[op(
+                "function",
+                "creates",
+                "rust.apg.plan_cmd.authoring.validate_task_operations",
+                ""
+            )])
+            .is_ok()
+        );
+        assert!(
+            check(&[op(
+                "function",
+                "creates",
+                "rust.apg.plan_cmd.authoring.task_operations_validation",
+                ""
+            )])
+            .is_ok()
+        );
+        let err = check(&[op("function", "creates", "rust.apg.cmd_scan", "")])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already resolves to scanned code"), "{err}");
+
+        // modifies/deletes require real scanned code.
+        for verb in ["modifies", "deletes"] {
+            assert!(check(&[op("function", verb, "rust.apg.cmd_scan", "")]).is_ok());
+            let err = check(&[op(
+                "function",
+                verb,
+                "rust.apg.plan_cmd.authoring.validate_task_operations",
+                "",
+            )])
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("planned node"), "{verb}: {err}");
+            let err = check(&[op(
+                "function",
+                verb,
+                "rust.apg.plan_cmd.authoring.task_operations_validation",
+                "",
+            )])
+            .unwrap_err()
+            .to_string();
+            assert!(
+                err.contains("does not resolve in the scanned graph"),
+                "{verb}: {err}"
+            );
+        }
+
+        // renames/moves validate both FQNs: a live source and a non-colliding
+        // destination.
+        for verb in ["renames", "moves"] {
+            assert!(check(&[op("function", verb, "rust.apg.cmd_scan", "rust.apg.fresh")]).is_ok());
+            let err = check(&[op(
+                "function",
+                verb,
+                "rust.apg.cmd_scan",
+                "rust.apg.plan_cmd.authoring.validate_task_assignment",
+            )])
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("must not collide"), "{verb}: {err}");
+            let err = check(&[op(
+                "function",
+                verb,
+                "rust.apg.plan_cmd.authoring.task_operations_validation",
+                "rust.apg.fresh",
+            )])
+            .unwrap_err()
+            .to_string();
+            assert!(
+                err.contains("does not resolve in the scanned graph"),
+                "{verb}: {err}"
+            );
+            let err = check(&[op("function", verb, "rust.apg.cmd_scan", "")])
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("destination-fqn"), "{verb}: {err}");
+        }
+    }
+
     /// A phase's task list renders each task's title, its checkbox status and
     /// one indented line per operation edge — no owning-kind grouping (phase 5
     /// owns the assigned-Agent grouping).
