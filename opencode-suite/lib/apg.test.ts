@@ -41,6 +41,7 @@ import apgReviewReject from "../tools/apg_review_reject.ts"
 import apgNode from "../tools/apg_node.ts"
 import apgEdge from "../tools/apg_edge.ts"
 import apgSession from "../tools/apg_session.ts"
+import apgPlanTasks from "../tools/apg_plan_tasks.ts"
 import apgPlan from "../tools/apg_plan.ts"
 import apgReview from "../tools/apg_review.ts"
 
@@ -804,9 +805,15 @@ test("mainAnchoredResource takes no canonicaliser argument", () => {
 // `ctx.tool.transform(editor.add)`, faked below; `execute` never runs, so the
 // test stays pure in-memory.
 
+type AddedToolProperty = {
+  description?: string
+  items?: { properties?: Record<string, AddedToolProperty>; required?: string[] }
+}
+
 type AddedTool = {
   name?: string
-  input?: { properties?: Record<string, { description?: string }> }
+  description?: string
+  input?: { properties?: Record<string, AddedToolProperty> }
 }
 
 /** Register one tool against a faked plugin context and return what it added. */
@@ -858,4 +865,58 @@ test("the apg_plan and apg_review read tools keep their existing directory descr
     expect(tool.name).toBe(name)
     expect(tool.input?.properties?.directory?.description).toBe(existing)
   }
+})
+
+// schema-alignment phase-05.task-20: the plan-authoring tools speak the task
+// tier's EDGE vocabulary. A task carries its assigned-to Agent (`assignedTo`),
+// its implements Component (`implements`) and its per-kind operation edges
+// (`operations`, each exactly `{kind, verb, target}`), plus the renames/moves
+// `target` destination — never the retired taskKind/tier/verb/to task fields.
+// `fqn` survives as a PLANNED-NODE input only, so the no-fqn pin is scoped to
+// the task surface (the operation entries and the planned-node description)
+// rather than deleting the planned-node input.
+
+test("apg_plan_add's task inputs name the assigned Agent, implements Component and operation edges only", async () => {
+  const tool = await registeredTool(apgPlanAdd)
+  const props = tool.input?.properties ?? {}
+  const desc = (name: string) => props[name]?.description ?? ""
+
+  expect(desc("assignedTo")).toContain("Agent FQN")
+  expect(desc("assignedTo")).toContain("assigned-to edge")
+  expect(desc("implements")).toContain("Component FQN")
+  expect(desc("implements")).toContain("implements edge")
+  expect(desc("operations")).toContain("per-kind operation edges")
+  expect(desc("target")).toContain("destination FQN")
+
+  // One operation entry is exactly the edge triple — no fqn, no destination.
+  expect(Object.keys(props.operations?.items?.properties ?? {})).toEqual([
+    "kind",
+    "verb",
+    "target",
+  ])
+  expect(props.operations?.items?.required).toEqual(["kind", "verb", "target"])
+
+  // The retired task fields are not task inputs; `verb` lives only inside an
+  // operation entry and `fqn` only on the planned-node surface.
+  for (const gone of ["taskKind", "tier", "verb", "to"]) expect(props[gone]).toBeUndefined()
+  expect(tool.description ?? "").not.toContain("taskKind")
+  expect(desc("fqn")).toContain("planned node")
+})
+
+test("apg_plan_tasks lists the assigned Agent and operation edges", async () => {
+  const tool = await registeredTool(apgPlanTasks)
+  const description = tool.description ?? ""
+  expect(description).toContain("assigned Agent")
+  expect(description).toContain("assigned-to edge")
+  expect(description).toContain("implements edge")
+  expect(description).toContain("operation edges")
+  expect(description).toContain("kind, verb and target")
+  expect(description).toContain("destination")
+})
+
+test("apg_plan's overview derives each phase's targets from the operation edges", async () => {
+  const tool = await registeredTool(apgPlan)
+  expect(tool.description ?? "").toContain(
+    "targets — derived from each task's assigned Agent, implements Component and per-kind operation edges",
+  )
 })
