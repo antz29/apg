@@ -707,3 +707,6 @@ pub fn read_targets_file(path: &Path) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
+
+#[cfg(test)]
+mod tests;
