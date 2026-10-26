@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "layers-e2e-assigned-to-dropped-without-agent-node",
+  "body": "The fixture's assigned-to edge names agent.go-frontend-implementer, but the scratch scan defines no Agent node, so ingest's dangling-edge filter drops that one edge; the StructCreate operation edge does land and joins the planned fixture.mod.Widget. Limit: the assignment edge is not observable in db.lbug for this fixture. Upgrade if the assignment itself must be observable in db.lbug: add an agent definition record to the fixture's scan payload.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.layers_e2e.e2e.scan_ingests_transient_plans_and_feedback_paired_to_durable_nodes",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
