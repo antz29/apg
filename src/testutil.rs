@@ -719,6 +719,27 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
                     },
                 );
             }
+            "agent" => {
+                // A tier-4 agent definition (`agent.<file-stem>`) is fqn-keyed
+                // and located at its definition file's repo-relative path and
+                // 1-based line span (no byte span) — the file-shaped located
+                // arm, unlike the fqn-only `language` root arm.
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Agent,
+                        location: Some(Location {
+                            path: s("path").into(),
+                            start: 0,
+                            end: 0,
+                            start_line: u("start_line"),
+                            end_line: u("end_line"),
+                        }),
+                        code_type: s("code_type"),
+                        ..Node::default()
+                    },
+                );
+            }
             "unresolved" => {
                 g.nodes.insert(
                     s("fqn"),
