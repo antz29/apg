@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agentfrontend-empty-stream",
+  "body": "The entrypoint emits an empty, parse-safe stream; replace the scaffold when definition collection and stream emission are wired.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.agentfrontend.run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agentfrontend-cli-test-coverage",
+  "body": "CLI parsing has a doc-test but no dedicated unit test; extend automated coverage when a parser unit-test task is planned.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.agentfrontend.parse_args",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
