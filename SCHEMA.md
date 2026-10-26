@@ -35,6 +35,7 @@ namespace Implementation {
     class File
     class Struct
     class Function
+    class Agent
     class Unresolved
     class Note
 }
@@ -158,6 +159,7 @@ Component --> "1..*" Function : implemented-by
 
 Plan --> "1..*" PlanPhase : contains
 PlanPhase --> "1..*" Task : contains
+Task --> "1" Agent : assigned-to
 Task --> "0..1" Component : implements
 
 %% Module operations
@@ -198,6 +200,7 @@ Task --> "0..1" PlannedFunction : target
 
 note for Service "Calls, publishes, and subscribes may cross Groups. Reads and writes are private to Group."
 note for ImplementationConstraint "Constraints are either tier-wide or applied to specific languages."
+note for Agent "One per definition file under `.opencode/agents/`, its FQN `agent.<file-stem>` — the extension-stripped file name, e.g. `agent.go-frontend-implementer` — located at that file's path and line span."
 note for Plan "One per project."
-note for Task "Move/rename: operation edge to existing source plus target edge to matching planned destination. Create: operation edge to planned destination only. Target-less tasks are allowed for no-change activities."
+note for Task "A task's own properties are title and status; its assigned Agent, the Component it implements, and the code it touches are edges. Every task assigns exactly one Agent. Move/rename: operation edge to existing source plus target edge to matching planned destination. Create: operation edge to planned destination only. Target-less tasks are allowed for no-change activities."
 ```
