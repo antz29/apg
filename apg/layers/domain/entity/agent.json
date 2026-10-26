@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "agent",
-  "body": "The tier-4 graph node of an agent definition: one per file under `.opencode/agents/`, named by the file's basename verbatim and identified by that scanned node's code identity.",
+  "body": "The tier-4 graph node of an agent definition: one per agent definition file under `.opencode/agents/`, named by the file name without its `.md` extension and identified by that scanned node's code identity.",
   "properties": {
     "kind": "entity"
   },

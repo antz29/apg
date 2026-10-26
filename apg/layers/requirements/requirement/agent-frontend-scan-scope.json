@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "agent-frontend-scan-scope",
-  "body": "The agent frontend claims exactly `.opencode/agents/`, so every agent definition in that directory is its own claim and every other tracked file stays with the scanner that already claims it.",
+  "body": "The agent frontend claims the repository's agent definitions alone, so every agent definition is its own claim and every other tracked file stays with the scanner that already claims it.",
   "properties": {
     "feature": "schema-model"
   },

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "schema-document-states-agent-and-exclusivity-model",
+  "body": "The schema document states the Agent node type, the task assigned-to edge, the Group's exclusive containment modes, and implemented-by exclusivity, so the canonical model carries every type, edge, and cardinality the binary enforces.",
+  "properties": {
+    "feature": "schema-model"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.schema-documentation",
+      "properties": {}
+    }
+  ]
+}

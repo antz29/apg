@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.implemented-by-is-exclusive",
+      "target": "requirements.requirement.constraint-scope-is-its-layer",
       "properties": {}
     },
     {
@@ -17,7 +17,12 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.constraint-scope-is-its-layer",
+      "target": "requirements.requirement.implemented-by-is-exclusive",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.schema-document-states-agent-and-exclusivity-model",
       "properties": {}
     }
   ],
