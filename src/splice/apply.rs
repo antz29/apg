@@ -32,7 +32,8 @@ use super::seed::{SeededDb, cell, cypher_escape, query_rows};
 // the re-emitted target units PLUS the cached unaffected units). The splicer
 // selects the **delta rows** from it:
 //
-// * a Struct/Function is a delta unit when its location path is in `targets`;
+// * a Struct/Function/Agent is a delta unit when its location path is in
+//   `targets`;
 // * a File is a delta unit when its FQN (the absolute path) is in `targets`;
 // * a Module is always re-upserted (there are few, and the module set is part
 //   of the equivalence — a removed file can orphan its module);
@@ -177,6 +178,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     let seeded_modules: BTreeSet<String> = seed_modules(conn)?.into_iter().collect();
     let mut delta_funcs: Vec<String> = Vec::new();
     let mut delta_structs: Vec<String> = Vec::new();
+    let mut delta_agents: Vec<String> = Vec::new();
     let mut delta_files: Vec<String> = Vec::new();
     let mut delta_modules: Vec<String> = Vec::new();
     // PHASE_09: the language roots the delta's assembled graph carries (one per
@@ -219,6 +221,15 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 if location_in_targets(node, delta.targets) {
                     delta_funcs.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Function");
+                }
+            }
+            // A tier-4 Agent node is located in its definition file, so the
+            // file's presence in the target set decides it exactly like a
+            // Struct/Function.
+            NodeKind::Agent => {
+                if location_in_targets(node, delta.targets) {
+                    delta_agents.push(fqn.clone());
+                    delta_labels.insert(fqn.clone(), "Agent");
                 }
             }
             NodeKind::File if delta.targets.contains(fqn) => {
@@ -312,6 +323,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     for (label, fqns) in [
         ("Function", &delta_funcs),
         ("Struct", &delta_structs),
+        ("Agent", &delta_agents),
         ("File", &delta_files),
         ("Module", &delta_modules),
         ("Language", &delta_languages),
@@ -527,8 +539,8 @@ fn literal_list(values: &BTreeSet<String>) -> String {
     values.iter().map(|v| lit(v)).collect::<Vec<_>>().join(", ")
 }
 
-/// Every seeded Struct/Function located in one of `targets`, plus every seeded
-/// File whose FQN is a target path, with its label.
+/// Every seeded Struct/Function/Agent located in one of `targets`, plus every
+/// seeded File whose FQN is a target path, with its label.
 fn code_fqns_in_paths(
     conn: &Connection,
     targets: &BTreeSet<String>,
@@ -538,7 +550,7 @@ fn code_fqns_in_paths(
         return Ok(out);
     }
     let list = literal_list(targets);
-    for label in ["Struct", "Function"] {
+    for label in ["Struct", "Function", "Agent"] {
         let (_, rows) = query_rows(
             conn,
             &format!("MATCH (n:{label}) WHERE n.path IN [{list}] RETURN n.fqn AS fqn"),
@@ -671,6 +683,7 @@ fn node_label_of(kind: NodeKind) -> Option<&'static str> {
         NodeKind::Module => Some("Module"),
         NodeKind::Struct => Some("Struct"),
         NodeKind::Function => Some("Function"),
+        NodeKind::Agent => Some("Agent"),
         NodeKind::File => Some("File"),
         NodeKind::UnresolvedTarget => Some("UnresolvedTarget"),
         NodeKind::Language => Some("Language"),
@@ -745,7 +758,8 @@ fn delete_authored_rels(
 ///   realized Module (`ON MATCH` keeps a non-`planned` status untouched);
 /// * the per-label property set `build_load_files` writes (Module: status;
 ///   Struct/Function: path/start/`end`/start_line/end_line/code_type/status;
-///   File: start_line/end_line/code_type/status; UnresolvedTarget: category).
+///   File: start_line/end_line/code_type/status; Agent: path/start_line/
+///   end_line/code_type; UnresolvedTarget: category).
 ///
 /// A node whose FQN is absent from `graph` is not upserted (the pre-fix guard).
 /// Returns `(rows, statements)`: the row count (the caller's `nodes_upserted`
@@ -785,6 +799,17 @@ fn upsert_node(
                     lit(&node.code_type),
                 )
             }
+            // The Agent table is file-shaped but carries its definition file's
+            // path and has no status column (`create_schema`).
+            NodeKind::Agent => {
+                let (path, _, _, sl, el) = span(node);
+                format!(
+                    "{{fqn: {}, path: {}, sline: {sl}, eline: {el}, ctype: {}}}",
+                    lit(fqn),
+                    lit(&path),
+                    lit(&node.code_type),
+                )
+            }
             NodeKind::UnresolvedTarget => format!(
                 "{{fqn: {}, category: {}}}",
                 lit(fqn),
@@ -819,6 +844,11 @@ fn upsert_node(
             "UNWIND [{list}] AS row MERGE (n:File {{fqn: row.fqn}}) \
              SET n.start_line = row.sline, n.end_line = row.eline, \
              n.code_type = row.ctype, n.status = row.status"
+        ),
+        "Agent" => format!(
+            "UNWIND [{list}] AS row MERGE (n:Agent {{fqn: row.fqn}}) \
+             SET n.path = row.path, n.start_line = row.sline, \
+             n.end_line = row.eline, n.code_type = row.ctype"
         ),
         "UnresolvedTarget" => format!(
             "UNWIND [{list}] AS row MERGE (n:UnresolvedTarget {{fqn: row.fqn}}) \
