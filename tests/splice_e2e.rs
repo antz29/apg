@@ -949,6 +949,146 @@ fn published_snapshot(path: &Path) -> BTreeSet<String> {
     snap
 }
 
+// ---------------------------------------------------------------------------
+// Tier-4 Agent fixture (phase-03 task-17)
+// ---------------------------------------------------------------------------
+
+/// The agent stream's rooted module identity.
+const AGENT_MODULE: &str = "agent..opencode/agents";
+
+/// Adds one `.opencode/agents` definition to `g`: the claimed definition `File`
+/// and its tier-4 `Agent` node (`agent.<stem>`), both located at `file` with the
+/// definition's 1-based line span and the md stream's `docs` code_type, plus the
+/// agent module's `Module -> File` Contains edge.
+fn add_agent_definition(g: &mut Graph, file: &str, stem: &str, sl: u32, el: u32) {
+    let definition = |kind: NodeKind| Node {
+        kind,
+        location: Some(Location {
+            path: PathBuf::from(file),
+            start: 0,
+            end: 0,
+            start_line: sl,
+            end_line: el,
+        }),
+        code_type: "docs".to_string(),
+        ..Node::default()
+    };
+    g.nodes.insert(file.to_string(), definition(NodeKind::File));
+    g.nodes
+        .insert(format!("agent.{stem}"), definition(NodeKind::Agent));
+    g.contains
+        .insert((AGENT_MODULE.to_string(), file.to_string()));
+}
+
+/// The previous tree: the `agent` language root and its module, with the
+/// definitions `alpha` (1..10) and `beta` (1..20).
+fn agent_previous() -> Graph {
+    let mut g = Graph::default();
+    g.nodes.insert(
+        "agent".into(),
+        Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        },
+    );
+    g.nodes.insert(
+        AGENT_MODULE.into(),
+        Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        },
+    );
+    g.contains.insert(("agent".into(), AGENT_MODULE.into()));
+    add_agent_definition(&mut g, ".opencode/agents/alpha.md", "alpha", 1, 10);
+    add_agent_definition(&mut g, ".opencode/agents/beta.md", "beta", 1, 20);
+    g.nodes.insert(
+        SCAN_HEAD.into(),
+        scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+    );
+    g
+}
+
+/// The assembled tree of an incremental scan: `alpha` re-emitted with a longer
+/// body (1..14), a NEW `gamma` definition (1..8), and `beta` gone.
+fn agent_assembled() -> Graph {
+    let mut g = Graph::default();
+    g.nodes.insert(
+        "agent".into(),
+        Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        },
+    );
+    g.nodes.insert(
+        AGENT_MODULE.into(),
+        Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        },
+    );
+    g.contains.insert(("agent".into(), AGENT_MODULE.into()));
+    add_agent_definition(&mut g, ".opencode/agents/alpha.md", "alpha", 1, 14);
+    add_agent_definition(&mut g, ".opencode/agents/gamma.md", "gamma", 1, 8);
+    g.nodes.insert(
+        SCAN_HEAD.into(),
+        scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+    );
+    g
+}
+
+/// The `Agent` rows of a DB file opened read-only, as
+/// `(fqn, path, start_line, end_line, code_type)`.
+fn agent_rows(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
+    let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+    let conn = Connection::new(&db).unwrap();
+    let (names, rows) = query_rows(
+        &conn,
+        "MATCH (n:Agent) RETURN n.fqn AS fqn, n.path AS path, \
+         n.start_line AS start_line, n.end_line AS end_line, n.code_type AS code_type",
+    )
+    .unwrap();
+    let f = column_index(&names, "fqn").unwrap();
+    let p = column_index(&names, "path").unwrap();
+    let sl = column_index(&names, "start_line").unwrap();
+    let el = column_index(&names, "end_line").unwrap();
+    let ct = column_index(&names, "code_type").unwrap();
+    let out = rows
+        .iter()
+        .map(|r| {
+            (
+                cell(r, f),
+                cell(r, p),
+                cell(r, sl).parse::<u64>().unwrap(),
+                cell(r, el).parse::<u64>().unwrap(),
+                cell(r, ct),
+            )
+        })
+        .collect();
+    drop(conn);
+    drop(db);
+    out
+}
+
+/// The `agent` records of a `graph.jsonl` export, as
+/// `(fqn, path, start_line, end_line, code_type)`.
+fn agent_records(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .filter(|v| v["type"] == "agent")
+        .map(|v| {
+            (
+                v["fqn"].as_str().unwrap().to_string(),
+                v["path"].as_str().unwrap().to_string(),
+                v["start_line"].as_u64().unwrap(),
+                v["end_line"].as_u64().unwrap(),
+                v["code_type"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
 /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files,
 /// writes `graph.jsonl` and node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -2976,6 +3116,89 @@ mod e2e {
         let temp = seeded.temp_path.clone();
         drop(seeded);
         std::fs::remove_file(&temp).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// schema-alignment phase-03 task-17: a spliced incremental scan carries
+    /// exactly the tier-4 Agent node set a full rebuild produces — a persisting
+    /// definition re-emitted with a changed span, a removed definition gone, and
+    /// a new definition added — in BOTH the DB (`Agent` rows) and the published
+    /// `graph.jsonl` (`agent` records).
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    fn spliced_scan_carries_the_agent_node_set_of_a_full_rebuild() {
+        let dir = scratch("agent-set");
+        let prev_path = dir.join("db.lbug");
+        let export = dir.join("graph.jsonl");
+        let alpha = ".opencode/agents/alpha.md".to_string();
+        let beta = ".opencode/agents/beta.md".to_string();
+        let gamma = ".opencode/agents/gamma.md".to_string();
+
+        build_db(&prev_path, &agent_previous());
+        let seeded = seed_or_panic(&prev_path);
+        let assembled = agent_assembled();
+        // The tree's exact Agent set: alpha carries its re-emitted span, gamma
+        // is the new definition, beta is gone.
+        let expected_agents: BTreeSet<(String, String, u64, u64, String)> = BTreeSet::from([
+            ("agent.alpha".into(), alpha.clone(), 1, 14, "docs".into()),
+            ("agent.gamma".into(), gamma.clone(), 1, 8, "docs".into()),
+        ]);
+
+        // The incremental scan's target set: the changed definition, the
+        // removed one, and the added one.
+        let targets: BTreeSet<String> = [alpha, beta, gamma].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        let report = seeded
+            .apply(&SpliceDelta {
+                graph: &assembled,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+        publish(seeded, &assembled, &export).unwrap();
+
+        // The full-rebuild reference: the same assembled graph loaded whole.
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &assembled);
+
+        // DB half: the removed definition's File and Agent rows disappear, and
+        // the spliced `Agent` rows are exactly a full rebuild's set.
+        assert_eq!(
+            report.nodes_deleted, 2,
+            "beta.md and agent.beta disappear: {report:?}"
+        );
+        let spliced_agents = agent_rows(&prev_path);
+        assert_eq!(
+            spliced_agents, expected_agents,
+            "the spliced DB's Agent rows must be exactly the tree's"
+        );
+        assert_eq!(
+            spliced_agents,
+            agent_rows(&expected_path),
+            "a spliced DB must carry a full rebuild's Agent rows"
+        );
+
+        // Export half: the published `agent` records equal a full rebuild's
+        // export AND the tree's exact set.
+        let reference = dir.join("reference.jsonl");
+        load::write_graph_jsonl(&assembled, &reference).unwrap();
+        let published_agents = agent_records(&export);
+        assert_eq!(
+            published_agents, expected_agents,
+            "the published export's agent records must be exactly the tree's"
+        );
+        assert_eq!(
+            published_agents,
+            agent_records(&reference),
+            "the spliced export must carry a full rebuild's agent records"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
