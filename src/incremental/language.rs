@@ -12,21 +12,21 @@ pub const CPP_EXTENSIONS: &[&str] = &[
     "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
 ];
 
-/// The language a checkout-relative path belongs to, by extension — the
-/// per-language granularity key for the fact store.
+/// The language a checkout-relative path belongs to — the per-language
+/// granularity key for the fact store.
 ///
 /// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
-/// `csharp`, `py`, `cpp`, `md`, and the bundled structural scanner's `sh`,
-/// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`) so
-/// it can be compared directly against the scan's detected/requested language
-/// ids — `apg.targets_for_language` filters the win-B target set with exactly
-/// this comparison. `.py`/`.pyi` therefore return `"py"`, NOT `"python"` (the
-/// scan-side vocabulary is `py`: the detector candidate, `frontend_cmd`,
-/// `id_prefix_for` and the `lang_switch` record all use it). The same token is
-/// the per-file/per-module label in the fact store and module scaffolding
-/// (`ReuseFile.lang`, `FileFragment`), where it is only ever compared against
-/// other `language_of`-derived labels, so the token rename is internally
-/// consistent.
+/// `csharp`, `py`, `cpp`, `agent`, `md`, and the bundled structural scanner's
+/// `sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`,
+/// `misc`) so it can be compared directly against the scan's detected/requested
+/// language ids — `apg.targets_for_language` filters the win-B target set with
+/// exactly this comparison. `.py`/`.pyi` therefore return `"py"`, NOT
+/// `"python"` (the scan-side vocabulary is `py`: the detector candidate,
+/// `frontend_cmd`, `id_prefix_for` and the `lang_switch` record all use it).
+/// The same token is the per-file/per-module label in the fact store and module
+/// scaffolding (`ReuseFile.lang`, `FileFragment`), where it is only ever
+/// compared against other `language_of`-derived labels, so the token rename is
+/// internally consistent.
 ///
 /// The structural mappings mirror the bundled scanner's `stream_for_path`
 /// taxonomy exactly (its filename-keyed formats included), so each structural
@@ -36,6 +36,18 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 /// a fixture or a binary — is the `misc` stream, matching the scanner's
 /// residual, so every tracked file is graphed.
 pub fn language_of(rel: &str) -> &'static str {
+    // A tracked `.opencode/agents/` definition is the agent frontend's claim,
+    // not the structural `md` stream's: route it to `agent` ahead of the `.md`
+    // mapping so a changed definition lands in the agent stream's target set
+    // and is re-emitted, instead of being reused as an unchanged md file. The
+    // claimed definitions are the directory's direct regular children, so the
+    // route is that prefix plus exactly one path component.
+    if rel
+        .strip_prefix(".opencode/agents/")
+        .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+    {
+        return "agent";
+    }
     let path = Path::new(rel);
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     // Filename-keyed structural formats first: Dockerfile/Makefile and the
