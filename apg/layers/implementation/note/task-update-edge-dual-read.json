@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-update-edge-dual-read",
+  "body": "The transitional dual-read in plan_update_task_at widens its records parameter to `&mut Vec<Record>` so an operation-edge rewrite can insert and remove records, and every in-tree caller already holds a Vec. The edge-preferred read/rewrite path carries no direct test assertion — it is exercised indirectly through the add arm's identical edge construction and the preserved fallback e2e — and the derivation assumes at most one per-kind operation edge plus one target destination per task, a malformed record with several picking the last match. Narrow the parameter back to a slice and add a direct edge-path assertion once task-20 retires the legacy fields and phase-5's operation validator enforces the single-edge-set invariant.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.authoring.plan_update_task_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
