@@ -81,8 +81,9 @@ fn node_file_fqn(n: &layers::NodeFile) -> String {
     format!("{}.{}.{}", n.layer, n.node_type, n.name)
 }
 
-/// The single Agent a task-authoring case assigns (phase-5's task-16..18
-/// fixtures add the matching Agent node to their scan payload).
+/// The single Agent a task-authoring case assigns — [`db_at`]'s shared graph
+/// carries the matching `agent.implementer` roster node, so the assignment
+/// universe resolves it.
 fn assigned_agent() -> Vec<String> {
     vec!["agent.implementer".to_string()]
 }
@@ -294,6 +295,26 @@ fn db_at(dir: &Path) {
         Node {
             kind: NodeKind::UnresolvedTarget,
             category: Some("external".to_string()),
+            ..Node::default()
+        },
+    );
+
+    // The branch graph's Agent roster `task_assignment_universes` reads: every
+    // task-authoring scenario assigns `agent.implementer`, so the shared graph
+    // carries it as the located tier-4 node a scan produces (an `agent` record
+    // is not code, so the export's code universes ignore it).
+    g.nodes.insert(
+        "agent.implementer".to_string(),
+        Node {
+            kind: NodeKind::Agent,
+            location: Some(Location {
+                path: ".opencode/agents/implementer.md".into(),
+                start: 0,
+                end: 0,
+                start_line: 1,
+                end_line: 546,
+            }),
+            code_type: "docs".to_string(),
             ..Node::default()
         },
     );
