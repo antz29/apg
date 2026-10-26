@@ -189,6 +189,14 @@ mod e2e {
                 title: "T".to_string(),
                 status: "pending".to_string(),
             },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "agent.go-frontend-implementer".to_string(),
+            },
+            Record::ModuleModify {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y".to_string(),
+            },
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
@@ -407,6 +415,14 @@ mod e2e {
                 title: "T".to_string(),
                 status: "pending".to_string(),
             },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "agent.go-frontend-implementer".to_string(),
+            },
+            Record::ModuleModify {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y".to_string(),
+            },
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
@@ -608,6 +624,14 @@ mod e2e {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
                 status: "pending".to_string(),
+            },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "agent.go-frontend-implementer".to_string(),
+            },
+            Record::ModuleModify {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y".to_string(),
             },
             Record::Contains {
                 from: "foo/plan".to_string(),
