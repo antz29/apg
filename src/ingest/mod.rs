@@ -155,9 +155,6 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
 /// repo-relative path and 1-based line span (no byte span), and classified like
 /// the md stream's Markdown claim (`docs`).
 ///
-/// `#[allow(dead_code)]` until the record loop's `Record::Agent` arm admits it
-/// (the builder is currently exercised only through that admission).
-#[allow(dead_code)]
 fn agent_node(
     name: &str,
     path: &str,
@@ -688,11 +685,19 @@ fn ingest_records(
                         );
                     }
                 }
-                // Parse-only `agent` stream record: the stream's module and file
-                // records are admitted above; the per-definition agent record is
-                // dropped here (never spooled as an edge, never counted as a
-                // blacklist skip) until its Agent-node admission lands.
-                Record::Agent { .. } => {}
+                // The agent stream's module and file records are admitted above;
+                // its per-definition record becomes the tier-4 Agent node beside
+                // that File node, one per streamed definition.
+                Record::Agent {
+                    name,
+                    path,
+                    start_line,
+                    end_line,
+                } => {
+                    let (fqn, node) =
+                        agent_node(&name, &path, start_line, end_line, base, opts.config);
+                    insert_node(&mut graph, fqn, node, progress.as_deref_mut());
+                }
                 Record::Unresolved { fqn, category } => {
                     graph.nodes.entry(fqn).or_insert_with(|| Node {
                         kind: NodeKind::UnresolvedTarget,
