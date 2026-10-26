@@ -86,8 +86,12 @@ pub fn is_structural_language(language: &str) -> bool {
 ///
 /// A STRUCTURAL record is the one exception: instead of falling through to
 /// `default` it takes the config's structural `code_type` (default `config`),
-/// with `md` keeping its built-in `docs` classification. The `types` rules
-/// themselves are unchanged, so a code record's classification is unaffected.
+/// with `md` keeping its built-in `docs` classification. An `agent` stream
+/// definition is a Markdown document, so it takes that same `md` rule
+/// (`docs`) rather than the code `default`, and never the structural
+/// `code_type`: `agent` stays out of [`is_structural_language`]. The `types`
+/// rules themselves are unchanged, so a code record's classification is
+/// unaffected.
 pub fn classify_code_type(
     path: &str,
     fqn: &str,
@@ -113,7 +117,16 @@ pub fn classify_code_type(
         if is_structural_language(language) {
             return structural_code_type(path, language, cfg);
         }
-        return cfg.default.clone();
+        if language != "agent" {
+            return cfg.default.clone();
+        }
+    }
+    // An agent definition is a Markdown document: it takes the md stream's
+    // built-in `docs` classification, after any config `types` rules and never
+    // the code `default`; `agent` stays out of `is_structural_language`, so the
+    // structural `code_type` override never applies.
+    if language == "agent" {
+        return builtin_code_type(path, "md").to_string();
     }
     builtin_code_type(path, language).to_string()
 }
