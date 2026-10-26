@@ -168,9 +168,17 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
                     i += 1;
                 }
             },
+            // The driver's target-list hand-off, kept for the run-time filter.
+            "--targets" => match next {
+                Some(v) => {
+                    args.targets_path = Some(v);
+                    i += 2;
+                }
+                None => i += 1,
+            },
             // Accepted for the pinned front-end hand-off, then ignored: the
-            // agent stream has no module subtree, target list or native cache.
-            "--module" | "--targets" | "--cache-dir" | "--cache-key" => match next {
+            // agent stream has no module subtree or native cache.
+            "--module" | "--cache-dir" | "--cache-key" => match next {
                 Some(_) => i += 2,
                 None => i += 1,
             },
