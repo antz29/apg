@@ -39,7 +39,10 @@ mod unit {
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in
     /// `docs` classification; a configured `code_type` overrides the non-md
-    /// default; and a code record is unchanged.
+    /// default; and a code record is unchanged. schema-alignment phase-02
+    /// task-15: an `agent` definition is a Markdown document, so it takes the
+    /// same `docs` classification as `md` under a default config and under a
+    /// config whose `structural.code_type` is set.
     #[test]
     fn structural_streams_take_the_configured_code_type() {
         let default_cfg = ApgConfig {
@@ -69,6 +72,16 @@ mod unit {
             "docs",
             "Markdown keeps its built-in docs classification"
         );
+        assert_eq!(
+            classify_code_type(
+                ".opencode/agents/implementer.md",
+                ".opencode/agents/implementer.md",
+                "agent",
+                Some(&default_cfg)
+            ),
+            "docs",
+            "an agent definition classifies like Markdown"
+        );
 
         // A configured structural code_type overrides the non-md default,
         // but Markdown still keeps `docs`.
@@ -88,6 +101,16 @@ mod unit {
         assert_eq!(
             classify_code_type("AGENTS.md", "md.AGENTS.md", "md", Some(&custom)),
             "docs"
+        );
+        assert_eq!(
+            classify_code_type(
+                ".opencode/agents/implementer.md",
+                ".opencode/agents/implementer.md",
+                "agent",
+                Some(&custom)
+            ),
+            "docs",
+            "the structural override leaves agent definitions `docs`"
         );
 
         // A code stream is unchanged: it still falls through to `default`,
