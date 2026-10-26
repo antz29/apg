@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agent-classification-test-coverage",
+  "body": "Agent-to-docs classification has no direct unit assertion; remove this coverage limit when the planned stream-classification test extension lands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.classify.classify_code_type",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
