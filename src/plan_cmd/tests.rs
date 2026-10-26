@@ -122,25 +122,45 @@ mod unit {
 
     #[test]
     fn task_kind_tier_validation() {
-        // Default kind is source.
-        assert!(validate_task_kind_tier("source", "").is_ok());
-        // All four implementer-workable kinds accepted.
-        for k in ["source", "test", "gate", "docs"] {
-            let tier = if k == "test" { "unit" } else { "" };
-            assert!(validate_task_kind_tier(k, tier).is_ok(), "kind {k}");
-        }
-        // Unknown kinds rejected — the retired `human` kind included.
-        assert!(validate_task_kind_tier("qa", "").is_err());
-        assert!(validate_task_kind_tier("human", "").is_err());
-        // tier required for test, rejected for non-test.
-        assert!(validate_task_kind_tier("test", "").is_err());
-        assert!(validate_task_kind_tier("source", "unit").is_err());
-        // Unknown tier rejected.
-        assert!(validate_task_kind_tier("test", "smoke").is_err());
-        // All three tiers accepted for test.
-        for t in ["unit", "int", "e2e"] {
-            assert!(validate_task_kind_tier("test", t).is_ok(), "tier {t}");
-        }
+        let agents: BTreeSet<String> = ["agent.implementer".to_string()].into();
+        let components: BTreeSet<String> = ["solution.component.app".to_string()].into();
+        let agent = || vec!["agent.implementer".to_string()];
+        // Exactly one assigned-to Agent, present in the branch graph's roster.
+        assert!(validate_task_assignment(&agent(), None, &agents, &components).is_ok());
+        assert!(validate_task_assignment(&[], None, &agents, &components).is_err());
+        assert!(
+            validate_task_assignment(
+                &["agent.a".to_string(), "agent.b".to_string()],
+                None,
+                &agents,
+                &components
+            )
+            .is_err()
+        );
+        // An Agent the branch graph lacks is drift.
+        assert!(
+            validate_task_assignment(&["agent.ghost".to_string()], None, &agents, &components)
+                .is_err()
+        );
+        // Any Agent is assignable; an implements target must be a Component.
+        assert!(
+            validate_task_assignment(
+                &agent(),
+                Some("solution.component.app"),
+                &agents,
+                &components
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_task_assignment(
+                &agent(),
+                Some("solution.component.ghost"),
+                &agents,
+                &components
+            )
+            .is_err()
+        );
     }
 
     /// A phase's task list renders each task's title, its checkbox status and

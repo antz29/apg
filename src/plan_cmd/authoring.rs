@@ -92,18 +92,20 @@ pub fn plan_update_at(
 /// `apg plan update <project> [--title T] [--strategy S]` /
 /// `apg plan update <project> phase <n> [--title …] [--deliverable …]
 /// [--prereq <n>]* [--satisfies <req>]*` /
-/// `apg plan update <project> task <phase> <k> [--title …] [--kind …]
-/// [--tier …] [--verb …] [--fqn …] [--no-fqn] [--to …]` /
+/// `apg plan update <project> task <phase> <k> [--title …]
+/// [--assigned-to <agent-fqn>] [--implements <component-fqn>]
+/// [--<kind>-<create|modify|delete|move|rename> <fqn>]… [--target …]` /
 /// `apg plan update <project> planned <fqn> [--kind …] [--name …] [--parent …]`.
 ///
-/// A missing flag leaves that field unchanged: the plan-record arm MERGEs
+/// A missing flag leaves that dimension unchanged: the plan-record arm MERGEs
 /// title/strategy, the phase/task arms update in place (every phase/task and
-/// every edge survives — except the phase's replaced Satisfies/Gates sets),
-/// and the planned arm repoints the parent `Contains` edge. Every arm refuses
-/// an absent target. On the task arm `--no-fqn` is the sentinel that clears
-/// the target back to the target-less form (an empty target is legal only for
-/// `--verb creates`); `--fqn` and `--no-fqn` together are refused as
-/// ambiguous. `apg plan link` is retired: its bridge set-semantics live here
+/// every edge survives — except the phase's replaced Satisfies/Gates sets and
+/// the task's replaced assignment/operation edges), and the planned arm
+/// repoints the parent `Contains` edge. Every arm refuses an absent target. On
+/// the task arm a supplied `--assigned-to`/`--implements`/operation flag set
+/// replaces that edge dimension (an omitted one leaves the existing edges
+/// untouched); a renames/moves operation edge takes its destination from
+/// `--target`. `apg plan link` is retired: its bridge set-semantics live here
 /// (`phase` + `--satisfies`/`--prereq`).
 pub(crate) fn plan_update(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
@@ -154,23 +156,17 @@ pub(crate) fn plan_update(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
                 anyhow::bail!(
-                    "usage: apg plan update <project> task <phase> <k> [--title …] [--kind …] [--tier …] [--verb …] [--fqn …] [--no-fqn] [--to …]"
+                    "usage: apg plan update <project> task <phase> <k> [--title …] [--assigned-to <agent-fqn>] [--implements <component-fqn>] [--<kind>-<create|modify|delete|move|rename> <fqn>]… [--target <destination-fqn>]"
                 );
             };
-            // `--no-fqn` is the sentinel that CLEARS the target (an empty
-            // target is the target-less `creates` form, which
-            // `validate_task_verb` accepts only for `creates`); an omitted
-            // `--fqn` leaves the target unchanged. Passing both is ambiguous.
-            let target = if p.has("no-fqn") {
-                if p.has("fqn") {
-                    anyhow::bail!(
-                        "--fqn and --no-fqn are mutually exclusive on a task update — pass --fqn <fqn> to set the target, or --no-fqn alone to clear it (with --verb creates)"
-                    );
-                }
-                Some(String::new())
-            } else {
-                p.get("fqn")
-            };
+            // An omitted dimension leaves its edge set untouched; a supplied
+            // one replaces it (an empty operation set is a target-less
+            // activity).
+            let assigned = p.has("assigned-to").then(|| p.all("assigned-to"));
+            let implements = p.get("implements");
+            let operations = task_operations_supplied(&p)
+                .then(|| parse_task_operations(&p))
+                .transpose()?;
             plan_update_task_at(
                 &apg_root,
                 project,
@@ -178,11 +174,9 @@ pub(crate) fn plan_update(args: &[String]) -> anyhow::Result<()> {
                 phase,
                 k,
                 p.get("title").as_deref(),
-                p.get("kind").as_deref(),
-                p.get("tier").as_deref(),
-                p.get("verb").as_deref(),
-                target.as_deref(),
-                p.get("to").as_deref(),
+                assigned.as_deref(),
+                implements.as_deref(),
+                operations.as_deref(),
             )?;
             write_through(&apg_root, project, &records)?;
             println!("Updated task {k} in plan.phase-{phase} of {project}");
@@ -301,17 +295,14 @@ pub fn plan_update_phase_at(
 }
 
 /// Core of the `update task` arm: update a task's fields IN PLACE, preserving
-/// its `status` and every incident `Reviews` edge. The effective `(verb,
-/// target, new_fqn)` triple (each supplied value or the stored operation edge)
-/// is re-validated exactly as `add` does, so an update can never introduce an
-/// invalid verb/target. An absent task is refused before any mutation.
-///
-/// The stored operation edge set (SCHEMA.md task edges) is the sole source of
-/// truth for `(verb, target, new_fqn)`; a record carrying no operation edge is
-/// a target-less task. An update that supplies any of `verb`/`target`/`new_fqn`
-/// rewrites this task's operation edges from the effective values using `add`'s
-/// construction; an update that supplies none leaves the existing edges
-/// untouched.
+/// its `status` and every incident `Reviews` edge. A supplied `assigned` or
+/// `implements` dimension replaces that edge set; a supplied `operations`
+/// dimension replaces the task's whole operation edge set (an empty slice is a
+/// target-less activity, an omitted slice leaves the edges untouched). Every
+/// effective dimension is re-validated exactly as `add` does — see
+/// [`validate_task_assignment`] and [`validate_task_operations`] — so an update
+/// can never introduce a dangling assignment or an invalid operation. An absent
+/// task is refused before any mutation.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_update_task_at(
     apg_root: &Path,
@@ -320,11 +311,9 @@ pub fn plan_update_task_at(
     phase: u32,
     k: u32,
     title: Option<&str>,
-    kind: Option<&str>,
-    tier: Option<&str>,
-    verb: Option<&str>,
-    target: Option<&str>,
-    new_fqn: Option<&str>,
+    assigned: Option<&[String]>,
+    implements: Option<&str>,
+    operations: Option<&[TaskOperation]>,
 ) -> anyhow::Result<()> {
     let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
     if !records
@@ -335,216 +324,61 @@ pub fn plan_update_task_at(
             "update task: `{fqn}` is not a task of `{project}` (author it first with `apg plan add {project} task {phase} {k} …`)"
         );
     }
-    // The stored operation edge set is the sole source of the effective
-    // `(verb, target, new_fqn)` triple.
-    let mut edge_op: Option<(&str, &str)> = None;
-    let mut edge_new_fqn = "";
-    for r in records.iter() {
-        match r {
-            Record::ModuleCreate { from, to }
-            | Record::FileCreate { from, to }
-            | Record::StructCreate { from, to }
-            | Record::FunctionCreate { from, to }
-                if from == &fqn =>
-            {
-                edge_op = Some(("creates", to))
-            }
-            Record::ModuleModify { from, to }
-            | Record::FileModify { from, to }
-            | Record::StructModify { from, to }
-            | Record::FunctionModify { from, to }
-                if from == &fqn =>
-            {
-                edge_op = Some(("modifies", to))
-            }
-            Record::ModuleDelete { from, to }
-            | Record::FileDelete { from, to }
-            | Record::StructDelete { from, to }
-            | Record::FunctionDelete { from, to }
-                if from == &fqn =>
-            {
-                edge_op = Some(("deletes", to))
-            }
-            Record::ModuleRename { from, to }
-            | Record::FileRename { from, to }
-            | Record::StructRename { from, to }
-            | Record::FunctionRename { from, to }
-                if from == &fqn =>
-            {
-                edge_op = Some(("renames", to))
-            }
-            Record::ModuleMove { from, to }
-            | Record::FileMove { from, to }
-            | Record::StructMove { from, to }
-            | Record::FunctionMove { from, to }
-                if from == &fqn =>
-            {
-                edge_op = Some(("moves", to))
-            }
-            Record::Target { from, to } if from == &fqn => edge_new_fqn = to,
-            _ => {}
+    // Effective dimensions: each supplied value, else the stored edge set.
+    let cur_assigned: Vec<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::AssignedTo { from, to } if from == &fqn => Some(to.clone()),
+            _ => None,
+        })
+        .collect();
+    let cur_implements = records.iter().find_map(|r| match r {
+        Record::Implements { from, to } if from == &fqn => Some(to.clone()),
+        _ => None,
+    });
+    let cur_operations = task_operations_from_records(records, &fqn);
+    let eff_assigned: &[String] = assigned.unwrap_or(&cur_assigned);
+    let eff_implements = match implements {
+        Some("") => None,
+        Some(component) => Some(component.to_string()),
+        None => cur_implements,
+    };
+    let eff_operations: &[TaskOperation] = operations.unwrap_or(&cur_operations);
+    let (agents, components) = task_assignment_universes(apg_root)?;
+    validate_task_assignment(
+        eff_assigned,
+        eff_implements.as_deref(),
+        &agents,
+        &components,
+    )?;
+    let (scanned, planned) = task_verb_universes(apg_root, records)?;
+    validate_task_operations(eff_operations, &scanned, &planned)?;
+    // Rewrite only the dimensions the update supplies, leaving every other
+    // incident edge — `status` and `Reviews` included — untouched.
+    if let Some(assigned) = assigned {
+        records.retain(|r| !matches!(r, Record::AssignedTo { from, .. } if from == &fqn));
+        for agent in assigned {
+            records.push(Record::AssignedTo {
+                from: fqn.clone(),
+                to: agent.clone(),
+            });
         }
     }
-    let (cur_verb, cur_target, cur_new_fqn) = match edge_op {
-        Some((v, to)) => (v.to_string(), to.to_string(), edge_new_fqn.to_string()),
-        None => (String::new(), String::new(), String::new()),
-    };
-    let eff_kind = kind.unwrap_or("source");
-    let eff_tier = tier.unwrap_or("");
-    validate_task_kind_tier(eff_kind, eff_tier)?;
-    let eff_verb = verb.unwrap_or(cur_verb.as_str());
-    let eff_target = target.unwrap_or(cur_target.as_str());
-    let eff_new_fqn = new_fqn.unwrap_or(cur_new_fqn.as_str());
-    let (scanned, planned) = task_verb_universes(apg_root, records)?;
-    validate_task_verb(eff_verb, eff_target, eff_new_fqn, &scanned, &planned)?;
-    // Rewrite only the operations the update supplies, using `add`'s exact
-    // construction (planned-node kind first, live graph label second; an empty
-    // or unresolvable target writes no edge).
-    if verb.is_some() || target.is_some() || new_fqn.is_some() {
-        records.retain(|r| {
-            !matches!(
-                r,
-                Record::ModuleCreate { from, .. }
-                    | Record::ModuleModify { from, .. }
-                    | Record::ModuleDelete { from, .. }
-                    | Record::ModuleRename { from, .. }
-                    | Record::ModuleMove { from, .. }
-                    | Record::FileCreate { from, .. }
-                    | Record::FileModify { from, .. }
-                    | Record::FileDelete { from, .. }
-                    | Record::FileRename { from, .. }
-                    | Record::FileMove { from, .. }
-                    | Record::StructCreate { from, .. }
-                    | Record::StructModify { from, .. }
-                    | Record::StructDelete { from, .. }
-                    | Record::StructRename { from, .. }
-                    | Record::StructMove { from, .. }
-                    | Record::FunctionCreate { from, .. }
-                    | Record::FunctionModify { from, .. }
-                    | Record::FunctionDelete { from, .. }
-                    | Record::FunctionRename { from, .. }
-                    | Record::FunctionMove { from, .. }
-                    | Record::Target { from, .. }
-                    if from == &fqn
-            )
-        });
-        let node_kind = if eff_target.is_empty() {
-            None
-        } else {
-            records
-                .iter()
-                .find_map(|r| match r {
-                    Record::PlannedNode { fqn: pf, kind, .. } if pf == eff_target => {
-                        Some(kind.clone())
-                    }
-                    _ => None,
-                })
-                .or_else(|| {
-                    artifacts::ArtifactDb::open(apg_root)
-                        .ok()
-                        .and_then(|db| db.impl_label(eff_target))
-                        .map(|label| label.to_ascii_lowercase())
-                })
-        };
-        if let Some(node_kind) = node_kind.as_deref() {
-            let op_verb = if eff_verb.is_empty() {
-                "creates"
-            } else {
-                eff_verb
-            };
-            let op = match (node_kind, op_verb) {
-                ("module", "creates") => Some(Record::ModuleCreate {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("module", "modifies") => Some(Record::ModuleModify {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("module", "deletes") => Some(Record::ModuleDelete {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("module", "renames") => Some(Record::ModuleRename {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("module", "moves") => Some(Record::ModuleMove {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("file", "creates") => Some(Record::FileCreate {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("file", "modifies") => Some(Record::FileModify {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("file", "deletes") => Some(Record::FileDelete {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("file", "renames") => Some(Record::FileRename {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("file", "moves") => Some(Record::FileMove {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("struct", "creates") => Some(Record::StructCreate {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("struct", "modifies") => Some(Record::StructModify {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("struct", "deletes") => Some(Record::StructDelete {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("struct", "renames") => Some(Record::StructRename {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("struct", "moves") => Some(Record::StructMove {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("function", "creates") => Some(Record::FunctionCreate {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("function", "modifies") => Some(Record::FunctionModify {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("function", "deletes") => Some(Record::FunctionDelete {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("function", "renames") => Some(Record::FunctionRename {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                ("function", "moves") => Some(Record::FunctionMove {
-                    from: fqn.clone(),
-                    to: eff_target.to_string(),
-                }),
-                _ => None,
-            };
-            if let Some(op) = op {
-                records.push(op);
-                if matches!(op_verb, "renames" | "moves") {
-                    records.push(Record::Target {
-                        from: fqn.clone(),
-                        to: eff_new_fqn.to_string(),
-                    });
-                }
-            }
+    if let Some(component) = implements {
+        records.retain(|r| !matches!(r, Record::Implements { from, .. } if from == &fqn));
+        if !component.is_empty() {
+            records.push(Record::Implements {
+                from: fqn.clone(),
+                to: component.to_string(),
+            });
         }
+    }
+    if let Some(operations) = operations {
+        records.retain(|r| {
+            !(task_operation_of(r).is_some_and(|(_, _, from, _)| from == fqn)
+                || matches!(r, Record::Target { from, .. } if from == &fqn))
+        });
+        push_task_operations(records, &fqn, operations);
     }
     for r in records.iter_mut() {
         if let Record::Task {
@@ -910,6 +744,71 @@ pub fn plan_rm_planned_at(
     persist_rm(apg_root, project, &records)
 }
 
+/// The per-kind operation-edge flags: `--<kind>-<verb> <fqn>` builds the
+/// SCHEMA.md `<kind>_<verb>` edge (`--module-create` → `module_create`). A
+/// renames/moves flag takes the live source FQN; `--target` supplies its
+/// planned destination.
+const TASK_OPERATION_FLAGS: [(&str, &str, &str); 20] = [
+    ("module-create", "module", "creates"),
+    ("module-modify", "module", "modifies"),
+    ("module-delete", "module", "deletes"),
+    ("module-move", "module", "moves"),
+    ("module-rename", "module", "renames"),
+    ("file-create", "file", "creates"),
+    ("file-modify", "file", "modifies"),
+    ("file-delete", "file", "deletes"),
+    ("file-move", "file", "moves"),
+    ("file-rename", "file", "renames"),
+    ("struct-create", "struct", "creates"),
+    ("struct-modify", "struct", "modifies"),
+    ("struct-delete", "struct", "deletes"),
+    ("struct-move", "struct", "moves"),
+    ("struct-rename", "struct", "renames"),
+    ("function-create", "function", "creates"),
+    ("function-modify", "function", "modifies"),
+    ("function-delete", "function", "deletes"),
+    ("function-move", "function", "moves"),
+    ("function-rename", "function", "renames"),
+];
+
+/// Read a task's per-kind operation edges from the CLI arguments. Every
+/// operation flag contributes one edge; `--target` is the renames/moves
+/// destination and is refused without one.
+fn parse_task_operations(p: &artifacts::ParsedArgs) -> anyhow::Result<Vec<TaskOperation>> {
+    let destination = p.get("target").unwrap_or_default();
+    let mut operations = Vec::new();
+    for (flag, kind, verb) in TASK_OPERATION_FLAGS {
+        for target in p.all(flag) {
+            operations.push(TaskOperation {
+                kind: kind.to_string(),
+                verb: verb.to_string(),
+                target,
+                new_fqn: if matches!(verb, "renames" | "moves") {
+                    destination.clone()
+                } else {
+                    String::new()
+                },
+            });
+        }
+    }
+    if !destination.is_empty()
+        && !operations
+            .iter()
+            .any(|op| matches!(op.verb.as_str(), "renames" | "moves"))
+    {
+        anyhow::bail!(
+            "--target <destination-fqn> is only valid for a renames/moves operation edge"
+        );
+    }
+    Ok(operations)
+}
+
+/// Whether any operation-edge argument was supplied (so an update replaces the
+/// stored edge set rather than leaving it untouched).
+fn task_operations_supplied(p: &artifacts::ParsedArgs) -> bool {
+    p.has("target") || TASK_OPERATION_FLAGS.iter().any(|(flag, _, _)| p.has(flag))
+}
+
 /// `apg plan add <project>` (the plan itself — no second positional) /
 /// `apg plan add <project> phase <n> …` / `task <phase> <k> …` /
 /// `planned <kind> <fqn> …` (R23, PHASE_02). The create arm refuses when the
@@ -1001,17 +900,15 @@ pub(crate) fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
                 anyhow::bail!(
-                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs>] [--tier <unit|int|e2e>] [--verb <creates|modifies|deletes|renames|moves>] [--fqn <fqn>] [--to <new-fqn>]"
+                    "usage: apg plan add <project> task <phase> <k> --title … --assigned-to <agent-fqn> [--implements <component-fqn>] [--<kind>-<create|modify|delete|move|rename> <fqn>]… [--target <destination-fqn>]"
                 );
             };
             let Some(title) = p.get("title") else {
                 anyhow::bail!("task requires --title");
             };
-            let kind = p.get("kind").unwrap_or_else(|| "source".to_string());
-            let tier = p.get("tier").unwrap_or_default();
-            let verb = p.get("verb").unwrap_or_default();
-            let target = p.get("fqn").unwrap_or_default();
-            let new_fqn = p.get("to").unwrap_or_default();
+            let assigned = p.all("assigned-to");
+            let implements = p.get("implements");
+            let operations = parse_task_operations(&p)?;
             plan_add_task_at(
                 &apg_root,
                 project,
@@ -1019,11 +916,9 @@ pub(crate) fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 phase,
                 k,
                 &title,
-                &kind,
-                &tier,
-                &verb,
-                &target,
-                &new_fqn,
+                &assigned,
+                implements.as_deref(),
+                &operations,
             )?;
             write_through(&apg_root, project, &records)?;
             println!("Added task {k} to plan.phase-{phase} of {project}");
@@ -1100,19 +995,17 @@ pub fn plan_add_phase_at(
 /// Core of the `task` add arm (extracted for tests): verifies the target
 /// phase exists (a task under a nonexistent `plan.phase-NN` is rejected
 /// before any write), refuses an existing task (no implicit upsert), validates
-/// kind/tier, validates the Task→Implementation verb + target FQN(s) against
-/// the scanned graph and the planned-node universe, and appends the Task +
-/// Contains records.
+/// the task's assignment and its operation edge set, and appends the Task +
+/// `assigned-to`/`implements` + per-kind operation records + Contains.
 ///
-/// The Task record stores its title+status alone; the operation rides beside it
-/// as the matching per-kind edge (SCHEMA.md task edges) — `creates` →
-/// `{kind}_create` to the planned destination, `modifies`/`deletes` →
-/// `{kind}_{modify,delete}` to the live target, `renames`/`moves` →
-/// `{kind}_{rename,move}` to the live source plus a `target` edge to the
-/// planned destination. `{kind}` is the target's Implementation kind, read from
-/// a planned-node declaration first and the live graph label second; an
-/// unresolvable kind writes no edge (a `creates` against an absent, undeclared
-/// FQN has no planned destination to type).
+/// The Task record stores its title+status alone; the assignment and the
+/// operation ride beside it as the SCHEMA.md task edges: exactly one
+/// `assigned-to` Agent, at most one `implements` Component, and one per-kind
+/// operation edge per operation — `creates` → `{kind}_create` to the planned
+/// destination, `modifies`/`deletes` → `{kind}_{modify,delete}` to the live
+/// target, `renames`/`moves` → `{kind}_{rename,move}` to the live source plus
+/// a `target` edge to the planned destination. An empty operation set is a
+/// target-less activity.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_add_task_at(
     apg_root: &Path,
@@ -1121,11 +1014,9 @@ pub fn plan_add_task_at(
     phase: u32,
     k: u32,
     title: &str,
-    kind: &str,
-    tier: &str,
-    verb: &str,
-    target: &str,
-    new_fqn: &str,
+    assigned: &[String],
+    implements: Option<&str>,
+    operations: &[TaskOperation],
 ) -> anyhow::Result<()> {
     let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
     let phase_fqn = format!("{project}/plan.phase-{phase:02}");
@@ -1145,125 +1036,28 @@ pub fn plan_add_task_at(
         &format!("apg plan update {project} task {phase} {k}"),
         &format!("apg plan rm {project} task {phase} {k}"),
     )?;
-    validate_task_kind_tier(kind, tier)?;
-    let verb = if verb.is_empty() { "creates" } else { verb };
+    let (agents, components) = task_assignment_universes(apg_root)?;
+    validate_task_assignment(assigned, implements, &agents, &components)?;
     let (scanned, planned) = task_verb_universes(apg_root, records)?;
-    validate_task_verb(verb, target, new_fqn, &scanned, &planned)?;
-    let node_kind = if target.is_empty() {
-        None
-    } else {
-        records
-            .iter()
-            .find_map(|r| match r {
-                Record::PlannedNode { fqn: pf, kind, .. } if pf == target => Some(kind.clone()),
-                _ => None,
-            })
-            .or_else(|| {
-                artifacts::ArtifactDb::open(apg_root)
-                    .ok()
-                    .and_then(|db| db.impl_label(target))
-                    .map(|label| label.to_ascii_lowercase())
-            })
-    };
+    validate_task_operations(operations, &scanned, &planned)?;
     let mut recs = vec![Record::Task {
         fqn: fqn.clone(),
         title: title.to_string(),
         status: "pending".to_string(),
     }];
-    if let Some(node_kind) = node_kind.as_deref() {
-        let op = match (node_kind, verb) {
-            ("module", "creates") => Some(Record::ModuleCreate {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("module", "modifies") => Some(Record::ModuleModify {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("module", "deletes") => Some(Record::ModuleDelete {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("module", "renames") => Some(Record::ModuleRename {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("module", "moves") => Some(Record::ModuleMove {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("file", "creates") => Some(Record::FileCreate {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("file", "modifies") => Some(Record::FileModify {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("file", "deletes") => Some(Record::FileDelete {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("file", "renames") => Some(Record::FileRename {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("file", "moves") => Some(Record::FileMove {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("struct", "creates") => Some(Record::StructCreate {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("struct", "modifies") => Some(Record::StructModify {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("struct", "deletes") => Some(Record::StructDelete {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("struct", "renames") => Some(Record::StructRename {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("struct", "moves") => Some(Record::StructMove {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("function", "creates") => Some(Record::FunctionCreate {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("function", "modifies") => Some(Record::FunctionModify {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("function", "deletes") => Some(Record::FunctionDelete {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("function", "renames") => Some(Record::FunctionRename {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            ("function", "moves") => Some(Record::FunctionMove {
-                from: fqn.clone(),
-                to: target.to_string(),
-            }),
-            _ => None,
-        };
-        if let Some(op) = op {
-            recs.push(op);
-            if matches!(verb, "renames" | "moves") {
-                recs.push(Record::Target {
-                    from: fqn.clone(),
-                    to: new_fqn.to_string(),
-                });
-            }
-        }
+    for agent in assigned {
+        recs.push(Record::AssignedTo {
+            from: fqn.clone(),
+            to: agent.clone(),
+        });
     }
+    if let Some(component) = implements.filter(|c| !c.is_empty()) {
+        recs.push(Record::Implements {
+            from: fqn.clone(),
+            to: component.to_string(),
+        });
+    }
+    push_task_operations(&mut recs, &fqn, operations);
     recs.push(Record::Contains {
         from: phase_fqn,
         to: fqn.clone(),
@@ -1338,112 +1132,298 @@ pub fn plan_add_planned_at(
     Ok(())
 }
 
-/// Validate the two-axis task classification: `kind` is the owning role
-/// (orthogonal), `tier` the verification depth (a hierarchy, meaningful only
-/// for `kind = test`). Mirrors the `Note.kind` validation
-/// pattern in `spec_cmd`. Tasks are implementer-workable by design (`source`/
-/// `test`/`gate`/`docs`) — the human's decision point is plan end, never a
-/// phase task.
-pub(crate) fn validate_task_kind_tier(kind: &str, tier: &str) -> anyhow::Result<()> {
-    if !["source", "test", "gate", "docs"].contains(&kind) {
-        anyhow::bail!("invalid task kind `{kind}` — one of source/test/gate/docs");
+/// One per-kind operation edge a task carries: `<kind>_<verb>` from the task to
+/// `target` — the planned destination of a `creates`, the live target of a
+/// `modifies`/`deletes`, the live source of a `renames`/`moves` — plus the
+/// renames/moves `target` edge destination in `new_fqn`. An empty operation set
+/// is a target-less activity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TaskOperation {
+    pub kind: String,
+    pub verb: String,
+    pub target: String,
+    pub new_fqn: String,
+}
+
+/// Validate a task's assignment: exactly one `assigned-to` Agent (any Agent is
+/// assignable to any task — the roster is not partitioned by role), that Agent
+/// present in the branch graph's Agent roster (the assigned-to drift universe),
+/// and an optional `implements` Component drawn from the solution layer.
+pub(crate) fn validate_task_assignment(
+    assigned: &[String],
+    implements: Option<&str>,
+    agents: &BTreeSet<String>,
+    components: &BTreeSet<String>,
+) -> anyhow::Result<()> {
+    if assigned.len() != 1 {
+        anyhow::bail!(
+            "a task assigns exactly one Agent (got {}) — pass --assigned-to <agent-fqn> once",
+            assigned.len()
+        );
     }
-    if kind == "test" && tier.is_empty() {
-        anyhow::bail!("test task requires --tier (unit|int|e2e)");
+    let agent = &assigned[0];
+    if agent.is_empty() {
+        anyhow::bail!("assigned-to requires an Agent FQN (`agent.<file-stem>`)");
     }
-    if kind != "test" && !tier.is_empty() {
-        anyhow::bail!("tier is only valid for test tasks");
+    if !agents.contains(agent) {
+        anyhow::bail!(
+            "assigned Agent `{agent}` is drift — it is absent from the branch graph's Agent roster (route the task to the agent-builder)"
+        );
     }
-    if !tier.is_empty() && !["unit", "int", "e2e"].contains(&tier) {
-        anyhow::bail!("invalid tier `{tier}` — one of unit/int/e2e");
+    if let Some(component) = implements
+        && !components.contains(component)
+    {
+        anyhow::bail!("implements target `{component}` is not a Component of the solution layer");
     }
     Ok(())
 }
 
-/// The Task→Implementation verbs (SPEC §5): how a task touches the
-/// Implementation tier. `creates` is the default; further verbs may reveal
-/// themselves through dogfooding.
+/// The Task→Implementation verbs (SPEC §5): how a task's operation edge
+/// touches the Implementation tier. Further verbs may reveal themselves
+/// through dogfooding.
 const TASK_VERBS: [&str; 5] = ["creates", "modifies", "deletes", "renames", "moves"];
 
-/// Validate a task's Task→Implementation verb + target FQN(s) (SPEC §5)
-/// against the two code-reference universes: `scanned` = every real code FQN
-/// in the live graph, `planned` = the planned-node universe (a `status:
-/// planned` DB node or a `Record::PlannedNode` in `.trans/plans`). The rules:
+/// Validate a task's per-kind operation edge set against the two code-reference
+/// universes: `scanned` = every real code FQN in the live graph, `planned` = the
+/// planned-node universe (a `status: planned` DB node or a
+/// `Record::PlannedNode` in `.trans/plans`). An empty set is a valid target-less
+/// activity. Each operation's rules:
 ///
-/// - `creates` (the default) — builds a *planned* node: the target must NOT
-///   resolve in the scanned graph (it may be a planned node or still absent);
-///   a creates against existing real code is refused.
-/// - `modifies` / `deletes` — the target must resolve in the scanned graph;
-///   an unresolvable (or still-planned) FQN is refused.
-/// - `renames` / `moves` — FQN changes: the source must resolve in the
-///   scanned graph and the new FQN must not collide with existing real code;
-///   the pair is recorded on the task.
+/// - `creates` — the target must NOT resolve in the scanned graph (it may be a
+///   planned node or still absent); creating over existing real code is refused.
+/// - `modifies` / `deletes` — the target must resolve in the scanned graph; an
+///   unresolvable (or still-planned) FQN is refused.
+/// - `renames` / `moves` — the source must resolve in the scanned graph and the
+///   destination FQN must not collide with existing real code.
 ///
-/// An empty `target` is a target-less task (the pre-verb record shape) — only
-/// a `creates` may omit its target. An empty `verb` means `creates`. Pure —
-/// no I/O; the caller supplies both universes.
-fn validate_task_verb(
-    verb: &str,
-    target: &str,
-    new_fqn: &str,
+/// An operation edge with an empty target is refused (a target-less edge is not
+/// a valid operation). Pure — no I/O; the caller supplies both universes.
+pub(crate) fn validate_task_operations(
+    operations: &[TaskOperation],
     scanned: &BTreeSet<String>,
     planned: &BTreeSet<String>,
 ) -> anyhow::Result<()> {
-    let verb = if verb.is_empty() { "creates" } else { verb };
-    if !TASK_VERBS.contains(&verb) {
-        anyhow::bail!("invalid task verb `{verb}` — one of creates/modifies/deletes/renames/moves");
-    }
-    if !new_fqn.is_empty() && !matches!(verb, "renames" | "moves") {
-        anyhow::bail!("--to <new-fqn> is only valid for renames/moves tasks (got `{verb}`)");
-    }
-    if target.is_empty() {
-        if verb != "creates" {
-            anyhow::bail!("{verb} task requires --fqn <fqn> (the code it touches)");
+    let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for op in operations {
+        if !["module", "file", "struct", "function"].contains(&op.kind.as_str()) {
+            anyhow::bail!(
+                "invalid operation kind `{}` — one of module/file/struct/function",
+                op.kind
+            );
         }
-        return Ok(());
-    }
-    let status = crate::layers::classify_code_ref(target, scanned, planned);
-    match verb {
-        "creates" => {
-            if status == crate::layers::CodeRefStatus::Real {
-                anyhow::bail!(
-                    "creates target `{target}` already resolves to scanned code — a creates builds a planned node; plan the delta, not the present"
-                );
-            }
+        if !TASK_VERBS.contains(&op.verb.as_str()) {
+            anyhow::bail!(
+                "invalid task verb `{}` — one of creates/modifies/deletes/renames/moves",
+                op.verb
+            );
         }
-        "modifies" | "deletes" => match status {
-            crate::layers::CodeRefStatus::Real => {}
-            crate::layers::CodeRefStatus::Pending => anyhow::bail!(
-                "{verb} target `{target}` is a planned node, not scanned code — only a creates builds a planned node"
-            ),
-            crate::layers::CodeRefStatus::Drift => anyhow::bail!(
-                "{verb} target `{target}` does not resolve in the scanned graph — {verb} changes existing code (a creates would plan it)"
-            ),
-        },
-        "renames" | "moves" => {
-            if new_fqn.is_empty() {
-                anyhow::bail!("{verb} task requires --to <new-fqn> (the destination FQN)");
-            }
-            if status != crate::layers::CodeRefStatus::Real {
-                anyhow::bail!(
-                    "{verb} source `{target}` does not resolve in the scanned graph — {verb} changes an existing FQN"
-                );
-            }
-            if crate::layers::classify_code_ref(new_fqn, scanned, planned)
-                == crate::layers::CodeRefStatus::Real
-            {
-                anyhow::bail!(
-                    "{verb} target `{new_fqn}` already resolves to scanned code — the new FQN must not collide with existing code"
-                );
-            }
+        if op.target.is_empty() {
+            anyhow::bail!(
+                "{} {} operation edge requires a target FQN",
+                op.kind,
+                op.verb
+            );
         }
-        _ => unreachable!("validated against TASK_VERBS"),
+        if !seen.insert((op.kind.as_str(), op.verb.as_str())) {
+            anyhow::bail!(
+                "duplicate {} {} operation edge — a task carries at most one per kind and verb",
+                op.kind,
+                op.verb
+            );
+        }
+        if !op.new_fqn.is_empty() && !matches!(op.verb.as_str(), "renames" | "moves") {
+            anyhow::bail!(
+                "--target <destination-fqn> is only valid for renames/moves tasks (got `{}`)",
+                op.verb
+            );
+        }
+        let status = crate::layers::classify_code_ref(&op.target, scanned, planned);
+        match op.verb.as_str() {
+            "creates" => {
+                if status == crate::layers::CodeRefStatus::Real {
+                    anyhow::bail!(
+                        "creates target `{}` already resolves to scanned code — a creates builds a planned node; plan the delta, not the present",
+                        op.target
+                    );
+                }
+            }
+            "modifies" | "deletes" => match status {
+                crate::layers::CodeRefStatus::Real => {}
+                crate::layers::CodeRefStatus::Pending => anyhow::bail!(
+                    "{} target `{}` is a planned node, not scanned code — only a creates builds a planned node",
+                    op.verb,
+                    op.target
+                ),
+                crate::layers::CodeRefStatus::Drift => anyhow::bail!(
+                    "{} target `{}` does not resolve in the scanned graph — {} changes existing code (a creates would plan it)",
+                    op.verb,
+                    op.target,
+                    op.verb
+                ),
+            },
+            "renames" | "moves" => {
+                if op.new_fqn.is_empty() {
+                    anyhow::bail!(
+                        "{} {} operation edge requires --target <destination-fqn>",
+                        op.kind,
+                        op.verb
+                    );
+                }
+                if status != crate::layers::CodeRefStatus::Real {
+                    anyhow::bail!(
+                        "{} source `{}` does not resolve in the scanned graph — {} changes an existing FQN",
+                        op.verb,
+                        op.target,
+                        op.verb
+                    );
+                }
+                if crate::layers::classify_code_ref(&op.new_fqn, scanned, planned)
+                    == crate::layers::CodeRefStatus::Real
+                {
+                    anyhow::bail!(
+                        "{} target `{}` already resolves to scanned code — the new FQN must not collide with existing code",
+                        op.verb,
+                        op.new_fqn
+                    );
+                }
+            }
+            _ => unreachable!("validated against TASK_VERBS"),
+        }
     }
     Ok(())
 }
 
-/// The two universes `validate_task_verb` classifies a task's target against:
-/// `scanned` = every real code FQN the last scan produced (a missing DB
+/// The SCHEMA.md per-kind operation edge record for `op`, sourced at `from`;
+/// `None` when the kind/verb pair is not a declared task edge.
+fn task_operation_record(from: &str, op: &TaskOperation) -> Option<Record> {
+    use Record::*;
+    let (from, to) = (from.to_string(), op.target.clone());
+    Some(match (op.kind.as_str(), op.verb.as_str()) {
+        ("module", "creates") => ModuleCreate { from, to },
+        ("module", "modifies") => ModuleModify { from, to },
+        ("module", "deletes") => ModuleDelete { from, to },
+        ("module", "moves") => ModuleMove { from, to },
+        ("module", "renames") => ModuleRename { from, to },
+        ("file", "creates") => FileCreate { from, to },
+        ("file", "modifies") => FileModify { from, to },
+        ("file", "deletes") => FileDelete { from, to },
+        ("file", "moves") => FileMove { from, to },
+        ("file", "renames") => FileRename { from, to },
+        ("struct", "creates") => StructCreate { from, to },
+        ("struct", "modifies") => StructModify { from, to },
+        ("struct", "deletes") => StructDelete { from, to },
+        ("struct", "moves") => StructMove { from, to },
+        ("struct", "renames") => StructRename { from, to },
+        ("function", "creates") => FunctionCreate { from, to },
+        ("function", "modifies") => FunctionModify { from, to },
+        ("function", "deletes") => FunctionDelete { from, to },
+        ("function", "moves") => FunctionMove { from, to },
+        ("function", "renames") => FunctionRename { from, to },
+        _ => return None,
+    })
+}
+
+/// A task operation record as `(kind, verb, from, to)`; `None` for every other
+/// record (the `target` destination edge included).
+fn task_operation_of(r: &Record) -> Option<(&'static str, &'static str, &str, &str)> {
+    use Record::*;
+    Some(match r {
+        ModuleCreate { from, to } => ("module", "creates", from, to),
+        ModuleModify { from, to } => ("module", "modifies", from, to),
+        ModuleDelete { from, to } => ("module", "deletes", from, to),
+        ModuleMove { from, to } => ("module", "moves", from, to),
+        ModuleRename { from, to } => ("module", "renames", from, to),
+        FileCreate { from, to } => ("file", "creates", from, to),
+        FileModify { from, to } => ("file", "modifies", from, to),
+        FileDelete { from, to } => ("file", "deletes", from, to),
+        FileMove { from, to } => ("file", "moves", from, to),
+        FileRename { from, to } => ("file", "renames", from, to),
+        StructCreate { from, to } => ("struct", "creates", from, to),
+        StructModify { from, to } => ("struct", "modifies", from, to),
+        StructDelete { from, to } => ("struct", "deletes", from, to),
+        StructMove { from, to } => ("struct", "moves", from, to),
+        StructRename { from, to } => ("struct", "renames", from, to),
+        FunctionCreate { from, to } => ("function", "creates", from, to),
+        FunctionModify { from, to } => ("function", "modifies", from, to),
+        FunctionDelete { from, to } => ("function", "deletes", from, to),
+        FunctionMove { from, to } => ("function", "moves", from, to),
+        FunctionRename { from, to } => ("function", "renames", from, to),
+        _ => return None,
+    })
+}
+
+/// Append a task's operation edge records — plus one `target` destination edge
+/// per distinct renames/moves destination — to `records`.
+fn push_task_operations(records: &mut Vec<Record>, fqn: &str, operations: &[TaskOperation]) {
+    let mut destinations: BTreeSet<&str> = BTreeSet::new();
+    for op in operations {
+        if let Some(rec) = task_operation_record(fqn, op) {
+            records.push(rec);
+        }
+        if matches!(op.verb.as_str(), "renames" | "moves") && destinations.insert(&op.new_fqn) {
+            records.push(Record::Target {
+                from: fqn.to_string(),
+                to: op.new_fqn.clone(),
+            });
+        }
+    }
+}
+
+/// Read a task's stored operation edge set back into [`TaskOperation`]s; the
+/// task's `target` destination edge fills a renames/moves `new_fqn`.
+fn task_operations_from_records(records: &[Record], fqn: &str) -> Vec<TaskOperation> {
+    let destination = records
+        .iter()
+        .find_map(|r| match r {
+            Record::Target { from, to } if from == fqn => Some(to.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    records
+        .iter()
+        .filter_map(|r| {
+            let (kind, verb, from, to) = task_operation_of(r)?;
+            (from == fqn).then(|| TaskOperation {
+                kind: kind.to_string(),
+                verb: verb.to_string(),
+                target: to.to_string(),
+                new_fqn: if matches!(verb, "renames" | "moves") {
+                    destination.clone()
+                } else {
+                    String::new()
+                },
+            })
+        })
+        .collect()
+}
+
+/// The two assignment universes: `agents` = the branch graph's Agent roster
+/// (`agent.<file-stem>` nodes; a missing DB is an empty roster, so every
+/// assignment is drift), `components` = the solution layer's Component FQNs.
+fn task_assignment_universes(
+    apg_root: &Path,
+) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
+    let mut agents = BTreeSet::new();
+    if apg_root.join(specs::TRANS).join("db.lbug").exists() {
+        let db = artifacts::ArtifactDb::open(apg_root)?;
+        let conn = db.conn()?;
+        for row in conn.query("MATCH (n:Agent) RETURN n.fqn")? {
+            let fqn = row.first().map(|v| v.to_string()).unwrap_or_default();
+            if !fqn.is_empty() {
+                agents.insert(fqn);
+            }
+        }
+    }
+    let components = crate::layers::read_existing_nodes(apg_root)?
+        .into_iter()
+        .filter(|n| n.layer == "solution" && n.node_type == "component")
+        .map(|n| crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name))
+        .collect();
+    Ok((agents, components))
+}
+
+/// The two universes `validate_task_operations` classifies a task's target
+/// against: `scanned` = every real code FQN the last scan produced (a missing DB
 /// counts as no scanned graph — every target is absent), `planned` = the
 /// planned-node universe: the DB's `status: planned` Implementation nodes
 /// UNION the `Record::PlannedNode` FQNs declared in the plan records

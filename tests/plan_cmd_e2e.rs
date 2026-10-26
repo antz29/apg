@@ -81,6 +81,22 @@ fn node_file_fqn(n: &layers::NodeFile) -> String {
     format!("{}.{}.{}", n.layer, n.node_type, n.name)
 }
 
+/// The single Agent a task-authoring case assigns (phase-5's task-16..18
+/// fixtures add the matching Agent node to their scan payload).
+fn assigned_agent() -> Vec<String> {
+    vec!["agent.implementer".to_string()]
+}
+
+/// One per-kind operation edge for the task-authoring calls.
+fn task_op(kind: &str, verb: &str, target: &str, new_fqn: &str) -> TaskOperation {
+    TaskOperation {
+        kind: kind.to_string(),
+        verb: verb.to_string(),
+        target: target.to_string(),
+        new_fqn: new_fqn.to_string(),
+    }
+}
+
 /// Every authored/transient FQN the live DB currently carries — the detach set
 /// a full tree re-projection replaces. Queried per label so code nodes
 /// (`Module`/`File`/`Struct`/`Function`/`UnresolvedTarget`/`Scan`) are never
@@ -1167,8 +1183,6 @@ mod e2e {
                 None,
                 None,
                 None,
-                None,
-                None,
             )
             .is_err()
         );
@@ -1250,8 +1264,6 @@ mod e2e {
             None,
             None,
             None,
-            None,
-            None,
         )
         .unwrap();
         let task = records
@@ -1270,7 +1282,7 @@ mod e2e {
                 if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
         )));
 
-        // A re-validated classification change (source -> test/unit) lands.
+        // A re-validated assignment/operation replacement lands.
         plan_update_task_at(
             &apg_root,
             "foo",
@@ -1278,54 +1290,42 @@ mod e2e {
             1,
             1,
             None,
-            Some("test"),
-            Some("unit"),
+            Some(&assigned_agent()),
             None,
-            None,
-            None,
+            Some(&[task_op("struct", "modifies", "github.com/x/y.Store", "")]),
         )
         .unwrap();
 
         // Negatives — each refused before any write.
         let before = snapshot(&records);
-        let mut try_case = |label: &str,
-                            kind: Option<&str>,
-                            tier: Option<&str>,
-                            verb: Option<&str>,
-                            target: Option<&str>| {
-            let err = plan_update_task_at(
-                &apg_root,
-                "foo",
-                &mut records,
-                1,
-                1,
-                None,
-                kind,
-                tier,
-                verb,
-                target,
-                None,
-            )
-            .unwrap_err();
-            assert!(!err.to_string().is_empty(), "{label}");
-            assert_eq!(snapshot(&records), before, "{label}: no partial write");
-        };
-        try_case("invalid kind", Some("qa"), None, None, None);
-        try_case("test needs a tier", Some("test"), Some(""), None, None);
+        let mut try_case =
+            |label: &str, assigned: Option<&[String]>, operations: Option<&[TaskOperation]>| {
+                let err = plan_update_task_at(
+                    &apg_root,
+                    "foo",
+                    &mut records,
+                    1,
+                    1,
+                    None,
+                    assigned,
+                    None,
+                    operations,
+                )
+                .unwrap_err();
+                assert!(!err.to_string().is_empty(), "{label}");
+                assert_eq!(snapshot(&records), before, "{label}: no partial write");
+            };
+        try_case("no assigned Agent", Some(&[] as &[String]), None);
+        try_case("drift Agent", Some(&["agent.ghost".to_string()]), None);
         try_case(
-            "tier only for test",
-            Some("source"),
-            Some("unit"),
+            "invalid verb",
             None,
-            None,
+            Some(&[task_op("struct", "explodes", "github.com/x/y.Store", "")]),
         );
-        try_case("invalid verb", None, None, Some("explodes"), None);
         try_case(
             "creates over real code",
             None,
-            None,
-            Some("creates"),
-            Some("github.com/x/y.Store"),
+            Some(&[task_op("struct", "creates", "github.com/x/y.Store", "")]),
         );
 
         // The valid classification landed and status/Reviews still survive.
@@ -1425,20 +1425,7 @@ mod e2e {
             "done".to_string(),
         );
         assert_eq!(task_state(&records), real);
-        plan_update_task_at(
-            &apg_root,
-            "foo",
-            &mut records,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+        plan_update_task_at(&apg_root, "foo", &mut records, 1, 1, None, None, None, None).unwrap();
         assert_eq!(
             task_state(&records),
             real,
@@ -1456,9 +1443,7 @@ mod e2e {
             None,
             None,
             None,
-            Some("creates"),
-            Some(""),
-            None,
+            Some(&[] as &[TaskOperation]),
         )
         .unwrap();
         assert_eq!(
@@ -1486,40 +1471,31 @@ mod e2e {
             None,
             None,
             None,
-            Some("modifies"),
-            Some("github.com/x/y.Store"),
-            None,
+            Some(&[task_op("struct", "modifies", "github.com/x/y.Store", "")]),
         )
         .unwrap();
         let before = snapshot(&records);
-        for (label, verb) in [
-            ("explicit modifies", Some("modifies")),
-            ("stored modifies", None),
-        ] {
-            let err = plan_update_task_at(
-                &apg_root,
-                "foo",
-                &mut records,
-                1,
-                1,
-                None,
-                None,
-                None,
-                verb,
-                Some(""),
-                None,
-            )
-            .unwrap_err();
-            assert!(
-                err.to_string().contains("requires --fqn"),
-                "{label}: expected the validate_task_verb target-less refusal, got `{err}`"
-            );
-            assert_eq!(
-                snapshot(&records),
-                before,
-                "{label}: a refused clear must leave the record set byte-identical"
-            );
-        }
+        let err = plan_update_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            None,
+            None,
+            None,
+            Some(&[task_op("struct", "modifies", "", "")]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("requires a target FQN"),
+            "expected the target-less operation refusal, got `{err}`"
+        );
+        assert_eq!(
+            snapshot(&records),
+            before,
+            "a refused clear must leave the record set byte-identical"
+        );
 
         testutil::remove(&repo);
     }
@@ -1655,11 +1631,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "creates",
-            "github.com/x/y.Gateway",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "creates", "github.com/x/y.Gateway", "")],
         )
         .unwrap();
         match records
@@ -1693,11 +1667,9 @@ mod e2e {
             1,
             2,
             "T2",
-            "source",
-            "",
-            "creates",
-            "github.com/x/y.Gateway",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "creates", "github.com/x/y.Gateway", "")],
         )
         .unwrap();
         assert!(records.iter().any(|r| matches!(
@@ -1743,11 +1715,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "creates",
-            "github.com/x/y.Store",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "creates", "github.com/x/y.Store", "")],
         )
         .unwrap_err();
         assert!(
@@ -1981,11 +1951,9 @@ mod e2e {
                 1,
                 1,
                 "T",
-                "source",
-                "",
-                verb,
-                "github.com/x/y.Nope",
-                "",
+                &assigned_agent(),
+                None,
+                &[task_op("struct", verb, "github.com/x/y.Nope", "")],
             )
             .unwrap_err();
             assert!(
@@ -2010,11 +1978,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "modifies",
-            "github.com/x/y.Gateway",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "modifies", "github.com/x/y.Gateway", "")],
         )
         .unwrap_err();
         assert!(
@@ -2023,8 +1989,8 @@ mod e2e {
             "{err}"
         );
 
-        // modifies/deletes with a real scanned FQN are accepted; the verb and
-        // target land on the task record.
+        // modifies/deletes with a real scanned FQN are accepted; the operation
+        // edge lands on the task record.
         plan_add_task_at(
             &apg_root,
             "foo",
@@ -2032,11 +1998,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "modifies",
-            "github.com/x/y.Store",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "modifies", "github.com/x/y.Store", "")],
         )
         .unwrap();
         plan_add_task_at(
@@ -2046,11 +2010,9 @@ mod e2e {
             1,
             2,
             "T2",
-            "source",
-            "",
-            "deletes",
-            "github.com/x/y.Store",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "deletes", "github.com/x/y.Store", "")],
         )
         .unwrap();
         assert!(records.iter().any(|r| matches!(
@@ -2102,11 +2064,14 @@ mod e2e {
                 1,
                 1,
                 "T",
-                "source",
-                "",
-                verb,
-                "github.com/x/y.Nope",
-                "github.com/x/y.Gateway",
+                &assigned_agent(),
+                None,
+                &[task_op(
+                    "struct",
+                    verb,
+                    "github.com/x/y.Nope",
+                    "github.com/x/y.Gateway",
+                )],
             )
             .unwrap_err();
             assert!(
@@ -2123,14 +2088,12 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "renames",
-            "github.com/x/y.Store",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "renames", "github.com/x/y.Store", "")],
         )
         .unwrap_err();
-        assert!(err.to_string().contains("requires --to"), "{err}");
+        assert!(err.to_string().contains("requires --target"), "{err}");
 
         // A colliding destination is refused — both against another real node
         // and against the source itself.
@@ -2145,11 +2108,9 @@ mod e2e {
                 1,
                 1,
                 "T",
-                "source",
-                "",
-                verb,
-                "github.com/x/y.Store",
-                to,
+                &assigned_agent(),
+                None,
+                &[task_op("struct", verb, "github.com/x/y.Store", to)],
             )
             .unwrap_err();
             assert!(
@@ -2168,11 +2129,14 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "renames",
-            "github.com/x/y.Store",
-            "github.com/x/y.Store2",
+            &assigned_agent(),
+            None,
+            &[task_op(
+                "struct",
+                "renames",
+                "github.com/x/y.Store",
+                "github.com/x/y.Store2",
+            )],
         )
         .unwrap();
         plan_add_task_at(
@@ -2182,11 +2146,14 @@ mod e2e {
             1,
             2,
             "T2",
-            "source",
-            "",
-            "moves",
-            "github.com/x/y.Store",
-            "github.com/x/y.Store2",
+            &assigned_agent(),
+            None,
+            &[task_op(
+                "struct",
+                "moves",
+                "github.com/x/y.Store",
+                "github.com/x/y.Store2",
+            )],
         )
         .unwrap();
         assert!(records.iter().any(|r| matches!(
@@ -2237,16 +2204,14 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "explodes",
-            "github.com/x/y.Store",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "explodes", "github.com/x/y.Store", "")],
         )
         .unwrap_err();
         assert!(err.to_string().contains("invalid task verb"), "{err}");
 
-        // A non-creates verb without a target FQN is meaningless — refused.
+        // An operation edge without a target FQN is meaningless — refused.
         for verb in ["modifies", "deletes", "renames", "moves"] {
             let err = plan_add_task_at(
                 &apg_root,
@@ -2255,17 +2220,18 @@ mod e2e {
                 1,
                 1,
                 "T",
-                "source",
-                "",
-                verb,
-                "",
-                "",
+                &assigned_agent(),
+                None,
+                &[task_op("struct", verb, "", "github.com/x/y.Gateway")],
             )
             .unwrap_err();
-            assert!(err.to_string().contains("requires --fqn"), "{verb}: {err}");
+            assert!(
+                err.to_string().contains("requires a target FQN"),
+                "{verb}: {err}"
+            );
         }
 
-        // --to is only valid for renames/moves.
+        // --target is only valid for renames/moves.
         let err = plan_add_task_at(
             &apg_root,
             "foo",
@@ -2273,11 +2239,14 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "creates",
-            "github.com/x/y.Gateway",
-            "github.com/x/y.Gateway2",
+            &assigned_agent(),
+            None,
+            &[task_op(
+                "struct",
+                "creates",
+                "github.com/x/y.Gateway",
+                "github.com/x/y.Gateway2",
+            )],
         )
         .unwrap_err();
         assert!(
@@ -2285,8 +2254,7 @@ mod e2e {
             "{err}"
         );
 
-        // An omitted verb defaults to creates-without-target — the pre-verb
-        // task shape still authors.
+        // A target-less activity (no operation edge) still authors.
         plan_add_task_at(
             &apg_root,
             "foo",
@@ -2294,11 +2262,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "",
-            "",
-            "",
+            &assigned_agent(),
+            None,
+            &[],
         )
         .unwrap();
         assert!(records.iter().any(|r| matches!(
@@ -2349,11 +2315,9 @@ mod e2e {
             2,
             1,
             "T",
-            "source",
-            "",
-            "creates",
-            "",
-            "",
+            &assigned_agent(),
+            None,
+            &[],
         )
         .unwrap_err();
         assert!(err.to_string().contains("no such phase"), "{err}");
@@ -2461,11 +2425,9 @@ mod e2e {
             1,
             1,
             "T2",
-            "source",
-            "",
-            "creates",
-            "",
-            "",
+            &assigned_agent(),
+            None,
+            &[],
         )
         .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
@@ -3943,11 +3905,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "modifies",
-            "github.com/x/y.Nope",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "modifies", "github.com/x/y.Nope", "")],
         )
         .unwrap_err();
         assert!(
@@ -3970,11 +3930,9 @@ mod e2e {
             1,
             1,
             "T",
-            "source",
-            "",
-            "creates",
-            "github.com/x/y.Gateway",
-            "",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "creates", "github.com/x/y.Gateway", "")],
         )
         .unwrap();
         write_through(&apg_root, "foo", &records).unwrap();
