@@ -306,11 +306,19 @@ pub fn plan_update_phase_at(
 /// existing one) are re-validated exactly as `add` does, so an update can
 /// never introduce an invalid classification or verb/target. An absent task is
 /// refused before any mutation.
+///
+/// Transitional dual-read (SCHEMA.md task edges): the stored operation edge set
+/// is the source of truth for `(verb, target, new_fqn)`; a record carrying no
+/// operation edge falls back to the still-present fields (task-20 retires
+/// them). An update that supplies any of `verb`/`target`/`new_fqn` rewrites
+/// this task's operation edges from the effective values using `add`'s
+/// construction, and the legacy fields are kept in step; an update that
+/// supplies none leaves the existing edges untouched.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_update_task_at(
     apg_root: &Path,
     project: &str,
-    records: &mut [Record],
+    records: &mut Vec<Record>,
     phase: u32,
     k: u32,
     title: Option<&str>,
@@ -345,6 +353,60 @@ pub fn plan_update_task_at(
             "update task: `{fqn}` is not a task of `{project}` (author it first with `apg plan add {project} task {phase} {k} …`)"
         );
     };
+    // Prefer the stored operation edge set; fall back to the legacy fields when
+    // the record carries none (the transitional dual-read task-20 deletes).
+    let mut edge_op: Option<(&str, &str)> = None;
+    let mut edge_new_fqn = "";
+    for r in records.iter() {
+        match r {
+            Record::ModuleCreate { from, to }
+            | Record::FileCreate { from, to }
+            | Record::StructCreate { from, to }
+            | Record::FunctionCreate { from, to }
+                if from == &fqn =>
+            {
+                edge_op = Some(("creates", to))
+            }
+            Record::ModuleModify { from, to }
+            | Record::FileModify { from, to }
+            | Record::StructModify { from, to }
+            | Record::FunctionModify { from, to }
+                if from == &fqn =>
+            {
+                edge_op = Some(("modifies", to))
+            }
+            Record::ModuleDelete { from, to }
+            | Record::FileDelete { from, to }
+            | Record::StructDelete { from, to }
+            | Record::FunctionDelete { from, to }
+                if from == &fqn =>
+            {
+                edge_op = Some(("deletes", to))
+            }
+            Record::ModuleRename { from, to }
+            | Record::FileRename { from, to }
+            | Record::StructRename { from, to }
+            | Record::FunctionRename { from, to }
+                if from == &fqn =>
+            {
+                edge_op = Some(("renames", to))
+            }
+            Record::ModuleMove { from, to }
+            | Record::FileMove { from, to }
+            | Record::StructMove { from, to }
+            | Record::FunctionMove { from, to }
+                if from == &fqn =>
+            {
+                edge_op = Some(("moves", to))
+            }
+            Record::Target { from, to } if from == &fqn => edge_new_fqn = to,
+            _ => {}
+        }
+    }
+    let (cur_verb, cur_target, cur_new_fqn) = match edge_op {
+        Some((v, to)) => (v.to_string(), to.to_string(), edge_new_fqn.to_string()),
+        None => (cur_verb, cur_target, cur_new_fqn),
+    };
     let eff_kind = kind.unwrap_or(cur_kind.as_str());
     let eff_tier = tier.unwrap_or(cur_tier.as_str());
     validate_task_kind_tier(eff_kind, eff_tier)?;
@@ -353,6 +415,155 @@ pub fn plan_update_task_at(
     let eff_new_fqn = new_fqn.unwrap_or(cur_new_fqn.as_str());
     let (scanned, planned) = task_verb_universes(apg_root, records)?;
     validate_task_verb(eff_verb, eff_target, eff_new_fqn, &scanned, &planned)?;
+    // Rewrite only the operations the update supplies, using `add`'s exact
+    // construction (planned-node kind first, live graph label second; an empty
+    // or unresolvable target writes no edge).
+    if verb.is_some() || target.is_some() || new_fqn.is_some() {
+        records.retain(|r| {
+            !matches!(
+                r,
+                Record::ModuleCreate { from, .. }
+                    | Record::ModuleModify { from, .. }
+                    | Record::ModuleDelete { from, .. }
+                    | Record::ModuleRename { from, .. }
+                    | Record::ModuleMove { from, .. }
+                    | Record::FileCreate { from, .. }
+                    | Record::FileModify { from, .. }
+                    | Record::FileDelete { from, .. }
+                    | Record::FileRename { from, .. }
+                    | Record::FileMove { from, .. }
+                    | Record::StructCreate { from, .. }
+                    | Record::StructModify { from, .. }
+                    | Record::StructDelete { from, .. }
+                    | Record::StructRename { from, .. }
+                    | Record::StructMove { from, .. }
+                    | Record::FunctionCreate { from, .. }
+                    | Record::FunctionModify { from, .. }
+                    | Record::FunctionDelete { from, .. }
+                    | Record::FunctionRename { from, .. }
+                    | Record::FunctionMove { from, .. }
+                    | Record::Target { from, .. }
+                    if from == &fqn
+            )
+        });
+        let node_kind = if eff_target.is_empty() {
+            None
+        } else {
+            records
+                .iter()
+                .find_map(|r| match r {
+                    Record::PlannedNode { fqn: pf, kind, .. } if pf == eff_target => {
+                        Some(kind.clone())
+                    }
+                    _ => None,
+                })
+                .or_else(|| {
+                    artifacts::ArtifactDb::open(apg_root)
+                        .ok()
+                        .and_then(|db| db.impl_label(eff_target))
+                        .map(|label| label.to_ascii_lowercase())
+                })
+        };
+        if let Some(node_kind) = node_kind.as_deref() {
+            let op_verb = if eff_verb.is_empty() {
+                "creates"
+            } else {
+                eff_verb
+            };
+            let op = match (node_kind, op_verb) {
+                ("module", "creates") => Some(Record::ModuleCreate {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("module", "modifies") => Some(Record::ModuleModify {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("module", "deletes") => Some(Record::ModuleDelete {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("module", "renames") => Some(Record::ModuleRename {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("module", "moves") => Some(Record::ModuleMove {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("file", "creates") => Some(Record::FileCreate {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("file", "modifies") => Some(Record::FileModify {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("file", "deletes") => Some(Record::FileDelete {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("file", "renames") => Some(Record::FileRename {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("file", "moves") => Some(Record::FileMove {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("struct", "creates") => Some(Record::StructCreate {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("struct", "modifies") => Some(Record::StructModify {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("struct", "deletes") => Some(Record::StructDelete {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("struct", "renames") => Some(Record::StructRename {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("struct", "moves") => Some(Record::StructMove {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("function", "creates") => Some(Record::FunctionCreate {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("function", "modifies") => Some(Record::FunctionModify {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("function", "deletes") => Some(Record::FunctionDelete {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("function", "renames") => Some(Record::FunctionRename {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                ("function", "moves") => Some(Record::FunctionMove {
+                    from: fqn.clone(),
+                    to: eff_target.to_string(),
+                }),
+                _ => None,
+            };
+            if let Some(op) = op {
+                records.push(op);
+                if matches!(op_verb, "renames" | "moves") {
+                    records.push(Record::Target {
+                        from: fqn.clone(),
+                        to: eff_new_fqn.to_string(),
+                    });
+                }
+            }
+        }
+    }
     for r in records.iter_mut() {
         if let Record::Task {
             fqn: tf,
