@@ -274,6 +274,66 @@ pub fn code_universes_from_export(
     Ok((scanned, planned))
 }
 
+/// The **Implementation kind** every code FQN materialises at, resolved
+/// **without opening `db.lbug`** — the kind accessor beside
+/// [`code_universes_from_export`]:
+///
+/// - the four Implementation record types from the `apg/.trans/graph.jsonl`
+///   export (`module`/`file`/`struct`/`function`), and
+/// - the `Record::PlannedNode.kind` the plan store declares for a FQN the last
+///   scan did not produce, so a declared-but-unscanned target carries its
+///   declared kind too. The export's kind wins where both name the same FQN (the
+///   scan realized the planned node), and a FQN with no declared kind stays
+///   absent from the map — the caller's `module` default covers it.
+///
+/// The export is parsed as generic JSON: the `scan_meta` control record and
+/// every spec/plan/edge record are skipped, exactly as the sibling does.
+pub fn code_kinds_from_export(apg_root: &Path) -> anyhow::Result<HashMap<String, String>> {
+    let mut kinds = HashMap::new();
+
+    let export = apg_root.join(specs::TRANS).join("graph.jsonl");
+    if export.exists() {
+        let text = std::fs::read_to_string(&export)?;
+        for (i, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                anyhow::anyhow!(
+                    "{}:{}: bad graph.jsonl record: {e}",
+                    export.display(),
+                    i + 1
+                )
+            })?;
+            let Some(kind) = value.get("type").and_then(|t| t.as_str()) else {
+                continue;
+            };
+            if !matches!(kind, "module" | "file" | "struct" | "function") {
+                continue;
+            }
+            let Some(fqn) = value.get("fqn").and_then(|f| f.as_str()) else {
+                continue;
+            };
+            kinds.insert(fqn.to_string(), kind.to_string());
+        }
+    }
+
+    // The plan store's declared kinds only fill the gaps: the export's kind
+    // already won above, so `or_insert` never overwrites it.
+    for f in specs::plan_files(apg_root) {
+        for record in specs::read_jsonl(&f)? {
+            if let Record::PlannedNode { fqn, kind, .. } = record
+                && !kind.is_empty()
+            {
+                kinds.entry(fqn).or_insert(kind);
+            }
+        }
+    }
+
+    Ok(kinds)
+}
+
 /// Re-ingests the durable layers delta into the live DB after a node/edge
 /// mutation: detaches exactly the mutated FQNs `deletes` (removed ∪ changed —
 /// never a whole layer-dir prefix) and re-merges the caller-supplied `records`
