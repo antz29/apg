@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agentfrontend-e2e-observation-boundary",
+  "body": "Symlink tests are Unix-only and observe emitted records, not reads; add platform equivalents or read instrumentation when non-Unix support or stronger read-boundary evidence is required.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.agentlib_e2e",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
