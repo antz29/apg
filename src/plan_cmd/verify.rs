@@ -499,9 +499,10 @@ pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
 /// 1. **Implemented-by claims** — every `implemented-by` claim the delta adds,
 ///    re-points, or removes (a removed edge, or a removed solution node
 ///    carrying one) obliges its code FQN to be touched by at least one plan
-///    task. A task touches an FQN when its verb's subject equals it: `target`
-///    for every verb, plus `new_fqn` for a renames/moves pair (the destination
-///    FQN the code lands at). Coverage is verb-agnostic and status-agnostic: a
+///    task. A task touches its per-kind operation edges' targets (plus the
+///    companion destination of a renames/moves), falling back to the legacy
+///    `target`/`new_fqn` fields only for a task that carries no operation edge.
+///    Coverage is verb-agnostic and status-agnostic: a
 ///    `creates` over a still-planned FQN counts exactly like a `modifies` over
 ///    real code, and a renames/moves destination counts. FQNs are compared by
 ///    language-agnostic identity, so `rust.apg.x` ≡ `apg.x`. This walk never
@@ -526,17 +527,67 @@ pub fn coverage_check(records: &[Record], delta: &SpecDelta) -> CoverageReport {
     let mut touched: BTreeSet<&str> = BTreeSet::new();
     for r in records {
         if let Record::Task {
+            fqn,
             verb,
             target,
             new_fqn,
             ..
         } = r
         {
-            if !target.is_empty() {
-                touched.insert(crate::layers::code_identity(target));
+            // Prefer the task's per-kind operation edges; fall back to the
+            // legacy verb/target/new_fqn fields only for a record that carries
+            // none (the transitional dual-read — a renames/moves destination
+            // rides a companion `Record::Target`).
+            let mut has_op = false;
+            let mut rename_move = false;
+            let mut edge_dest = "";
+            for e in records {
+                let (from, to, rename) = match e {
+                    Record::ModuleCreate { from, to }
+                    | Record::FileCreate { from, to }
+                    | Record::StructCreate { from, to }
+                    | Record::FunctionCreate { from, to }
+                    | Record::ModuleModify { from, to }
+                    | Record::FileModify { from, to }
+                    | Record::StructModify { from, to }
+                    | Record::FunctionModify { from, to }
+                    | Record::ModuleDelete { from, to }
+                    | Record::FileDelete { from, to }
+                    | Record::StructDelete { from, to }
+                    | Record::FunctionDelete { from, to } => (from, to, false),
+                    Record::ModuleRename { from, to }
+                    | Record::FileRename { from, to }
+                    | Record::StructRename { from, to }
+                    | Record::FunctionRename { from, to }
+                    | Record::ModuleMove { from, to }
+                    | Record::FileMove { from, to }
+                    | Record::StructMove { from, to }
+                    | Record::FunctionMove { from, to } => (from, to, true),
+                    Record::Target { from, to } if from == fqn => {
+                        edge_dest = to;
+                        continue;
+                    }
+                    _ => continue,
+                };
+                if from == fqn {
+                    has_op = true;
+                    rename_move |= rename;
+                    if !to.is_empty() {
+                        touched.insert(crate::layers::code_identity(to));
+                    }
+                }
             }
-            if matches!(verb.as_str(), "renames" | "moves") && !new_fqn.is_empty() {
-                touched.insert(crate::layers::code_identity(new_fqn));
+            if has_op {
+                if rename_move && !edge_dest.is_empty() {
+                    touched.insert(crate::layers::code_identity(edge_dest));
+                }
+            } else {
+                if !target.is_empty() {
+                    touched.insert(crate::layers::code_identity(target));
+                }
+                if matches!(verb.as_str(), "renames" | "moves") && !new_fqn.is_empty() {
+                    touched.insert(crate::layers::code_identity(new_fqn));
+                }
             }
         }
     }
