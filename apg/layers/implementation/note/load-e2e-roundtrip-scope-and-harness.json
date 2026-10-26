@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "load-e2e-roundtrip-scope-and-harness",
+  "body": "The edge-modelled round-trip test no longer asserts the Note/Details, Feedback/Reviews and Satisfies spec-rel round-trip the old synthetic fixture bundled in (those rows stay covered by tests/layers_e2e.rs and tests/artifacts_e2e.rs), and it drives the scan through the hermetic testutil::scan_checkout stand-in (real ingest to parquet to COPY to graph.jsonl, no frontend process). Limit: this test owns only the task edge model, not the whole spec/plan schema surface, and not a frontend-driven scan. Upgrade: fold the Note/Feedback/Satisfies fixtures back in if one test should own the whole surface, and switch to a frontend-driven scan if process-level coverage is required at this tier.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.load_e2e.e2e.spec_plan_schema_roundtrip",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
