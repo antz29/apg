@@ -64,6 +64,45 @@ pub fn collect_definitions(files: &[(String, u32)]) -> Vec<(String, String, u32,
     defs
 }
 
+/// Emits the agent stream over the collected definition list: one `module`
+/// record for the `.opencode/agents` directory identity (the ingestor roots it
+/// `agent..opencode/agents`), then per definition one `file` record parented on
+/// that module plus one `agent` record carrying the extension-stripped stem and
+/// the definition's path and line span. Writes nothing for an empty list.
+pub fn emit_stream<W: Write>(w: &mut W, defs: &[(String, String, u32, u32)]) -> io::Result<()> {
+    if defs.is_empty() {
+        return Ok(());
+    }
+    let module = ".opencode/agents";
+    write_rec(
+        w,
+        &Rec::Module {
+            fqn: module.to_string(),
+        },
+    )?;
+    for (path, stem, start_line, end_line) in defs {
+        write_rec(
+            w,
+            &Rec::File {
+                path: path.clone(),
+                parent: module.to_string(),
+                start_line: *start_line,
+                end_line: *end_line,
+            },
+        )?;
+        write_rec(
+            w,
+            &Rec::Agent {
+                name: stem.clone(),
+                path: path.clone(),
+                start_line: *start_line,
+                end_line: *end_line,
+            },
+        )?;
+    }
+    Ok(())
+}
+
 /// Parsed command line: the project dir plus the scan driver's flags.
 pub struct Args {
     pub root: PathBuf,
