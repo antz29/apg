@@ -603,9 +603,12 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
 /// so `ingest`'s finalize keeps the authored→code edges (`implemented-by`,
 /// `details`, `reviews`) exactly as the real scan's assembled graph does — the
 /// real scan has the actual code nodes; the tree has none. A `PlannedNode`
-/// placeholder enters at its exact FQN (no language re-rooting) and, being a
-/// code kind, contributes no authored row to the digest; its only effect is to
-/// keep those edges.
+/// placeholder enters at its exact FQN (no language re-rooting) at the
+/// Implementation kind the export resolves for that FQN — `module` only where
+/// the export names none — so the kind-paired Task operation edges
+/// (`struct_modify` and its siblings) survive finalize exactly as they do
+/// against the real nodes. Being a code kind, the placeholder contributes no
+/// authored row to the digest; its only effect is to keep those edges.
 ///
 /// No database is opened. Every failure (a malformed layers/transient file, a
 /// drift ref, a bad export line) is returned as an `Err`.
@@ -626,13 +629,20 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
 
     // Placeholder code nodes for the code universe — the analog of the real
     // scan's actual code nodes, without which `ingest`'s finalize would prune
-    // every authored→code edge (the target node would be absent). Code kinds
-    // contribute no authored row, so the digest is unchanged by their presence
-    // other than through the edges they keep.
+    // every authored→code edge (the target node would be absent). Each carries
+    // the Implementation kind the export resolves, so the kind-paired Task
+    // operation edges survive finalize; only a FQN the export does not name
+    // falls back to `module`. Code kinds contribute no authored row, so the
+    // digest is unchanged by their presence other than through the edges they
+    // keep.
+    let kinds = crate::artifacts::code_kinds_from_export(apg_root)?;
     for fqn in scanned.iter().chain(planned.iter()) {
         records.push(Record::PlannedNode {
             fqn: fqn.clone(),
-            kind: "module".to_string(),
+            kind: kinds
+                .get(fqn)
+                .cloned()
+                .unwrap_or_else(|| "module".to_string()),
             name: String::new(),
             parent: String::new(),
         });
