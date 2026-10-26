@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-cmd-e2e-update-replacement-single-roster-agent",
+  "body": "The task-update e2e (plan_update_task_at_preserves_status_reviews_and_revalidates) exercises the assigned-to Agent replacement re-validation only against the single roster Agent `agent.implementer` that `db_at` carries — the \"replacement\" re-supplies the same agent rather than swapping to a distinct valid one. A genuinely different assigned Agent (asserting a swap lands and is re-validated against the branch roster) is not covered because the shared fixture DB seeds exactly one Agent. Upgrade — add a second Agent to the `db_at` roster (or a task-local fixture) and assert a swap to it lands — only if distinct-agent replacement needs explicit coverage.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.plan_update_task_at_preserves_status_reviews_and_revalidates",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
