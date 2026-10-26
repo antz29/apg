@@ -1433,6 +1433,130 @@ pub fn task_rec(verb: &str, target: &str, new_fqn: &str) -> crate::schema::Recor
     }
 }
 
+/// [`task_rec`]'s edge-aware sibling (SCHEMA.md task edges): the same
+/// single-task plan record plus the operation edge its verb names —
+/// `creates` → `<kind>_create` to the planned destination,
+/// `modifies`/`deletes` → `<kind>_{modify,delete}` to the live target,
+/// `renames`/`moves` → `<kind>_{rename,move}` to the live source plus a
+/// `target` edge to the planned destination — and no edge for a target-less
+/// task. Shared by the plan/edge tiers so fixtures are single-sourced.
+pub fn task_recs(
+    kind: &str,
+    verb: &str,
+    target: &str,
+    new_fqn: &str,
+) -> Vec<crate::schema::Record> {
+    use crate::schema::Record::*;
+    let fqn = "foo/plan.phase-01.task-1".to_string();
+    let mut recs = vec![Task {
+        fqn: fqn.clone(),
+        title: "T".to_string(),
+        kind: kind.to_string(),
+        tier: String::new(),
+        status: "pending".to_string(),
+        verb: verb.to_string(),
+        target: target.to_string(),
+        new_fqn: new_fqn.to_string(),
+    }];
+    if target.is_empty() {
+        return recs;
+    }
+    let to = target.to_string();
+    let op = match (kind, verb) {
+        ("module", "creates") => Some(ModuleCreate {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("module", "modifies") => Some(ModuleModify {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("module", "deletes") => Some(ModuleDelete {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("module", "renames") => Some(ModuleRename {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("module", "moves") => Some(ModuleMove {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("file", "creates") => Some(FileCreate {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("file", "modifies") => Some(FileModify {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("file", "deletes") => Some(FileDelete {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("file", "renames") => Some(FileRename {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("file", "moves") => Some(FileMove {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("struct", "creates") => Some(StructCreate {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("struct", "modifies") => Some(StructModify {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("struct", "deletes") => Some(StructDelete {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("struct", "renames") => Some(StructRename {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("struct", "moves") => Some(StructMove {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("function", "creates") => Some(FunctionCreate {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("function", "modifies") => Some(FunctionModify {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("function", "deletes") => Some(FunctionDelete {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("function", "renames") => Some(FunctionRename {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        ("function", "moves") => Some(FunctionMove {
+            from: fqn.clone(),
+            to: to.clone(),
+        }),
+        _ => None,
+    };
+    if let Some(op) = op {
+        recs.push(op);
+        if matches!(verb, "renames" | "moves") && !new_fqn.is_empty() {
+            recs.push(Target {
+                from: fqn,
+                to: new_fqn.to_string(),
+            });
+        }
+    }
+    recs
+}
+
 /// A hermetic stand-in for `apg scan` (tests never spawn frontends): pipes the
 /// checkout's `*.scan.jsonl` payloads through the real ingest pipeline, then
 /// chains the same post-code leg `cmd_scan` assembles — the durable

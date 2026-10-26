@@ -559,7 +559,7 @@ fn node_merge(
 ///
 /// The last element is `Some` for every durable authored rel table (the
 /// serialized-properties column, phase-4 task 13) and `None` for the transient
-/// `Reviews`/`Gates`/`Satisfies` rels, which carry no column.
+/// `Reviews`/`Gates`/`Satisfies` rels and the task edges, which carry no column.
 pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeProperties>)> {
     match r {
         Record::Contains {
@@ -635,6 +635,32 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
             to,
             properties,
         } => Some(("Realises", from, to, Some(properties))),
+        // Task edges (SCHEMA.md, phase 4): rel tables created by the projection
+        // task, PascalCase of each wire name. Safe before the tables exist —
+        // `merge_edge` skips every pair `rel_table_pairs` does not declare.
+        Record::AssignedTo { from, to } => Some(("AssignedTo", from, to, None)),
+        Record::Implements { from, to } => Some(("Implements", from, to, None)),
+        Record::Target { from, to } => Some(("Target", from, to, None)),
+        Record::ModuleCreate { from, to } => Some(("ModuleCreate", from, to, None)),
+        Record::ModuleModify { from, to } => Some(("ModuleModify", from, to, None)),
+        Record::ModuleDelete { from, to } => Some(("ModuleDelete", from, to, None)),
+        Record::ModuleMove { from, to } => Some(("ModuleMove", from, to, None)),
+        Record::ModuleRename { from, to } => Some(("ModuleRename", from, to, None)),
+        Record::FileCreate { from, to } => Some(("FileCreate", from, to, None)),
+        Record::FileModify { from, to } => Some(("FileModify", from, to, None)),
+        Record::FileDelete { from, to } => Some(("FileDelete", from, to, None)),
+        Record::FileMove { from, to } => Some(("FileMove", from, to, None)),
+        Record::FileRename { from, to } => Some(("FileRename", from, to, None)),
+        Record::StructCreate { from, to } => Some(("StructCreate", from, to, None)),
+        Record::StructModify { from, to } => Some(("StructModify", from, to, None)),
+        Record::StructDelete { from, to } => Some(("StructDelete", from, to, None)),
+        Record::StructMove { from, to } => Some(("StructMove", from, to, None)),
+        Record::StructRename { from, to } => Some(("StructRename", from, to, None)),
+        Record::FunctionCreate { from, to } => Some(("FunctionCreate", from, to, None)),
+        Record::FunctionModify { from, to } => Some(("FunctionModify", from, to, None)),
+        Record::FunctionDelete { from, to } => Some(("FunctionDelete", from, to, None)),
+        Record::FunctionMove { from, to } => Some(("FunctionMove", from, to, None)),
+        Record::FunctionRename { from, to } => Some(("FunctionRename", from, to, None)),
         _ => None,
     }
 }
@@ -708,7 +734,30 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
         | Record::Reads { from, to, .. }
         | Record::Writes { from, to, .. }
         | Record::IsRole { from, to, .. }
-        | Record::Realises { from, to, .. } => Some((from, to)),
+        | Record::Realises { from, to, .. }
+        | Record::AssignedTo { from, to }
+        | Record::Implements { from, to }
+        | Record::Target { from, to }
+        | Record::ModuleCreate { from, to }
+        | Record::ModuleModify { from, to }
+        | Record::ModuleDelete { from, to }
+        | Record::ModuleMove { from, to }
+        | Record::ModuleRename { from, to }
+        | Record::FileCreate { from, to }
+        | Record::FileModify { from, to }
+        | Record::FileDelete { from, to }
+        | Record::FileMove { from, to }
+        | Record::FileRename { from, to }
+        | Record::StructCreate { from, to }
+        | Record::StructModify { from, to }
+        | Record::StructDelete { from, to }
+        | Record::StructMove { from, to }
+        | Record::StructRename { from, to }
+        | Record::FunctionCreate { from, to }
+        | Record::FunctionModify { from, to }
+        | Record::FunctionDelete { from, to }
+        | Record::FunctionMove { from, to }
+        | Record::FunctionRename { from, to } => Some((from, to)),
         _ => None,
     }
 }

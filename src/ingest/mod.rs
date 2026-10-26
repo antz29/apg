@@ -1093,6 +1093,34 @@ fn ingest_records(
                     },
                     None,
                 ),
+                // Task-edge records (SCHEMA.md, phase 4): parsed and dropped in
+                // this pass — their admission (spool tags, per-kind `Graph`
+                // edge sets, rel tables) is the projection's. Without this
+                // grouped arm the catch-all below would reach `write_edge`'s
+                // `unreachable!`.
+                Record::AssignedTo { .. }
+                | Record::Implements { .. }
+                | Record::Target { .. }
+                | Record::ModuleCreate { .. }
+                | Record::ModuleModify { .. }
+                | Record::ModuleDelete { .. }
+                | Record::ModuleMove { .. }
+                | Record::ModuleRename { .. }
+                | Record::FileCreate { .. }
+                | Record::FileModify { .. }
+                | Record::FileDelete { .. }
+                | Record::FileMove { .. }
+                | Record::FileRename { .. }
+                | Record::StructCreate { .. }
+                | Record::StructModify { .. }
+                | Record::StructDelete { .. }
+                | Record::StructMove { .. }
+                | Record::StructRename { .. }
+                | Record::FunctionCreate { .. }
+                | Record::FunctionModify { .. }
+                | Record::FunctionDelete { .. }
+                | Record::FunctionMove { .. }
+                | Record::FunctionRename { .. } => {}
                 // Rooted code-fact edge endpoints (PHASE_09). `Contains`
                 // endpoints are module identities (root exactly) or opaque ids
                 // (leave). `Calls`/`Uses` endpoints are opaque ids for emitted

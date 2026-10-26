@@ -401,6 +401,110 @@ pub enum Record {
         new_fqn: String,
     },
 
+    // --- Task edges (SCHEMA.md, transient plan tier). A task's own storage is
+    // its title+status record; the Agent it is assigned to, the Component it
+    // implements and the code it touches are these edges. `assigned-to` is the
+    // one hyphenated wire spelling, so it carries an explicit rename; the
+    // underscore compounds follow `rename_all = "snake_case"`. ---
+    /// `{"type":"assigned-to","from":"<project>/plan.phase-01.task-1","to":"agent.<stem>"}`
+    #[serde(rename = "assigned-to")]
+    AssignedTo {
+        from: String,
+        to: String,
+    },
+    /// `{"type":"implements","from":"<project>/plan.phase-01.task-1","to":"solution.component.<name>"}`
+    Implements {
+        from: String,
+        to: String,
+    },
+    /// `{"type":"target","from":"<project>/plan.phase-01.task-1","to":"<planned destination fqn>"}`
+    /// The renames/moves destination; a creates carries its planned target on
+    /// the operation edge instead.
+    Target {
+        from: String,
+        to: String,
+    },
+    ModuleCreate {
+        from: String,
+        to: String,
+    },
+    ModuleModify {
+        from: String,
+        to: String,
+    },
+    ModuleDelete {
+        from: String,
+        to: String,
+    },
+    ModuleMove {
+        from: String,
+        to: String,
+    },
+    ModuleRename {
+        from: String,
+        to: String,
+    },
+    FileCreate {
+        from: String,
+        to: String,
+    },
+    FileModify {
+        from: String,
+        to: String,
+    },
+    FileDelete {
+        from: String,
+        to: String,
+    },
+    FileMove {
+        from: String,
+        to: String,
+    },
+    FileRename {
+        from: String,
+        to: String,
+    },
+    StructCreate {
+        from: String,
+        to: String,
+    },
+    StructModify {
+        from: String,
+        to: String,
+    },
+    StructDelete {
+        from: String,
+        to: String,
+    },
+    StructMove {
+        from: String,
+        to: String,
+    },
+    StructRename {
+        from: String,
+        to: String,
+    },
+    FunctionCreate {
+        from: String,
+        to: String,
+    },
+    FunctionModify {
+        from: String,
+        to: String,
+    },
+    FunctionDelete {
+        from: String,
+        to: String,
+    },
+    FunctionMove {
+        from: String,
+        to: String,
+    },
+    FunctionRename {
+        from: String,
+        to: String,
+    },
+
     Details {
         from: String,
         to: String,
