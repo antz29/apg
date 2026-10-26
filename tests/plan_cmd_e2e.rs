@@ -3127,6 +3127,57 @@ mod e2e {
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         testutil::remove(&repo);
+
+        // The destination half only counts when the task actually carries an
+        // operation edge: a target-less task (record alone, no `<kind>_<verb>`
+        // and no `target` destination) touches nothing, so the same
+        // branch-added claim stays uncovered and verify refuses, naming the
+        // solution node, the claim and the creates suggestion. A fresh fixture
+        // gives this scenario its own independent merge-base delta.
+        let (apg_root, repo, wt) = fixture("coverage-rename-targetless");
+        write_solution_node(
+            &apg_root,
+            "component",
+            "checkout",
+            &["github.com/x/y.Store2"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &["apg/layers/solution/component/checkout.json"],
+            "author solution node",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            status: "pending".to_string(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
+        });
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
+
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coverage incomplete"), "{msg}");
+        assert!(msg.contains("solution.component.checkout"), "{msg}");
+        assert!(msg.contains("github.com/x/y.Store2"), "{msg}");
+        assert!(
+            msg.contains("--verb creates --fqn github.com/x/y.Store2"),
+            "{msg}"
+        );
+
+        testutil::remove(&repo);
     }
 
     #[test]
