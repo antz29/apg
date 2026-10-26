@@ -12,7 +12,7 @@
 //! [exclude...]`.
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Unified JSONL records (SPEC §2), the `agent` stream's wire shapes.
 #[derive(serde::Serialize)]
@@ -39,6 +39,29 @@ pub enum Rec {
 pub fn write_rec<W: Write>(w: &mut W, rec: &Rec) -> io::Result<()> {
     let line = serde_json::to_string(rec).expect("serialize record");
     writeln!(w, "{line}")
+}
+
+/// The agent frontend's claim scope: from the checkout's repo-relative file
+/// listing (each file's line count supplied by the stream writer's walk), the
+/// definition files directly in `.opencode/agents/` alone — never a path
+/// outside it. Yields `(repo-relative path, extension-stripped stem,
+/// start_line, end_line)` per definition, sorted by path.
+pub fn collect_definitions(files: &[(String, u32)]) -> Vec<(String, String, u32, u32)> {
+    const DIR: &str = ".opencode/agents/";
+    let mut defs: Vec<(String, String, u32, u32)> = files
+        .iter()
+        .filter_map(|(path, lines)| {
+            let name = path.strip_prefix(DIR)?;
+            // One normal component: a direct child, never a traversal.
+            if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+                return None;
+            }
+            let stem = Path::new(name).file_stem()?.to_string_lossy().into_owned();
+            Some((path.clone(), stem, 1, (*lines).max(1)))
+        })
+        .collect();
+    defs.sort();
+    defs
 }
 
 /// Parsed command line: the project dir plus the scan driver's flags.
