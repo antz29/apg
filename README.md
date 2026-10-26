@@ -88,6 +88,7 @@ ceiling.
 | C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` |
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
+| Agent definitions (`agentfrontend`) | stable Rust + crates.io | none (self-contained binary reading `.opencode/agents/`, never shells out) | `serde` / `serde_json` 1 (no language-version ceiling) |
 | opencode chat plugin (`apg init`) | `bun install` (`@opencode/plugin`) | opencode 2.x (tool plugins into `~/.config/opencode/plugins/`) | `@opencode/plugin` (opencode 2.x plugin API) |
 
 ## Install (Homebrew)
