@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-cmd-e2e-renames-dest-planned-universe-half",
+  "body": "The renames/moves e2e (task_verb_renames_moves_validate_source_and_new_fqn) exercises the planned-destination acceptance only through the plan-record half of the planned universe (a Record::PlannedNode pushed into the add's record set); the DB `status: planned` half of that universe is covered by the creates e2e (task_verb_creates_accepts_absent_and_planned_targets). Upgrade — add a write-through of a `status: planned` destination and assert a renames/moves edge still accepts it — only if the DB-half planned-node path for a renames/moves destination needs coverage independent of the creates case.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.task_verb_renames_moves_validate_source_and_new_fqn",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
