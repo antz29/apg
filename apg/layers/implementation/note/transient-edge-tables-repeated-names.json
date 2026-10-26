@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "transient-edge-tables-repeated-names",
+  "body": "artifacts/db.rs' TRANSIENT_EDGE_TABLES repeats the 23 table names — it must, to rebuild each Record variant from the DB. Limit: a second list duplicates load::tables::TASK_EDGE_TABLES. Upgrade when a fourth consumer appears: derive it from load::tables::TASK_EDGE_TABLES instead of repeating the names.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.transient_edge_record",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

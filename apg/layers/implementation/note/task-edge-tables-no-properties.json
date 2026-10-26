@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-edge-tables-no-properties",
+  "body": "The task-edge rel tables (AssignedTo/Implements/Target and the 20 per-kind create/modify/delete/move/rename tables) carry no serialized-properties column, because SCHEMA.md task edges have no properties today. Limit: an authored plan edge that later needs metadata cannot be stored on these tables. Upgrade when a plan edge needs metadata: move those tables onto the durable-edge path and add a properties column.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.load.tables.create_schema",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

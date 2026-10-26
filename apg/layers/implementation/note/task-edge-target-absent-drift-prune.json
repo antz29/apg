@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-edge-target-absent-drift-prune",
+  "body": "finalize_graph drops a task edge whose target FQN is absent from the branch graph: a creates/target edge to an FQN not declared as a planned node is pruned, the same drift policy as implemented-by. Limit: the plan surface cannot deliberately name an undeclared planned destination. Upgrade if that surface starts naming undeclared planned destinations: add explicit admission rather than the silent prune.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.finalize_graph",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
