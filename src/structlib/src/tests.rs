@@ -537,6 +537,38 @@ mod unit {
         assert!(glob_match("*.md", "a.md"));
         assert!(!glob_match("*.md", "a.txt"));
     }
+
+    /// schema-alignment phase-03 task-9: the structural scope predicate declines
+    /// the repo-relative `.opencode/agents/` tree — each definition there is the
+    /// agent frontend's sole claim — while the rest of `.opencode` (its Markdown
+    /// included) stays claimed.
+    #[test]
+    fn scope_rejects_agent_definitions_but_claims_other_opencode_markdown() {
+        let root = Path::new("/repo");
+        let base = Path::new("/repo");
+        let scope = StructuralScope::default();
+
+        for rel in [
+            ".opencode/agents/implementer.md",
+            ".opencode/agents/nested/notes.md",
+        ] {
+            assert!(
+                !in_scope(&base.join(rel), root, base, &[], &[], &scope),
+                "{rel} must be excluded from the structural claim scope"
+            );
+        }
+
+        for rel in [
+            ".opencode/README.md",
+            ".opencode/plugins/notes.md",
+            ".opencode/agents.md",
+        ] {
+            assert!(
+                in_scope(&base.join(rel), root, base, &[], &[], &scope),
+                "{rel} must stay claimed by the structural scanner"
+            );
+        }
+    }
 }
 
 mod int {
