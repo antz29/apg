@@ -295,207 +295,208 @@ mod e2e {
         let _ = std::fs::remove_file(&out);
     }
 
+    /// The edge-modelled transient task round-trips through a real scan: the
+    /// `Task` row carries only fqn/title/status, its `AssignedTo` /
+    /// `Implements` / per-kind operation rel rows join the Agent, Component and
+    /// live/planned code targets, and `graph.jsonl` emits the same record and
+    /// edges the database holds.
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
     fn spec_plan_schema_roundtrip() {
-        // A plan + requirement graph survives the PARQUET load path: node
-        // tables with their own columns, multi-pair Contains, and the
-        // spec/plan rel tables (one COPY per pair, empty pairs too).
-        let mut g = Graph::default();
-        let sp = |kind: NodeKind| Node {
-            kind,
-            code_type: String::new(),
-            ..Node::default()
-        };
-        let mut n = |fqn: &str, node: Node| {
-            g.nodes.insert(fqn.to_string(), node);
-        };
-        n(
-            "foo/plan",
-            Node {
-                title: Some("Plan".to_string()),
-                strategy: Some("Layer-first".to_string()),
-                ..sp(NodeKind::Plan)
-            },
-        );
-        n(
-            "foo/plan.phase-1",
-            Node {
-                number: Some(1),
-                title: Some("P1".to_string()),
-                deliverable: Some("Core".to_string()),
-                ..sp(NodeKind::PlanPhase)
-            },
-        );
-        n(
-            "foo/plan.phase-1.task-1",
-            Node {
-                title: Some("Add RootStore".to_string()),
-                status: Some("pending".to_string()),
-                ..sp(NodeKind::Task)
-            },
-        );
-        // An old-format Task node (pre-verb shape): title+status alone.
-        n(
-            "foo/plan.phase-1.task-2",
-            Node {
-                title: Some("Legacy".to_string()),
-                status: Some("pending".to_string()),
-                ..sp(NodeKind::Task)
-            },
-        );
-        n(
-            "foo/spec.R1",
-            Node {
-                id: Some("R1".to_string()),
-                title: Some("Timer".to_string()),
-                feature: Some("feature-a".to_string()),
-                ..sp(NodeKind::Requirement)
-            },
-        );
-        n(
-            "foo/gateway",
-            Node {
-                name: Some("Gateway".to_string()),
-                status: Some("planned".to_string()),
-                ..sp(NodeKind::Struct)
-            },
-        );
-        n(
-            "foo/note-1",
-            Node {
-                body: Some("Background prose".to_string()),
-                sub_kind: Some("background".to_string()),
-                ..sp(NodeKind::Note)
-            },
-        );
-        n(
-            "foo/feedback-1",
-            Node {
-                body: Some("Split R1".to_string()),
-                status: Some("open".to_string()),
-                ..sp(NodeKind::Feedback)
-            },
-        );
+        use apg::artifacts::ArtifactDb;
+        use apg::testutil::{self, Repo};
 
-        g.contains.extend([
-            ("foo/plan".into(), "foo/plan.phase-1".into()),
-            ("foo/plan.phase-1".into(), "foo/plan.phase-1.task-1".into()),
-        ]);
-        g.details.insert(("foo/note-1".into(), "foo/plan".into()));
-        g.reviews
-            .insert(("foo/feedback-1".into(), "foo/spec.R1".into()));
-        g.satisfies
-            .insert(("foo/plan.phase-1".into(), "foo/spec.R1".into()));
-
-        let dir = std::env::temp_dir().join(format!("apg-test-spec-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        build_load_files(&g, &dir).unwrap();
-
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
-        let conn = Connection::new(&db).unwrap();
-        create_schema(&conn).unwrap();
-        copy_from(&conn, &dir).unwrap();
-
-        // Node tables carry their own columns.
-        let out = conn
-            .query("MATCH (p:Plan) RETURN p.fqn, p.title, p.strategy")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.contains("foo/plan") && out.contains("Layer-first"),
-            "plan rows: {out}"
+        let repo = Repo::new("task-edge-db");
+        // The live code an operation edge targets, plus the agent definition
+        // record the agent stream emits (the tier-4 Agent node).
+        let mut code = testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]);
+        code.push_str(
+            "{\"type\":\"agent\",\"name\":\"go-frontend-implementer\",\"path\":\".opencode/agents/go-frontend-implementer.md\",\"start_line\":1,\"end_line\":10}\n",
         );
-        let out = conn
-            .query("MATCH (r:Requirement) RETURN r.id, r.feature")
-            .unwrap()
-            .to_string();
+        repo.write("code/seed.scan.jsonl", &code);
+        repo.commit_all("seed code");
+        let wt = repo.start_project("task-edge-db");
+        // A durable Component (with the Requirement/Service spine) gives the
+        // `implements` edge a real Solution node to join.
+        testutil::seed_valid_model(&wt.join(apg::specs::LAYOUT));
+
+        // The transient plan store: a task carries title+status alone; its
+        // assignment, implemented Component, operation kinds and renames
+        // destination are edge records written beside it.
+        let plan_path = wt
+            .join(apg::specs::LAYOUT)
+            .join(apg::specs::TRANS)
+            .join("plans")
+            .join("task-edge-db.jsonl");
+        std::fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &plan_path,
+            concat!(
+                "{\"type\":\"plan\",\"fqn\":\"task-edge-db/plan\",\"title\":\"Task edges\",\"strategy\":\"fixture\"}\n",
+                "{\"type\":\"plan_phase\",\"fqn\":\"task-edge-db/plan.phase-01\",\"number\":1,\"title\":\"P1\",\"deliverable\":\"D\",\"status\":\"pending\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-edge-db/plan\",\"to\":\"task-edge-db/plan.phase-01\"}\n",
+                // task-1: modifies live code, implemented by a real Component.
+                "{\"type\":\"task\",\"fqn\":\"task-edge-db/plan.phase-01.task-1\",\"title\":\"Modify live\",\"status\":\"pending\"}\n",
+                "{\"type\":\"assigned-to\",\"from\":\"task-edge-db/plan.phase-01.task-1\",\"to\":\"agent.go-frontend-implementer\"}\n",
+                "{\"type\":\"implements\",\"from\":\"task-edge-db/plan.phase-01.task-1\",\"to\":\"solution.component.order-handler\"}\n",
+                "{\"type\":\"struct_modify\",\"from\":\"task-edge-db/plan.phase-01.task-1\",\"to\":\"go.fixture.mod.Store\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-edge-db/plan.phase-01\",\"to\":\"task-edge-db/plan.phase-01.task-1\"}\n",
+                // task-2: creates planned code.
+                "{\"type\":\"task\",\"fqn\":\"task-edge-db/plan.phase-01.task-2\",\"title\":\"Create planned\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_create\",\"from\":\"task-edge-db/plan.phase-01.task-2\",\"to\":\"fixture.mod.Planned\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-edge-db/plan.phase-01\",\"to\":\"task-edge-db/plan.phase-01.task-2\"}\n",
+                "{\"type\":\"planned_node\",\"fqn\":\"fixture.mod.Planned\",\"kind\":\"struct\",\"name\":\"Planned\"}\n",
+                // task-3: renames live code to a planned destination.
+                "{\"type\":\"task\",\"fqn\":\"task-edge-db/plan.phase-01.task-3\",\"title\":\"Rename\",\"status\":\"pending\"}\n",
+                "{\"type\":\"struct_rename\",\"from\":\"task-edge-db/plan.phase-01.task-3\",\"to\":\"go.fixture.mod.Store\"}\n",
+                "{\"type\":\"target\",\"from\":\"task-edge-db/plan.phase-01.task-3\",\"to\":\"fixture.mod.Renamed\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-edge-db/plan.phase-01\",\"to\":\"task-edge-db/plan.phase-01.task-3\"}\n",
+                "{\"type\":\"planned_node\",\"fqn\":\"fixture.mod.Renamed\",\"kind\":\"struct\",\"name\":\"Renamed\"}\n",
+            ),
+        )
+        .unwrap();
+
+        testutil::scan_checkout(&wt).unwrap();
+
+        let db = ArtifactDb::open(&wt.join(apg::specs::LAYOUT)).unwrap();
+
+        // The Task row carries fqn/title/status only; every retired field has
+        // no column, so its old query shape no longer binds.
+        let out = db
+            .q("MATCH (t:Task) RETURN t.fqn, t.title, t.status ORDER BY t.fqn")
+            .unwrap();
         assert!(
-            out.contains("R1") && out.contains("feature-a"),
-            "req rows: {out}"
-        );
-        let out = conn
-            .query("MATCH (p:PlanPhase) RETURN p.number, p.deliverable")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.contains("1") && out.contains("Core"),
-            "plan phase rows: {out}"
-        );
-        let out = conn
-            .query("MATCH (t:Task) RETURN t.kind, t.status")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.contains("source") && out.contains("pending"),
+            out.contains("task-edge-db/plan.phase-01.task-1")
+                && out.contains("Modify live")
+                && out.contains("pending"),
             "task rows: {out}"
         );
-        // The Task table carries the Task→Implementation verb fields the suite
-        // tools query (apg_plan_tasks/apg_plan): verb/target/new_fqn.
-        let out = conn
-            .query("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn ORDER BY t.fqn")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.contains("foo/plan.phase-1.task-1")
-                && out.contains("renames")
-                && out.contains("foo.Old")
-                && out.contains("foo.New"),
-            "task verb rows: {out}"
-        );
-        // An old-format Task (no verb fields) projects empty strings, not a
-        // binder error.
-        let out = conn
-            .query("MATCH (t:Task {fqn: 'foo/plan.phase-1.task-2'}) RETURN t.verb, t.target, t.new_fqn")
-            .unwrap()
-            .to_string();
-        assert!(
-            !out.contains("(empty)"),
-            "old-format task must still be a row: {out}"
-        );
-        let out = conn
-            .query("MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.contains("renames") && out.contains("foo.New"),
-            "suite query shape must bind: {out}"
-        );
-        let out = conn
-            .query("MATCH (s:Struct {fqn: 'foo/gateway'}) RETURN s.status")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("planned"), "planned struct row: {out}");
+        for retired in ["t.kind", "t.verb", "t.target", "t.new_fqn"] {
+            let q = format!("MATCH (t:Task) RETURN {retired}");
+            assert!(
+                db.q(&q).is_err(),
+                "the retired task property `{retired}` must not bind"
+            );
+        }
 
-        // Multi-pair Contains: Plan -> PlanPhase -> Task.
-        let out = conn
-            .query("MATCH (p:Plan)-[:Contains]->(pp:PlanPhase) RETURN pp.fqn")
-            .unwrap()
-            .to_string();
+        // The assignment and implementation rel rows join real nodes.
+        let out = db
+            .q("MATCH (t:Task)-[:AssignedTo]->(a:Agent) RETURN t.fqn, a.fqn")
+            .unwrap();
         assert!(
-            out.contains("foo/plan.phase-1"),
-            "contains plan->phase: {out}"
+            out.contains("task-edge-db/plan.phase-01.task-1")
+                && out.contains("agent.go-frontend-implementer"),
+            "assigned-to rows: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:Implements]->(c:Component) RETURN c.fqn")
+            .unwrap();
+        assert!(
+            out.contains("solution.component.order-handler"),
+            "implements rows: {out}"
         );
 
-        // Spec/plan rel tables.
-        let out = conn
-            .query("MATCH (:Note)-[:Details]->(p:Plan) RETURN p.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/plan"), "details: {out}");
-        let out = conn
-            .query("MATCH (:Feedback)-[:Reviews]->(r:Requirement) RETURN r.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/spec.R1"), "reviews: {out}");
-        let out = conn
-            .query("MATCH (:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/spec.R1"), "satisfies: {out}");
+        // The per-kind operation rows join both live and planned code targets.
+        let out = db
+            .q("MATCH (t:Task)-[:StructModify]->(s:Struct) RETURN s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("go.fixture.mod.Store"),
+            "struct_modify rows: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:StructCreate]->(s:Struct) RETURN s.fqn, s.status")
+            .unwrap();
+        assert!(
+            out.contains("fixture.mod.Planned") && out.contains("planned"),
+            "struct_create planned row: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:StructRename]->(s:Struct) RETURN s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("go.fixture.mod.Store"),
+            "struct_rename rows: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:Target]->(s:Struct) RETURN s.fqn")
+            .unwrap();
+        assert!(
+            out.contains("fixture.mod.Renamed"),
+            "renames destination rows: {out}"
+        );
+        drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        // graph.jsonl agrees with the database: the same Task record (no
+        // retired keys) and the same edge rows.
+        let export = wt
+            .join(apg::specs::LAYOUT)
+            .join(apg::specs::TRANS)
+            .join("graph.jsonl");
+        let text = std::fs::read_to_string(&export).unwrap();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v.get("type").and_then(|t| t.as_str()) == Some("task") {
+                for retired in ["kind", "tier", "verb", "target", "new_fqn"] {
+                    assert!(
+                        v.get(retired).is_none(),
+                        "exported task carries the retired `{retired}` key: {line}"
+                    );
+                }
+            }
+        }
+        let back = read_graph_jsonl(&export).unwrap();
+        let t1 = back
+            .nodes
+            .get("task-edge-db/plan.phase-01.task-1")
+            .expect("task-1 in graph.jsonl");
+        assert_eq!(t1.kind, NodeKind::Task);
+        assert_eq!(t1.title.as_deref(), Some("Modify live"));
+        assert_eq!(t1.status.as_deref(), Some("pending"));
+        assert!(
+            back.assigned_to.contains(&(
+                "task-edge-db/plan.phase-01.task-1".to_string(),
+                "agent.go-frontend-implementer".to_string()
+            )),
+            "assigned-to export edge"
+        );
+        assert!(
+            back.implements.contains(&(
+                "task-edge-db/plan.phase-01.task-1".to_string(),
+                "solution.component.order-handler".to_string()
+            )),
+            "implements export edge"
+        );
+        assert!(
+            back.struct_modify.contains(&(
+                "task-edge-db/plan.phase-01.task-1".to_string(),
+                "go.fixture.mod.Store".to_string()
+            )),
+            "struct_modify export edge"
+        );
+        assert!(
+            back.struct_create.contains(&(
+                "task-edge-db/plan.phase-01.task-2".to_string(),
+                "fixture.mod.Planned".to_string()
+            )),
+            "struct_create export edge"
+        );
+        assert!(
+            back.struct_rename.contains(&(
+                "task-edge-db/plan.phase-01.task-3".to_string(),
+                "go.fixture.mod.Store".to_string()
+            )),
+            "struct_rename export edge"
+        );
+        assert!(
+            back.target.contains(&(
+                "task-edge-db/plan.phase-01.task-3".to_string(),
+                "fixture.mod.Renamed".to_string()
+            )),
+            "target export edge"
+        );
+
+        testutil::remove(&repo);
     }
 
     /// The suite tools (`apg_plan_tasks`/`apg_plan`) query
