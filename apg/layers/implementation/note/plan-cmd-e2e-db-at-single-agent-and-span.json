@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-cmd-e2e-db-at-single-agent-and-span",
+  "body": "db_at carries only agent.implementer, so a scenario needing another Agent (e.g. the drift case's agent.ghost) must add it itself; and the fixture's Agent end_line is a fixed 546 snapshot of .opencode/agents/implementer.md (no test reads the span — the roster query reads fqn only). Limits: one shared Agent, and a fixed span snapshot. Upgrade: add more agents to the shared payload if needed, and refresh the span if the definition changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.db_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
