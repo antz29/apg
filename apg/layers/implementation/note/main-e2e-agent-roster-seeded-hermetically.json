@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "main-e2e-agent-roster-seeded-hermetically",
+  "body": "The two synthetic fixtures in tests/main_e2e.rs (strict_surface_fixture and the metadata_mutations_are_immediately_queryable_without_a_scan setup) seed the Agent roster through the hermetic `*.scan.jsonl` payload — `testutil::scan_checkout` reads those scan files directly and never invokes the agent frontend — so `--assigned-to agent.implementer` resolves without a real `.opencode/agents/` scan. Upgrade — switch to a committed `.opencode/agents/implementer.md` definition in the scratch tree — only if the hermetic scan harness ever gains real frontend execution.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "tests/main_e2e.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
