@@ -60,6 +60,18 @@ pub enum Record {
         end_line: u32,
     },
 
+    /// Parse-only `agent` stream record, emitted by `agentfrontend` per
+    /// `.opencode/agents/` definition:
+    /// `{"type":"agent","name":"go-frontend-implementer","path":".opencode/agents/go-frontend-implementer.md","start_line":1,"end_line":274}`.
+    /// `name` is the extension-stripped file stem; the agent's FQN is rendered
+    /// ingestor-side from it. The ingestor's admission is deferred.
+    Agent {
+        name: String,
+        path: String,
+        start_line: u32,
+        end_line: u32,
+    },
+
     /// `{"type":"unresolved","fqn":"fmt.Errorf","category":"stdlib"}`
     Unresolved {
         fqn: String,
