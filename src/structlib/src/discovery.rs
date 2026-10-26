@@ -127,9 +127,11 @@ pub(crate) fn under_excluded_tree(path: &Path, root: &Path) -> bool {
     })
 }
 
-/// The claim/scope boundary: pruned trees, `--module` restriction,
-/// `--exclude-path` substrings, and the `apg/config.json` structural scope
-/// include/exclude globs (matched against the repo-relative identity).
+/// The claim/scope boundary: pruned trees, the repo-relative
+/// `.opencode/agents/` tree (each agent definition is the `agent` frontend's
+/// sole claim), `--module` restriction, `--exclude-path` substrings, and the
+/// `apg/config.json` structural scope include/exclude globs (matched against
+/// the repo-relative identity).
 pub(crate) fn in_scope(
     path: &Path,
     root: &Path,
@@ -149,6 +151,11 @@ pub(crate) fn in_scope(
         return false;
     }
     let rel = repo_relative_identity(base, path);
+    // Agent definitions belong to the `agent` frontend alone; every other
+    // `.opencode` file stays claimed here.
+    if rel.starts_with(".opencode/agents/") {
+        return false;
+    }
     if !scope.include.is_empty() && !scope.include.iter().any(|g| glob_match(g, &rel)) {
         return false;
     }
