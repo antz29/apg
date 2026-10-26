@@ -78,7 +78,7 @@ Requirement --> "0..*" Requirement : contains
 
 %% Containment
 Group --> "0..*" Group : contains
-Group --> "1..*" Service : contains
+Group --> "0..*" Service : contains
 Group --> "0..*" Entity : contains
 Entity --> "1..*" Value : contains
 Event --> "1..*" Value : contains
@@ -148,10 +148,10 @@ Note --> "0..1" Struct : details
 Note --> "0..1" Function : details
 
 %% Solution / implementation links
-Component --> "1..*" Module : implemented-by
-Component --> "1..*" File : implemented-by
-Component --> "1..*" Struct : implemented-by
-Component --> "1..*" Function : implemented-by
+Component --> "0..*" Module : implemented-by
+Component --> "0..*" File : implemented-by
+Component --> "0..*" Struct : implemented-by
+Component --> "0..*" Function : implemented-by
 
 %% ==================================================
 %% PLAN — TRANSIENT
@@ -198,8 +198,10 @@ Task --> "0..1" PlannedFunction : target
 %% NOTES
 %% ==================================================
 
+note for Group "A Group contains either subgroups or leaf contents, never both; a leaf Group — a Group with no subgroups — holds Services and Entities and at least one Service."
 note for Service "Calls, publishes, and subscribes may cross Groups. Reads and writes are private to Group."
-note for ImplementationConstraint "Constraints are either tier-wide or applied to specific languages."
+note for Component "A Component claims many code nodes; each code node is claimed by exactly one Component, never shared, and the merge gate requires every Component to claim at least one code node."
+note for ImplementationConstraint "An implementation constraint binds all of tier 4 unless it carries one applies-to edge per Language it binds; every applies-to target is a Language node."
 note for Agent "One per definition file under `.opencode/agents/`, its FQN `agent.<file-stem>` — the extension-stripped file name, e.g. `agent.go-frontend-implementer` — located at that file's path and line span."
 note for Plan "One per project."
 note for Task "A task's own properties are title and status; its assigned Agent, the Component it implements, and the code it touches are edges. Every task assigns exactly one Agent. Move/rename: operation edge to existing source plus target edge to matching planned destination. Create: operation edge to planned destination only. Target-less tasks are allowed for no-change activities."
