@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-assignment-universes-reads-branch-roster",
+  "body": "task_assignment_universes reads the Agent roster from the branch DB and Components from the layers store, so the drift validation depends on the branch graph holding the Agent nodes. Limit: plan_cmd e2e fixtures that carry no Agent node fail the assigned-to drift check, leaving accepted task-add/update e2e paths red. Upgrade when phase-5 tasks 16-18 land: give those fixtures an Agent definition record so the roster resolves.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.authoring.task_assignment_universes",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

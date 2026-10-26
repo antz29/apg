@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "task-verb-universes-retired-name",
+  "body": "task_verb_universes keeps its retired \"verb\" name because no plan task targets the rename. Limit: the helper's name no longer matches the edge model it reads. Upgrade when a plan task covers it: rename task_verb_universes to the edge vocabulary.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.authoring.task_verb_universes",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
