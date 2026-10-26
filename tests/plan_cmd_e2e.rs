@@ -4968,8 +4968,9 @@ mod e2e {
     /// Phase-7 task-3 (E2E, top-level dispatch): `apg plan update` preservation
     /// — a phase title/deliverable update keeps its task `Contains` edges and
     /// replaces `Satisfies`/`Gates` with set-semantics (cycle-refusing); a task
-    /// update keeps `status` + incident `Reviews` and re-validates
-    /// `--verb`/`--fqn`; a planned update repoints the parent `Contains` edge.
+    /// update keeps `status` + incident `Reviews` and re-validates its stored
+    /// assignment and operation edges; a planned update repoints the parent
+    /// `Contains` edge.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn strict_plan_update_preservation_through_dispatch() {
@@ -5022,6 +5023,10 @@ mod e2e {
                 title: "T".into(),
 
                 status: "done".into(),
+            },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "agent.implementer".into(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -5206,11 +5211,17 @@ mod e2e {
                     if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
             )));
 
-            // Re-validation: an invalid verb and a creates-over-real-code are both
-            // refused before any write.
+            // Re-validation: a `--target` with no renames/moves operation edge and a
+            // creates-over-real-code are both refused before any write.
             let before = std::fs::read_to_string(&plan_path).unwrap();
             let err = cmd_plan(&av(&[
-                "update", "foo", "task", "1", "1", "--verb", "explodes",
+                "update",
+                "foo",
+                "task",
+                "1",
+                "1",
+                "--target",
+                "github.com/x/y.Store",
             ]))
             .unwrap_err();
             assert!(!err.to_string().is_empty(), "{err}");
@@ -5220,9 +5231,7 @@ mod e2e {
                 "task",
                 "1",
                 "1",
-                "--verb",
-                "creates",
-                "--fqn",
+                "--struct-create",
                 "github.com/x/y.Store",
             ]))
             .unwrap_err();
