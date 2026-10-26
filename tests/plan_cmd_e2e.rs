@@ -1442,6 +1442,10 @@ mod e2e {
                 title: "T".into(),
                 status: "done".into(),
             },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "agent.implementer".into(),
+            },
             Record::StructModify {
                 from: "foo/plan.phase-01.task-1".into(),
                 to: "github.com/x/y.Store".into(),
