@@ -527,13 +527,12 @@ pub fn coverage_check(records: &[Record], delta: &SpecDelta) -> CoverageReport {
     let mut touched: BTreeSet<&str> = BTreeSet::new();
     for r in records {
         if let Record::Task { fqn, .. } = r {
-            // Coverage comes from the task's per-kind operation edges only; a
-            // target-less task (no operation edge) touches nothing. A
-            // renames/moves destination rides a companion `Record::Target`.
-            let mut rename_move = false;
-            let mut edge_dest = "";
+            // Coverage comes from the task's per-kind operation edges only —
+            // every `<kind>_<verb>` edge's target plus every renames/moves
+            // `Record::Target` destination edge; a target-less task (no
+            // operation edge) touches nothing.
             for e in records {
-                let (from, to, rename) = match e {
+                let (from, to) = match e {
                     Record::ModuleCreate { from, to }
                     | Record::FileCreate { from, to }
                     | Record::StructCreate { from, to }
@@ -545,30 +544,21 @@ pub fn coverage_check(records: &[Record], delta: &SpecDelta) -> CoverageReport {
                     | Record::ModuleDelete { from, to }
                     | Record::FileDelete { from, to }
                     | Record::StructDelete { from, to }
-                    | Record::FunctionDelete { from, to } => (from, to, false),
-                    Record::ModuleRename { from, to }
+                    | Record::FunctionDelete { from, to }
+                    | Record::ModuleRename { from, to }
                     | Record::FileRename { from, to }
                     | Record::StructRename { from, to }
                     | Record::FunctionRename { from, to }
                     | Record::ModuleMove { from, to }
                     | Record::FileMove { from, to }
                     | Record::StructMove { from, to }
-                    | Record::FunctionMove { from, to } => (from, to, true),
-                    Record::Target { from, to } if from == fqn => {
-                        edge_dest = to;
-                        continue;
-                    }
+                    | Record::FunctionMove { from, to }
+                    | Record::Target { from, to } => (from, to),
                     _ => continue,
                 };
-                if from == fqn {
-                    rename_move |= rename;
-                    if !to.is_empty() {
-                        touched.insert(crate::layers::code_identity(to));
-                    }
+                if from == fqn && !to.is_empty() {
+                    touched.insert(crate::layers::code_identity(to));
                 }
-            }
-            if rename_move && !edge_dest.is_empty() {
-                touched.insert(crate::layers::code_identity(edge_dest));
             }
         }
     }
