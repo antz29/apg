@@ -278,84 +278,40 @@ mod unit {
     /// pre-existing spec the whole branch spec is the delta, so every
     /// solution node's `implemented-by` target is an ADDED claim and every
     /// claim-less solution node a `no_claims` warning. Pins exact-FQN touch
-    /// matching, verb-agnostic touches (a `deletes` touches what it deletes; a
-    /// `renames`/`moves` `new_fqn` covers the destination; a `creates` covers a
-    /// still-planned FQN), target-less tasks touching nothing, and non-solution
-    /// nodes (person, solution notes) ignored.
+    /// matching, verb-agnostic touches built from operation edges (a `deletes`
+    /// touches what it deletes; a `renames`/`moves` touches its live source
+    /// AND its `target` destination; a `creates` covers a still-planned FQN),
+    /// a target-less task's empty edge set touching nothing, language-root
+    /// tolerance, and non-solution nodes (person, solution notes) ignored.
     #[test]
     fn coverage_check_reports_gaps_no_claims_and_verb_agnostic_touches() {
-        // Pure semantics: exact-FQN touch matching, verb-agnostic (a deletes
-        // task touches what it deletes), a renames/moves new_fqn covering the
-        // destination, a creates covering a planned FQN, empty-target tasks
-        // touching nothing, and non-solution nodes (person, solution notes)
-        // ignored. The merge-base git compare is exercised by the e2e tier.
-        let records = vec![
-            Record::Plan {
-                fqn: "foo/plan".to_string(),
-                title: "P".to_string(),
-                strategy: String::new(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-1".to_string(),
-                title: "T1".to_string(),
-                status: "pending".to_string(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-2".to_string(),
-                title: "T2".to_string(),
-                status: "pending".to_string(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-3".to_string(),
-                title: "T3".to_string(),
-                status: "pending".to_string(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-4".to_string(),
-                title: "T4".to_string(),
-                status: "pending".to_string(),
-            },
-            // A target-less creates touches nothing.
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-5".to_string(),
-                title: "T5".to_string(),
-                status: "pending".to_string(),
-            },
-            // The operation edges are the coverage source: task-1 modifies
-            // Store, task-2 deletes it (verb-agnostic), task-3 renames Old to
-            // Store2 (the `target` destination counts), task-4 creates the
-            // planned Gateway.
-            Record::StructModify {
-                from: "foo/plan.phase-01.task-1".to_string(),
-                to: "github.com/x/y.Store".to_string(),
-            },
-            Record::StructDelete {
-                from: "foo/plan.phase-01.task-2".to_string(),
-                to: "github.com/x/y.Store".to_string(),
-            },
-            Record::StructRename {
-                from: "foo/plan.phase-01.task-3".to_string(),
-                to: "github.com/x/y.Old".to_string(),
-            },
-            Record::Target {
-                from: "foo/plan.phase-01.task-3".to_string(),
-                to: "github.com/x/y.Store2".to_string(),
-            },
-            Record::StructCreate {
-                from: "foo/plan.phase-01.task-4".to_string(),
-                to: "github.com/x/y.Gateway".to_string(),
-            },
-            // The planned-node declaration is irrelevant to coverage — the
-            // creates task's touch is what counts (edge case: an
-            // implemented-by FQN already `status: planned` in the DB,
-            // awaiting its creates task).
-            Record::PlannedNode {
-                fqn: "github.com/x/y.Gateway".to_string(),
-                kind: "struct".to_string(),
-                name: "Gateway".to_string(),
-                parent: String::new(),
-            },
-        ];
+        // The operation edges are the coverage source. `task_recs` emits the
+        // title+status task record plus the verb's edge (and, for a
+        // rename/move, the `target` destination); the first call's task
+        // record is kept and the repeats' dropped, so this is ONE task
+        // carrying every verb's edge.
+        let mut records = task_recs("struct", "modifies", "github.com/x/y.Store", "");
+        for recs in [
+            task_recs("struct", "deletes", "github.com/x/y.Store", ""),
+            task_recs(
+                "struct",
+                "renames",
+                "github.com/x/y.Old",
+                "github.com/x/y.Store2",
+            ),
+            task_recs("struct", "creates", "github.com/x/y.Gateway", ""),
+        ] {
+            records.extend(recs.into_iter().skip(1));
+        }
+        // The planned-node declaration is irrelevant to coverage — the
+        // creates task's touch is what counts (edge case: an implemented-by
+        // FQN already `status: planned` in the DB, awaiting its creates task).
+        records.push(Record::PlannedNode {
+            fqn: "github.com/x/y.Gateway".to_string(),
+            kind: "struct".to_string(),
+            name: "Gateway".to_string(),
+            parent: String::new(),
+        });
         let nodes = vec![
             nf(
                 "solution",
@@ -371,6 +327,14 @@ mod unit {
                 "container",
                 "api",
                 &[("implemented-by", "github.com/x/y.Store2")],
+            ),
+            // The rename's LIVE SOURCE is a claim too, so Old is covered by the
+            // rename edge itself, not only by its `target` destination.
+            nf(
+                "solution",
+                "component",
+                "orders",
+                &[("implemented-by", "github.com/x/y.Old")],
             ),
             // An untouched implemented-by FQN -> the gap.
             nf(
@@ -402,8 +366,9 @@ mod unit {
         let delta = delta_from_solution_nodes(&nodes);
         let report = coverage_check(&records, &delta);
         // Only the reporting component's FQN is untouched: Store is touched
-        // (modifies AND deletes — verb-agnostic), Gateway by the creates,
-        // Store2 by the rename's new_fqn.
+        // (modifies AND deletes — verb-agnostic), Old by the rename's live
+        // source and Store2 by its `target` destination, Gateway by the
+        // creates.
         assert_eq!(
             report.gaps,
             vec![CoverageGap {
@@ -412,6 +377,53 @@ mod unit {
             }]
         );
         assert_eq!(report.no_claims, vec!["solution.component.checkout"]);
+
+        // A target-less task carries an empty edge set, so it touches nothing:
+        // the added claim stays a gap.
+        let target_less = task_recs("struct", "creates", "", "");
+        assert_eq!(
+            target_less.len(),
+            1,
+            "a target-less task is its record alone: {target_less:?}"
+        );
+        let delta = SpecDelta {
+            added_claims: vec![(
+                "solution.component.delta".to_string(),
+                "github.com/x/y.Delta".to_string(),
+            )],
+            ..Default::default()
+        };
+        assert_eq!(
+            coverage_check(&target_less, &delta).gaps,
+            vec![CoverageGap {
+                solution: "solution.component.delta".to_string(),
+                fqn: "github.com/x/y.Delta".to_string(),
+            }]
+        );
+
+        // Claims and targets compare by language-agnostic identity, so a
+        // language-rooted target matches a bare claim and the reverse.
+        let rooted_target = task_recs("struct", "creates", "rust.apg.cache", "");
+        let bare_claim = SpecDelta {
+            added_claims: vec![("solution.system.cache".to_string(), "apg.cache".to_string())],
+            ..Default::default()
+        };
+        assert!(
+            coverage_check(&rooted_target, &bare_claim).gaps.is_empty(),
+            "a rooted target must cover a bare claim"
+        );
+        let bare_target = task_recs("struct", "creates", "apg.cache", "");
+        let rooted_claim = SpecDelta {
+            added_claims: vec![(
+                "solution.system.cache".to_string(),
+                "rust.apg.cache".to_string(),
+            )],
+            ..Default::default()
+        };
+        assert!(
+            coverage_check(&bare_target, &rooted_claim).gaps.is_empty(),
+            "a bare target must cover a rooted claim"
+        );
     }
 
     /// The coverage gate is language-root agnostic: task targets / rename
