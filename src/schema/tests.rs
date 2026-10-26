@@ -294,4 +294,28 @@ mod unit {
             assert!(wire.contains(&format!(r#""type":"{kind}""#)), "{wire}");
         }
     }
+
+    /// The parse-only `agent` stream record, as `agentfrontend` emits it per
+    /// `.opencode/agents/` definition: the extension-stripped stem, the
+    /// definition's path and its line span survive the parse, and the record
+    /// re-serializes to the same wire line.
+    #[test]
+    fn agent_record_parses_with_stem_and_span() {
+        let line = r#"{"type":"agent","name":"go-frontend-implementer","path":".opencode/agents/go-frontend-implementer.md","start_line":1,"end_line":274}"#;
+        let r = parse(line);
+        match &r {
+            Record::Agent {
+                name,
+                path,
+                start_line,
+                end_line,
+            } => {
+                assert_eq!(name, "go-frontend-implementer");
+                assert_eq!(path, ".opencode/agents/go-frontend-implementer.md");
+                assert_eq!((*start_line, *end_line), (1, 274));
+            }
+            other => panic!("expected agent, got {other:?}"),
+        }
+        assert_eq!(serde_json::to_string(&r).unwrap(), line);
+    }
 }
