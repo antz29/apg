@@ -2,19 +2,19 @@
   "layer": "solution",
   "type": "container",
   "name": "agent-frontend",
-  "body": "The agent-definition frontend artifact: a dedicated scanner that reads only `.opencode/agents/` and yields one Agent per agent definition file.",
+  "body": "The agent frontend artifact: a dedicated scanner reading `.opencode/agents/` alone, with build-time stable Rust plus crates.io, zero scan-time dependencies, and an engine pin of the crates.io dependency set with no language-version ceiling.",
   "properties": {
     "kind": "app"
   },
   "out": [
     {
-      "kind": "is-role",
-      "target": "solution.role.frontend-container",
+      "kind": "contains",
+      "target": "solution.component.agent-frontend-artifact",
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "solution.component.agent-frontend-artifact",
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
       "properties": {}
     }
   ],
