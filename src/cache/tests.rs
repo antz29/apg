@@ -451,4 +451,68 @@ mod unit {
         );
         assert!(sfrag.nodes.is_empty() && sfrag.edges.is_empty() && sfrag.modules.is_empty());
     }
+
+    /// phase-03 task-16: an Agent node is a *located* node of its definition
+    /// file's fact unit — both extraction paths keep the `agent.<file-stem>`
+    /// row, whose `kind_str` is `agent` — and a unit that round-trips through
+    /// the cache's serde shape projects that row back to `NodeKind::Agent`
+    /// with its definition file and line span intact.
+    #[test]
+    fn agent_node_stays_in_its_file_fact_unit_and_round_trips_the_kind() {
+        let path = "/r/.opencode/agents/go-frontend-implementer.md";
+        let mut g = Graph::default();
+        g.nodes
+            .insert("agent..opencode/agents".into(), module_node());
+        g.nodes
+            .insert(path.into(), located_node(NodeKind::File, path));
+        g.contains
+            .insert(("agent..opencode/agents".into(), path.into()));
+        g.nodes.insert(
+            "agent.go-frontend-implementer".into(),
+            Node {
+                kind: NodeKind::Agent,
+                location: Some(Location {
+                    path: PathBuf::from(path),
+                    start: 0,
+                    end: 0,
+                    start_line: 1,
+                    end_line: 274,
+                }),
+                code_type: "docs".into(),
+                ..Node::default()
+            },
+        );
+
+        // (a) The unit keeps its Agent node, and the one-pass index agrees with
+        // the pre-fix per-graph scan.
+        let reference = FileFragment::from_graph(&g, path, "rel.md", "oid", "agent");
+        let index = FileIndex::build(&g);
+        let indexed = FileFragment::from_index(&index, path, "rel.md", "oid", "agent");
+        assert_eq!(indexed, reference);
+        let row = indexed
+            .nodes
+            .iter()
+            .find(|n| n.fqn == "agent.go-frontend-implementer")
+            .expect("the fact unit keeps its Agent node");
+        assert_eq!(row.kind, "agent");
+        assert_eq!(kind_str(NodeKind::Agent), "agent");
+        assert_eq!(row.code_type, "docs");
+
+        // (b) The stored unit round-trips, and `to_node` restores the Agent
+        // kind rather than degrading to the unresolved fallback.
+        let stored = serde_json::to_string(&indexed).expect("the unit serializes");
+        let reread: FileFragment = serde_json::from_str(&stored).expect("the unit deserializes");
+        assert_eq!(reread, indexed);
+        let (_, nodes, _) = reread.project("", "");
+        let node = nodes
+            .iter()
+            .find(|(fqn, _)| fqn == "agent.go-frontend-implementer")
+            .map(|(_, node)| node)
+            .expect("the projected unit carries its Agent node");
+        assert_eq!(node.kind, NodeKind::Agent);
+        let loc = node.location.as_ref().expect("the Agent node is located");
+        assert_eq!(loc.path, PathBuf::from(path));
+        assert_eq!((loc.start_line, loc.end_line), (1, 274));
+        assert_eq!(node.code_type, "docs");
+    }
 }
