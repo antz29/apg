@@ -9360,6 +9360,167 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// schema-alignment phase-03 task-12 (e2e, scratch /tmp repo, CANDIDATE
+    /// binary only — `global.constraint.no-real-project-test`): a REAL scan of
+    /// a checkout carrying agent definitions yields one tier-4 Agent node per
+    /// definition file — `agent.<file-stem>`, located at the definition's
+    /// repo-relative path and 1..line-count span, classified `docs` — and each
+    /// definition file is claimed exactly once: by the agent frontend's
+    /// `agent..opencode/agents` module, never by the structural md stream
+    /// (which still claims the rest of `.opencode` Markdown).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+    fn agent_scan_yields_one_agent_node_per_definition() {
+        let definitions = [
+            (
+                ".opencode/agents/go-frontend-implementer.md",
+                "# Go frontend implementer\n\nOwns the Go frontend.\n",
+            ),
+            (
+                ".opencode/agents/implementer.md",
+                "# Implementer\n\nCore implementation.\n",
+            ),
+        ];
+        let mut files: Vec<(&str, &str)> = definitions.to_vec();
+        // `.opencode/README.md` is ordinary `.opencode` Markdown: the
+        // structural md stream still claims it, so the exclusion is scoped to
+        // `.opencode/agents/` alone.
+        files.push((".opencode/README.md", "# Local opencode config\n"));
+        files.push(("docs/guide.md", "# Guide\n\n## Install\n"));
+        let (base, repo_dir, home) = md_scratch("agent-claim", &files);
+
+        let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+        let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+        assert!(scan.status.success(), "agent scan failed: {stderr}");
+        let langs: Vec<String> = stderr
+            .lines()
+            .find_map(|l| l.strip_prefix("Languages: "))
+            .map(|l| l.split(", ").map(str::to_string).collect())
+            .unwrap_or_default();
+        for lang in ["md", "agent"] {
+            assert_eq!(
+                langs.iter().filter(|l| *l == lang).count(),
+                1,
+                "`{lang}` must be selected exactly once: {stderr}"
+            );
+        }
+        assert!(
+            stderr.contains("[scan] running md frontend")
+                && stderr.contains("[scan] running agent frontend"),
+            "both the structural md and the agent frontend must run: {stderr}"
+        );
+
+        let recs = export_records(&repo_dir);
+        let agent_module = "agent..opencode/agents";
+        assert_eq!(
+            export_module_counts(&recs).get(agent_module).copied(),
+            Some(1),
+            "the agent directory module must be emitted exactly once: {:?}",
+            export_modules(&recs)
+        );
+        let file_counts: std::collections::BTreeMap<String, usize> = recs
+            .iter()
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+            .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()))
+            .fold(std::collections::BTreeMap::new(), |mut m, f| {
+                *m.entry(f.to_string()).or_insert(0) += 1;
+                m
+            });
+        let contains: Vec<(String, String)> = recs
+            .iter()
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
+            .map(|r| {
+                (
+                    r.get("from")
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    r.get("to")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect();
+
+        for (path, body) in definitions {
+            let name = path.rsplit('/').next().expect("a definition file name");
+            let stem = name.strip_suffix(".md").expect("a .md definition");
+            // One File node, claimed by exactly one contains edge — the agent
+            // module's. A second claim would be a same-FQN duplicate (a scan
+            // panic), and the md stream would also emit the file's heading
+            // Struct; neither happens.
+            assert_eq!(
+                file_counts.get(path).copied(),
+                Some(1),
+                "`{path}` must be one File node: {file_counts:?}"
+            );
+            let inbound: Vec<&(String, String)> = contains
+                .iter()
+                .filter(|(_, to)| to.as_str() == path)
+                .collect();
+            assert_eq!(
+                inbound.len(),
+                1,
+                "`{path}` must be claimed exactly once: {inbound:?}"
+            );
+            assert_eq!(
+                inbound[0].0.as_str(),
+                agent_module,
+                "the agent frontend must be the sole claimant of `{path}`"
+            );
+            assert!(
+                export_symbols_at(&recs, path).is_empty(),
+                "the md stream must not claim `{path}`: {:?}",
+                export_symbols_at(&recs, path)
+            );
+            // One Agent node per definition file, `agent.<file-stem>`, located
+            // at the definition's path and 1..line-count span, `docs`.
+            let agent_fqn = format!("agent.{stem}");
+            let agents: Vec<&serde_json::Value> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("agent"))
+                .filter(|r| r.get("fqn").and_then(|f| f.as_str()) == Some(agent_fqn.as_str()))
+                .collect();
+            assert_eq!(
+                agents.len(),
+                1,
+                "exactly one `{agent_fqn}` node per definition file"
+            );
+            let agent = agents[0];
+            assert_eq!(agent["path"], path);
+            assert_eq!(agent["start_line"], 1);
+            assert_eq!(agent["end_line"], body.lines().count());
+            assert_eq!(agent["code_type"], "docs");
+        }
+        let agent_fqns: BTreeSet<String> = recs
+            .iter()
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("agent"))
+            .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+            .collect();
+        assert_eq!(
+            agent_fqns,
+            BTreeSet::from([
+                "agent.go-frontend-implementer".to_string(),
+                "agent.implementer".to_string(),
+            ]),
+            "one Agent per definition file, no extra and none missing"
+        );
+        // The structural md stream still claims `.opencode` Markdown outside
+        // the agents directory — its heading Struct proves the claim.
+        assert_eq!(
+            file_counts.get(".opencode/README.md").copied(),
+            Some(1),
+            "`.opencode/README.md` must stay an md File node: {file_counts:?}"
+        );
+        assert!(
+            !export_symbols_at(&recs, ".opencode/README.md").is_empty(),
+            "the md stream must still claim `.opencode/README.md`"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// Phase-08 task-17/20 (e2e): a mixed Go + Python repo scans BOTH
     /// frontends into ONE graph — py auto-detects alongside go, both
     /// frontends run, the merged graph carries a py symbol and its resolved
