@@ -828,25 +828,25 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn agent_record_skipped_while_module_and_file_admitted() {
-        // The agent frontend's stream: the directory module record and the
-        // definition file record are admitted, while the parse-only `agent`
-        // record is dropped without error and never counted as a blacklist skip.
-        let agent_stream = vec![
-            Record::Module {
-                fqn: ".opencode/agents".to_string(),
-            },
-            file_rec(
-                ".opencode/agents/go-frontend-implementer.md",
-                ".opencode/agents",
-                274,
-            ),
-            Record::Agent {
-                name: "go-frontend-implementer".to_string(),
-                path: ".opencode/agents/go-frontend-implementer.md".to_string(),
+        // The agent frontend's stream: the directory module record and each
+        // definition's file record are admitted, and each `agent` record is
+        // admitted beside its File node as one tier-4 Agent node whose FQN is
+        // `agent.<file-stem>` — a distinct FQN per stem. (The name is the
+        // phase-02 skip arm's; phase-03 task-4 turned that arm into admission.)
+        let definitions = [("go-frontend-implementer", 274u32), ("implementer", 120u32)];
+        let mut agent_stream = vec![Record::Module {
+            fqn: ".opencode/agents".to_string(),
+        }];
+        for &(stem, end_line) in &definitions {
+            let path = format!(".opencode/agents/{stem}.md");
+            agent_stream.push(file_rec(&path, ".opencode/agents", end_line));
+            agent_stream.push(Record::Agent {
+                name: stem.to_string(),
+                path,
                 start_line: 1,
-                end_line: 274,
-            },
-        ];
+                end_line,
+            });
+        }
         let opts = IngestOptions {
             blacklist: &[],
             language: "agent",
@@ -854,27 +854,50 @@ mod e2e {
             base: None,
         };
         let (graph, report) = ingest(agent_stream.clone(), &opts, None);
-        let file = ".opencode/agents/go-frontend-implementer.md";
         assert!(
             graph.nodes.contains_key("agent..opencode/agents"),
             "the rooted directory module node is admitted"
         );
-        let node = graph
+        for &(stem, end_line) in &definitions {
+            let file = format!(".opencode/agents/{stem}.md");
+            let node = graph
+                .nodes
+                .get(&file)
+                .unwrap_or_else(|| panic!("{file} is admitted"));
+            assert_eq!(node.kind, NodeKind::File);
+            // The definition is a Markdown document: the md stream's `docs` rule.
+            assert_eq!(node.code_type, "docs");
+            assert!(
+                graph
+                    .contains
+                    .contains(&("agent..opencode/agents".to_string(), file.clone())),
+                "Module -> File contains edge for {file}"
+            );
+            // The Agent node sits beside that File node, located at the
+            // definition's path and line span.
+            let agent_fqn = format!("agent.{stem}");
+            let agent = graph
+                .nodes
+                .get(&agent_fqn)
+                .unwrap_or_else(|| panic!("{agent_fqn} is admitted beside its File node"));
+            assert_eq!(agent.kind, NodeKind::Agent);
+            let location = agent.location.as_ref().expect("agent node is located");
+            assert_eq!(location.path, std::path::PathBuf::from(&file));
+            assert_eq!((location.start_line, location.end_line), (1, end_line));
+        }
+        // One Agent node per streamed definition, distinct per stem.
+        let agent_fqns: BTreeSet<&str> = graph
             .nodes
-            .get(file)
-            .unwrap_or_else(|| panic!("{file} is admitted"));
-        assert_eq!(node.kind, NodeKind::File);
-        // The definition is a Markdown document: the md stream's `docs` rule.
-        assert_eq!(node.code_type, "docs");
-        assert!(
-            graph
-                .contains
-                .contains(&("agent..opencode/agents".to_string(), file.to_string())),
-            "Module -> File contains edge"
+            .iter()
+            .filter(|(_, n)| n.kind == NodeKind::Agent)
+            .map(|(fqn, _)| fqn.as_str())
+            .collect();
+        assert_eq!(
+            agent_fqns,
+            BTreeSet::from(["agent.go-frontend-implementer", "agent.implementer"]),
+            "one agent.<stem> node per record, distinct per stem"
         );
-        // The parse-only agent record is dropped: no `agent.<stem>` node.
-        assert!(!graph.nodes.contains_key("agent.go-frontend-implementer"));
-        assert_eq!(report.skipped, 0, "the agent record is not a skip");
+        assert_eq!(report.skipped, 0, "agent records are admitted, not skipped");
 
         // Beside it, a build-output file record is the one record that DOES
         // increment the tally, so `skipped` counts only the blacklisted record.
@@ -883,8 +906,14 @@ mod e2e {
         let (graph, report) = ingest(records, &opts, None);
         assert_eq!(report.skipped, 1, "only the build-output file is skipped");
         assert!(graph.nodes.contains_key("agent..opencode/agents"));
-        assert!(graph.nodes.contains_key(file));
-        assert!(!graph.nodes.contains_key("agent.go-frontend-implementer"));
+        for &(stem, _) in &definitions {
+            assert!(
+                graph
+                    .nodes
+                    .contains_key(&format!(".opencode/agents/{stem}.md"))
+            );
+            assert!(graph.nodes.contains_key(&format!("agent.{stem}")));
+        }
     }
 
     #[test]
