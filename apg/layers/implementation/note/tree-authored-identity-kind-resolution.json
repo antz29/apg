@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "tree-authored-identity-kind-resolution",
+  "body": "tree_authored_identity now reads graph.jsonl and the plan store twice (once via code_universes_from_export, once via code_kinds_from_export), and a FQN absent from both the export and the plan store's planned_node kind still falls back to module, so a stale or partial export could keep losing non-module operation rows. Limits: two passes over the export, and a module fallback for FQNs with no recorded kind. Upgrade: fold the two passes into one if the tree digest becomes hot on large repos, and tighten the fallback when a non-module kind must survive a partial export.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.seed.tree_authored_identity",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
