@@ -1188,6 +1188,8 @@ mod e2e {
 
     /// R18/§5: `.trans` plans (Plan/PlanPhase/Task/PlannedNode) and feedback
     /// still ingest through the scan and pair against durable node-file nodes.
+    /// The task is a title+status record alone, with its assignment and
+    /// operation edge records written beside it (SCHEMA.md's task edges).
     /// The feedback sits in the tier dir of its attached node (SPEC §5) — the
     /// requirements tier mirror, `.trans/requirements/foo.jsonl` — and its
     /// Reviews edge points at the durable requirement and lands in the DB.
@@ -1227,10 +1229,21 @@ mod e2e {
                 to: "foo/plan.phase-01".to_string(),
                 properties: NodeProperties::default(),
             },
+            // The task's own record is title+status alone; its assignment and
+            // its `creates` operation edge are the SCHEMA.md task edges
+            // written beside it, the operation targeting the planned `Widget`.
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
                 status: "pending".to_string(),
+            },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "agent.go-frontend-implementer".to_string(),
+            },
+            Record::StructCreate {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "fixture.mod.Widget".to_string(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
