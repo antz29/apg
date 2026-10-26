@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agent-admission-blacklist-guard",
+  "body": "Agent admission does not apply the scan blacklist guard the File admission does; align them if a blacklisted definition must also suppress its Agent node.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.ingest_records",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

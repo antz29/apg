@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agent-structural-exclusion-scope",
+  "body": "The .opencode/agents structural exclusion is repo-root-relative only; a nested subdir/.opencode/agents definition stays claimed as md, so widen the predicate if agent definitions move off the repo root.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.structfrontend.discovery.in_scope",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
