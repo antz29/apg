@@ -961,6 +961,81 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    fn agent_label_projects_to_its_table_and_round_trips_through_the_export() {
+        // The tier-4 `Agent` label is fqn-keyed but file-shaped: an
+        // `agent.<file-stem>` node located at its definition file's
+        // repo-relative path and 1-based line span. It projects to the `Agent`
+        // node table and round-trips through graph.jsonl's `agent` record.
+        let dir =
+            std::env::temp_dir().join(format!("apg-test-agent-roundtrip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = ".opencode/agents/go-frontend-implementer.md";
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "agent.go-frontend-implementer".to_string(),
+            Node {
+                kind: NodeKind::Agent,
+                location: Some(Location {
+                    path: path.into(),
+                    start: 0,
+                    end: 0,
+                    start_line: 1,
+                    end_line: 274,
+                }),
+                code_type: "docs".to_string(),
+                ..Node::default()
+            },
+        );
+
+        // DB projection: the Agent table carries the located field set.
+        let ldir = dir.join("load");
+        std::fs::create_dir_all(&ldir).unwrap();
+        build_load_files(&graph, &ldir).unwrap();
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &ldir).unwrap();
+        let out = conn
+            .query("MATCH (a:Agent) RETURN a.fqn, a.path, a.start_line, a.end_line, a.code_type")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains(&format!("agent.go-frontend-implementer|{path}|1|274|docs")),
+            "agent row: {out}"
+        );
+
+        // Export: one `agent` record with the same located field set — not the
+        // fqn-only `language` arm, and not skipped.
+        let out_path = dir.join("graph.jsonl");
+        write_graph_jsonl(&graph, &out_path).unwrap();
+        let text = std::fs::read_to_string(&out_path).unwrap();
+        let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(record["type"], "agent");
+        assert_eq!(record["fqn"], "agent.go-frontend-implementer");
+        assert_eq!(record["path"], path);
+        assert_eq!(record["start_line"], 1);
+        assert_eq!(record["end_line"], 274);
+        assert_eq!(record["code_type"], "docs");
+
+        // Read back: the shared export reader rebuilds the located Agent node.
+        let back = read_graph_jsonl(&out_path).unwrap();
+        let node = back
+            .nodes
+            .get("agent.go-frontend-implementer")
+            .expect("Agent node lost in round-trip");
+        assert_eq!(node.kind, NodeKind::Agent);
+        let location = node.location.as_ref().expect("Agent node is located");
+        assert_eq!(location.path, std::path::PathBuf::from(path));
+        assert_eq!((location.start_line, location.end_line), (1, 274));
+        assert_eq!(node.code_type, "docs");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
     fn scan_node_loads_into_db() {
         let dir = std::env::temp_dir().join(format!("apg-test-scandb-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
