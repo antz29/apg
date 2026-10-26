@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "code-kinds-e2e-fixture-generic-json-and-count-pin",
+  "body": "The accessor e2e fixture parses generic JSON with hand-written record lines (matching the sibling code_universes test), so a future export wire-shape change is caught by the load/export e2e tier, not by this accessor test; and the map-length pin (6 then 3) assumes the fixture dir holds exactly one plan file. Limits: hand-written JSON lines and a hard-coded count pin. Upgrade: extend the fixture if the accessor starts reading additional fields, and add the count when the plan store gains other plans in this fixture.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.code_kinds_from_export_reads_the_four_implementation_types",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
