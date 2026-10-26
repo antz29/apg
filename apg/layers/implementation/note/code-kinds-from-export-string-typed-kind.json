@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "code-kinds-from-export-string-typed-kind",
+  "body": "The export's kind map is language-agnostic string-typed (no enum of the four Implementation kinds), so a future fifth code kind would silently flow through as its record type. Limit: the accessor returns string kinds, not a typed kind. Upgrade to a typed kind enum when another Implementation record type is added.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.project.code_kinds_from_export",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
