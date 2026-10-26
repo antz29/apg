@@ -1143,6 +1143,136 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase-04 task-23: `code_kinds_from_export` resolves the Implementation
+    /// kind of every code FQN from the `graph.jsonl` export plus the plan
+    /// store's declared kinds, with NO `db.lbug` open.
+    ///
+    /// The fixture deliberately writes a BOGUS `db.lbug` (not a database): if
+    /// the accessor opened it, decoding would fail — a passed test proves the
+    /// DB was never touched. The four Implementation record types each resolve
+    /// to their own kind; a Struct and a Function declared only in the plan
+    /// store resolve at their declared kind; the export's kind wins where both
+    /// name the same FQN (the scan realized the planned node); an FQN neither
+    /// source names stays absent (the caller's `module` default covers it); the
+    /// `scan_meta` control record and spec/plan/edge records are skipped; and an
+    /// absent export still yields the plan store's kinds.
+    #[test]
+    #[ignore = "e2e tier: real I/O (graph.jsonl via temp_dir); run via cargo test-e2e"]
+    fn code_kinds_from_export_reads_the_four_implementation_types() {
+        let dir = std::env::temp_dir().join(format!("apg-kinds-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let trans = dir.join(specs::TRANS);
+        std::fs::create_dir_all(trans.join("plans")).unwrap();
+
+        // graph.jsonl: the scan_meta control lead, one record of each
+        // Implementation kind, and spec/plan/edge records that must all be
+        // skipped. `github.com/x/y.Store` is also declared planned with a
+        // different kind below — the export wins.
+        let graph = [
+        r#"{"type":"scan_meta","git_sha":"abc","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
+        r#"{"type":"module","fqn":"github.com/x/y"}"#,
+        r#"{"type":"file","fqn":"src/store.go","start_line":1,"end_line":100,"code_type":"src"}"#,
+        r#"{"type":"struct","fqn":"github.com/x/y.Store","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
+        r#"{"type":"function","fqn":"github.com/x/y.Store.Get","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
+        r#"{"type":"requirement","fqn":"github.com/x/y/req.one","title":"One","body":"b"}"#,
+        r#"{"type":"planned_node","fqn":"github.com/x/y.PlannedOnly","kind":"struct","name":"PlannedOnly","parent":"github.com/x/y"}"#,
+        r#"{"type":"contains","from":"github.com/x/y","to":"github.com/x/y.Store"}"#,
+    ]
+    .join("\n");
+        std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
+
+        // The plan store declares a Struct and a Function the export does not
+        // carry (each at its declared kind), and re-declares the scanned Store
+        // as a Function — the export's Struct must win.
+        specs::write_jsonl(
+            &trans.join("plans").join("foo.jsonl"),
+            &[
+                Record::PlannedNode {
+                    fqn: "apg.session.PlannedStruct".into(),
+                    kind: "struct".into(),
+                    name: "PlannedStruct".into(),
+                    parent: "apg.session".into(),
+                },
+                Record::PlannedNode {
+                    fqn: "apg.session.planned_fn".into(),
+                    kind: "function".into(),
+                    name: "planned_fn".into(),
+                    parent: "apg.session".into(),
+                },
+                Record::PlannedNode {
+                    fqn: "github.com/x/y.Store".into(),
+                    kind: "function".into(),
+                    name: "Store".into(),
+                    parent: "github.com/x/y".into(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // A bogus DB — never opened by the kind accessor.
+        std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
+
+        let kinds = code_kinds_from_export(&dir).unwrap();
+        assert_eq!(
+            kinds.get("github.com/x/y").map(String::as_str),
+            Some("module")
+        );
+        assert_eq!(kinds.get("src/store.go").map(String::as_str), Some("file"));
+        assert_eq!(
+            kinds.get("github.com/x/y.Store").map(String::as_str),
+            Some("struct"),
+            "the export's kind beats the plan store's conflicting declaration"
+        );
+        assert_eq!(
+            kinds.get("github.com/x/y.Store.Get").map(String::as_str),
+            Some("function")
+        );
+        assert_eq!(
+            kinds.get("apg.session.PlannedStruct").map(String::as_str),
+            Some("struct"),
+            "a plan-store-only Struct resolves at its declared kind"
+        );
+        assert_eq!(
+            kinds.get("apg.session.planned_fn").map(String::as_str),
+            Some("function"),
+            "a plan-store-only Function resolves at its declared kind"
+        );
+
+        // Skipped records never reach the map: the scan_meta lead, the
+        // spec/plan/edge records — and an FQN neither source names stays
+        // absent (the caller's `module` default covers it).
+        assert_eq!(
+            kinds.len(),
+            6,
+            "only the four export kinds plus the two plan-store-only kinds"
+        );
+        assert!(!kinds.contains_key("github.com/x/y/req.one"));
+        assert!(!kinds.contains_key("github.com/x/y.PlannedOnly"));
+        assert!(!kinds.contains_key("github.com/x/y.Gone"));
+
+        // graph.jsonl absent: the export contributes nothing; the plan store's
+        // declared kinds remain — the scanned Store now resolves at the plan
+        // store's kind, the only one left.
+        std::fs::remove_file(trans.join("graph.jsonl")).unwrap();
+        let kinds2 = code_kinds_from_export(&dir).unwrap();
+        assert_eq!(kinds2.len(), 3);
+        assert_eq!(
+            kinds2.get("apg.session.PlannedStruct").map(String::as_str),
+            Some("struct")
+        );
+        assert_eq!(
+            kinds2.get("apg.session.planned_fn").map(String::as_str),
+            Some("function")
+        );
+        assert_eq!(
+            kinds2.get("github.com/x/y.Store").map(String::as_str),
+            Some("function"),
+            "without the export the plan store's kind is the only kind"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase-01 task-19: a routed durable write through a live session is
     /// projected into the session-held `db.lbug` IMMEDIATELY — a separate
     /// routed reader sees the mutation before any save — but it is BUFFERED,
