@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "coverage-edge-match-inline",
+  "body": "coverage_check's edge-derived touched set matches the per-kind operation edges inline (mirroring plan_add_task_at) instead of reusing render's private task_op_edge helper — publishing that helper would modify the unplanned render unit. The edge-derived path also has no direct unit fixture yet: the existing coverage fixtures carry only legacy fields and exercise the fallback. Upgrade: consolidate the shared edge matcher and add direct edge-path fixtures when a plan task covers the render unit or task-8 rewrites the coverage fixtures to edges.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.verify.coverage_check",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
