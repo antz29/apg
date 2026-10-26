@@ -1221,9 +1221,12 @@ mod e2e {
     }
 
     /// Unit: `plan_update_task_at` preserves `status` + incident `Reviews` and
-    /// re-validates kind/tier (`validate_task_kind_tier`) and verb/target
-    /// (`validate_task_verb`). Every invalid classification, verb, or
-    /// creates-over-real-code is refused before any write.
+    /// re-validates every effective dimension — the assignment via
+    /// `validate_task_assignment` (exactly one assigned Agent present in the
+    /// branch graph's Agent roster) and the operation edge set via
+    /// `validate_task_operations` (per-verb target rules). A supplied dimension
+    /// replaces its edge set; an omitted one leaves the edges untouched. Every
+    /// invalid assignment or operation is refused before any write.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn plan_update_task_at_preserves_status_reviews_and_revalidates() {
@@ -1249,8 +1252,15 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-
                 status: "done".into(),
+            },
+            Record::AssignedTo {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "agent.implementer".into(),
+            },
+            Record::StructModify {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "github.com/x/y.Store".into(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -1274,7 +1284,8 @@ mod e2e {
                 .collect()
         };
 
-        // A title-only update preserves `status` + the incident Reviews edge.
+        // A title-only update leaves the seeded assignment + operation edges
+        // intact and preserves `status` + the incident Reviews edge.
         plan_update_task_at(
             &apg_root,
             "foo",
@@ -1303,7 +1314,18 @@ mod e2e {
                 if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
         )));
 
-        // A re-validated assignment/operation replacement lands.
+        // Omission ≠ clear: an update supplying neither the assignment nor the
+        // operation dimension leaves both seeded edges byte-for-byte.
+        let before = snapshot(&records);
+        plan_update_task_at(&apg_root, "foo", &mut records, 1, 1, None, None, None, None).unwrap();
+        assert_eq!(
+            snapshot(&records),
+            before,
+            "omitting the assignment/operation dimensions must leave their edges untouched"
+        );
+
+        // A supplied assignment + operation edge set replaces and re-validates
+        // both dimensions; `status` + the incident Reviews edge still survive.
         plan_update_task_at(
             &apg_root,
             "foo",
@@ -1313,9 +1335,40 @@ mod e2e {
             None,
             Some(&assigned_agent()),
             None,
-            Some(&[task_op("struct", "modifies", "github.com/x/y.Store", "")]),
+            Some(&[task_op("struct", "creates", "github.com/x/y.NewStore", "")]),
         )
         .unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::AssignedTo { from, to }
+                if from == "foo/plan.phase-01.task-1" && to == "agent.implementer"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::StructCreate { from, to }
+                if from == "foo/plan.phase-01.task-1" && to == "github.com/x/y.NewStore"
+        )));
+        assert!(
+            !records
+                .iter()
+                .any(|r| matches!(r, Record::StructModify { .. })),
+            "the supplied operation edge set replaces the seeded one"
+        );
+        let status = records
+            .iter()
+            .find_map(|r| match r {
+                Record::Task { fqn, status, .. } if fqn == "foo/plan.phase-01.task-1" => {
+                    Some(status.as_str())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(status, "done");
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Reviews { from, to }
+                if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
+        )));
 
         // Negatives — each refused before any write.
         let before = snapshot(&records);
@@ -1348,18 +1401,6 @@ mod e2e {
             None,
             Some(&[task_op("struct", "creates", "github.com/x/y.Store", "")]),
         );
-
-        // The valid classification landed and status/Reviews still survive.
-        let status = records
-            .iter()
-            .find_map(|r| match r {
-                Record::Task { fqn, status, .. } if fqn == "foo/plan.phase-01.task-1" => {
-                    Some(status.as_str())
-                }
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(status, "done");
 
         testutil::remove(&repo);
     }
