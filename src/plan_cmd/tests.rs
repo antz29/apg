@@ -299,12 +299,15 @@ mod unit {
         }
     }
 
-    /// A phase's task list renders each task's title, its checkbox status and
-    /// one indented line per operation edge — no owning-kind grouping (phase 5
-    /// owns the assigned-Agent grouping).
+    /// A phase's task list groups each line under the Agent its `assigned-to`
+    /// edge names (`**agent.<stem>**`), with a task carrying no assignment under
+    /// `**unassigned**`. Each task renders its title, checkbox status and one
+    /// indented line per operation edge, a rename/move folding in its `->`
+    /// destination; no owning-kind or tier wording appears.
     #[test]
     fn render_phase_tasks_lists_title_status_and_edges() {
         let task_fqn = "foo/plan.phase-01.task-1";
+        let unassigned_fqn = "foo/plan.phase-01.task-2";
         let mut records = vec![
             Record::PlanPhase {
                 fqn: "foo/plan.phase-01".into(),
@@ -317,6 +320,22 @@ mod unit {
                 from: "foo/plan.phase-01".into(),
                 to: task_fqn.into(),
                 properties: NodeProperties::default(),
+            },
+            // The first task's assignment selects its group heading.
+            Record::AssignedTo {
+                from: task_fqn.into(),
+                to: "agent.implementer".into(),
+            },
+            // A second task with no `assigned-to` edge renders unassigned.
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: unassigned_fqn.into(),
+                properties: NodeProperties::default(),
+            },
+            Record::Task {
+                fqn: unassigned_fqn.into(),
+                title: "U".into(),
+                status: "done".into(),
             },
         ];
         // One shared task fixture carrying two operation edges: a struct
@@ -332,9 +351,18 @@ mod unit {
         ));
 
         let out = render_phase_tasks(&records, "foo/plan.phase-01");
-        // The task line carries its title and checkbox status.
+        // Tasks group under their Agent heading; the assignment-less task falls
+        // back to `**unassigned**`.
+        let assigned = out.find("**agent.implementer**\n").expect(&out);
+        let unassigned = out.find("**unassigned**\n").expect(&out);
+        assert!(assigned < unassigned, "{out}");
+        // Each task line carries its title and checkbox status.
         assert!(
             out.contains("- [ ] `foo/plan.phase-01.task-1` — T"),
+            "{out}"
+        );
+        assert!(
+            out.contains("- [x] `foo/plan.phase-01.task-2` — U"),
             "{out}"
         );
         // Each operation edge renders as one indented line.
@@ -346,7 +374,7 @@ mod unit {
             out.contains("  - module rename `rust.apg.old` -> `rust.apg.new`"),
             "{out}"
         );
-        // No owning-kind grouping wording (phase 5 owns Agent grouping).
+        // No owning-kind or tier wording remains in the render.
         assert!(!out.contains("**source**"), "{out}");
         assert!(!out.contains("**test**"), "{out}");
     }
