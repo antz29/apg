@@ -150,6 +150,42 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
     }
 }
 
+/// Builds the tier-4 `Agent` node an `agent` stream record describes: the FQN
+/// `agent.<file-stem>` from the record's stem, located at the definition file's
+/// repo-relative path and 1-based line span (no byte span), and classified like
+/// the md stream's Markdown claim (`docs`).
+///
+/// `#[allow(dead_code)]` until the record loop's `Record::Agent` arm admits it
+/// (the builder is currently exercised only through that admission).
+#[allow(dead_code)]
+fn agent_node(
+    name: &str,
+    path: &str,
+    start_line: u32,
+    end_line: u32,
+    base: &Path,
+    config: Option<&ApgConfig>,
+) -> (String, Node) {
+    let fqn = format!("agent.{name}");
+    let identity = repo_relative_identity(base, path);
+    let code_type = classify_code_type(path, &fqn, "agent", config);
+    (
+        fqn,
+        Node {
+            kind: NodeKind::Agent,
+            location: Some(Location {
+                path: PathBuf::from(identity),
+                start: 0,
+                end: 0,
+                start_line,
+                end_line,
+            }),
+            code_type,
+            ..Node::default()
+        },
+    )
+}
+
 /// Selects the language subsequent admissions count against, when an emitter is
 /// present. Streamed admissions rely on the current `lang`; the deferred passes
 /// (Functions, Modules, Language roots) re-select each node's own language
