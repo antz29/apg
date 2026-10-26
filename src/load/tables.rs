@@ -50,6 +50,11 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut file_status = Vec::new();
     let mut unres_fqn = Vec::new();
     let mut unres_cat = Vec::new();
+    let mut agent_fqn = Vec::new();
+    let mut agent_path = Vec::new();
+    let mut agent_start_line = Vec::new();
+    let mut agent_end_line = Vec::new();
+    let mut agent_ct = Vec::new();
     let mut req_fqn = Vec::new();
     let mut req_id = Vec::new();
     let mut req_title = Vec::new();
@@ -318,7 +323,14 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 constraint_body.push(node.body.clone().unwrap_or_default());
                 constraint_props.push(properties_json(&node.properties));
             }
-            NodeKind::Agent => {}
+            NodeKind::Agent => {
+                agent_fqn.push(fqn.clone());
+                agent_path.push(loc(graph, fqn).0);
+                let (sl, el) = lines(graph, fqn);
+                agent_start_line.push(sl);
+                agent_end_line.push(el);
+                agent_ct.push(node.code_type.clone());
+            }
         }
     }
 
@@ -384,6 +396,16 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         &[
             ("fqn", Col::Str(unres_fqn)),
             ("category", Col::Str(unres_cat)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("agent.parquet"),
+        &[
+            ("fqn", Col::Str(agent_fqn)),
+            ("path", Col::Str(agent_path)),
+            ("start_line", Col::I64(agent_start_line)),
+            ("end_line", Col::I64(agent_end_line)),
+            ("code_type", Col::Str(agent_ct)),
         ],
     )?;
     write_parquet(
@@ -1099,6 +1121,7 @@ pub fn node_labels() -> &'static [&'static str] {
         "Function",
         "File",
         "UnresolvedTarget",
+        "Agent",
         "Language",
         "Requirement",
         "Note",
@@ -1189,6 +1212,9 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE File(fqn STRING PRIMARY KEY, start_line INT64, end_line INT64, code_type STRING, status STRING)",
     )?;
     conn.query("CREATE NODE TABLE UnresolvedTarget(fqn STRING PRIMARY KEY, category STRING)")?;
+    conn.query(
+        "CREATE NODE TABLE Agent(fqn STRING PRIMARY KEY, path STRING, start_line INT64, end_line INT64, code_type STRING)",
+    )?;
     conn.query(
         "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING, properties STRING)",
     )?;
@@ -1321,7 +1347,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         conn.query(&stmt)?;
         Ok(())
     };
-    let stmts: [(&str, String); 41] = [
+    let stmts: [(&str, String); 42] = [
         (
             "module.parquet",
             format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
@@ -1356,6 +1382,10 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
                 r#"COPY UnresolvedTarget FROM "{}""#,
                 p("unresolved.parquet")
             ),
+        ),
+        (
+            "agent.parquet",
+            format!(r#"COPY Agent FROM "{}""#, p("agent.parquet")),
         ),
         (
             "requirement.parquet",
