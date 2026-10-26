@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "coverage-multi-target-dest-uncovered",
+  "body": "coverage_check now inserts every operation edge target and every renames/moves destination (no last-wins slot), but the multiple-target-edges-per-task path has no unit coverage — coverage_check_reports_gaps_no_claims_and_verb_agnostic_touches exercises one destination only, and phase-5 task-15 owns its final rewrite. Limit: the second-destination path is unasserted. Upgrade: add the second-destination case to the coverage unit test when task-15 rewrites it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.verify.coverage_check",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
