@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agent-build-staging-evidence",
+  "body": "The root gate checks staging but omits standalone frontend suites and staged-scan e2e; use those gates when changing frontend behavior or scan integration.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.build_script_build.main",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
