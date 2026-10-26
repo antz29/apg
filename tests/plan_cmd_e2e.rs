@@ -308,10 +308,12 @@ fn db_at(dir: &Path) {
     reproject_layers(&apg_root);
 }
 
-/// Writes a plan JSONL for `foo` with one phase containing one task.
+/// Writes a plan JSONL for `foo` with one phase containing one target-less
+/// task: its title+status record plus the phase `Contains` edge, through the
+/// shared [`task_recs`] builder.
 fn write_plan(apg_root: &Path) -> PathBuf {
     let path = specs::plan_jsonl_path(apg_root, "foo");
-    let records = vec![
+    let mut records = vec![
         Record::Plan {
             fqn: "foo/plan".to_string(),
             title: "P".to_string(),
@@ -329,18 +331,13 @@ fn write_plan(apg_root: &Path) -> PathBuf {
             to: "foo/plan.phase-01".to_string(),
             properties: layers::NodeProperties::default(),
         },
-        Record::Task {
-            fqn: "foo/plan.phase-01.task-1".to_string(),
-            title: "T".to_string(),
-
-            status: "pending".to_string(),
-        },
-        Record::Contains {
-            from: "foo/plan.phase-01".to_string(),
-            to: "foo/plan.phase-01.task-1".to_string(),
-            properties: layers::NodeProperties::default(),
-        },
     ];
+    records.extend(task_recs("", "", "", ""));
+    records.push(Record::Contains {
+        from: "foo/plan.phase-01".to_string(),
+        to: "foo/plan.phase-01.task-1".to_string(),
+        properties: layers::NodeProperties::default(),
+    });
     artifacts::write_jsonl_and_reingest(apg_root, &path, "foo", &records).unwrap();
     path
 }
@@ -1347,13 +1344,15 @@ mod e2e {
     }
 
     /// Unit: an empty target is the core mechanism the CLI `--no-fqn` sentinel
-    /// drives. An empty target CLEARS a task's target to the target-less
-    /// `creates` form (preserving `status`), an omitted target leaves it
+    /// drives. An empty target CLEARS a task's operation edge to the target-less
+    /// form (preserving `status`), an omitted target leaves the operation edge
     /// untouched (omission ≠ clear), and a target-less task is legal ONLY for
     /// `creates`: an empty target with a non-`creates` effective verb is
     /// refused by `validate_task_verb` with no partial write. The `--no-fqn`
     /// mapping itself lives in `plan_update` (`Some(String::new())`), so this
-    /// covers the semantics that flag feeds into `plan_update_task_at`.
+    /// covers the semantics that flag feeds into `plan_update_task_at`. The
+    /// task's state is its operation edge (`StructModify`) plus its stored
+    /// `status`; there is no verb/target field to read.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn plan_update_task_clears_target_to_targetless() {
@@ -1379,8 +1378,11 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-
                 status: "done".into(),
+            },
+            Record::StructModify {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "github.com/x/y.Store".into(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -1394,18 +1396,29 @@ mod e2e {
                 .collect()
         };
         let task_state = |recs: &[Record]| -> (String, String, String) {
-            recs.iter()
+            let status = recs
+                .iter()
                 .find_map(|r| match r {
                     Record::Task { fqn, status, .. } if fqn == "foo/plan.phase-01.task-1" => {
-                        Some((String::new(), String::new(), status.clone()))
+                        Some(status.clone())
                     }
                     _ => None,
                 })
-                .unwrap()
+                .unwrap();
+            let (verb, target) = recs
+                .iter()
+                .find_map(|r| match r {
+                    Record::StructModify { from, to } if from == "foo/plan.phase-01.task-1" => {
+                        Some(("modifies".to_string(), to.clone()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            (verb, target, status)
         };
 
         // 1. Omission ≠ clear: an update that passes neither `--verb` nor
-        //    `--fqn` leaves the existing real target exactly as it was.
+        //    `--fqn` leaves the existing real operation edge exactly as it was.
         let real = (
             "modifies".to_string(),
             "github.com/x/y.Store".to_string(),
@@ -1432,8 +1445,8 @@ mod e2e {
             "omitting --verb/--fqn must leave the target unchanged, not clear it"
         );
 
-        // 2. The `--no-fqn` sentinel (an empty target) CLEARS to the
-        //    target-less `creates` form; `status` survives the clear.
+        // 2. The `--no-fqn` sentinel (an empty target) CLEARS the operation edge
+        //    to the target-less form; `status` survives the clear.
         plan_update_task_at(
             &apg_root,
             "foo",
@@ -1450,8 +1463,14 @@ mod e2e {
         .unwrap();
         assert_eq!(
             task_state(&records),
-            ("creates".to_string(), String::new(), "done".to_string()),
-            "an empty target clears the task to the target-less creates form"
+            (String::new(), String::new(), "done".to_string()),
+            "an empty target clears the task to the target-less (no operation edge) form"
+        );
+        assert!(
+            !records
+                .iter()
+                .any(|r| matches!(r, Record::StructModify { .. })),
+            "the cleared operation edge must be gone"
         );
 
         // 3. Target-less is creates-only. Restore a real target, then empty it
@@ -2763,7 +2782,7 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn coverage_holds_when_every_implemented_by_fqn_is_touched() {
         // One solution node whose implemented-by FQNs are a real scanned
-        // Struct (covered by a modifies task) and an absent FQN (covered by a
+        // Module (covered by a modifies task) and an absent FQN (covered by a
         // creates task — the planned-node case: a creates over a still-absent
         // FQN counts exactly like a modifies over real code). The fixture has
         // NO pre-existing spec, so the whole branch spec is the delta (law
@@ -2774,7 +2793,7 @@ mod e2e {
             &apg_root,
             "system",
             "payments",
-            &["github.com/x/y.Store", "github.com/x/y.Gateway"],
+            &["github.com/x/y", "github.com/x/y.Gateway"],
         );
         let sha = wt_commit_paths(
             &wt,
@@ -2783,13 +2802,10 @@ mod e2e {
         );
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
+        // task-1 modifies the real scanned Module; task-2 creates the still-absent
+        // Gateway. Each task is its title+status record plus its operation edge.
         let mut records = bare_plan();
-        records.push(Record::Task {
-            fqn: "foo/plan.phase-01.task-1".to_string(),
-            title: "T1".to_string(),
-
-            status: "done".to_string(),
-        });
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
@@ -2798,13 +2814,16 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-2".to_string(),
             title: "T2".to_string(),
-
             status: "pending".to_string(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-2".to_string(),
             properties: layers::NodeProperties::default(),
+        });
+        records.push(Record::ModuleCreate {
+            from: "foo/plan.phase-01.task-2".to_string(),
+            to: "github.com/x/y.Gateway".to_string(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -2824,17 +2843,12 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn coverage_refuses_when_an_implemented_by_fqn_is_untouched() {
         // Two branch-added solution nodes; the plan touches only the real
-        // Struct — the container's absent Gateway FQN is uncovered, so verify
-        // refuses, naming the FQN, its solution node, and the matching creates
-        // suggestion.
+        // scanned Module — the container's absent Gateway FQN is uncovered, so
+        // verify refuses, naming the FQN, its solution node, and the matching
+        // creates suggestion.
         let (apg_root, repo, wt) = fixture("coverage-gap");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
-        write_solution_node(
-            &apg_root,
-            "component",
-            "checkout",
-            &["github.com/x/y.Store"],
-        );
+        write_solution_node(&apg_root, "component", "checkout", &["github.com/x/y"]);
         let sha = wt_commit_paths(
             &wt,
             &[
@@ -2846,12 +2860,7 @@ mod e2e {
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
         let mut records = bare_plan();
-        records.push(Record::Task {
-            fqn: "foo/plan.phase-01.task-1".to_string(),
-            title: "T1".to_string(),
-
-            status: "pending".to_string(),
-        });
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
@@ -2899,12 +2908,14 @@ mod e2e {
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
         let mut records = bare_plan();
-        records.push(Record::Task {
-            fqn: "foo/plan.phase-01.task-1".to_string(),
-            title: "T1".to_string(),
-
-            status: "pending".to_string(),
-        });
+        // A renames edge to the live Module source plus the `target` destination
+        // equal to the claim — the destination half of the pair covers it.
+        records.extend(task_recs(
+            "module",
+            "renames",
+            "github.com/x/y",
+            "github.com/x/y.Store2",
+        ));
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
@@ -3039,7 +3050,7 @@ mod e2e {
             &apg_root,
             "component",
             "coverage-spine-validation",
-            &["github.com/x/y.Store"],
+            &["github.com/x/y"],
         );
         write_solution_node(&apg_root, "component", "plan-store-atomic-rewrite", &[]);
         let sha = wt_commit_paths(
@@ -3067,7 +3078,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3099,7 +3110,7 @@ mod e2e {
             msg.contains("solution.component.coverage-spine-validation"),
             "{msg}"
         );
-        assert!(msg.contains("github.com/x/y.Store"), "{msg}");
+        assert!(msg.contains("github.com/x/y"), "{msg}");
         // None of the pre-existing unchanged worktree-cleanup nodes is named.
         for name in [
             "project-delete",
@@ -3119,7 +3130,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3147,7 +3158,7 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
             properties: layers::NodeProperties::default(),
         });
-        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -3411,12 +3422,7 @@ mod e2e {
         // no no-claims warnings — is pinned by the unit coverage tests.)
         let (apg_root, repo, wt) = fixture("coverage-multi-ok");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
-        write_solution_node(
-            &apg_root,
-            "component",
-            "checkout",
-            &["github.com/x/y.Store"],
-        );
+        write_solution_node(&apg_root, "component", "checkout", &["github.com/x/y"]);
         let sha = wt_commit_paths(
             &wt,
             &[
@@ -3427,13 +3433,10 @@ mod e2e {
         );
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
+        // task-1 modifies the real scanned Module; task-2 creates the still-absent
+        // Gateway. Each task is its title+status record plus its operation edge.
         let mut records = bare_plan();
-        records.push(Record::Task {
-            fqn: "foo/plan.phase-01.task-1".to_string(),
-            title: "T1".to_string(),
-
-            status: "pending".to_string(),
-        });
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
@@ -3442,13 +3445,16 @@ mod e2e {
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-2".to_string(),
             title: "T2".to_string(),
-
             status: "pending".to_string(),
         });
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-2".to_string(),
             properties: layers::NodeProperties::default(),
+        });
+        records.push(Record::ModuleCreate {
+            from: "foo/plan.phase-01.task-2".to_string(),
+            to: "github.com/x/y.Gateway".to_string(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -3475,12 +3481,7 @@ mod e2e {
         // for a partially-covered bridge).
         let (apg_root, repo, wt) = fixture("coverage-mixed-names");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
-        write_solution_node(
-            &apg_root,
-            "component",
-            "checkout",
-            &["github.com/x/y.Store"],
-        );
+        write_solution_node(&apg_root, "component", "checkout", &["github.com/x/y"]);
         let sha = wt_commit_paths(
             &wt,
             &[
@@ -3492,12 +3493,7 @@ mod e2e {
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
         let mut records = bare_plan();
-        records.push(Record::Task {
-            fqn: "foo/plan.phase-01.task-1".to_string(),
-            title: "T1".to_string(),
-
-            status: "pending".to_string(),
-        });
+        records.extend(task_recs("module", "modifies", "github.com/x/y", ""));
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
@@ -3518,7 +3514,10 @@ mod e2e {
         assert!(msg.contains("github.com/x/y.Gateway"), "{msg}");
         // The covered component and its claim are NOT named.
         assert!(!msg.contains("solution.component.checkout"), "{msg}");
-        assert!(!msg.contains("github.com/x/y.Store"), "{msg}");
+        assert!(
+            !msg.contains("--verb modifies --fqn github.com/x/y"),
+            "{msg}"
+        );
 
         testutil::remove(&repo);
     }
@@ -4270,15 +4269,19 @@ mod e2e {
                 to: "foo/plan.phase-01.task-1".to_string(),
                 properties: layers::NodeProperties::default(),
             },
+            Record::ModuleCreate {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
+            },
             Record::PlannedNode {
-                fqn: "github.com/x/y.Store".to_string(),
-                kind: "struct".to_string(),
-                name: "Store".to_string(),
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "module".to_string(),
+                name: "Gateway".to_string(),
                 parent: "github.com/x/y".to_string(),
             },
             Record::Contains {
                 from: "github.com/x/y".to_string(),
-                to: "github.com/x/y.Store".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
                 properties: layers::NodeProperties::default(),
             },
         ];
@@ -4332,7 +4335,7 @@ mod e2e {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before_fb);
 
         // A creates-targeted planned node refuses, naming the task + --force.
-        let err = plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Store", false)
+        let err = plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Gateway", false)
             .unwrap_err()
             .to_string();
         assert!(err.contains("foo/plan.phase-01.task-1"), "{err}");
@@ -4424,15 +4427,19 @@ mod e2e {
                 to: "foo/plan.phase-01.task-1".to_string(),
                 properties: layers::NodeProperties::default(),
             },
+            Record::ModuleCreate {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
+            },
             Record::PlannedNode {
-                fqn: "github.com/x/y.Store".to_string(),
-                kind: "struct".to_string(),
-                name: "Store".to_string(),
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "module".to_string(),
+                name: "Gateway".to_string(),
                 parent: "github.com/x/y".to_string(),
             },
             Record::Contains {
                 from: "github.com/x/y".to_string(),
-                to: "github.com/x/y.Store".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
                 properties: layers::NodeProperties::default(),
             },
             // Task-level feedback: its Reviews target is removed by the task
@@ -4475,16 +4482,16 @@ mod e2e {
 
         // The creates-targeted planned node refuses without --force; --force
         // removes it plus its parent Contains edge, leaving no dangling edge.
-        assert!(plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Store", false).is_err());
-        plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Store", true).unwrap();
+        assert!(plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Gateway", false).is_err());
+        plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Gateway", true).unwrap();
         let recs = specs::read_jsonl(&path).unwrap();
         assert!(!recs.iter().any(
-            |r| matches!(r, Record::PlannedNode { fqn, .. } if fqn == "github.com/x/y.Store")
+            |r| matches!(r, Record::PlannedNode { fqn, .. } if fqn == "github.com/x/y.Gateway")
         ));
         assert!(
-            !recs
-                .iter()
-                .any(|r| matches!(r, Record::Contains { to, .. } if to == "github.com/x/y.Store"))
+            !recs.iter().any(
+                |r| matches!(r, Record::Contains { to, .. } if to == "github.com/x/y.Gateway")
+            )
         );
         assert_no_orphans(&recs);
 
@@ -5054,8 +5061,11 @@ mod e2e {
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-
                 status: "pending".into(),
+            },
+            Record::ModuleCreate {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "github.com/x/y.Gateway".into(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -5064,7 +5074,7 @@ mod e2e {
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Gateway".into(),
-                kind: "struct".into(),
+                kind: "module".into(),
                 name: "Gateway".into(),
                 parent: "github.com/x/y".into(),
             },
@@ -5361,6 +5371,10 @@ mod e2e {
                 to: "main/plan.phase-01.task-1".to_string(),
                 properties: layers::NodeProperties::default(),
             },
+            Record::ModuleModify {
+                from: "main/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y".to_string(),
+            },
         ];
         specs::write_jsonl(&specs::plan_jsonl_path(&repo.apg_root(), "main"), &records).unwrap();
 
@@ -5378,7 +5392,8 @@ mod e2e {
             "## Strategy\nread the store",
             "| 1 | done | the read |  |  |",
             "## Phase 1 (complete)",
-            "- [x] `main/plan.phase-01.task-1` — Read the store (test/e2e)",
+            "- [x] `main/plan.phase-01.task-1` — Read the store",
+            "  - module modify `github.com/x/y`",
         ] {
             assert!(
                 stdout.contains(needle),
