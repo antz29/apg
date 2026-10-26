@@ -107,6 +107,21 @@ pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
 
 /// The markdown task list for one phase, grouped by owning kind. Verification
 /// depth renders as `test/<tier>` for test tasks, plain kind otherwise.
+///
+/// A task's operation edges (SCHEMA.md task tier) render as one indented
+/// sub-line per edge, `<kind> <operation> `<target>`` — `<kind>` is
+/// `module`/`file`/`struct`/`function`, `<operation>` is
+/// `create`/`modify`/`delete`/`rename`/`move`, and `<target>` is the edge's
+/// `to` (the planned destination of a create, the live target otherwise). A
+/// renames/moves line folds in the task's `target` edge destination as
+/// `-> `<destination>``:
+///
+/// ```text
+/// - [ ] `demo/plan.phase-01.task-1` — Rename gateway (source)
+///   - module rename `rust.apg.old` -> `rust.apg.new`
+/// ```
+///
+/// A task carrying no operation edge renders the task line alone.
 pub(crate) fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
     let tasks: Vec<String> = records
         .iter()
@@ -155,9 +170,58 @@ pub(crate) fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
         for (t, title, depth, status) in items {
             let check = if status == "done" { "[x]" } else { "[ ]" };
             out.push_str(&format!("- {check} `{t}` — {title} ({depth})\n"));
+            let dest = records.iter().find_map(|r| match r {
+                Record::Target { from, to } if from == &t => Some(to.as_str()),
+                _ => None,
+            });
+            for r in records {
+                let Some((edge_kind, op, from, to)) = task_op_edge(r) else {
+                    continue;
+                };
+                if from != t.as_str() {
+                    continue;
+                }
+                let arrow = match dest {
+                    Some(d) if !d.is_empty() && matches!(op, "rename" | "move") => {
+                        format!(" -> `{d}`")
+                    }
+                    _ => String::new(),
+                };
+                out.push_str(&format!("  - {edge_kind} {op} `{to}`{arrow}\n"));
+            }
         }
     }
     out
+}
+
+/// A task's operation edge as `(implementation kind, operation, from, to)`; the
+/// SCHEMA.md per-kind create/modify/delete/move/rename variants, `None` for
+/// every other record (the `target` destination edge included).
+fn task_op_edge(r: &Record) -> Option<(&'static str, &'static str, &str, &str)> {
+    use Record::*;
+    Some(match r {
+        ModuleCreate { from, to } => ("module", "create", from, to),
+        ModuleModify { from, to } => ("module", "modify", from, to),
+        ModuleDelete { from, to } => ("module", "delete", from, to),
+        ModuleMove { from, to } => ("module", "move", from, to),
+        ModuleRename { from, to } => ("module", "rename", from, to),
+        FileCreate { from, to } => ("file", "create", from, to),
+        FileModify { from, to } => ("file", "modify", from, to),
+        FileDelete { from, to } => ("file", "delete", from, to),
+        FileMove { from, to } => ("file", "move", from, to),
+        FileRename { from, to } => ("file", "rename", from, to),
+        StructCreate { from, to } => ("struct", "create", from, to),
+        StructModify { from, to } => ("struct", "modify", from, to),
+        StructDelete { from, to } => ("struct", "delete", from, to),
+        StructMove { from, to } => ("struct", "move", from, to),
+        StructRename { from, to } => ("struct", "rename", from, to),
+        FunctionCreate { from, to } => ("function", "create", from, to),
+        FunctionModify { from, to } => ("function", "modify", from, to),
+        FunctionDelete { from, to } => ("function", "delete", from, to),
+        FunctionMove { from, to } => ("function", "move", from, to),
+        FunctionRename { from, to } => ("function", "rename", from, to),
+        _ => return None,
+    })
 }
 
 /// Render a plan FQN without its `{project}/` prefix.
