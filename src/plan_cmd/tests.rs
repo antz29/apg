@@ -120,43 +120,68 @@ mod unit {
         assert_eq!(satisfies, vec!["requirements.requirement.R9"]);
     }
 
+    /// A task's assignment contract: exactly one `assigned-to` Agent, any Agent
+    /// in the branch graph's roster assignable (the roster is not partitioned by
+    /// role), an assigned Agent the roster lacks classified as drift, and an
+    /// `implements` target that must be a Component of the solution layer. Pure
+    /// in-memory: the roster is the `BTreeSet` of `agent.<file-stem>` FQNs the
+    /// branch graph's Agent nodes carry.
     #[test]
-    fn task_kind_tier_validation() {
-        let agents: BTreeSet<String> = ["agent.implementer".to_string()].into();
+    fn task_assignment_validation() {
+        let roster: BTreeSet<String> = [
+            "agent.implementer".to_string(),
+            "agent.reviewer".to_string(),
+        ]
+        .into();
         let components: BTreeSet<String> = ["solution.component.app".to_string()].into();
-        let agent = || vec!["agent.implementer".to_string()];
-        // Exactly one assigned-to Agent, present in the branch graph's roster.
-        assert!(validate_task_assignment(&agent(), None, &agents, &components).is_ok());
-        assert!(validate_task_assignment(&[], None, &agents, &components).is_err());
+        let assign = |agent: &str| vec![agent.to_string()];
+
+        // Exactly one assigned-to Agent, and it must name an Agent FQN.
+        assert!(
+            validate_task_assignment(&assign("agent.implementer"), None, &roster, &components)
+                .is_ok()
+        );
+        assert!(validate_task_assignment(&[], None, &roster, &components).is_err());
+        assert!(validate_task_assignment(&assign(""), None, &roster, &components).is_err());
         assert!(
             validate_task_assignment(
-                &["agent.a".to_string(), "agent.b".to_string()],
+                &[
+                    "agent.implementer".to_string(),
+                    "agent.reviewer".to_string()
+                ],
                 None,
-                &agents,
+                &roster,
                 &components
             )
             .is_err()
         );
-        // An Agent the branch graph lacks is drift.
+
+        // Any Agent is assignable to any task.
         assert!(
-            validate_task_assignment(&["agent.ghost".to_string()], None, &agents, &components)
-                .is_err()
+            validate_task_assignment(&assign("agent.reviewer"), None, &roster, &components).is_ok()
         );
-        // Any Agent is assignable; an implements target must be a Component.
+
+        // An assigned Agent absent from the branch graph's Agent roster is drift.
+        let err = validate_task_assignment(&assign("agent.ghost"), None, &roster, &components)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("drift"), "{err}");
+
+        // The implements target must be a Component of the solution layer.
         assert!(
             validate_task_assignment(
-                &agent(),
+                &assign("agent.implementer"),
                 Some("solution.component.app"),
-                &agents,
+                &roster,
                 &components
             )
             .is_ok()
         );
         assert!(
             validate_task_assignment(
-                &agent(),
+                &assign("agent.implementer"),
                 Some("solution.component.ghost"),
-                &agents,
+                &roster,
                 &components
             )
             .is_err()
