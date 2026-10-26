@@ -127,8 +127,9 @@ pub fn project_merge_at(
     // Merge-strength validation (SPEC §8.2/§9.2): plan verification deliberately
     // permits a missing Component `implemented-by` claim; the merge act is where
     // that deferral ends. Validate the whole branch model under
-    // `Context::MergeStrength` — every Component carries exactly one claim — and
-    // require every `implemented-by` target to be REAL scanned code. Refuse
+    // `Context::MergeStrength` — every Component carries at least one claim — and
+    // require every `implemented-by` target to be REAL scanned code. Exclusivity
+    // stays per code node (one Component per code node, never shared). Refuse
     // before the merge rewrites the default branch or the rebuild replaces the
     // branch graph.
     merge_strength_check(&wt_apg, name)?;
@@ -230,7 +231,7 @@ fn merge_strength_check(wt_apg: &Path, name: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     anyhow::bail!(
-        "refused: merge-strength validation failed for `{name}` — the whole model must be consistent before merge (SPEC §8.2), with every Component claiming exactly one real scanned-code `implemented-by` target: {}",
+        "refused: merge-strength validation failed for `{name}` — the whole model must be consistent before merge (SPEC §8.2), with every Component claiming at least one real scanned-code `implemented-by` target and no code node claimed by more than one Component (no shared claims): {}",
         problems.join("; ")
     )
 }

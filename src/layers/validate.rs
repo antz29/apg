@@ -600,8 +600,10 @@ pub(crate) fn validate_assembled_rules(
 /// - [`Context::Save`] and [`Context::Lint`]: a missing claim is permitted; a
 ///   present one must be at most one and its target must be real scanned code
 ///   (the target check is [`validate_code_refs`]'s, not this enum's).
-/// - [`Context::MergeStrength`]: a missing claim is an error — merge requires
-///   exactly one real scanned-code target per Component.
+/// - [`Context::MergeStrength`]: a missing claim is the error — merge requires
+///   at least one real scanned-code target per Component; the
+///   at-most-one-Component-per-code-node exclusivity stays
+///   [`validate_cardinalities`]'s rule.
 ///
 /// Lint uses `Lint`; the save boundary uses `Save`; the merge act
 /// (`project_merge_at`) uses `MergeStrength`. Target realness itself stays
