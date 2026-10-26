@@ -2148,7 +2148,7 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn task_verb_renames_moves_validate_source_and_new_fqn() {
-        let (apg_root, repo, _wt) = fixture("verb-rename");
+        let (apg_root, repo, wt) = fixture("verb-rename");
         let mut records = vec![
             Record::Plan {
                 fqn: "foo/plan".to_string(),
@@ -2168,8 +2168,10 @@ mod e2e {
                 properties: layers::NodeProperties::default(),
             },
         ];
+        let before = records.len();
 
-        // renames/moves with an unresolvable source are refused.
+        // A renames/moves source that does not resolve in the scanned graph is
+        // refused for both verbs.
         for verb in ["renames", "moves"] {
             let err = plan_add_task_at(
                 &apg_root,
@@ -2209,8 +2211,9 @@ mod e2e {
         .unwrap_err();
         assert!(err.to_string().contains("requires --target"), "{err}");
 
-        // A colliding destination is refused — both against another real node
-        // and against the source itself.
+        // A destination that already resolves to scanned code is refused before
+        // any record lands — both against another real node and against the
+        // source itself.
         for (verb, to) in [
             ("renames", "/abs/store.go"),
             ("moves", "github.com/x/y.Store"),
@@ -2233,9 +2236,15 @@ mod e2e {
                 "{verb}: {err}"
             );
         }
+        assert_eq!(
+            records.len(),
+            before,
+            "a refused rename/move leaves no record"
+        );
 
-        // renames/moves with a resolving source and a free destination are
-        // accepted; the pair is recorded on the task.
+        // A renames/moves whose source is real and whose destination is absent
+        // from the scanned graph is accepted: the per-kind operation edge points
+        // at the source, and a `target` destination edge carries the new FQN.
         plan_add_task_at(
             &apg_root,
             "foo",
@@ -2253,6 +2262,28 @@ mod e2e {
             )],
         )
         .unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::StructRename { from, to }
+                if from == "foo/plan.phase-01.task-1"
+                    && to == "github.com/x/y.Store"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Target { from, to }
+                if from == "foo/plan.phase-01.task-1"
+                    && to == "github.com/x/y.Store2"
+        )));
+
+        // A planned destination is accepted too: the plan's planned-node
+        // universe admits a `Record::PlannedNode` — only real scanned code is
+        // refused as a destination.
+        records.push(Record::PlannedNode {
+            fqn: "github.com/x/y.Gateway".to_string(),
+            kind: "struct".to_string(),
+            name: "Gateway".to_string(),
+            parent: String::new(),
+        });
         plan_add_task_at(
             &apg_root,
             "foo",
@@ -2266,22 +2297,69 @@ mod e2e {
                 "struct",
                 "moves",
                 "github.com/x/y.Store",
-                "github.com/x/y.Store2",
+                "github.com/x/y.Gateway",
             )],
         )
         .unwrap();
-        assert!(records.iter().any(|r| matches!(
-            r,
-            Record::StructRename { from, to }
-                if from == "foo/plan.phase-01.task-1"
-                    && to == "github.com/x/y.Store"
-        )));
         assert!(records.iter().any(|r| matches!(
             r,
             Record::StructMove { from, to }
                 if from == "foo/plan.phase-01.task-2"
                     && to == "github.com/x/y.Store"
         )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Target { from, to }
+                if from == "foo/plan.phase-01.task-2"
+                    && to == "github.com/x/y.Gateway"
+        )));
+
+        // The operation edge and the destination edge both survive a write
+        // round-trip — the destination must not be dropped.
+        write_through(&apg_root, "foo", &records).unwrap();
+        let reloaded = load_plan(&apg_root, "foo").unwrap();
+        assert!(reloaded.iter().any(|r| matches!(
+            r,
+            Record::StructRename { from, to }
+                if from.as_str() == "foo/plan.phase-01.task-1"
+                    && to.as_str() == "github.com/x/y.Store"
+        )));
+        assert!(reloaded.iter().any(|r| matches!(
+            r,
+            Record::Target { from, to }
+                if from.as_str() == "foo/plan.phase-01.task-1"
+                    && to.as_str() == "github.com/x/y.Store2"
+        )));
+        assert!(reloaded.iter().any(|r| matches!(
+            r,
+            Record::StructMove { from, to }
+                if from.as_str() == "foo/plan.phase-01.task-2"
+                    && to.as_str() == "github.com/x/y.Store"
+        )));
+        assert!(reloaded.iter().any(|r| matches!(
+            r,
+            Record::Target { from, to }
+                if from.as_str() == "foo/plan.phase-01.task-2"
+                    && to.as_str() == "github.com/x/y.Gateway"
+        )));
+
+        // ...and both render, the destination folded in as the `->` arrow.
+        let rendered = testutil::spawn_apg(&["plan", "render", "foo", "--out", "-"], &wt);
+        assert!(
+            rendered.status.success(),
+            "render must succeed: {}",
+            String::from_utf8_lossy(&rendered.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&rendered.stdout);
+        for needle in [
+            "struct rename `github.com/x/y.Store` -> `github.com/x/y.Store2`",
+            "struct move `github.com/x/y.Store` -> `github.com/x/y.Gateway`",
+        ] {
+            assert!(
+                stdout.contains(needle),
+                "render must keep the destination (`{needle}`):\n{stdout}"
+            );
+        }
 
         testutil::remove(&repo);
     }
