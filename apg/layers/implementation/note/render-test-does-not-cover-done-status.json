@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "render-test-does-not-cover-done-status",
+  "body": "The render unit test's fixture only exercises status = \"pending\" (the shared task_recs builder's fixed status), so the [x] done checkbox branch of render_phase_tasks is not asserted by this test, and no other test in the file covers it. Limit: the done-status render branch is unasserted. Upgrade when render needs its done branch proven: extend task_recs to set a done status, or add a fixture carrying a done task.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.tests.unit.render_phase_tasks_lists_title_status_and_edges",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
