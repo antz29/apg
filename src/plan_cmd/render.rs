@@ -105,18 +105,21 @@ pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The markdown task list for one phase. Each task renders its title, its
-/// checkbox status and one indented sub-line per operation edge.
+/// The markdown task list for one phase, grouped by the Agent each task is
+/// assigned to. A task's `assigned-to` edge names its group heading (the Agent
+/// FQN); a task carrying no assignment renders under `**unassigned**`.
 ///
-/// A task's operation edges (SCHEMA.md task tier) render as one indented
-/// sub-line per edge, `<kind> <operation> `<target>`` — `<kind>` is
-/// `module`/`file`/`struct`/`function`, `<operation>` is
+/// Each task renders its title, its checkbox status and one indented sub-line
+/// per operation edge. A task's operation edges (SCHEMA.md task tier) render as
+/// one indented sub-line per edge, `<kind> <operation> `<target>`` — `<kind>`
+/// is `module`/`file`/`struct`/`function`, `<operation>` is
 /// `create`/`modify`/`delete`/`rename`/`move`, and `<target>` is the edge's
 /// `to` (the planned destination of a create, the live target otherwise). A
 /// renames/moves line folds in the task's `target` edge destination as
 /// `-> `<destination>``:
 ///
 /// ```text
+/// **agent.implementer**
 /// - [ ] `demo/plan.phase-01.task-1` — Rename gateway
 ///   - module rename `rust.apg.old` -> `rust.apg.new`
 /// ```
@@ -135,37 +138,54 @@ pub(crate) fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
                 .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t))
         })
         .collect();
-    let mut out = String::new();
+    let mut groups: Vec<(Option<String>, Vec<String>)> = Vec::new();
     for t in tasks {
-        let (title, status) = records
-            .iter()
-            .find_map(|r| match r {
-                Record::Task {
-                    fqn, title, status, ..
-                } if fqn == &t => Some((title.clone(), status.clone())),
-                _ => None,
-            })
-            .unwrap_or_default();
-        let check = if status == "done" { "[x]" } else { "[ ]" };
-        out.push_str(&format!("- {check} `{t}` — {title}\n"));
-        let dest = records.iter().find_map(|r| match r {
-            Record::Target { from, to } if from == &t => Some(to.as_str()),
+        let agent = records.iter().find_map(|r| match r {
+            Record::AssignedTo { from, to } if from == &t => Some(to.clone()),
             _ => None,
         });
-        for r in records {
-            let Some((edge_kind, op, from, to)) = task_op_edge(r) else {
-                continue;
-            };
-            if from != t.as_str() {
-                continue;
-            }
-            let arrow = match dest {
-                Some(d) if !d.is_empty() && matches!(op, "rename" | "move") => {
-                    format!(" -> `{d}`")
+        match groups.iter_mut().find(|(a, _)| *a == agent) {
+            Some((_, items)) => items.push(t),
+            None => groups.push((agent, vec![t])),
+        }
+    }
+    let mut out = String::new();
+    for (agent, tasks) in groups {
+        out.push_str(&format!(
+            "**{}**\n",
+            agent.as_deref().unwrap_or("unassigned")
+        ));
+        for t in tasks {
+            let (title, status) = records
+                .iter()
+                .find_map(|r| match r {
+                    Record::Task {
+                        fqn, title, status, ..
+                    } if fqn == &t => Some((title.clone(), status.clone())),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let check = if status == "done" { "[x]" } else { "[ ]" };
+            out.push_str(&format!("- {check} `{t}` — {title}\n"));
+            let dest = records.iter().find_map(|r| match r {
+                Record::Target { from, to } if from == &t => Some(to.as_str()),
+                _ => None,
+            });
+            for r in records {
+                let Some((edge_kind, op, from, to)) = task_op_edge(r) else {
+                    continue;
+                };
+                if from != t.as_str() {
+                    continue;
                 }
-                _ => String::new(),
-            };
-            out.push_str(&format!("  - {edge_kind} {op} `{to}`{arrow}\n"));
+                let arrow = match dest {
+                    Some(d) if !d.is_empty() && matches!(op, "rename" | "move") => {
+                        format!(" -> `{d}`")
+                    }
+                    _ => String::new(),
+                };
+                out.push_str(&format!("  - {edge_kind} {op} `{to}`{arrow}\n"));
+            }
         }
     }
     out
