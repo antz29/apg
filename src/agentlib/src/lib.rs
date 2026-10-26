@@ -103,11 +103,14 @@ pub fn emit_stream<W: Write>(w: &mut W, defs: &[(String, String, u32, u32)]) -> 
     Ok(())
 }
 
-/// Parsed command line: the project dir plus the scan driver's flags.
+/// Parsed command line: the project dir, the scan driver's flags, and its
+/// `--targets <file>` hand-off path in `targets_path` (newline-delimited
+/// absolute source paths under the pinned FrontendHandoff contract).
 pub struct Args {
     pub root: PathBuf,
     pub id_prefix: String,
     pub excludes: Vec<String>,
+    pub targets_path: Option<String>,
 }
 
 fn usage() -> String {
@@ -115,9 +118,10 @@ fn usage() -> String {
         .to_string()
 }
 
-/// Parses the frontend command line. The scan driver forwards `--exclude-path`
-/// values as bare arguments; the explicit flag form and the driver's hand-off
-/// flags are accepted too.
+/// Parses the frontend command line into `Args`. The scan driver forwards
+/// `--exclude-path` values as bare arguments; the explicit flag form and the
+/// driver's hand-off flags are accepted too. `targets_path` is `None` by
+/// default and carries the driver's `--targets <file>` hand-off path.
 ///
 /// ```
 /// let argv: Vec<String> = ["repo", "--id-prefix", "a1", "--exclude-path", "*.md", "vendor"]
@@ -128,6 +132,7 @@ fn usage() -> String {
 /// assert_eq!(args.root, std::path::PathBuf::from("repo"));
 /// assert_eq!(args.id_prefix, "a1");
 /// assert_eq!(args.excludes, vec!["*.md".to_string(), "vendor".to_string()]);
+/// assert_eq!(args.targets_path, None);
 /// ```
 pub fn parse_args(argv: &[String]) -> Result<Args, String> {
     let Some(first) = argv.first() else {
@@ -137,6 +142,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
         root: PathBuf::from(first),
         id_prefix: "n".to_string(),
         excludes: Vec::new(),
+        targets_path: None,
     };
     let mut i = 1;
     while i < argv.len() {
