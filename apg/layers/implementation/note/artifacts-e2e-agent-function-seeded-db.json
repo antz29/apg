@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "artifacts-e2e-agent-function-seeded-db",
+  "body": "The Agent and live Function rows the merge joins are seeded directly into the fixture db.lbug because project_fixture's synthetic graph has no Agent or Function node. Limit: these rows are DB-seeded, not scan-derived, so they do not exercise a real scan round-trip. Upgrade if artifacts_e2e ever needs those rows to round-trip through a real scan: switch to a scanned-code fixture.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.write_through_projects_task_verb_fields",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
