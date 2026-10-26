@@ -174,6 +174,10 @@ fn plan_records(with_feedback: bool) -> Vec<Record> {
             title: "T".into(),
             status: "pending".into(),
         },
+        Record::StructCreate {
+            from: "foo/plan.phase-01.task-1".into(),
+            to: format!("{MOD_FQN}.Widget"),
+        },
         Record::Contains {
             from: "foo/plan.phase-01".into(),
             to: "foo/plan.phase-01.task-1".into(),
@@ -933,6 +937,10 @@ fn apg_projects_plan_records(project: &str) -> Vec<Record> {
             fqn: task.clone(),
             title: format!("touch {code}"),
             status: "pending".to_string(),
+        });
+        r.push(Record::StructModify {
+            from: task.clone(),
+            to: code.to_string(),
         });
         r.push(Record::Contains {
             from: format!("{project}/plan.phase-01"),
@@ -2597,6 +2605,10 @@ mod e2e {
                     title: "touch go.fixture.mod.Store".to_string(),
                     status: "pending".to_string(),
                 },
+                Record::StructModify {
+                    from: "test/plan.phase-01.task-1".to_string(),
+                    to: "go.fixture.mod.Store".to_string(),
+                },
                 Record::Contains {
                     from: "test/plan.phase-01".to_string(),
                     to: "test/plan.phase-01.task-1".to_string(),
@@ -3127,6 +3139,10 @@ mod e2e {
                 title: "touch go.scratch/a.A".into(),
                 status: "pending".into(),
             },
+            Record::StructModify {
+                from: "spec-only/plan.phase-01.task-1".into(),
+                to: "go.scratch/a.A".into(),
+            },
             Record::Contains {
                 from: "spec-only/plan.phase-01".into(),
                 to: "spec-only/plan.phase-01.task-1".into(),
@@ -3302,6 +3318,10 @@ mod e2e {
                     fqn: "mini/plan.phase-01.task-1".into(),
                     title: "touch go.scratch/a.A".into(),
                     status: "pending".into(),
+                },
+                Record::StructModify {
+                    from: "mini/plan.phase-01.task-1".into(),
+                    to: "go.scratch/a.A".into(),
                 },
                 Record::Contains {
                     from: "mini/plan.phase-01".into(),
