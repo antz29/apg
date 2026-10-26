@@ -827,6 +827,68 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn agent_record_skipped_while_module_and_file_admitted() {
+        // The agent frontend's stream: the directory module record and the
+        // definition file record are admitted, while the parse-only `agent`
+        // record is dropped without error and never counted as a blacklist skip.
+        let agent_stream = vec![
+            Record::Module {
+                fqn: ".opencode/agents".to_string(),
+            },
+            file_rec(
+                ".opencode/agents/go-frontend-implementer.md",
+                ".opencode/agents",
+                274,
+            ),
+            Record::Agent {
+                name: "go-frontend-implementer".to_string(),
+                path: ".opencode/agents/go-frontend-implementer.md".to_string(),
+                start_line: 1,
+                end_line: 274,
+            },
+        ];
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "agent",
+            config: None,
+            base: None,
+        };
+        let (graph, report) = ingest(agent_stream.clone(), &opts, None);
+        let file = ".opencode/agents/go-frontend-implementer.md";
+        assert!(
+            graph.nodes.contains_key("agent..opencode/agents"),
+            "the rooted directory module node is admitted"
+        );
+        let node = graph
+            .nodes
+            .get(file)
+            .unwrap_or_else(|| panic!("{file} is admitted"));
+        assert_eq!(node.kind, NodeKind::File);
+        // The definition is a Markdown document: the md stream's `docs` rule.
+        assert_eq!(node.code_type, "docs");
+        assert!(
+            graph
+                .contains
+                .contains(&("agent..opencode/agents".to_string(), file.to_string())),
+            "Module -> File contains edge"
+        );
+        // The parse-only agent record is dropped: no `agent.<stem>` node.
+        assert!(!graph.nodes.contains_key("agent.go-frontend-implementer"));
+        assert_eq!(report.skipped, 0, "the agent record is not a skip");
+
+        // Beside it, a build-output file record is the one record that DOES
+        // increment the tally, so `skipped` counts only the blacklisted record.
+        let mut records = agent_stream;
+        records.push(file_rec("target/build/out.md", ".opencode/agents", 3));
+        let (graph, report) = ingest(records, &opts, None);
+        assert_eq!(report.skipped, 1, "only the build-output file is skipped");
+        assert!(graph.nodes.contains_key("agent..opencode/agents"));
+        assert!(graph.nodes.contains_key(file));
+        assert!(!graph.nodes.contains_key("agent.go-frontend-implementer"));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn cached_cross_file_edges_survive_unit_order() {
         // Regression: the win-B fact splice merges ALL cached nodes before ANY
         // cached edges, so a cross-file `calls`/`uses` edge whose target unit is
