@@ -3,10 +3,12 @@ use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
-/// `struct`, `py`); `0`/`none`/empty skips all.
+/// `struct`, `py`, `agent`); `0`/`none`/empty skips all.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
+/// `agent` is the standalone `agentfrontend` binary serving the
+/// `.opencode/agents/` definition stream.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
 /// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py` formulae build each
 /// frontend directly and don't use build.rs for that.
@@ -24,6 +26,7 @@ fn build_frontends() -> Vec<String> {
             "csharp".into(),
             "struct".into(),
             "py".into(),
+            "agent".into(),
         ],
     }
 }
@@ -58,6 +61,7 @@ fn watch_frontend_sources() {
         "src/csharplib",
         "src/structlib",
         "src/pylib",
+        "src/agentlib",
     ];
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     while let Some(dir) = stack.pop() {
@@ -136,6 +140,29 @@ fn main() {
     }
     if enabled(&frontends, "csharp") {
         languages.extend(stage_csharp(&out_dir, &stage_dir));
+    }
+    if enabled(&frontends, "agent") {
+        // Agent frontend (standalone Rust crate, compiled in isolation). Fail-closed
+        // unlike the others: the root gate's `cargo build` is this staging's only
+        // verification, so a failed build or copy must abort instead of skipping.
+        let agentfrontend = Path::new("src/agentlib")
+            .join("target")
+            .join("release")
+            .join("agentfrontend");
+        let status = Command::new("cargo")
+            .arg("build")
+            .arg("--manifest-path")
+            .arg("src/agentlib/Cargo.toml")
+            .arg("--release")
+            .arg("--bin")
+            .arg("agentfrontend")
+            .status()
+            .expect("failed to run cargo build for src/agentlib");
+        assert!(status.success(), "cargo build for src/agentlib failed");
+        let staged = stage_dir.join("agentfrontend");
+        std::fs::copy(&agentfrontend, &staged).expect("failed to stage agentfrontend");
+        println!("cargo:rustc-env=APG_FRONTEND_AGENT={}", staged.display());
+        languages.push("agent".into());
     }
 
     println!("cargo:rustc-env=APG_LANGUAGES={}", languages.join(","));
