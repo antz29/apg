@@ -39,6 +39,34 @@ pub struct Graph {
     pub writes: HashSet<(String, String)>,
     pub is_role: HashSet<(String, String)>,
     pub realises: HashSet<(String, String)>,
+    /// Task edges (SCHEMA.md, transient plan tier): a task's own storage is its
+    /// title+status record, while the Agent it is assigned to, the Component it
+    /// implements and the code (live or planned) it touches are these edges.
+    /// `assigned-to` keeps the one hyphenated wire spelling; every set's `to`
+    /// endpoint is a code FQN for the operation and `target` edges.
+    pub assigned_to: HashSet<(String, String)>,
+    pub implements: HashSet<(String, String)>,
+    pub target: HashSet<(String, String)>,
+    pub module_create: HashSet<(String, String)>,
+    pub module_modify: HashSet<(String, String)>,
+    pub module_delete: HashSet<(String, String)>,
+    pub module_move: HashSet<(String, String)>,
+    pub module_rename: HashSet<(String, String)>,
+    pub file_create: HashSet<(String, String)>,
+    pub file_modify: HashSet<(String, String)>,
+    pub file_delete: HashSet<(String, String)>,
+    pub file_move: HashSet<(String, String)>,
+    pub file_rename: HashSet<(String, String)>,
+    pub struct_create: HashSet<(String, String)>,
+    pub struct_modify: HashSet<(String, String)>,
+    pub struct_delete: HashSet<(String, String)>,
+    pub struct_move: HashSet<(String, String)>,
+    pub struct_rename: HashSet<(String, String)>,
+    pub function_create: HashSet<(String, String)>,
+    pub function_modify: HashSet<(String, String)>,
+    pub function_delete: HashSet<(String, String)>,
+    pub function_move: HashSet<(String, String)>,
+    pub function_rename: HashSet<(String, String)>,
     /// The **full** node-file properties map of every durable authored edge,
     /// keyed by the node-file edge kind and its `(from, to)` endpoints (e.g.
     /// `("driven-by", "domain.service.checkout", "requirements.requirement.place-order")`).

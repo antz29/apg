@@ -1093,34 +1093,10 @@ fn ingest_records(
                     },
                     None,
                 ),
-                // Task-edge records (SCHEMA.md, phase 4): parsed and dropped in
-                // this pass — their admission (spool tags, per-kind `Graph`
-                // edge sets, rel tables) is the projection's. Without this
-                // grouped arm the catch-all below would reach `write_edge`'s
-                // `unreachable!`.
-                Record::AssignedTo { .. }
-                | Record::Implements { .. }
-                | Record::Target { .. }
-                | Record::ModuleCreate { .. }
-                | Record::ModuleModify { .. }
-                | Record::ModuleDelete { .. }
-                | Record::ModuleMove { .. }
-                | Record::ModuleRename { .. }
-                | Record::FileCreate { .. }
-                | Record::FileModify { .. }
-                | Record::FileDelete { .. }
-                | Record::FileMove { .. }
-                | Record::FileRename { .. }
-                | Record::StructCreate { .. }
-                | Record::StructModify { .. }
-                | Record::StructDelete { .. }
-                | Record::StructMove { .. }
-                | Record::StructRename { .. }
-                | Record::FunctionCreate { .. }
-                | Record::FunctionModify { .. }
-                | Record::FunctionDelete { .. }
-                | Record::FunctionMove { .. }
-                | Record::FunctionRename { .. } => {}
+                // Task-edge records (SCHEMA.md, phase 4) are spooled like every
+                // other edge by the catch-all below: their endpoints are
+                // canonical FQNs (a plan record carries no opaque id), so they
+                // need no rooting and are admitted in Pass C.
                 // Rooted code-fact edge endpoints (PHASE_09). `Contains`
                 // endpoints are module identities (root exactly) or opaque ids
                 // (leave). `Calls`/`Uses` endpoints are opaque ids for emitted
@@ -1678,6 +1654,36 @@ fn ingest_records(
                     }
                     graph.realises.insert((a, b));
                 }
+                // Task edges (SCHEMA.md, phase 4): the transient plan tier's
+                // assigned Agent, implemented Component and per-kind operation
+                // rows. Their endpoints are canonical FQNs (no opaque id to
+                // resolve); a blacklisted endpoint drops the row like any other
+                // edge, and `finalize_graph` prunes the pairs the graph lacks.
+                e @ (Record::AssignedTo { .. }
+                | Record::Implements { .. }
+                | Record::Target { .. }
+                | Record::ModuleCreate { .. }
+                | Record::ModuleModify { .. }
+                | Record::ModuleDelete { .. }
+                | Record::ModuleMove { .. }
+                | Record::ModuleRename { .. }
+                | Record::FileCreate { .. }
+                | Record::FileModify { .. }
+                | Record::FileDelete { .. }
+                | Record::FileMove { .. }
+                | Record::FileRename { .. }
+                | Record::StructCreate { .. }
+                | Record::StructModify { .. }
+                | Record::StructDelete { .. }
+                | Record::StructMove { .. }
+                | Record::StructRename { .. }
+                | Record::FunctionCreate { .. }
+                | Record::FunctionModify { .. }
+                | Record::FunctionDelete { .. }
+                | Record::FunctionMove { .. }
+                | Record::FunctionRename { .. }) => {
+                    skipped += u64::from(!admit_task_record(&mut graph, &lang, opts, e));
+                }
                 _ => unreachable!("non-edge record reached the edge pass"),
             }
         }
@@ -1700,6 +1706,60 @@ fn ingest_records(
             shadowed_functions,
         },
     )
+}
+
+/// A mutable `Graph` edge-set selector for one task-edge kind.
+type TaskEdgeSetMut = fn(&mut Graph) -> &mut HashSet<(String, String)>;
+
+/// Admit one task edge (SCHEMA.md, phase 4) into the `Graph` edge set its kind
+/// names. Returns `false` when a blacklisted endpoint dropped the row — the
+/// same hygiene every other spooled edge applies. The endpoints are already
+/// canonical FQNs, so no `resolve` is involved.
+fn admit_task_record(graph: &mut Graph, lang: &str, opts: &IngestOptions, r: Record) -> bool {
+    let (from, to, pick): (String, String, TaskEdgeSetMut) = match r {
+        Record::AssignedTo { from, to } => (from, to, |g| &mut g.assigned_to),
+        Record::Implements { from, to } => (from, to, |g| &mut g.implements),
+        Record::Target { from, to } => (from, to, |g| &mut g.target),
+        Record::ModuleCreate { from, to } => (from, to, |g| &mut g.module_create),
+        Record::ModuleModify { from, to } => (from, to, |g| &mut g.module_modify),
+        Record::ModuleDelete { from, to } => (from, to, |g| &mut g.module_delete),
+        Record::ModuleMove { from, to } => (from, to, |g| &mut g.module_move),
+        Record::ModuleRename { from, to } => (from, to, |g| &mut g.module_rename),
+        Record::FileCreate { from, to } => (from, to, |g| &mut g.file_create),
+        Record::FileModify { from, to } => (from, to, |g| &mut g.file_modify),
+        Record::FileDelete { from, to } => (from, to, |g| &mut g.file_delete),
+        Record::FileMove { from, to } => (from, to, |g| &mut g.file_move),
+        Record::FileRename { from, to } => (from, to, |g| &mut g.file_rename),
+        Record::StructCreate { from, to } => (from, to, |g| &mut g.struct_create),
+        Record::StructModify { from, to } => (from, to, |g| &mut g.struct_modify),
+        Record::StructDelete { from, to } => (from, to, |g| &mut g.struct_delete),
+        Record::StructMove { from, to } => (from, to, |g| &mut g.struct_move),
+        Record::StructRename { from, to } => (from, to, |g| &mut g.struct_rename),
+        Record::FunctionCreate { from, to } => (from, to, |g| &mut g.function_create),
+        Record::FunctionModify { from, to } => (from, to, |g| &mut g.function_modify),
+        Record::FunctionDelete { from, to } => (from, to, |g| &mut g.function_delete),
+        Record::FunctionMove { from, to } => (from, to, |g| &mut g.function_move),
+        Record::FunctionRename { from, to } => (from, to, |g| &mut g.function_rename),
+        other => unreachable!("non-task-edge record reached the edge pass: {other:?}"),
+    };
+    if is_blacklisted(&from, None, lang, opts) || is_blacklisted(&to, None, lang, opts) {
+        return false;
+    }
+    pick(graph).insert((from, to));
+    true
+}
+
+/// Drop the task-edge rows whose `(Task, to)` kind pair the schema does not
+/// declare (the sibling of `filter_edges` for the twenty per-kind operation
+/// tables, whose `to` kind is fixed).
+fn filter_task_ops(
+    graph: &Graph,
+    edges: &HashSet<(String, String)>,
+    to: NodeKind,
+) -> HashSet<(String, String)> {
+    filter_edges(graph, edges, |g, a, b| {
+        kind_is(g, a, NodeKind::Task) && kind_is(g, b, to)
+    })
 }
 
 /// The dangling-edge cleanup and spec/plan/spine edge validation (SPEC R2/R21,
@@ -1816,6 +1876,45 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     graph.realises = filter_edges(graph, &graph.realises, |g, a, b| {
         kind_is(g, a, NodeKind::Component) && kind_is(g, b, NodeKind::Service)
     });
+
+    // Task edges (SCHEMA.md, phase 4): the transient plan tier's assigned
+    // Agent, implemented Component and per-kind operation rows. Same
+    // dangling-drop and endpoint-kind hygiene as the sibling spec edges; the
+    // operation/target targets may be planned code nodes (they are Module/
+    // File/Struct/Function nodes carrying `status: planned`).
+    graph.assigned_to = filter_edges(graph, &graph.assigned_to, |g, a, b| {
+        kind_is(g, a, NodeKind::Task) && kind_is(g, b, NodeKind::Agent)
+    });
+    graph.implements = filter_edges(graph, &graph.implements, |g, a, b| {
+        kind_is(g, a, NodeKind::Task) && kind_is(g, b, NodeKind::Component)
+    });
+    graph.target = filter_edges(graph, &graph.target, |g, a, b| {
+        kind_is(g, a, NodeKind::Task)
+            && matches!(
+                g.nodes.get(b).map(|n| n.kind),
+                Some(NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function)
+            )
+    });
+    graph.module_create = filter_task_ops(graph, &graph.module_create, NodeKind::Module);
+    graph.module_modify = filter_task_ops(graph, &graph.module_modify, NodeKind::Module);
+    graph.module_delete = filter_task_ops(graph, &graph.module_delete, NodeKind::Module);
+    graph.module_move = filter_task_ops(graph, &graph.module_move, NodeKind::Module);
+    graph.module_rename = filter_task_ops(graph, &graph.module_rename, NodeKind::Module);
+    graph.file_create = filter_task_ops(graph, &graph.file_create, NodeKind::File);
+    graph.file_modify = filter_task_ops(graph, &graph.file_modify, NodeKind::File);
+    graph.file_delete = filter_task_ops(graph, &graph.file_delete, NodeKind::File);
+    graph.file_move = filter_task_ops(graph, &graph.file_move, NodeKind::File);
+    graph.file_rename = filter_task_ops(graph, &graph.file_rename, NodeKind::File);
+    graph.struct_create = filter_task_ops(graph, &graph.struct_create, NodeKind::Struct);
+    graph.struct_modify = filter_task_ops(graph, &graph.struct_modify, NodeKind::Struct);
+    graph.struct_delete = filter_task_ops(graph, &graph.struct_delete, NodeKind::Struct);
+    graph.struct_move = filter_task_ops(graph, &graph.struct_move, NodeKind::Struct);
+    graph.struct_rename = filter_task_ops(graph, &graph.struct_rename, NodeKind::Struct);
+    graph.function_create = filter_task_ops(graph, &graph.function_create, NodeKind::Function);
+    graph.function_modify = filter_task_ops(graph, &graph.function_modify, NodeKind::Function);
+    graph.function_delete = filter_task_ops(graph, &graph.function_delete, NodeKind::Function);
+    graph.function_move = filter_task_ops(graph, &graph.function_move, NodeKind::Function);
+    graph.function_rename = filter_task_ops(graph, &graph.function_rename, NodeKind::Function);
 }
 
 #[cfg(test)]

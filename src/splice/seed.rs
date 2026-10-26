@@ -236,12 +236,7 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
                 row.push("Task".into());
                 row.push(fqn.into());
                 row.push(empty(&node.title));
-                row.push(empty(&node.sub_kind));
-                row.push(empty(&node.tier));
                 row.push(empty(&node.status));
-                row.push(empty(&node.verb));
-                row.push(empty(&node.target));
-                row.push(empty(&node.new_fqn));
             }
             NodeKind::Stakeholder => {
                 row.push("N".into());
@@ -432,6 +427,9 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
     add_edges("Writes", &graph.writes);
     add_edges("IsRole", &graph.is_role);
     add_edges("Realises", &graph.realises);
+    for (table, set) in load::tables::TASK_EDGE_TABLES {
+        add_edges(table, set(graph));
+    }
 
     // Order-independent: sort before folding, then include the row separator so
     // adjacent rows can never run together ambiguously.
@@ -455,8 +453,9 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
 /// canonical form [`assembled_authored_identity`] computes from an assembled
 /// [`Graph`]: one row per authored/transient node — the nineteen
 /// layer/plan/feedback tables, whose columns are projected in `create_schema`
-/// order — and one row per edge in the seventeen authored/transient rel tables
-/// whose SOURCE FQN belongs to one of those tables. Each row is a JSON array of
+/// order — and one row per edge in the authored/transient rel tables (the
+/// shared code rels plus [`load::tables::TASK_EDGE_TABLES`]) whose SOURCE FQN
+/// belongs to one of those tables. Each row is a JSON array of
 /// strings; the rows are sorted and folded into the same 64-bit FNV-1a digest.
 ///
 /// `seed_authored_identity(seed) == assembled_authored_identity(graph)` iff the
@@ -482,12 +481,7 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
             "PlanPhase",
             &["fqn", "number", "title", "deliverable", "status"],
         ),
-        (
-            "Task",
-            &[
-                "fqn", "title", "kind", "tier", "status", "verb", "target", "new_fqn",
-            ],
-        ),
+        ("Task", &["fqn", "title", "status"]),
         ("Stakeholder", &["fqn", "name", "body"]),
         ("Entity", &["fqn", "name", "body"]),
         ("System", &["fqn", "name", "body"]),
@@ -530,7 +524,7 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
     // `Contains`/`Calls`/`Uses` tables' code pairs while retaining authored
     // edges whose target is a code FQN (`Details`, `Reviews`,
     // `SpecImplementedBy`).
-    let rel_tables: [&str; 17] = [
+    let rel_tables: Vec<&str> = [
         "Contains",
         "Calls",
         "Uses",
@@ -548,7 +542,14 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
         "Writes",
         "IsRole",
         "Realises",
-    ];
+    ]
+    .into_iter()
+    .chain(
+        load::tables::TASK_EDGE_TABLES
+            .iter()
+            .map(|(table, _)| *table),
+    )
+    .collect();
     for table in rel_tables {
         let (_, edge_rows) = query_rows(
             &conn,

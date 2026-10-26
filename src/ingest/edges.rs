@@ -61,7 +61,10 @@ pub(crate) fn filter_edges(
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
 /// 8 gates, 9 satisfies, 10 driven-by, 11 represents, 13 spec_implemented_by,
 /// 14 publishes, 15 subscribes, 16 requires, 17 reads, 18 writes, 19 is_role,
-/// 20 realises) followed by four length-prefixed UTF-8 strings (from, to,
+/// 20 realises, then 21–43 for the task edges in [`crate::load::tables`]'s
+/// `TASK_EDGE_TABLES` order: assigned-to, implements, target and the
+/// module/file/struct/function create/modify/delete/move/rename operations)
+/// followed by four length-prefixed UTF-8 strings (from, to,
 /// target_type, properties; `target_type` is empty for most, `properties` is
 /// the canonical JSON of the edge record's full properties map — `"{}"` for a
 /// record that carries none, so the codec never drops an authored edge
@@ -156,6 +159,77 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
             to,
             properties,
         } => write_edge_fields(w, 20, &from, &to, "", &properties),
+        // Task edges (SCHEMA.md, phase 4), one tag per wire name in
+        // `TASK_EDGE_TABLES` order; every task edge is property-less.
+        Record::AssignedTo { from, to } => {
+            write_edge_fields(w, 21, &from, &to, "", &NodeProperties::new())
+        }
+        Record::Implements { from, to } => {
+            write_edge_fields(w, 22, &from, &to, "", &NodeProperties::new())
+        }
+        Record::Target { from, to } => {
+            write_edge_fields(w, 23, &from, &to, "", &NodeProperties::new())
+        }
+        Record::ModuleCreate { from, to } => {
+            write_edge_fields(w, 24, &from, &to, "", &NodeProperties::new())
+        }
+        Record::ModuleModify { from, to } => {
+            write_edge_fields(w, 25, &from, &to, "", &NodeProperties::new())
+        }
+        Record::ModuleDelete { from, to } => {
+            write_edge_fields(w, 26, &from, &to, "", &NodeProperties::new())
+        }
+        Record::ModuleMove { from, to } => {
+            write_edge_fields(w, 27, &from, &to, "", &NodeProperties::new())
+        }
+        Record::ModuleRename { from, to } => {
+            write_edge_fields(w, 28, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FileCreate { from, to } => {
+            write_edge_fields(w, 29, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FileModify { from, to } => {
+            write_edge_fields(w, 30, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FileDelete { from, to } => {
+            write_edge_fields(w, 31, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FileMove { from, to } => {
+            write_edge_fields(w, 32, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FileRename { from, to } => {
+            write_edge_fields(w, 33, &from, &to, "", &NodeProperties::new())
+        }
+        Record::StructCreate { from, to } => {
+            write_edge_fields(w, 34, &from, &to, "", &NodeProperties::new())
+        }
+        Record::StructModify { from, to } => {
+            write_edge_fields(w, 35, &from, &to, "", &NodeProperties::new())
+        }
+        Record::StructDelete { from, to } => {
+            write_edge_fields(w, 36, &from, &to, "", &NodeProperties::new())
+        }
+        Record::StructMove { from, to } => {
+            write_edge_fields(w, 37, &from, &to, "", &NodeProperties::new())
+        }
+        Record::StructRename { from, to } => {
+            write_edge_fields(w, 38, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FunctionCreate { from, to } => {
+            write_edge_fields(w, 39, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FunctionModify { from, to } => {
+            write_edge_fields(w, 40, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FunctionDelete { from, to } => {
+            write_edge_fields(w, 41, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FunctionMove { from, to } => {
+            write_edge_fields(w, 42, &from, &to, "", &NodeProperties::new())
+        }
+        Record::FunctionRename { from, to } => {
+            write_edge_fields(w, 43, &from, &to, "", &NodeProperties::new())
+        }
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -276,6 +350,29 @@ impl<R: BufRead> EdgeReader<R> {
                 to: b,
                 properties,
             },
+            21 => Record::AssignedTo { from: a, to: b },
+            22 => Record::Implements { from: a, to: b },
+            23 => Record::Target { from: a, to: b },
+            24 => Record::ModuleCreate { from: a, to: b },
+            25 => Record::ModuleModify { from: a, to: b },
+            26 => Record::ModuleDelete { from: a, to: b },
+            27 => Record::ModuleMove { from: a, to: b },
+            28 => Record::ModuleRename { from: a, to: b },
+            29 => Record::FileCreate { from: a, to: b },
+            30 => Record::FileModify { from: a, to: b },
+            31 => Record::FileDelete { from: a, to: b },
+            32 => Record::FileMove { from: a, to: b },
+            33 => Record::FileRename { from: a, to: b },
+            34 => Record::StructCreate { from: a, to: b },
+            35 => Record::StructModify { from: a, to: b },
+            36 => Record::StructDelete { from: a, to: b },
+            37 => Record::StructMove { from: a, to: b },
+            38 => Record::StructRename { from: a, to: b },
+            39 => Record::FunctionCreate { from: a, to: b },
+            40 => Record::FunctionModify { from: a, to: b },
+            41 => Record::FunctionDelete { from: a, to: b },
+            42 => Record::FunctionMove { from: a, to: b },
+            43 => Record::FunctionRename { from: a, to: b },
             t => panic!("bad edge spool tag: {t}"),
         })
     }

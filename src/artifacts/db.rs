@@ -713,8 +713,37 @@ impl ArtifactDb {
 /// Unlike [`DURABLE_EDGE_TABLES`] these carry **no** serialized-properties
 /// column ([`edge_merge`](crate::artifacts::merge::edge_merge) returns `None` for
 /// them), so [`ArtifactDb::incident_edge_records_from_db`] reads only their
-/// endpoints.
-const TRANSIENT_EDGE_TABLES: [&str; 3] = ["Reviews", "Gates", "Satisfies"];
+/// endpoints. The task edges ([`crate::load::tables::TASK_EDGE_TABLES`]) join
+/// the plan/review rels here: a task's own storage is title+status, its
+/// assignment and per-kind operation rows are these property-less edges.
+const TRANSIENT_EDGE_TABLES: [&str; 26] = [
+    "Reviews",
+    "Gates",
+    "Satisfies",
+    "AssignedTo",
+    "Implements",
+    "Target",
+    "ModuleCreate",
+    "ModuleModify",
+    "ModuleDelete",
+    "ModuleMove",
+    "ModuleRename",
+    "FileCreate",
+    "FileModify",
+    "FileDelete",
+    "FileMove",
+    "FileRename",
+    "StructCreate",
+    "StructModify",
+    "StructDelete",
+    "StructMove",
+    "StructRename",
+    "FunctionCreate",
+    "FunctionModify",
+    "FunctionDelete",
+    "FunctionMove",
+    "FunctionRename",
+];
 
 /// Build the durable-authored edge [`Record`] for one `(a)-[r:TABLE]->(b)` row,
 /// keyed by its rel table. The inverse of
@@ -810,6 +839,29 @@ fn transient_edge_record(table: &str, from: String, to: String) -> Record {
         "Reviews" => Record::Reviews { from, to },
         "Gates" => Record::Gates { from, to },
         "Satisfies" => Record::Satisfies { from, to },
+        "AssignedTo" => Record::AssignedTo { from, to },
+        "Implements" => Record::Implements { from, to },
+        "Target" => Record::Target { from, to },
+        "ModuleCreate" => Record::ModuleCreate { from, to },
+        "ModuleModify" => Record::ModuleModify { from, to },
+        "ModuleDelete" => Record::ModuleDelete { from, to },
+        "ModuleMove" => Record::ModuleMove { from, to },
+        "ModuleRename" => Record::ModuleRename { from, to },
+        "FileCreate" => Record::FileCreate { from, to },
+        "FileModify" => Record::FileModify { from, to },
+        "FileDelete" => Record::FileDelete { from, to },
+        "FileMove" => Record::FileMove { from, to },
+        "FileRename" => Record::FileRename { from, to },
+        "StructCreate" => Record::StructCreate { from, to },
+        "StructModify" => Record::StructModify { from, to },
+        "StructDelete" => Record::StructDelete { from, to },
+        "StructMove" => Record::StructMove { from, to },
+        "StructRename" => Record::StructRename { from, to },
+        "FunctionCreate" => Record::FunctionCreate { from, to },
+        "FunctionModify" => Record::FunctionModify { from, to },
+        "FunctionDelete" => Record::FunctionDelete { from, to },
+        "FunctionMove" => Record::FunctionMove { from, to },
+        "FunctionRename" => Record::FunctionRename { from, to },
         other => unreachable!("TRANSIENT_EDGE_TABLES carries no `{other}` rel"),
     }
 }

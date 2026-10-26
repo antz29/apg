@@ -67,7 +67,9 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         .unresolved_uses
         .retain(|(a, b)| is_removed(a) && is_removed(b));
     // Spec/plan edges reference code nodes (Details/Reviews on excluded
-    // units, plan edges into excluded code); drop those that dangle.
+    // units, plan edges into excluded code); drop those that dangle. The task
+    // edges (SCHEMA.md, phase 4) point at code the operation touches, so they
+    // travel here too.
     for edges in [
         &mut graph.details,
         &mut graph.reviews,
@@ -83,6 +85,29 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         &mut graph.writes,
         &mut graph.is_role,
         &mut graph.realises,
+        &mut graph.assigned_to,
+        &mut graph.implements,
+        &mut graph.target,
+        &mut graph.module_create,
+        &mut graph.module_modify,
+        &mut graph.module_delete,
+        &mut graph.module_move,
+        &mut graph.module_rename,
+        &mut graph.file_create,
+        &mut graph.file_modify,
+        &mut graph.file_delete,
+        &mut graph.file_move,
+        &mut graph.file_rename,
+        &mut graph.struct_create,
+        &mut graph.struct_modify,
+        &mut graph.struct_delete,
+        &mut graph.struct_move,
+        &mut graph.struct_rename,
+        &mut graph.function_create,
+        &mut graph.function_modify,
+        &mut graph.function_delete,
+        &mut graph.function_move,
+        &mut graph.function_rename,
     ] {
         edges.retain(|(a, b)| is_removed(a) && is_removed(b));
     }

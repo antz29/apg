@@ -1030,6 +1030,75 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
             "realises" => {
                 g.realises.insert((s("from"), s("to")));
             }
+            "assigned-to" => {
+                g.assigned_to.insert((s("from"), s("to")));
+            }
+            "implements" => {
+                g.implements.insert((s("from"), s("to")));
+            }
+            "target" => {
+                g.target.insert((s("from"), s("to")));
+            }
+            "module_create" => {
+                g.module_create.insert((s("from"), s("to")));
+            }
+            "module_modify" => {
+                g.module_modify.insert((s("from"), s("to")));
+            }
+            "module_delete" => {
+                g.module_delete.insert((s("from"), s("to")));
+            }
+            "module_move" => {
+                g.module_move.insert((s("from"), s("to")));
+            }
+            "module_rename" => {
+                g.module_rename.insert((s("from"), s("to")));
+            }
+            "file_create" => {
+                g.file_create.insert((s("from"), s("to")));
+            }
+            "file_modify" => {
+                g.file_modify.insert((s("from"), s("to")));
+            }
+            "file_delete" => {
+                g.file_delete.insert((s("from"), s("to")));
+            }
+            "file_move" => {
+                g.file_move.insert((s("from"), s("to")));
+            }
+            "file_rename" => {
+                g.file_rename.insert((s("from"), s("to")));
+            }
+            "struct_create" => {
+                g.struct_create.insert((s("from"), s("to")));
+            }
+            "struct_modify" => {
+                g.struct_modify.insert((s("from"), s("to")));
+            }
+            "struct_delete" => {
+                g.struct_delete.insert((s("from"), s("to")));
+            }
+            "struct_move" => {
+                g.struct_move.insert((s("from"), s("to")));
+            }
+            "struct_rename" => {
+                g.struct_rename.insert((s("from"), s("to")));
+            }
+            "function_create" => {
+                g.function_create.insert((s("from"), s("to")));
+            }
+            "function_modify" => {
+                g.function_modify.insert((s("from"), s("to")));
+            }
+            "function_delete" => {
+                g.function_delete.insert((s("from"), s("to")));
+            }
+            "function_move" => {
+                g.function_move.insert((s("from"), s("to")));
+            }
+            "function_rename" => {
+                g.function_rename.insert((s("from"), s("to")));
+            }
             other => {
                 anyhow::bail!("graph.jsonl record with unknown type `{other}`");
             }

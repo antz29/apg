@@ -292,7 +292,7 @@ mod unit {
     /// wins over the evidence).
     #[test]
     fn edge_spool_roundtrip() {
-        let edges = vec![
+        let mut edges = vec![
             Record::Contains {
                 from: "n1".to_string(),
                 to: "n2".to_string(),
@@ -343,6 +343,103 @@ mod unit {
                 properties: NodeProperties::default(),
             },
         ];
+        // The 23 task-edge tags (SCHEMA.md, phase 4) round-trip through the
+        // same spool codec, in `TASK_EDGE_TABLES` order.
+        let (f, t) = (
+            "foo/plan.phase-01.task-1".to_string(),
+            "rust.apg.unit".to_string(),
+        );
+        edges.extend([
+            Record::AssignedTo {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::Implements {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::Target {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::ModuleCreate {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::ModuleModify {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::ModuleDelete {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::ModuleMove {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::ModuleRename {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FileCreate {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FileModify {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FileDelete {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FileMove {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FileRename {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::StructCreate {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::StructModify {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::StructDelete {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::StructMove {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::StructRename {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FunctionCreate {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FunctionModify {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FunctionDelete {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FunctionMove {
+                from: f.clone(),
+                to: t.clone(),
+            },
+            Record::FunctionRename { from: f, to: t },
+        ]);
         let mut buf: Vec<u8> = Vec::new();
         for e in &edges {
             write_edge(&mut buf, e.clone());

@@ -147,17 +147,7 @@ enum Export {
         fqn: String,
         title: String,
         #[serde(skip_serializing_if = "String::is_empty")]
-        kind: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
-        tier: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
-        verb: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
-        target: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
-        new_fqn: String,
     },
     Stakeholder {
         fqn: String,
@@ -316,6 +306,102 @@ enum Export {
         from: String,
         to: String,
     },
+    // Task edges (SCHEMA.md, phase 4): the transient plan tier's assigned
+    // Agent, implemented Component, planned `target` destination and per-kind
+    // operation rows, under the same wire names the plan store carries.
+    #[serde(rename = "assigned-to")]
+    AssignedTo {
+        from: String,
+        to: String,
+    },
+    Implements {
+        from: String,
+        to: String,
+    },
+    Target {
+        from: String,
+        to: String,
+    },
+    ModuleCreate {
+        from: String,
+        to: String,
+    },
+    ModuleModify {
+        from: String,
+        to: String,
+    },
+    ModuleDelete {
+        from: String,
+        to: String,
+    },
+    ModuleMove {
+        from: String,
+        to: String,
+    },
+    ModuleRename {
+        from: String,
+        to: String,
+    },
+    FileCreate {
+        from: String,
+        to: String,
+    },
+    FileModify {
+        from: String,
+        to: String,
+    },
+    FileDelete {
+        from: String,
+        to: String,
+    },
+    FileMove {
+        from: String,
+        to: String,
+    },
+    FileRename {
+        from: String,
+        to: String,
+    },
+    StructCreate {
+        from: String,
+        to: String,
+    },
+    StructModify {
+        from: String,
+        to: String,
+    },
+    StructDelete {
+        from: String,
+        to: String,
+    },
+    StructMove {
+        from: String,
+        to: String,
+    },
+    StructRename {
+        from: String,
+        to: String,
+    },
+    FunctionCreate {
+        from: String,
+        to: String,
+    },
+    FunctionModify {
+        from: String,
+        to: String,
+    },
+    FunctionDelete {
+        from: String,
+        to: String,
+    },
+    FunctionMove {
+        from: String,
+        to: String,
+    },
+    FunctionRename {
+        from: String,
+        to: String,
+    },
 }
 
 /// Writes `graph.jsonl`: the final graph re-serialized with canonical FQNs
@@ -462,12 +548,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             NodeKind::Task => Export::Task {
                 fqn: fqn.clone(),
                 title: node.title.clone().unwrap_or_default(),
-                kind: node.sub_kind.clone().unwrap_or_default(),
-                tier: node.tier.clone().unwrap_or_default(),
                 status: node.status.clone().unwrap_or_default(),
-                verb: node.verb.clone().unwrap_or_default(),
-                target: node.target.clone().unwrap_or_default(),
-                new_fqn: node.new_fqn.clone().unwrap_or_default(),
             },
             NodeKind::Stakeholder => Export::Stakeholder {
                 fqn: fqn.clone(),
@@ -712,6 +793,45 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             },
         )?;
     }
+    // Task edges (SCHEMA.md, phase 4): the plan store's own assignment,
+    // implements, planned-target and per-kind operation records.
+    for (table, set) in super::tables::TASK_EDGE_TABLES {
+        for (a, b) in set(graph) {
+            write_line(&mut w, &task_edge_export(table, a.clone(), b.clone()))?;
+        }
+    }
     w.flush()?;
     Ok(())
+}
+
+/// The [`Export`] record for one task-edge row, keyed by its rel table. Every
+/// `table` here is an element of [`super::tables::TASK_EDGE_TABLES`], so the
+/// fallback is unreachable.
+fn task_edge_export(table: &str, from: String, to: String) -> Export {
+    match table {
+        "AssignedTo" => Export::AssignedTo { from, to },
+        "Implements" => Export::Implements { from, to },
+        "Target" => Export::Target { from, to },
+        "ModuleCreate" => Export::ModuleCreate { from, to },
+        "ModuleModify" => Export::ModuleModify { from, to },
+        "ModuleDelete" => Export::ModuleDelete { from, to },
+        "ModuleMove" => Export::ModuleMove { from, to },
+        "ModuleRename" => Export::ModuleRename { from, to },
+        "FileCreate" => Export::FileCreate { from, to },
+        "FileModify" => Export::FileModify { from, to },
+        "FileDelete" => Export::FileDelete { from, to },
+        "FileMove" => Export::FileMove { from, to },
+        "FileRename" => Export::FileRename { from, to },
+        "StructCreate" => Export::StructCreate { from, to },
+        "StructModify" => Export::StructModify { from, to },
+        "StructDelete" => Export::StructDelete { from, to },
+        "StructMove" => Export::StructMove { from, to },
+        "StructRename" => Export::StructRename { from, to },
+        "FunctionCreate" => Export::FunctionCreate { from, to },
+        "FunctionModify" => Export::FunctionModify { from, to },
+        "FunctionDelete" => Export::FunctionDelete { from, to },
+        "FunctionMove" => Export::FunctionMove { from, to },
+        "FunctionRename" => Export::FunctionRename { from, to },
+        other => unreachable!("TASK_EDGE_TABLES carries no `{other}` table"),
+    }
 }

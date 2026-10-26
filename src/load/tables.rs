@@ -4,7 +4,7 @@
 //! pair/node label enumerations the schema, the loader, and the write-through
 //! merge guard share.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use lbug::Connection;
@@ -79,12 +79,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut planphase_status = Vec::new();
     let mut task_fqn = Vec::new();
     let mut task_title = Vec::new();
-    let mut task_kind = Vec::new();
-    let mut task_tier = Vec::new();
     let mut task_status = Vec::new();
-    let mut task_verb = Vec::new();
-    let mut task_target = Vec::new();
-    let mut task_new_fqn = Vec::new();
 
     // Tier-1/2/3 node tables (GraphModel-SPEC.md; PHASE_01).
     let mut stakeholder_fqn = Vec::new();
@@ -235,12 +230,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             NodeKind::Task => {
                 task_fqn.push(fqn.clone());
                 task_title.push(node.title.clone().unwrap_or_default());
-                task_kind.push(node.sub_kind.clone().unwrap_or_default());
-                task_tier.push(node.tier.clone().unwrap_or_default());
                 task_status.push(node.status.clone().unwrap_or_default());
-                task_verb.push(node.verb.clone().unwrap_or_default());
-                task_target.push(node.target.clone().unwrap_or_default());
-                task_new_fqn.push(node.new_fqn.clone().unwrap_or_default());
             }
             NodeKind::Stakeholder => {
                 stakeholder_fqn.push(fqn.clone());
@@ -460,12 +450,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         &[
             ("fqn", Col::Str(task_fqn)),
             ("title", Col::Str(task_title)),
-            ("kind", Col::Str(task_kind)),
-            ("tier", Col::Str(task_tier)),
             ("status", Col::Str(task_status)),
-            ("verb", Col::Str(task_verb)),
-            ("target", Col::Str(task_target)),
-            ("new_fqn", Col::Str(task_new_fqn)),
         ],
     )?;
     write_parquet(
@@ -900,7 +885,17 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                     }
                 }
             }
-            _ => unreachable!("unknown spec rel table: {table}"),
+            other => {
+                let Some((_, set)) = TASK_EDGE_TABLES.iter().find(|(t, _)| *t == other) else {
+                    unreachable!("unknown spec rel table: {other}");
+                };
+                for (a, b) in set(graph) {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
         }
         let name = pair_file(table, from, to);
         // The durable authored rel tables carry the serialized-properties
@@ -950,6 +945,45 @@ fn contains_pair_name(a: NodeKind, b: NodeKind) -> Option<String> {
     } else {
         None
     }
+}
+
+/// A `Graph` edge-set accessor for one task-edge rel table.
+pub(crate) type TaskEdgeSet = fn(&Graph) -> &HashSet<(String, String)>;
+
+/// The transient task-edge rel tables (SCHEMA.md, phase 4) and the `Graph`
+/// edge set each projects, in spool-tag order. Shared by the load files, the
+/// schema DDL, the seed digest and the export so the table set is
+/// single-sourced. A `target` row names the renames/moves (or creates)
+/// destination; every `to` endpoint is a code FQN, live or planned.
+pub(crate) const TASK_EDGE_TABLES: [(&str, TaskEdgeSet); 23] = [
+    ("AssignedTo", |g| &g.assigned_to),
+    ("Implements", |g| &g.implements),
+    ("Target", |g| &g.target),
+    ("ModuleCreate", |g| &g.module_create),
+    ("ModuleModify", |g| &g.module_modify),
+    ("ModuleDelete", |g| &g.module_delete),
+    ("ModuleMove", |g| &g.module_move),
+    ("ModuleRename", |g| &g.module_rename),
+    ("FileCreate", |g| &g.file_create),
+    ("FileModify", |g| &g.file_modify),
+    ("FileDelete", |g| &g.file_delete),
+    ("FileMove", |g| &g.file_move),
+    ("FileRename", |g| &g.file_rename),
+    ("StructCreate", |g| &g.struct_create),
+    ("StructModify", |g| &g.struct_modify),
+    ("StructDelete", |g| &g.struct_delete),
+    ("StructMove", |g| &g.struct_move),
+    ("StructRename", |g| &g.struct_rename),
+    ("FunctionCreate", |g| &g.function_create),
+    ("FunctionModify", |g| &g.function_modify),
+    ("FunctionDelete", |g| &g.function_delete),
+    ("FunctionMove", |g| &g.function_move),
+    ("FunctionRename", |g| &g.function_rename),
+];
+
+/// Whether `table` is one of the transient task-edge rel tables.
+fn is_task_edge_table(table: &str) -> bool {
+    TASK_EDGE_TABLES.iter().any(|(t, _)| *t == table)
 }
 
 /// The `(from, to)` kind pairs of the spec/plan rel tables (SPEC R2/R21), with
@@ -1031,6 +1065,38 @@ pub(crate) fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     v.push(("IsRole", Container, Role));
     v.push(("IsRole", Component, Role));
     v.push(("Realises", Component, Service));
+    // Transient task edges (SCHEMA.md, phase 4): the assigned Agent, the
+    // implemented Component and the per-kind operation rows (whose `target`
+    // pair is the renames/moves/create destination, any code kind).
+    v.push(("AssignedTo", Task, Agent));
+    v.push(("Implements", Task, Component));
+    for to in [Module, File, Struct, Function] {
+        v.push(("Target", Task, to));
+    }
+    for (table, to) in [
+        ("ModuleCreate", Module),
+        ("ModuleModify", Module),
+        ("ModuleDelete", Module),
+        ("ModuleMove", Module),
+        ("ModuleRename", Module),
+        ("FileCreate", File),
+        ("FileModify", File),
+        ("FileDelete", File),
+        ("FileMove", File),
+        ("FileRename", File),
+        ("StructCreate", Struct),
+        ("StructModify", Struct),
+        ("StructDelete", Struct),
+        ("StructMove", Struct),
+        ("StructRename", Struct),
+        ("FunctionCreate", Function),
+        ("FunctionModify", Function),
+        ("FunctionDelete", Function),
+        ("FunctionMove", Function),
+        ("FunctionRename", Function),
+    ] {
+        v.push((table, Task, to));
+    }
     v
 }
 
@@ -1228,9 +1294,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING, status STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING, verb STRING, target STRING, new_fqn STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, status STRING)")?;
     conn.query(
         "CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
     )?;
@@ -1318,6 +1382,24 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE IsRole(FROM Container TO Role, FROM Component TO Role, properties STRING)",
     )?;
     conn.query("CREATE REL TABLE Realises(FROM Component TO Service, properties STRING)")?;
+    // The transient task-edge rel tables (SCHEMA.md, phase 4). Every table has
+    // `Task` as its source; the pair list comes from the same enumeration the
+    // load files and COPY use, grouped so a multi-pair table (`Target`) is one
+    // statement. They carry no serialized-properties column.
+    let mut task_ddl: Vec<(&str, Vec<String>)> = Vec::new();
+    for (table, from, to) in spec_rel_pairs() {
+        if !is_task_edge_table(table) {
+            continue;
+        }
+        let clause = format!("FROM {} TO {}", label_of(from), label_of(to));
+        match task_ddl.iter_mut().find(|(t, _)| *t == table) {
+            Some((_, clauses)) => clauses.push(clause),
+            None => task_ddl.push((table, vec![clause])),
+        }
+    }
+    for (table, clauses) in task_ddl {
+        conn.query(&format!("CREATE REL TABLE {table}({})", clauses.join(", ")))?;
+    }
     Ok(())
 }
 
