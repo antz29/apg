@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "merge-task-row-unset-columns",
+  "body": "node_merge's Task arm emits only title and status for a Task row, so a merged-but-unscanned Task row leaves kind/tier/verb/target/new_fqn unset against the still-wide schema until task-6 lands the narrow Task table. Upgrade: when task-6 narrows the rel table or task-20 removes the residual record fields, re-check any code that reads those columns from a merge-written row.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.merge.node_merge",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
