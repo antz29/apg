@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "agentfrontend-cli-test-coverage",
-  "body": "CLI parsing has a doc-test but no dedicated unit test; extend automated coverage when a parser unit-test task is planned.",
+  "body": "CLI parsing has only a doc-test and ignores --targets; replace the ignored-arm comment with target capture and add the planned parser unit test.",
   "properties": {},
   "out": [
     {
