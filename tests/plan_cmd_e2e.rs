@@ -1405,16 +1405,17 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Unit: an empty target is the core mechanism the CLI `--no-fqn` sentinel
-    /// drives. An empty target CLEARS a task's operation edge to the target-less
-    /// form (preserving `status`), an omitted target leaves the operation edge
-    /// untouched (omission ≠ clear), and a target-less task is legal ONLY for
-    /// `creates`: an empty target with a non-`creates` effective verb is
-    /// refused by `validate_task_verb` with no partial write. The `--no-fqn`
-    /// mapping itself lives in `plan_update` (`Some(String::new())`), so this
-    /// covers the semantics that flag feeds into `plan_update_task_at`. The
-    /// task's state is its operation edge (`StructModify`) plus its stored
-    /// `status`; there is no verb/target field to read.
+    /// Unit: an empty operation edge set is the core mechanism that drives the
+    /// target-less form. An empty operation edge set CLEARS a task's operation
+    /// edge to the target-less form (preserving `status`), an omitted operation
+    /// edge set leaves the operation edge untouched (omission ≠ clear), and a
+    /// target-less task is legal ONLY for `creates`: an empty operation edge set
+    /// with a non-`creates` effective verb is refused by
+    /// `validate_task_operations` with no partial write. The empty-set mapping
+    /// itself lives in `plan_update` (`Some(String::new())`), so this covers the
+    /// semantics that flag feeds into `plan_update_task_at`. The task's state is
+    /// its operation edge (`StructModify`) plus its stored `status`; there is no
+    /// verb/target field to read.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn plan_update_task_clears_target_to_targetless() {
@@ -1483,8 +1484,8 @@ mod e2e {
             (verb, target, status)
         };
 
-        // 1. Omission ≠ clear: an update that passes neither `--verb` nor
-        //    `--fqn` leaves the existing real operation edge exactly as it was.
+        // 1. Omission ≠ clear: an update that passes no operation edge leaves
+        //    the existing real operation edge exactly as it was.
         let real = (
             "modifies".to_string(),
             "github.com/x/y.Store".to_string(),
@@ -1495,11 +1496,11 @@ mod e2e {
         assert_eq!(
             task_state(&records),
             real,
-            "omitting --verb/--fqn must leave the target unchanged, not clear it"
+            "omitting the operation edge must leave it unchanged, not clear it"
         );
 
-        // 2. The `--no-fqn` sentinel (an empty target) CLEARS the operation edge
-        //    to the target-less form; `status` survives the clear.
+        // 2. An empty operation edge set CLEARS the operation edge to the
+        //    target-less form; `status` survives the clear.
         plan_update_task_at(
             &apg_root,
             "foo",
