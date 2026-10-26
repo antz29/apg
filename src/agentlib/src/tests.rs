@@ -1,7 +1,7 @@
 //! Unit/int tests for the agent frontend: the tiers live in `tests::unit` and
 //! `tests::int` beside the walk and stream units they exercise.
 
-use crate::{collect_definitions, emit_stream};
+use crate::{collect_definitions, emit_stream, parse_args};
 
 mod unit {
     use super::*;
@@ -43,6 +43,44 @@ mod unit {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn parse_args_captures_targets_and_excludes() {
+        let argv: Vec<String> = [
+            "repo",
+            "--targets",
+            "/tmp/a.targets",
+            "--exclude-path",
+            "*.draft",
+            "vendor",
+            "--id-prefix",
+            "a1",
+            "--module",
+            "demo",
+            "--cache-dir",
+            "/tmp/cache",
+            "--cache-key",
+            "k1",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let args = parse_args(&argv).unwrap();
+        assert_eq!(args.root, std::path::PathBuf::from("repo"));
+        assert_eq!(args.targets_path, Some("/tmp/a.targets".to_string()));
+        assert_eq!(
+            args.excludes,
+            vec!["*.draft".to_string(), "vendor".to_string()]
+        );
+        assert_eq!(args.id_prefix, "a1");
+
+        // An absent `--targets` leaves the hand-off path unset.
+        let argv: Vec<String> = ["repo", "--exclude-path", "*.draft"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(parse_args(&argv).unwrap().targets_path, None);
     }
 }
 
