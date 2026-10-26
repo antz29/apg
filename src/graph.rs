@@ -115,6 +115,10 @@ pub enum NodeKind {
     /// `Constraint` — declarative prose ("X must hold"); structure/reference
     /// validation only, satisfaction by review.
     Constraint,
+    /// Tier 4 — an agent definition file under `.opencode/agents/`, its FQN
+    /// `agent.<file-stem>` (the extension-stripped file name), located at
+    /// that definition file's path and line span.
+    Agent,
     /// The scan-time git-state node (fqn `scan/HEAD`, one per DB; rewritten at
     /// every scan). Standalone — it carries no rel tables.
     Scan,

@@ -318,6 +318,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 constraint_body.push(node.body.clone().unwrap_or_default());
                 constraint_props.push(properties_json(&node.properties));
             }
+            NodeKind::Agent => {}
         }
     }
 
@@ -1046,6 +1047,7 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::Actor => "actor",
         NodeKind::Role => "role",
         NodeKind::Constraint => "constraint",
+        NodeKind::Agent => "agent",
     }
 }
 
@@ -1164,6 +1166,7 @@ pub fn label_of(k: NodeKind) -> &'static str {
         NodeKind::Actor => "Actor",
         NodeKind::Role => "Role",
         NodeKind::Constraint => "Constraint",
+        NodeKind::Agent => "Agent",
     }
 }
 

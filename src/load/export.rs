@@ -362,6 +362,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
     for (fqn, node) in &graph.nodes {
         let rec = match node.kind {
             NodeKind::Scan => continue,
+            NodeKind::Agent => continue,
             NodeKind::Module => Export::Module {
                 fqn: fqn.clone(),
                 status: node.status.clone().unwrap_or_default(),
