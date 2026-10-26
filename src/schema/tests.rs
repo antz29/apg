@@ -57,7 +57,7 @@ mod unit {
             r#"{"type":"feedback","fqn":"workitem-timer/feedback-1","body":"Split R1","status":"open"}"#,
             r#"{"type":"plan","fqn":"workitem-timer/plan","title":"Plan","strategy":"Layer-first"}"#,
             r#"{"type":"plan_phase","fqn":"workitem-timer/plan.phase-01","number":1,"title":"P1","deliverable":"Schema"}"#,
-            r#"{"type":"task","fqn":"workitem-timer/plan.phase-01.task-1","title":"Add RootStore","kind":"source","tier":"","status":"pending"}"#,
+            r#"{"type":"task","fqn":"workitem-timer/plan.phase-01.task-1","title":"Add RootStore","status":"pending"}"#,
         ];
         for l in lines {
             let _ = parse(l);
@@ -88,6 +88,68 @@ mod unit {
                 assert_eq!(parent, "github.com/foundry/flow");
             }
             other => panic!("expected planned_node, got {other:?}"),
+        }
+
+        // A task persists its title and status alone: the Agent it is assigned
+        // to, the Component it implements and the code it touches are the
+        // SCHEMA.md task edges below, not task properties.
+        let r = parse(lines[6]);
+        match &r {
+            Record::Task { fqn, title, status } => {
+                assert_eq!(fqn, "workitem-timer/plan.phase-01.task-1");
+                assert_eq!(title, "Add RootStore");
+                assert_eq!(status, "pending");
+            }
+            other => panic!("expected task, got {other:?}"),
+        }
+        let wire = serde_json::to_string(&r).unwrap();
+        assert_eq!(wire, lines[6], "a task serializes title+status alone");
+        for retired in ["kind", "tier", "verb", "target", "new_fqn"] {
+            assert!(
+                !wire.contains(&format!(r#""{retired}""#)),
+                "task must not carry the retired `{retired}` key: {wire}"
+            );
+        }
+
+        // Every task edge round-trips under its exact SCHEMA.md wire name, in
+        // both directions (deserialize then serialize), so a durable .trans
+        // mirror reader never drops one. `assigned-to` is hyphenated while the
+        // four operation compounds are underscore-joined (`module_modify`).
+        let wire_names = [
+            "assigned-to",
+            "implements",
+            "target",
+            "module_create",
+            "module_modify",
+            "module_delete",
+            "module_move",
+            "module_rename",
+            "file_create",
+            "file_modify",
+            "file_delete",
+            "file_move",
+            "file_rename",
+            "struct_create",
+            "struct_modify",
+            "struct_delete",
+            "struct_move",
+            "struct_rename",
+            "function_create",
+            "function_modify",
+            "function_delete",
+            "function_move",
+            "function_rename",
+        ];
+        for wire in wire_names {
+            let line = format!(
+                r#"{{"type":"{wire}","from":"workitem-timer/plan.phase-01.task-1","to":"apg.schema.Task"}}"#
+            );
+            let r = parse(&line);
+            assert_eq!(
+                serde_json::to_string(&r).unwrap(),
+                line,
+                "task edge `{wire}` must round-trip its exact wire name"
+            );
         }
     }
 
