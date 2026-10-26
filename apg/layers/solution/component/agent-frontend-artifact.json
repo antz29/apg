@@ -14,6 +14,11 @@
       "kind": "realises",
       "target": "domain.service.agent-definition-scanning",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.agentfrontend",
+      "properties": {}
     }
   ],
   "in": [
