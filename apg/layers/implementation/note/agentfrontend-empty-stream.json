@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "agentfrontend-empty-stream",
-  "body": "The entrypoint emits an empty, parse-safe stream; replace the scaffold when definition collection and stream emission are wired.",
+  "body": "Target filtering assumes an absolute root and unreadable definitions are skipped; normalize roots and add read diagnostics if standalone relative-root invocation or explicit read-failure reporting is required.",
   "properties": {},
   "out": [
     {
