@@ -652,6 +652,11 @@ fn ingest_records(
                         );
                     }
                 }
+                // Parse-only `agent` stream record: the stream's module and file
+                // records are admitted above; the per-definition agent record is
+                // dropped here (never spooled as an edge, never counted as a
+                // blacklist skip) until its Agent-node admission lands.
+                Record::Agent { .. } => {}
                 Record::Unresolved { fqn, category } => {
                     graph.nodes.entry(fqn).or_insert_with(|| Node {
                         kind: NodeKind::UnresolvedTarget,
