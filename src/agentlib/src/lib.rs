@@ -11,7 +11,8 @@
 //! Usage: `agentfrontend <dir> [--id-prefix <p>] [--exclude-path <glob>]...
 //! [exclude...]`.
 
-use std::io::{self, Write};
+use std::collections::HashSet;
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 /// Unified JSONL records (SPEC §2), the `agent` stream's wire shapes.
@@ -208,10 +209,109 @@ pub fn main() {
     }
 }
 
-/// Emits the agent stream. The definition walk and record emitter are the
-/// stream's next units; until they land the stream is empty.
-pub fn run(_args: Args) -> io::Result<()> {
-    Ok(())
+/// Emits the agent stream: probe the claim path one component at a time
+/// (`.opencode` then `.opencode/agents`) with `symlink_metadata`, declining the
+/// run when a component is absent, a symlink or not a directory; otherwise read
+/// the directory's direct regular children, apply `--exclude-path` globs and the
+/// `--targets` list, and emit over a buffered stdout.
+pub fn run(args: Args) -> io::Result<()> {
+    let agents_dir = args.root.join(".opencode/agents");
+    for dir in [args.root.join(".opencode"), agents_dir.clone()] {
+        let Ok(meta) = std::fs::symlink_metadata(&dir) else {
+            return Ok(());
+        };
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Ok(());
+        }
+    }
+
+    // The pinned `--targets` hand-off: newline-delimited absolute paths. An
+    // absent flag, an unreadable file or an empty list is no filter.
+    let target_set = args.targets_path.as_deref().and_then(|path| {
+        let text = std::fs::read_to_string(path).ok()?;
+        let set: HashSet<PathBuf> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        (!set.is_empty()).then_some(set)
+    });
+
+    // The driver's `--exclude-path` form: a whole-value glob where `*` matches
+    // any run (including `/`) and `?` a single character.
+    let excluded = |identity: &str| -> bool {
+        args.excludes.iter().any(|pat| {
+            let pat: Vec<char> = pat.chars().collect();
+            let txt: Vec<char> = identity.chars().collect();
+            let (mut pi, mut ti) = (0usize, 0usize);
+            let (mut star, mut star_ti) = (None, 0usize);
+            while ti < txt.len() {
+                if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+                    pi += 1;
+                    ti += 1;
+                } else if pi < pat.len() && pat[pi] == '*' {
+                    star = Some(pi);
+                    star_ti = ti;
+                    pi += 1;
+                    while pi < pat.len() && pat[pi] == '*' {
+                        pi += 1;
+                    }
+                } else if let Some(sp) = star {
+                    pi = sp + 1;
+                    star_ti += 1;
+                    ti = star_ti;
+                } else {
+                    return false;
+                }
+            }
+            while pi < pat.len() && pat[pi] == '*' {
+                pi += 1;
+            }
+            pi == pat.len()
+        })
+    };
+
+    let mut files: Vec<(String, u32)> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&agents_dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        // `DirEntry::file_type` never follows a symlink: only a regular direct
+        // child is a definition.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let identity = format!(".opencode/agents/{}", entry.file_name().to_string_lossy());
+        if excluded(&identity) {
+            continue;
+        }
+        let abs = args.root.join(&identity);
+        if let Some(set) = &target_set {
+            if !set.contains(&abs) {
+                continue;
+            }
+        }
+        let Ok(bytes) = std::fs::read(&abs) else {
+            continue;
+        };
+        let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u32;
+        let lines = if bytes.last() == Some(&b'\n') {
+            newlines
+        } else {
+            newlines + 1
+        };
+        files.push((identity, lines));
+    }
+
+    let defs = collect_definitions(&files);
+    let stdout = io::stdout();
+    let mut writer = BufWriter::new(stdout.lock());
+    emit_stream(&mut writer, &defs)?;
+    writer.flush()
 }
 
 #[cfg(test)]
