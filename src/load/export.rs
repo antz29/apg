@@ -69,6 +69,16 @@ enum Export {
         #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
     },
+    /// A tier-4 agent definition (`agent.<file-stem>`), located at its
+    /// definition file's repo-relative `path` and line span — the file-shaped
+    /// located arm, no byte span (mirrors the `Agent` load row).
+    Agent {
+        fqn: String,
+        path: String,
+        start_line: u32,
+        end_line: u32,
+        code_type: String,
+    },
     Unresolved {
         fqn: String,
         category: String,
@@ -362,7 +372,16 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
     for (fqn, node) in &graph.nodes {
         let rec = match node.kind {
             NodeKind::Scan => continue,
-            NodeKind::Agent => continue,
+            NodeKind::Agent => {
+                let (start_line, end_line) = lines(graph, fqn);
+                Export::Agent {
+                    fqn: fqn.clone(),
+                    path: loc(graph, fqn).0,
+                    start_line: start_line as u32,
+                    end_line: end_line as u32,
+                    code_type: node.code_type.clone(),
+                }
+            }
             NodeKind::Module => Export::Module {
                 fqn: fqn.clone(),
                 status: node.status.clone().unwrap_or_default(),
