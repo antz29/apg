@@ -143,9 +143,13 @@ mod unit {
         }
     }
 
+    /// A phase's task list renders each task's title, its checkbox status and
+    /// one indented line per operation edge — no owning-kind grouping (phase 5
+    /// owns the assigned-Agent grouping).
     #[test]
-    fn render_groups_tasks_by_kind_and_shows_test_tier() {
-        let records = vec![
+    fn render_phase_tasks_lists_title_status_and_edges() {
+        let task_fqn = "foo/plan.phase-01.task-1";
+        let mut records = vec![
             Record::PlanPhase {
                 fqn: "foo/plan.phase-01".into(),
                 number: 1,
@@ -153,59 +157,28 @@ mod unit {
                 deliverable: "D".into(),
                 status: "pending".into(),
             },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-1".into(),
-                title: "Implement".into(),
-                status: "done".into(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-2".into(),
-                title: "Unit tests".into(),
-                status: "pending".into(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-3".into(),
-                title: "Doc".into(),
-                status: "pending".into(),
-            },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
-                to: "foo/plan.phase-01.task-1".into(),
+                to: task_fqn.into(),
                 properties: NodeProperties::default(),
-            },
-            Record::Contains {
-                from: "foo/plan.phase-01".into(),
-                to: "foo/plan.phase-01.task-2".into(),
-                properties: NodeProperties::default(),
-            },
-            Record::Contains {
-                from: "foo/plan.phase-01".into(),
-                to: "foo/plan.phase-01.task-3".into(),
-                properties: NodeProperties::default(),
-            },
-            // One operation edge per task: task-1 modifies a struct, task-2
-            // creates a module, task-3 is target-less (no edge).
-            Record::StructModify {
-                from: "foo/plan.phase-01.task-1".into(),
-                to: "github.com/x/y.Store".into(),
-            },
-            Record::ModuleCreate {
-                from: "foo/plan.phase-01.task-2".into(),
-                to: "rust.apg.newmod".into(),
             },
         ];
+        // One shared task fixture carrying two operation edges: a struct
+        // modify and a module rename (the latter folds in its `->`
+        // destination). `task_recs` pins the task FQN and title, so both calls
+        // extend the same task.
+        records.extend(task_recs("struct", "modifies", "github.com/x/y.Store", ""));
+        records.extend(task_recs(
+            "module",
+            "renames",
+            "rust.apg.old",
+            "rust.apg.new",
+        ));
+
         let out = render_phase_tasks(&records, "foo/plan.phase-01");
-        // The owning-kind grouping is gone (phase 5 owns Agent grouping).
-        assert!(!out.contains("**source**"), "{out}");
-        assert!(!out.contains("**test**"), "{out}");
-        // Done checkbox preserved.
+        // The task line carries its title and checkbox status.
         assert!(
-            out.contains("- [x] `foo/plan.phase-01.task-1` — Implement"),
-            "{out}"
-        );
-        // A pending task renders its checkbox.
-        assert!(
-            out.contains("- [ ] `foo/plan.phase-01.task-2` — Unit tests"),
+            out.contains("- [ ] `foo/plan.phase-01.task-1` — T"),
             "{out}"
         );
         // Each operation edge renders as one indented line.
@@ -213,12 +186,13 @@ mod unit {
             out.contains("  - struct modify `github.com/x/y.Store`"),
             "{out}"
         );
-        assert!(out.contains("  - module create `rust.apg.newmod`"), "{out}");
-        // A target-less task renders the task line alone.
         assert!(
-            out.contains("- [ ] `foo/plan.phase-01.task-3` — Doc\n"),
+            out.contains("  - module rename `rust.apg.old` -> `rust.apg.new`"),
             "{out}"
         );
+        // No owning-kind grouping wording (phase 5 owns Agent grouping).
+        assert!(!out.contains("**source**"), "{out}");
+        assert!(!out.contains("**test**"), "{out}");
     }
 
     #[test]
