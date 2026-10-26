@@ -642,15 +642,37 @@ mod e2e {
     }
 
     /// The plan re-merge write-through (`node_merge` → `MERGE SET`) carries the
-    /// Task verb projection too: a re-ingested Task record lands its
-    /// verb/target/new_fqn in the live DB, so the suite tools see the same
-    /// columns the scan load path projects.
+    /// Task edge model too: a task written as a title+status record plus its
+    /// assignment and per-kind operation edges lands a `Task` row carrying only
+    /// fqn/title/status, with the matching `AssignedTo`/`Implements`/`Target`
+    /// and per-kind operation rel rows joining the Agent, Component and
+    /// live/planned code nodes the records name.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn write_through_projects_task_verb_fields() {
         let (apg_root, repo, _wt) = project_fixture("task-verb");
+        // The live code nodes the operation edges name that the fixture's
+        // scanned code does not carry: the Function (the Module/File/Struct are
+        // the fixture's scanned code). Both are code kinds, so seeding them
+        // leaves the DB's authored/transient digest untouched.
+        {
+            let db = Database::new(
+                apg_root.join(specs::TRANS).join("db.lbug"),
+                Default::default(),
+            )
+            .unwrap();
+            let conn = Connection::new(&db).unwrap();
+            for q in [
+                "MERGE (n:Agent {fqn: 'agent.go-frontend-implementer'})",
+                "MERGE (n:Function {fqn: 'github.com/x/y.Store.build'})",
+            ] {
+                conn.query(q).unwrap();
+            }
+        }
+
         let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let recs = vec![
+        let task = "foo/plan.phase-01.task-1".to_string();
+        let mut recs = vec![
             Record::Plan {
                 fqn: "foo/plan".into(),
                 title: "Foo".into(),
@@ -668,31 +690,259 @@ mod e2e {
                 to: "foo/plan.phase-01".into(),
                 properties: NodeProperties::default(),
             },
+            // The durable Component the task's `implements` edge joins — it is
+            // part of the record set the merge projects, like the assignment.
+            Record::Component {
+                fqn: "solution.component.order-handler".into(),
+                name: "order-handler".into(),
+                body: String::new(),
+                properties: NodeProperties::default(),
+            },
+            // The task's own storage is title+status alone; its assignment, the
+            // Component it implements and the code it touches are edges.
             Record::Task {
-                fqn: "foo/plan.phase-01.task-1".into(),
-                title: "Rename".into(),
+                fqn: task.clone(),
+                title: "Edge model".into(),
                 status: "pending".into(),
+            },
+            Record::AssignedTo {
+                from: task.clone(),
+                to: "agent.go-frontend-implementer".into(),
+            },
+            Record::Implements {
+                from: task.clone(),
+                to: "solution.component.order-handler".into(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
-                to: "foo/plan.phase-01.task-1".into(),
+                to: task.clone(),
                 properties: NodeProperties::default(),
             },
         ];
+        // One full per-kind operation family: a create to a planned
+        // destination, modify/delete to the live node, and move/rename to the
+        // live source plus a `target` edge to the matching planned
+        // destination.
+        for (fqn, kind) in [
+            ("github.com/x/y.new", "module"),
+            ("github.com/x/y.moved", "module"),
+            ("github.com/x/y.renamed", "module"),
+            ("/new/store.go", "file"),
+            ("/moved/store.go", "file"),
+            ("/renamed/store.go", "file"),
+            ("github.com/x/y.New", "struct"),
+            ("github.com/x/y.Moved", "struct"),
+            ("github.com/x/y.Renamed", "struct"),
+            ("github.com/x/y.New.build", "function"),
+            ("github.com/x/y.Moved.build", "function"),
+            ("github.com/x/y.Renamed.build", "function"),
+        ] {
+            recs.push(Record::PlannedNode {
+                fqn: fqn.into(),
+                kind: kind.into(),
+                name: String::new(),
+                parent: String::new(),
+            });
+        }
+        recs.extend([
+            Record::ModuleCreate {
+                from: task.clone(),
+                to: "github.com/x/y.new".into(),
+            },
+            Record::ModuleModify {
+                from: task.clone(),
+                to: "github.com/x/y".into(),
+            },
+            Record::ModuleDelete {
+                from: task.clone(),
+                to: "github.com/x/y".into(),
+            },
+            Record::ModuleMove {
+                from: task.clone(),
+                to: "github.com/x/y".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "github.com/x/y.moved".into(),
+            },
+            Record::ModuleRename {
+                from: task.clone(),
+                to: "github.com/x/y".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "github.com/x/y.renamed".into(),
+            },
+            Record::FileCreate {
+                from: task.clone(),
+                to: "/new/store.go".into(),
+            },
+            Record::FileModify {
+                from: task.clone(),
+                to: "/abs/store.go".into(),
+            },
+            Record::FileDelete {
+                from: task.clone(),
+                to: "/abs/store.go".into(),
+            },
+            Record::FileMove {
+                from: task.clone(),
+                to: "/abs/store.go".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "/moved/store.go".into(),
+            },
+            Record::FileRename {
+                from: task.clone(),
+                to: "/abs/store.go".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "/renamed/store.go".into(),
+            },
+            Record::StructCreate {
+                from: task.clone(),
+                to: "github.com/x/y.New".into(),
+            },
+            Record::StructModify {
+                from: task.clone(),
+                to: "github.com/x/y.Store".into(),
+            },
+            Record::StructDelete {
+                from: task.clone(),
+                to: "github.com/x/y.Store".into(),
+            },
+            Record::StructMove {
+                from: task.clone(),
+                to: "github.com/x/y.Store".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "github.com/x/y.Moved".into(),
+            },
+            Record::StructRename {
+                from: task.clone(),
+                to: "github.com/x/y.Store".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "github.com/x/y.Renamed".into(),
+            },
+            Record::FunctionCreate {
+                from: task.clone(),
+                to: "github.com/x/y.New.build".into(),
+            },
+            Record::FunctionModify {
+                from: task.clone(),
+                to: "github.com/x/y.Store.build".into(),
+            },
+            Record::FunctionDelete {
+                from: task.clone(),
+                to: "github.com/x/y.Store.build".into(),
+            },
+            Record::FunctionMove {
+                from: task.clone(),
+                to: "github.com/x/y.Store.build".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "github.com/x/y.Moved.build".into(),
+            },
+            Record::FunctionRename {
+                from: task.clone(),
+                to: "github.com/x/y.Store.build".into(),
+            },
+            Record::Target {
+                from: task.clone(),
+                to: "github.com/x/y.Renamed.build".into(),
+            },
+        ]);
 
         write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
 
         let db = ArtifactDb::open(&apg_root).unwrap();
+
+        // The Task row carries fqn/title/status only; the retired properties
+        // have no column, so their old query shapes no longer bind.
         let out = db
-            .q("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn")
+            .q("MATCH (t:Task) RETURN t.fqn, t.title, t.status")
             .unwrap();
         assert!(
             out.contains("foo/plan.phase-01.task-1")
-                && out.contains("renames")
-                && out.contains("foo.Old")
-                && out.contains("foo.New"),
-            "write-through task verb projection: {out}"
+                && out.contains("Edge model")
+                && out.contains("pending"),
+            "write-through task row: {out}"
         );
+        for retired in ["t.kind", "t.tier", "t.verb", "t.target", "t.new_fqn"] {
+            let q = format!("MATCH (t:Task) RETURN {retired}");
+            assert!(
+                db.q(&q).is_err(),
+                "the retired task property `{retired}` must not bind"
+            );
+        }
+
+        // The assignment and implementation edges join the Agent/Component.
+        let out = db
+            .q("MATCH (t:Task)-[:AssignedTo]->(a:Agent) RETURN t.fqn, a.fqn")
+            .unwrap();
+        assert!(
+            out.contains("foo/plan.phase-01.task-1")
+                && out.contains("agent.go-frontend-implementer"),
+            "assigned-to row: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task)-[:Implements]->(c:Component) RETURN c.fqn")
+            .unwrap();
+        assert!(
+            out.contains("solution.component.order-handler"),
+            "implements row: {out}"
+        );
+
+        // Every per-kind operation rel table projects its row, joining the
+        // live or planned code node the record names.
+        for (table, target) in [
+            ("ModuleCreate", "github.com/x/y.new"),
+            ("ModuleModify", "github.com/x/y"),
+            ("ModuleDelete", "github.com/x/y"),
+            ("ModuleMove", "github.com/x/y"),
+            ("ModuleRename", "github.com/x/y"),
+            ("FileCreate", "/new/store.go"),
+            ("FileModify", "/abs/store.go"),
+            ("FileDelete", "/abs/store.go"),
+            ("FileMove", "/abs/store.go"),
+            ("FileRename", "/abs/store.go"),
+            ("StructCreate", "github.com/x/y.New"),
+            ("StructModify", "github.com/x/y.Store"),
+            ("StructDelete", "github.com/x/y.Store"),
+            ("StructMove", "github.com/x/y.Store"),
+            ("StructRename", "github.com/x/y.Store"),
+            ("FunctionCreate", "github.com/x/y.New.build"),
+            ("FunctionModify", "github.com/x/y.Store.build"),
+            ("FunctionDelete", "github.com/x/y.Store.build"),
+            ("FunctionMove", "github.com/x/y.Store.build"),
+            ("FunctionRename", "github.com/x/y.Store.build"),
+        ] {
+            let out = db
+                .q(&format!("MATCH (t:Task)-[:{table}]->(n) RETURN n.fqn"))
+                .unwrap();
+            assert!(out.contains(target), "{table} row: {out}");
+        }
+
+        // Every move/rename destination lands on the `target` rel table.
+        let out = db.q("MATCH (t:Task)-[:Target]->(n) RETURN n.fqn").unwrap();
+        for dest in [
+            "github.com/x/y.moved",
+            "github.com/x/y.renamed",
+            "/moved/store.go",
+            "/renamed/store.go",
+            "github.com/x/y.Moved",
+            "github.com/x/y.Renamed",
+            "github.com/x/y.Moved.build",
+            "github.com/x/y.Renamed.build",
+        ] {
+            assert!(out.contains(dest), "target destination `{dest}`: {out}");
+        }
         drop(db);
 
         testutil::remove(&repo);
