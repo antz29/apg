@@ -2037,4 +2037,277 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&snapshot_dir);
         let _ = std::fs::remove_dir_all(&repo.root);
     }
+
+    /// Phase-07 task-1 — the cached-fact assembly realization CONTRACT.
+    ///
+    /// The live defect (`implementation.note.splice-delta-location-selection`):
+    /// `ingest_with_reuse` admits the spool — and with it the transient
+    /// `planned_node` placeholders — BEFORE `splice_cached` merges the cached
+    /// fact units. The merge then discards the cached real declaration at a
+    /// placeholder's FQN: pass 1's `Some(_) => continue` for File/Struct/Function
+    /// and pass 2/2b's `contains_key` guard for Module. The assembled graph —
+    /// and the export it produces — therefore carries `status: planned` at a
+    /// location-less placeholder over real code.
+    ///
+    /// Asserted AHEAD of the seam fix (phase-07 task-2), so this test is RED
+    /// until the assembly is fixed and flips green with NO test change: a cached
+    /// declaration supersedes a `planned` placeholder for all four kinds —
+    /// status cleared, the FQN kept, the cached location restored (a Module is
+    /// location-less by model) — and the assembled export is set-equal to a
+    /// no-reuse full rebuild of the same facts.
+    ///
+    /// Fixture shape (the live win-B shape): a warm `FactStore` holds ONE file's
+    /// resolved fact unit; the spool re-emits an UNRELATED target file plus the
+    /// four `planned_node` records (and their parent `contains` edges). The file
+    /// whose facts are warm is NOT a re-emission target, so only the cache
+    /// carries its declaration — exactly the masking the seam must undo.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp FactStore dir); run via cargo test-e2e"]
+    fn cached_declaration_supersedes_a_planned_placeholder() {
+        use apg::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+
+        let dir = std::env::temp_dir().join(format!(
+            "apg-cached-declaration-planned-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "rust",
+            config: None,
+            base: None,
+        };
+        let scan = Record::ScanMeta {
+            git_sha: Some("abc123".to_string()),
+            git_clean: Some(true),
+            content_key: Some("deadbeef".to_string()),
+            scanned_at: "2026-10-27T00:00:00Z".to_string(),
+        };
+        // The four realized identities the warm fact unit holds. A File FQN is
+        // its repo-relative path; the rest are language-rooted.
+        const MODULE: &str = "rust.diagcrate";
+        const FILE: &str = "crate/src/lib.rs";
+        const STRUCT: &str = "rust.diagcrate.Widget";
+        const FUNCTION: &str = "rust.diagcrate.compute";
+
+        // The no-reuse reference: the declarations a full scan spools for the
+        // same tree (the warm file included).
+        let reference = {
+            let (graph, _) = ingest(
+                vec![
+                    scan.clone(),
+                    Record::LangSwitch {
+                        language: "rust".to_string(),
+                    },
+                    Record::Module {
+                        fqn: "diagcrate".to_string(),
+                    },
+                    file_rec(FILE, "diagcrate", 40),
+                    srec("n1", "diagcrate", "Widget", FILE),
+                    frec("n2", "diagcrate", "compute", FILE),
+                    file_rec("other.rs", "diagcrate", 12),
+                ],
+                &opts,
+                None,
+            );
+            for fqn in [MODULE, FILE, STRUCT, FUNCTION] {
+                assert!(
+                    graph.nodes.contains_key(fqn),
+                    "the no-reuse reference must declare `{fqn}`: {:?}",
+                    graph.nodes.keys()
+                );
+            }
+            graph
+        };
+        let reference_jsonl = dir.join("reference.jsonl");
+        apg::load::write_graph_jsonl(&reference, &reference_jsonl).unwrap();
+
+        // Warm the store with that file's real fact unit, extracted FROM the
+        // reference graph so the cached nodes are exactly what a scan stores.
+        let mut store = FactStore::at(dir.join("facts"));
+        let frag = FileFragment::from_graph(&reference, FILE, FILE, "oid-diag", "rust");
+        // The routing this matrix pins: the File and its two located units are
+        // per-unit nodes (assembled by pass 1); the Module travels as the unit's
+        // module identity (assembled by pass 2/2b).
+        let cached_nodes: BTreeSet<(&str, String)> = frag
+            .nodes
+            .iter()
+            .map(|n| (n.kind.as_str(), n.fqn.clone()))
+            .collect();
+        assert_eq!(
+            cached_nodes,
+            BTreeSet::from([
+                ("file", FILE.to_string()),
+                ("function", FUNCTION.to_string()),
+                ("struct", STRUCT.to_string()),
+            ]),
+            "the unit must carry the File/Struct/Function declarations only"
+        );
+        assert_eq!(
+            frag.modules,
+            vec![MODULE.to_string()],
+            "the Module is the unit's module identity, not a per-unit node"
+        );
+        store.put(&frag, "/fresh", &cache_key).unwrap();
+
+        // The spool: the four `planned_node` placeholders (as the plan store
+        // emits them, plus their parent `contains` edges) and ONE unrelated
+        // re-emitted target file. No Module record — the module scaffolding is
+        // not part of this spool, so its declaration can only arrive from the
+        // warm unit.
+        let planned = vec![
+            scan.clone(),
+            Record::LangSwitch {
+                language: "rust".to_string(),
+            },
+            file_rec("other.rs", "diagcrate", 12),
+            Record::PlannedNode {
+                fqn: MODULE.to_string(),
+                kind: "module".to_string(),
+                name: "diagcrate".to_string(),
+                parent: String::new(),
+            },
+            Record::PlannedNode {
+                fqn: FILE.to_string(),
+                kind: "file".to_string(),
+                name: "lib.rs".to_string(),
+                parent: MODULE.to_string(),
+            },
+            Record::PlannedNode {
+                fqn: STRUCT.to_string(),
+                kind: "struct".to_string(),
+                name: "Widget".to_string(),
+                parent: FILE.to_string(),
+            },
+            Record::PlannedNode {
+                fqn: FUNCTION.to_string(),
+                kind: "function".to_string(),
+                name: "compute".to_string(),
+                parent: FILE.to_string(),
+            },
+            Record::Contains {
+                from: MODULE.to_string(),
+                to: FILE.to_string(),
+                properties: NodeProperties::default(),
+            },
+            Record::Contains {
+                from: FILE.to_string(),
+                to: STRUCT.to_string(),
+                properties: NodeProperties::default(),
+            },
+            Record::Contains {
+                from: FILE.to_string(),
+                to: FUNCTION.to_string(),
+                properties: NodeProperties::default(),
+            },
+        ];
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![(FILE.to_string(), "rust".to_string(), "oid-diag".to_string())],
+            reader_root: "/fresh".to_string(),
+            skipped_langs: BTreeSet::new(),
+        };
+        let (assembled, _) = ingest_with_reuse(planned, &opts, Some(&reuse), None);
+
+        // The per-kind realization matrix. Every kind is reported, so a RED run
+        // names exactly which kinds the assembly masks (the pinned mechanism:
+        // pass 1 for File/Struct/Function, pass 2/2b for Module).
+        let loc_key = |n: &apg::graph::Node| {
+            n.location.as_ref().map(|l| {
+                (
+                    l.path.to_string_lossy().into_owned(),
+                    l.start,
+                    l.end,
+                    l.start_line,
+                    l.end_line,
+                )
+            })
+        };
+        let mut matrix: Vec<String> = Vec::new();
+        let mut failed = false;
+        for (label, fqn, kind) in [
+            ("Module", MODULE, NodeKind::Module),
+            ("File", FILE, NodeKind::File),
+            ("Struct", STRUCT, NodeKind::Struct),
+            ("Function", FUNCTION, NodeKind::Function),
+        ] {
+            let want = &reference.nodes[fqn];
+            let Some(got) = assembled.nodes.get(fqn) else {
+                failed = true;
+                matrix.push(format!(
+                    "{label:<8} RED    `{fqn}` ABSENT from the assembly"
+                ));
+                continue;
+            };
+            let mut problems: Vec<String> = Vec::new();
+            if got.kind != kind {
+                problems.push(format!("kind {:?} (want {kind:?})", got.kind));
+            }
+            if got.status.as_deref() == Some("planned") {
+                problems.push(
+                    "status still `planned` — the placeholder masked the cached declaration"
+                        .to_string(),
+                );
+            } else if got.status.is_some() {
+                problems.push(format!("status {:?} (want cleared)", got.status));
+            }
+            if loc_key(got) != loc_key(want) {
+                problems.push(format!(
+                    "location {:?} (want {:?})",
+                    loc_key(got),
+                    loc_key(want)
+                ));
+            }
+            if problems.is_empty() {
+                matrix.push(format!("{label:<8} GREEN  `{fqn}` realized"));
+            } else {
+                failed = true;
+                matrix.push(format!(
+                    "{label:<8} RED    `{fqn}`: {}",
+                    problems.join("; ")
+                ));
+            }
+        }
+        assert!(
+            !failed,
+            "a cached declaration must supersede the planned placeholder for all four kinds \
+             (phase-07 task-2 fixes this seam in `splice_cached`):\n{}",
+            matrix.join("\n")
+        );
+
+        // The export is the artifact both consumers read (the DB full load and
+        // the splice delta source): every code node and edge record must be
+        // set-equal to a no-reuse full rebuild. The LANGUAGE ROOT is
+        // scaffolding-only and is scoped out here: this spool carries no module
+        // records, so the assembly has no `Language` node while the no-reuse
+        // reference materialises one from its `Record::Module` (the scaffolding
+        // replay is pinned separately by
+        // `skipped_language_scaffolding_is_replayed_into_the_assembly`).
+        let assembled_jsonl = dir.join("assembled.jsonl");
+        apg::load::write_graph_jsonl(&assembled, &assembled_jsonl).unwrap();
+        let code_records = |p: &Path| -> BTreeSet<String> {
+            std::fs::read_to_string(p)
+                .unwrap()
+                .lines()
+                .filter(|line| {
+                    let v: serde_json::Value = serde_json::from_str(line).unwrap();
+                    !matches!(v["type"].as_str(), Some("scan_meta") | Some("language"))
+                        && !(v["type"] == "contains" && (v["from"] == "rust" || v["to"] == "rust"))
+                })
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(
+            code_records(&assembled_jsonl),
+            code_records(&reference_jsonl),
+            "every code node and edge record in the assembled export must equal a no-reuse \
+             full rebuild's"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
