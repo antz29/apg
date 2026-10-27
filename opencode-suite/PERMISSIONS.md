@@ -79,6 +79,12 @@ mirrors `apg/.worktrees/*/apg/.trans/**` and
 denies override the broad allow. The guard covers the transient plan, feedback,
 and database files as well as the durable node files; neither is read directly.
 
+The one exception is `migration-agent`: its documented `apg/layers/**` hand-edit
+exception requires it to read those node files, so it denies `apg/.trans/**` and
+`apg/.worktrees/*/apg/.trans/**` for `read`, `glob`, and `grep` but carries no
+`apg/layers/**` denial, repo-local or worktree mirror. Every other distributed
+and generated agent carries the full guard above.
+
 ## The shell allowlist
 
 The `shell` action is deny-by-default. It starts with a `*` deny, followed by
@@ -122,8 +128,11 @@ produces.
 `external_directory` gates paths outside the workspace root. Two shapes exist,
 and which one an agent carries is part of its grant.
 
-The generated agents — every scaffolded `*-implementer` and the rest — and the
-`codebase-navigator` carry exactly two rules: `{resource: "*", effect: "deny"}`
+The generated agents — every scaffolded `*-implementer` and the rest — and every
+distributed template but the researcher (`codebase-navigator`, `spec-writer`,
+`plan-writer`, `spec-review`, `plan-review`, `implementation-phase-reviewer`,
+`agent-builder`, `migration-agent`) carry exactly two rules:
+`{resource: "*", effect: "deny"}`
 followed by `{resource: "/tmp/**", effect: "allow"}`. Every generated agent
 carries this shape, and for them a broader external grant is a regression, not
 an option.

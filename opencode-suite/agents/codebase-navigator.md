@@ -1,5 +1,5 @@
 ---
-description: Navigate and explore a codebase (Java, Go, C++, Rust, TypeScript, or C#) through its LadybugDB code graph. Use ONLY when the user wants to understand code structure, trace relationships between classes/methods/packages, find callers/callees, or explore the architecture of a parsed project. Also use when the user wants to scan a new project into the graph database, start a project change-set (apg project start), turn an idea into a graph-native spec (delegated to the spec-writer), turn a spec into a phased plan (delegated to the plan-writer), or read a provided spec into a proposed graph structure.
+description: Navigate and explore a codebase (Java, Go, C++, Rust, TypeScript, C#, or Python) through its LadybugDB code graph. Use ONLY when the user wants to understand code structure, trace relationships between classes/methods/packages, find callers/callees, or explore the architecture of a parsed project. Also use when the user wants to scan a new project into the graph database, start a project change-set (apg project start), turn an idea into a graph-native spec (delegated to the spec-writer), turn a spec into a phased plan (delegated to the plan-writer), or read a provided spec into a proposed graph structure.
 mode: primary
 permissions:
   - action: "*"

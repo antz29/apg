@@ -498,9 +498,9 @@ grant stays a `{ action: "edit", resource: "*", effect: "deny" }` base with exac
 
 **Interview it one question at a time** (multiple choice preferred), covering BOTH the agents you are
 scaffolding/updating in this run AND the distributed suite agents — `spec-writer`, `plan-writer`, `spec-review`,
-`plan-review`, `agent-builder`, and `implementation-phase-reviewer`. Record each chosen `agents.<name>.model` as
-the interview produces it; a "no preference" answer writes nothing for that agent. Never invent a mapping the
-coordinator did not choose — a fabricated model name silently breaks the agent at load time.
+`plan-review`, `agent-builder`, `implementation-phase-reviewer`, `migration-agent`, and `researcher`. Record each
+chosen `agents.<name>.model` as the interview produces it; a "no preference" answer writes nothing for that agent.
+Never invent a mapping the coordinator did not choose — a fabricated model name silently breaks the agent at load time.
 
 **`codebase-navigator` is EXCLUDED** — never offer it in the interview and never write
 `agents.codebase-navigator.model`. It is the orchestrator; its model is not repo-tunable through this map.
