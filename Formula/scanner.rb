@@ -50,8 +50,9 @@ class Scanner < Formula
 
     # Do not compile any per-language scanner frontends in this build; the
     # separate apg-go / apg-java / apg-cpp / apg-rust / apg-ts / apg-csharp /
-    # apg-py formulae provide them. The bundled structural scanner is built
-    # separately below (from src/structlib).
+    # apg-py formulae provide them. The two bundled frontends (the structural
+    # scanner from src/structlib and the agent frontend from src/agentlib) are
+    # built separately below.
     ENV["APG_BUILD_FRONTENDS"] = "0"
 
     # Install the real binary into libexec (not bin/), then bin/apg becomes a
@@ -62,22 +63,36 @@ class Scanner < Formula
     (bin/"apg").write_env_script libexec/"bin"/"apg",
                                  APG_FRONTEND_DIR: "#{HOMEBREW_PREFIX}/share/apg/frontends"
 
-    # The bundled structural scanner: ONE `structfrontend` binary serving the
-    # `md` stream plus every per-format structural stream and the residual
-    # `misc`. Built directly from src/structlib (a standalone, non-workspace
-    # crate) and dropped into the shared frontends dir beside the per-language
-    # frontends. Scanning with it needs no runtime and never shells out.
+    # Two bundled frontends ship in this base package, both built directly from
+    # their own standalone, non-workspace crates and dropped into the shared
+    # frontends dir beside the per-language frontends.
+    #
+    # 1. The bundled structural scanner: ONE `structfrontend` binary serving
+    # the `md` stream plus every per-format structural stream and the residual
+    # `misc`. Scanning with it needs no runtime and never shells out.
     cd "src/structlib" do
       system "cargo", "build", "--release", "--bin", "structfrontend"
     end
     (share/"apg/frontends").install "src/structlib/target/release/structfrontend"
+
+    # 2. The bundled agent frontend: `agentfrontend` claims the
+    # `.opencode/agents/` definitions. Like the structural scanner it needs no
+    # runtime at scan time.
+    cd "src/agentlib" do
+      system "cargo", "build", "--release", "--bin", "agentfrontend"
+    end
+    (share/"apg/frontends").install "src/agentlib/target/release/agentfrontend"
   end
 
   def caveats
     <<~EOS
-      The bundled structural scanner (Markdown plus shell, YAML, JSON, TOML,
-      XML, Dockerfile, Makefile, INI and other text files) ships with this
-      formula — no separate install is needed.
+      Two bundled frontends ship with this formula — no separate install is
+      needed:
+
+        - the bundled structural scanner (Markdown plus shell, YAML, JSON,
+          TOML, XML, Dockerfile, Makefile, INI and other text files)
+        - the bundled agent frontend, which claims `.opencode/agents/`
+          definitions
 
       apg also needs at least one code scanner frontend. Install the ones you use:
 
@@ -95,5 +110,6 @@ class Scanner < Formula
     assert_match "apg #{version}", shell_output("#{bin}/apg --version")
     assert_match "USAGE", shell_output("#{bin}/apg --help")
     assert_path_exists share/"apg/frontends/structfrontend"
+    assert_path_exists share/"apg/frontends/agentfrontend"
   end
 end

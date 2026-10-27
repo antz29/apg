@@ -182,7 +182,7 @@ if [ "$uninstall" -eq 1 ]; then
     for c in $components; do
         case "$c" in
             scanner)
-                rm -f "$real_bin" "$wrapper" "$frontends_dir/structfrontend"
+                rm -f "$real_bin" "$wrapper" "$frontends_dir/structfrontend" "$frontends_dir/agentfrontend"
                 echo "Removed scanner from ${prefix}."
                 ;;
             cpp)
@@ -366,11 +366,16 @@ if [ "$target_scanner" -eq 1 ]; then
 
     install -m 0755 "$work/extract_scanner/apg" "$real_bin"
 
-    # The base bundle also ships the bundled structural scanner (ONE binary
-    # serving the `md` stream plus every per-format structural stream and the
-    # residual `misc`); install it into the shared frontends dir.
+    # The base bundle also ships two bundled frontends: the structural scanner
+    # (ONE binary serving the `md` stream plus every per-format structural
+    # stream and the residual `misc`) and the agent frontend (which claims
+    # `.opencode/agents/` definitions); install both into the shared frontends
+    # dir.
     [ -x "$work/extract_scanner/structfrontend" ] || die "${tarball} does not contain 'structfrontend'"
     install -m 0755 "$work/extract_scanner/structfrontend" "$frontends_dir/structfrontend"
+
+    [ -x "$work/extract_scanner/agentfrontend" ] || die "${tarball} does not contain 'agentfrontend'"
+    install -m 0755 "$work/extract_scanner/agentfrontend" "$frontends_dir/agentfrontend"
 
     {
         printf '#!/bin/sh\n'
@@ -466,12 +471,19 @@ for lang in $ALL_FRONTENDS; do
     fi
 done
 
-# The base bundle ships the bundled structural scanner (one binary serving the
-# `md` stream plus every per-format structural stream and the residual `misc`).
+# The base bundle ships two bundled frontends: the structural scanner (one
+# binary serving the `md` stream plus every per-format structural stream and
+# the residual `misc`) and the agent frontend (which claims `.opencode/agents/`
+# definitions).
 if [ -x "$frontends_dir/structfrontend" ]; then
     bundled_structural="present"
 else
     bundled_structural="missing"
+fi
+if [ -x "$frontends_dir/agentfrontend" ]; then
+    bundled_agent="present"
+else
+    bundled_agent="missing"
 fi
 
 # Language-specific warnings
@@ -500,7 +512,7 @@ apg ${release} (${installed_components:-no changes}) installed to ${prefix}.
   Wrapper:   ${wrapper}
   Frontends: ${frontends_dir}
              Installed: ${installed_langs:-none}
-             Bundled:   structural scanner (${bundled_structural})
+             Bundled:   structural scanner (${bundled_structural}), agent frontend (${bundled_agent})
 EOF
 
 if [ -n "$missing_langs" ]; then

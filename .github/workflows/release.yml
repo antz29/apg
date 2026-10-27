@@ -131,17 +131,17 @@ jobs:
           echo "LBUG_LIBRARY_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
           echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
 
-      # build.rs compiles all frontends (Go, C++, Java, Rust, TS, C#, Python
-      # and the bundled structural scanner) and stages them into
-      # target/release/frontends; the default APG_BUILD_FRONTENDS (unset) does
-      # exactly what we want here.
+      # build.rs compiles all frontends (Go, C++, Java, Rust, TS, C#, Python,
+      # the bundled structural scanner and the bundled agent frontend) and
+      # stages them into target/release/frontends; the default
+      # APG_BUILD_FRONTENDS (unset) does exactly what we want here.
       - name: Build apg + frontends
         run: cargo build --release
 
       - name: Verify every frontend was built
         run: |
           for f in cppfrontend gofrontend rustfrontend csharpfrontend \
-                   java-classes tsfrontend pyfrontend structfrontend; do
+                   java-classes tsfrontend pyfrontend structfrontend agentfrontend; do
             test -e "target/release/frontends/$f" \
               || { echo "frontend not staged: $f"; exit 1; }
           done
@@ -150,12 +150,15 @@ jobs:
         run: |
           mkdir -p dist/packages
 
-          # 1. Base scanner — also carries the bundled structural scanner
-          #    (structfrontend), so a base install can scan the structural
-          #    streams with no extra package.
+          # 1. Base scanner — also carries the two bundled frontends
+          #    (structfrontend and agentfrontend), so a base install can scan
+          #    the structural streams and `.opencode/agents/` definitions with
+          #    no extra package.
           cp target/release/frontends/structfrontend target/release/structfrontend
-          tar -C target/release -czf "dist/packages/apg-linux-${{ matrix.arch }}.tar.gz" apg structfrontend
+          cp target/release/frontends/agentfrontend target/release/agentfrontend
+          tar -C target/release -czf "dist/packages/apg-linux-${{ matrix.arch }}.tar.gz" apg structfrontend agentfrontend
           rm -f target/release/structfrontend
+          rm -f target/release/agentfrontend
 
           # 2. Per-language frontends
           tar -C target/release/frontends -czf "dist/packages/apg-cpp-linux-${{ matrix.arch }}.tar.gz" cppfrontend
