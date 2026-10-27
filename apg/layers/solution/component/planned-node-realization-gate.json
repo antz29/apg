@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "planned-node-realization-gate",
+  "body": "The verify gate's planned-node realization arm: the candidate identities it accepts for a planned FQN, each checked against the branch graph for an implementation label and a cleared planned status.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.planned-node-realization",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.verify.realization_candidates",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

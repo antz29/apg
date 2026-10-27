@@ -1,0 +1,46 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "planned-node-realization",
+  "body": "The planned-node replacement on both build paths: the FQN-keyed admission that lets a scanned declaration supersede a planned node, the in-place upsert that clears a planned status, and the placeholder kind resolution that keeps kind-paired task edges.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.planned-node-realization",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.insert_node",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.apply.upsert_node",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.artifacts.project.code_kinds_from_export",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.filter_task_ops",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

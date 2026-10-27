@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
       "properties": {}
     },
@@ -22,7 +27,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
+      "target": "requirements.requirement.verify-gate-judges-planned-realization",
       "properties": {}
     }
   ],
@@ -45,6 +50,11 @@
     {
       "kind": "realises",
       "source": "solution.component.verify-feedback-stage",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.planned-node-realization-gate",
       "properties": {}
     }
   ]

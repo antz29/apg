@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-realization-crosses-crate-boundaries",
+  "body": "A planned node realizes the same way in a separate non-root cargo project as in the root crate, its FQN carrying the crate prefix the Rust frontend renders for that package's target.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

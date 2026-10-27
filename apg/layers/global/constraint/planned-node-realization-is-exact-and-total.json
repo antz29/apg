@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "planned-node-realization-is-exact-and-total",
+  "body": "A scan that emits a declaration at a planned node's FQN replaces that node on every build path, and every planned FQN is the exact code identity its frontend renders, crate prefix included, so realization never rests on a root-tolerant match.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

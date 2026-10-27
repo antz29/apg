@@ -112,17 +112,27 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.task-record-field-set",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
       "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
       "properties": {}
     },
     {
       "kind": "requires",
       "target": "requirements.requirement.task-operations-are-edge-modelled",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.task-record-field-set",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.still-planned-node-keeps-node-and-edges",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.verify-gate-judges-planned-realization",
       "properties": {}
     }
   ],

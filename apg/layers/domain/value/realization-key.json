@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "realization-key",
+  "body": "The exact code FQN that keys a planned node's replacement by the declaration a scan emits, equal to the identity the frontend renders for that declaration, crate prefix included.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.planned-implementation-node",
+      "properties": {}
+    }
+  ]
+}

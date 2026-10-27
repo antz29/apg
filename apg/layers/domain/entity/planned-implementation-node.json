@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "planned-implementation-node",
+  "body": "A code identity a plan declares before any code exists: a module, file, struct, or function record carrying a code FQN, a declared kind, and a planned status, with no location and the target of a creates edge.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.realization-key",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

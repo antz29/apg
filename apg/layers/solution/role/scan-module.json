@@ -110,6 +110,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.plan-task-record",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.project-context-guard",
       "properties": {}
     },
@@ -160,6 +165,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.schema-document",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.scratch-layout",
       "properties": {}
     },
@@ -190,12 +200,12 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.plan-task-record",
+      "source": "solution.component.planned-node-realization",
       "properties": {}
     },
     {
       "kind": "is-role",
-      "source": "solution.component.schema-document",
+      "source": "solution.component.planned-node-realization-gate",
       "properties": {}
     }
   ]

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-node-realized-on-every-build-path",
+  "body": "A scan that emits a declaration at a planned Implementation node's FQN replaces the planned node with that real one — status cleared, location filled, FQN kept — on the full load and the incremental splice, for all four kinds.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

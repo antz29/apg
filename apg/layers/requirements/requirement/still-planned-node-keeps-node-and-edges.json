@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "still-planned-node-keeps-node-and-edges",
+  "body": "A planned Implementation node that stays planned keeps its node and every incident edge across a scan, and every path that removes a planned placeholder lands the real declaration at its FQN in the same build.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-realization-repoints-incident-edges",
+  "body": "Every FQN-keyed edge incident to a planned Implementation node resolves to the real node once it lands — the per-kind task operation edges and a renames or moves destination, implemented-by, details, and contains.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

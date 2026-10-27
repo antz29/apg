@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-node-kind-survives-realization",
+  "body": "A planned node's declared kind is the kind the realized code node carries, and the transient seed placeholder standing in for a code FQN resolves that FQN's recorded kind so its kind-paired task operation edges survive finalization.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

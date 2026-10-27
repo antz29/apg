@@ -7,17 +7,17 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.identity.crate_prefix",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.identity.package_prefix_map",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg-rustfrontend",
       "properties": {}
     },
     {
@@ -28,6 +28,11 @@
     {
       "kind": "realises",
       "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.planned-node-realization",
       "properties": {}
     }
   ],

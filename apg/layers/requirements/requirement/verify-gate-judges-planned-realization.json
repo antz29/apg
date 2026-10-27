@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "verify-gate-judges-planned-realization",
+  "body": "The verify gate treats a planned node realized in the branch graph as satisfied, blocks the merge when a planned node's FQN carries no real code, and counts an operation edge's target — real or still planned — as touching that code identity.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    }
+  ]
+}

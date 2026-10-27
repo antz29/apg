@@ -109,6 +109,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.plan-task-record",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.project-context-guard",
       "properties": {}
     },
@@ -159,6 +164,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.schema-document",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.scratch-layout",
       "properties": {}
     },
@@ -194,12 +204,12 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.plan-task-record",
+      "target": "solution.component.planned-node-realization",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "solution.component.schema-document",
+      "target": "solution.component.planned-node-realization-gate",
       "properties": {}
     }
   ],
