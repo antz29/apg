@@ -462,9 +462,11 @@ mod unit {
     /// An admitted `applies-to` edge materialises its target `Language` node:
     /// a language id no scanned stream produced still yields exactly one
     /// `Language` node (through [`materialise_language`]) and the edge survives
-    /// [`finalize_graph`]'s dangling-edge cleanup. A target a scanned stream
-    /// already rooted stays that single node — the materialisation is
-    /// idempotent, never a duplicate.
+    /// [`finalize_graph`]'s dangling-edge cleanup. The materialisation streams
+    /// exactly like a streamed root — one `Language` symbol and one increment of
+    /// its kind's tally, whatever assembly path admitted it. A target a scanned
+    /// stream already rooted stays that single node, and the repeat admission
+    /// reports nothing: the materialisation is idempotent, never a duplicate.
     #[test]
     fn applies_to_admission_materialises_its_language_node() {
         let constraint = "implementation.constraint.law".to_string();
@@ -477,11 +479,41 @@ mod unit {
             },
         );
 
-        // No scanned stream produced `rust`: the admission materialises it.
-        materialise_language(&mut graph, "rust");
-        graph
-            .applies_to
-            .insert((constraint.clone(), "rust".to_string()));
+        let mut out: Vec<u8> = Vec::new();
+        {
+            // A live stream has selected the scan's language; the materialised
+            // root is admitted through the same `insert_node` path as a
+            // streamed one, so it reports where the sibling admissions do.
+            let mut progress = Progress::new(true, &mut out);
+            progress.language("go");
+
+            // No scanned stream produced `rust`: the admission materialises it.
+            materialise_language(&mut graph, "rust", Some(&mut progress));
+            graph
+                .applies_to
+                .insert((constraint.clone(), "rust".to_string()));
+
+            // A language a stream already rooted stays that single node — and
+            // the repeat materialisation reports nothing.
+            materialise_language(&mut graph, "rust", Some(&mut progress));
+
+            progress.summary();
+        }
+        let text = String::from_utf8(out).expect("progress is UTF-8");
+        let (symbols, summary) = text
+            .split_once('\n')
+            .expect("the summary starts on its own line");
+        let symbol =
+            crate::progress::symbol_for(NodeKind::Language).expect("Language has a symbol");
+        assert_eq!(
+            symbols, symbol,
+            "the materialised root must stream exactly one Language symbol"
+        );
+        assert!(
+            summary.contains(&format!("{symbol} Language: 1")),
+            "Language tally missing or duplicated in `{summary}`"
+        );
+
         finalize_graph(&mut graph);
         assert_eq!(
             graph.nodes.get("rust").map(|n| n.kind),
@@ -494,9 +526,6 @@ mod unit {
                 .contains(&(constraint.clone(), "rust".to_string())),
             "the applies-to edge must survive the dangling-edge cleanup"
         );
-
-        // A language a stream already rooted stays that single node.
-        materialise_language(&mut graph, "rust");
         assert_eq!(
             graph
                 .nodes

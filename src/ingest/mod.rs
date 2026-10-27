@@ -152,10 +152,13 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
 
 /// Materialise the `Language` root one admitted `applies-to` edge targets — the
 /// same node the scanned-stream roots get (Pass B4), through the same
-/// [`insert_node`] path. A language id **no scanned stream produced** still
-/// becomes a real `Language` node, so the dangling-edge cleanup cannot silently
-/// drop the edge. Idempotent beside a stream that already rooted it.
-fn materialise_language(graph: &mut Graph, fqn: &str) {
+/// [`insert_node`] path, so a materialised root streams the same one `Language`
+/// symbol and kind tally a streamed root does. A language id **no scanned
+/// stream produced** still becomes a real `Language` node, so the dangling-edge
+/// cleanup cannot silently drop the edge. Idempotent beside a stream that
+/// already rooted it: a present node is never re-admitted, so never reported
+/// twice.
+fn materialise_language(graph: &mut Graph, fqn: &str, progress: Option<&mut Progress<'_>>) {
     if !graph.nodes.contains_key(fqn) {
         insert_node(
             graph,
@@ -164,7 +167,7 @@ fn materialise_language(graph: &mut Graph, fqn: &str) {
                 kind: NodeKind::Language,
                 ..Node::default()
             },
-            None,
+            progress,
         );
     }
 }
@@ -1462,7 +1465,7 @@ fn ingest_records(
                         skipped += 1;
                         continue;
                     }
-                    materialise_language(&mut graph, &b);
+                    materialise_language(&mut graph, &b, progress.as_deref_mut());
                     if !properties.is_empty() {
                         graph
                             .edge_properties
