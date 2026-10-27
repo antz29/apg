@@ -906,4 +906,77 @@ mod int {
             Some(NodeKind::Language)
         );
     }
+
+    /// phase-05 task-1: the kind a `planned_node` record declares is what
+    /// carries the kind-paired task operation edge through the finalize prune
+    /// ([`filter_task_ops`]). The record arm in [`ingest_records`] maps the
+    /// record's `kind` string to a [`NodeKind`] and admits the placeholder
+    /// through [`insert_node`] (that entry point spools to a temp file, so this
+    /// int test wires the same admission directly); a Struct placeholder at a
+    /// task's operation target keeps its `struct_modify` row (Task on one end, a
+    /// Struct at that FQN on the other), while the same record materialised at
+    /// `module` drops it. The recorded kind — never the placeholder's mere
+    /// presence — decides the pairing.
+    #[test]
+    fn planned_placeholder_kind_keeps_the_kind_paired_task_op_edges() {
+        let task = "project/plan.phase-01.task-1".to_string();
+        let target = "rust.apg.ingest.PlannedThing".to_string();
+        // The `planned_node` record's admission: recorded kind, `status:
+        // planned`, no location, plus the Task that carries the operation row.
+        let admit = |graph: &mut Graph, kind: NodeKind| {
+            insert_node(
+                graph,
+                task.clone(),
+                Node {
+                    title: Some("a task".to_string()),
+                    ..spec_node(NodeKind::Task)
+                },
+                None,
+            );
+            insert_node(
+                graph,
+                target.clone(),
+                Node {
+                    status: Some("planned".to_string()),
+                    ..spec_node(kind)
+                },
+                None,
+            );
+        };
+
+        // Recorded kind `struct`: the struct operation row survives finalize.
+        let mut graph = Graph::default();
+        admit(&mut graph, NodeKind::Struct);
+        graph.struct_modify.insert((task.clone(), target.clone()));
+        finalize_graph(&mut graph);
+        assert!(
+            graph
+                .struct_modify
+                .contains(&(task.clone(), target.clone())),
+            "a Struct placeholder at the recorded kind must keep its struct_modify row"
+        );
+        assert_eq!(graph.nodes[&target].kind, NodeKind::Struct);
+        assert_eq!(graph.nodes[&target].status.as_deref(), Some("planned"));
+
+        // The same record materialised at `module` (the placeholder's fallback):
+        // the Struct-paired row drops, while the Module-paired row it carries
+        // survives — the table's kind, not the row's presence, decides.
+        let mut graph = Graph::default();
+        admit(&mut graph, NodeKind::Module);
+        graph.struct_modify.insert((task.clone(), target.clone()));
+        graph.module_modify.insert((task.clone(), target.clone()));
+        finalize_graph(&mut graph);
+        assert!(
+            !graph
+                .struct_modify
+                .contains(&(task.clone(), target.clone())),
+            "a module placeholder must not keep a Struct-paired row"
+        );
+        assert!(
+            graph
+                .module_modify
+                .contains(&(task.clone(), target.clone())),
+            "the module placeholder keeps the row its recorded kind pairs"
+        );
+    }
 }
