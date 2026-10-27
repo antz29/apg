@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-node-realizes-through-the-cached-fact-assembly",
+  "body": "A scan replaces a planned node's placeholder with the declaration its cached fact unit carries at that FQN for all four kinds, so the splice delta source and full load carry the real node and a placeholder seed row realizes in the splice.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

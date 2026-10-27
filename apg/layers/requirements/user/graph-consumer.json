@@ -22,12 +22,17 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.planned-node-realized-on-every-build-path",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.planned-realization-repoints-incident-edges",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.planned-node-realized-on-every-build-path",
+      "target": "requirements.requirement.planned-node-realizes-through-the-cached-fact-assembly",
       "properties": {}
     }
   ],

@@ -34,6 +34,16 @@
       "kind": "realises",
       "target": "domain.service.planned-node-realization",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.splice_cached",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.apply.apply",
+      "properties": {}
     }
   ],
   "in": [

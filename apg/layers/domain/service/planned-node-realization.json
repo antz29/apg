@@ -7,6 +7,21 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.planned-node-kind-survives-realization",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.planned-node-realized-on-every-build-path",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.planned-realization-repoints-incident-edges",
       "properties": {}
     },
@@ -17,22 +32,12 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.planned-node-realized-on-every-build-path",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.verify-gate-judges-planned-realization",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.planned-node-kind-survives-realization",
+      "target": "requirements.requirement.planned-node-realizes-through-the-cached-fact-assembly",
       "properties": {}
     }
   ],
@@ -44,12 +49,12 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.planned-node-realization-gate",
+      "source": "solution.component.planned-node-realization",
       "properties": {}
     },
     {
       "kind": "realises",
-      "source": "solution.component.planned-node-realization",
+      "source": "solution.component.planned-node-realization-gate",
       "properties": {}
     },
     {

@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "splice-delta-location-selection",
-  "body": "Limit: the splice delta selects only nodes whose location path is in the re-emission target set, so a location-less planned placeholder is never selected for the located kinds and a declaration whose file is cached/unchanged is never re-emitted — a placeholder masking such a declaration cannot be realized by the splice. Upgrade when a scan must realize a declaration whose file is cached/unchanged.",
+  "body": "Limit: the splice delta selects only nodes whose location path is in the re-emission target set, so a located row with no location — a planned placeholder included — is never selected for the located kinds, and a declaration whose file is cached/unchanged is never re-emitted. The placeholder-masking over cached declarations is demonstrated reachable through ordinary CLI sequences: a still-planned located seed row stays planned even where its assembly holds the real declaration at that FQN. Upgrade: add the delta/seed heal that admits a planned seed row whose assembly holds the real declaration.",
   "properties": {},
   "out": [
     {
