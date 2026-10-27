@@ -357,6 +357,35 @@ mod unit {
         }
     }
 
+    /// `applies-to` is the language-scope edge an implementation constraint
+    /// carries: it round-trips under the kebab wire name (not `applies_to`),
+    /// with its `from`/`to`/properties intact.
+    #[test]
+    fn applies_to_record_round_trips() {
+        let line = r#"{"type":"applies-to","from":"implementation.constraint.law","to":"rust","properties":{"note":"tier-4"}}"#;
+        let r = parse(line);
+        match &r {
+            Record::AppliesTo {
+                from,
+                to,
+                properties,
+            } => {
+                assert_eq!(from, "implementation.constraint.law");
+                assert_eq!(to, "rust");
+                assert_eq!(properties.get("note").map(String::as_str), Some("tier-4"));
+            }
+            other => panic!("expected applies-to, got {other:?}"),
+        }
+        assert_eq!(serde_json::to_string(&r).unwrap(), line);
+        // An edge with no properties serializes without the key and defaults
+        // back to the empty map.
+        let bare = r#"{"type":"applies-to","from":"implementation.constraint.law","to":"go"}"#;
+        let r = parse(bare);
+        assert!(matches!(r, Record::AppliesTo { ref properties, .. } if properties.is_empty()));
+        assert_eq!(serde_json::to_string(&r).unwrap(), bare);
+        assert!(!serde_json::to_string(&r).unwrap().contains("applies_to"));
+    }
+
     /// The parse-only `agent` stream record, as `agentfrontend` emits it per
     /// `.opencode/agents/` definition: the extension-stripped stem, the
     /// definition's path and its line span survive the parse, and the record

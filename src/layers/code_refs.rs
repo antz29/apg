@@ -28,11 +28,13 @@ pub enum CodeRefStatus {
 
 /// The `lang_switch` scan identities a code FQN can be rooted under — the
 /// complete set `available_languages`/`id_prefix_for` recognise (`ts` and `js`
-/// are the unified JS/TS frontend's two ids; a JS-only repo scans under `js`).
-/// Used only to resolve an authored code reference against the scanned universe
-/// tolerantly (see [`resolves_in_scanned`]).
-pub const LANGUAGE_ROOTS: [&str; 9] = [
-    "rust", "java", "go", "cpp", "csharp", "ts", "js", "py", "md",
+/// are the unified JS/TS frontend's two ids; a JS-only repo scans under `js`;
+/// `agent` is the agent-definition frontend's id, whose code FQNs are
+/// `agent.<file-stem>`). Used only to resolve an authored code reference
+/// against the scanned universe tolerantly (see [`resolves_in_scanned`]) and
+/// as the complete vocabulary an `applies-to` target may name.
+pub const LANGUAGE_ROOTS: [&str; 10] = [
+    "rust", "java", "go", "cpp", "csharp", "ts", "js", "py", "md", "agent",
 ];
 
 /// True when `fqn` resolves in `scanned`, tolerating the language root: an
@@ -60,8 +62,8 @@ fn resolves_in_scanned(fqn: &str, scanned: &BTreeSet<String>) -> bool {
 }
 
 /// The **language-agnostic identity** of a code FQN: strip ONE leading known
-/// language root (`rust.`/`java.`/`go.`/`cpp.`/`csharp.`/`ts.`/`js.`/`py.`/`md.`)
-/// and return the remainder; anything else is returned unchanged. This is the
+/// language root (`rust.`/`java.`/`go.`/`cpp.`/`csharp.`/`ts.`/`js.`/`py.`/`md.`/
+/// `agent.`) and return the remainder; anything else is returned unchanged. This is the
 /// stable identity the durable spec is authored against, so a rooted FQN
 /// (`rust.apg.cache`) and its bare counterpart (`apg.cache`) compare EQUAL.
 /// [`resolves_in_scanned`] applies the same tolerance to universe membership;

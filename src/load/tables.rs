@@ -673,6 +673,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             "DrivenBy" => Some("driven-by"),
             "Represents" => Some("represents"),
             "SpecImplementedBy" => Some("implemented-by"),
+            "AppliesTo" => Some("applies-to"),
             "Publishes" => Some("publishes"),
             "Subscribes" => Some("subscribes"),
             "Requires" => Some("requires"),
@@ -822,6 +823,14 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             // New-model §3.3 spec edges (apg-projects).
             "SpecImplementedBy" => {
                 for (a, b) in &graph.spec_implemented_by {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "AppliesTo" => {
+                for (a, b) in &graph.applies_to {
                     if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
                         fa.push(a.clone());
                         fb.push(b.clone());
@@ -1065,6 +1074,10 @@ pub(crate) fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     v.push(("IsRole", Container, Role));
     v.push(("IsRole", Component, Role));
     v.push(("Realises", Component, Service));
+    // An implementation constraint's language scope: one row per Language it
+    // binds. `Language` is a code-graph node table, materialised at admission
+    // for a target no scanned stream produced.
+    v.push(("AppliesTo", Constraint, Language));
     // Transient task edges (SCHEMA.md, phase 4): the assigned Agent, the
     // implemented Component and the per-kind operation rows (whose `target`
     // pair is the renames/moves/create destination, any code kind).
@@ -1382,6 +1395,9 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE IsRole(FROM Container TO Role, FROM Component TO Role, properties STRING)",
     )?;
     conn.query("CREATE REL TABLE Realises(FROM Component TO Service, properties STRING)")?;
+    // The implementation constraint's language scope (SCHEMA.md): a row can
+    // only ever join an `applies-to` edge to a `Language` node.
+    conn.query("CREATE REL TABLE AppliesTo(FROM Constraint TO Language, properties STRING)")?;
     // The transient task-edge rel tables (SCHEMA.md, phase 4). Every table has
     // `Task` as its source; the pair list comes from the same enumeration the
     // load files and COPY use, grouped so a multi-pair table (`Target`) is one

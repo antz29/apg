@@ -320,9 +320,9 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
 
 /// Convert one out-edge into its new-model edge record. `from` is the source
 /// node's derived FQN. The §4 kebab kinds map to the new-model records
-/// (`implemented-by` → `SpecImplementedBy`); `contains`/`driven-by`/`calls`/
-/// `uses`/`represents`/`details` map to the shared records the ingestor routes
-/// by endpoint node-kind.
+/// (`implemented-by` → `SpecImplementedBy`, `applies-to` → `AppliesTo`);
+/// `contains`/`driven-by`/`calls`/`uses`/`represents`/`details` map to the
+/// shared records the ingestor routes by endpoint node-kind.
 fn edge_record(
     from: &str,
     kind: &str,
@@ -377,6 +377,11 @@ fn edge_record(
             properties,
         },
         "details" => Record::Details {
+            from,
+            to,
+            properties,
+        },
+        "applies-to" => Record::AppliesTo {
             from,
             to,
             properties,

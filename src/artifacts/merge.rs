@@ -254,6 +254,13 @@ impl ArtifactDb {
                 self.merge_node(conn, label, fqn, &props, properties)?;
             }
         }
+        // An `applies-to` target is a Language identity no scanned stream may
+        // have rooted in this DB: materialise the row first (idempotent beside
+        // one a stream did root), or `merge_edge`'s dangling-endpoint skip
+        // would silently drop the edge.
+        for to in applies_to_missing_languages(records, &known) {
+            conn.query(&format!("MERGE (n:Language {{fqn: {}}})", lit(to)))?;
+        }
         for r in records {
             if let Some((table, from, to, properties)) = edge_merge(r) {
                 self.merge_edge(conn, table, from, to, &known, properties)?;
@@ -261,6 +268,25 @@ impl ArtifactDb {
         }
         Ok(())
     }
+}
+
+/// The `applies-to` targets an edge record set needs materialised as `Language`
+/// nodes before its edges merge: every target the record set itself does not
+/// already label (a bare scan Language id is never a node record, so in
+/// practice each one needs the row). The merge emits an idempotent
+/// `MERGE (n:Language {fqn})`, so a DB that already rooted the language keeps
+/// its single row.
+pub(crate) fn applies_to_missing_languages<'a>(
+    records: &'a [Record],
+    known: &HashMap<String, &'static str>,
+) -> Vec<&'a str> {
+    records
+        .iter()
+        .filter_map(|r| match r {
+            Record::AppliesTo { to, .. } if !known.contains_key(to) => Some(to.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The node-table label and MERGE properties for a node record, plus the
@@ -585,6 +611,11 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
             to,
             properties,
         } => Some(("SpecImplementedBy", from, to, Some(properties))),
+        Record::AppliesTo {
+            from,
+            to,
+            properties,
+        } => Some(("AppliesTo", from, to, Some(properties))),
         Record::Publishes {
             from,
             to,
@@ -713,6 +744,7 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
         | Record::DrivenBy { from, to, .. }
         | Record::Represents { from, to, .. }
         | Record::SpecImplementedBy { from, to, .. }
+        | Record::AppliesTo { from, to, .. }
         | Record::Publishes { from, to, .. }
         | Record::Subscribes { from, to, .. }
         | Record::Requires { from, to, .. }

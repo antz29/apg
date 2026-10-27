@@ -420,6 +420,7 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
     add_edges("DrivenBy", &graph.driven_by);
     add_edges("Represents", &graph.represents);
     add_edges("SpecImplementedBy", &graph.spec_implemented_by);
+    add_edges("AppliesTo", &graph.applies_to);
     add_edges("Publishes", &graph.publishes);
     add_edges("Subscribes", &graph.subscribes);
     add_edges("Requires", &graph.requires);
@@ -535,6 +536,7 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
         "DrivenBy",
         "Represents",
         "SpecImplementedBy",
+        "AppliesTo",
         "Publishes",
         "Subscribes",
         "Requires",

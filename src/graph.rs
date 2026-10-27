@@ -17,6 +17,10 @@ pub struct Graph {
     pub unresolved_uses: HashSet<(String, String)>,
     /// Spec/plan edge sets (SPEC R2/R21). Endpoints are canonical FQNs.
     pub details: HashSet<(String, String)>,
+    /// `applies-to`: an implementation constraint → a scan Language identity
+    /// (the bare `lang_switch` id, e.g. `rust`). The target Language node is
+    /// materialised at admission when no scanned stream rooted it.
+    pub applies_to: HashSet<(String, String)>,
     pub reviews: HashSet<(String, String)>,
     pub gates: HashSet<(String, String)>,
     pub satisfies: HashSet<(String, String)>,

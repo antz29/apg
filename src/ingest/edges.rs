@@ -61,10 +61,10 @@ pub(crate) fn filter_edges(
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
 /// 8 gates, 9 satisfies, 10 driven-by, 11 represents, 13 spec_implemented_by,
 /// 14 publishes, 15 subscribes, 16 requires, 17 reads, 18 writes, 19 is_role,
-/// 20 realises, then 21–43 for the task edges in [`crate::load::tables`]'s
-/// `TASK_EDGE_TABLES` order: assigned-to, implements, target and the
-/// module/file/struct/function create/modify/delete/move/rename operations)
-/// followed by four length-prefixed UTF-8 strings (from, to,
+/// 20 realises, 44 applies-to, then 21–43 for the task edges in
+/// [`crate::load::tables`]'s `TASK_EDGE_TABLES` order: assigned-to, implements,
+/// target and the module/file/struct/function create/modify/delete/move/rename
+/// operations) followed by four length-prefixed UTF-8 strings (from, to,
 /// target_type, properties; `target_type` is empty for most, `properties` is
 /// the canonical JSON of the edge record's full properties map — `"{}"` for a
 /// record that carries none, so the codec never drops an authored edge
@@ -100,6 +100,11 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
             to,
             properties,
         } => write_edge_fields(w, 5, &from, &to, "", &properties),
+        Record::AppliesTo {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 44, &from, &to, "", &properties),
         Record::Reviews { from, to } => {
             write_edge_fields(w, 6, &from, &to, "", &NodeProperties::new())
         }
@@ -293,6 +298,11 @@ impl<R: BufRead> EdgeReader<R> {
             },
             4 => Record::UnresolvedUse { from: a, to: b },
             5 => Record::Details {
+                from: a,
+                to: b,
+                properties,
+            },
+            44 => Record::AppliesTo {
                 from: a,
                 to: b,
                 properties,

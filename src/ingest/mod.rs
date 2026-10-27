@@ -150,6 +150,25 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
     }
 }
 
+/// Materialise the `Language` root one admitted `applies-to` edge targets — the
+/// same node the scanned-stream roots get (Pass B4), through the same
+/// [`insert_node`] path. A language id **no scanned stream produced** still
+/// becomes a real `Language` node, so the dangling-edge cleanup cannot silently
+/// drop the edge. Idempotent beside a stream that already rooted it.
+fn materialise_language(graph: &mut Graph, fqn: &str) {
+    if !graph.nodes.contains_key(fqn) {
+        insert_node(
+            graph,
+            fqn.to_string(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+            None,
+        );
+    }
+}
+
 /// Builds the tier-4 `Agent` node an `agent` stream record describes: the FQN
 /// `agent.<file-stem>` from the record's stem, located at the definition file's
 /// repo-relative path and 1-based line span (no byte span), and classified like
@@ -1427,6 +1446,30 @@ fn ingest_records(
                     }
                     graph.reviews.insert((a, b));
                 }
+                // `applies-to` runs an implementation constraint → a scan
+                // Language identity. Materialise the target `Language` node
+                // (idempotent beside a stream that already rooted it) so the
+                // cleanup below keeps the edge when no stream produced it.
+                Record::AppliesTo {
+                    from,
+                    to,
+                    properties,
+                } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    materialise_language(&mut graph, &b);
+                    if !properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .insert(("applies-to", a.clone(), b.clone()), properties);
+                    }
+                    graph.applies_to.insert((a, b));
+                }
                 Record::Gates { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
@@ -1800,6 +1843,11 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     // dangling here means a JSONL referenced a node that isn't in the graph.
     graph.details = filter_edges(graph, &graph.details, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Note
+    });
+    // An implementation constraint's `applies-to` target is a Language node
+    // (materialised at admission when no scanned stream rooted it).
+    graph.applies_to = filter_edges(graph, &graph.applies_to, |g, a, b| {
+        kind_is(g, a, NodeKind::Constraint) && kind_is(g, b, NodeKind::Language)
     });
     graph.reviews = filter_edges(graph, &graph.reviews, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Feedback

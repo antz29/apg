@@ -342,6 +342,11 @@ mod unit {
                 to: "domain.service.checkout".to_string(),
                 properties: NodeProperties::default(),
             },
+            Record::AppliesTo {
+                from: "implementation.constraint.law".to_string(),
+                to: "rust".to_string(),
+                properties: NodeProperties::default(),
+            },
         ];
         // The 23 task-edge tags (SCHEMA.md, phase 4) round-trip through the
         // same spool codec, in `TASK_EDGE_TABLES` order.
@@ -452,6 +457,59 @@ mod unit {
             out.push(e);
         }
         assert_eq!(out, edges);
+    }
+
+    /// An admitted `applies-to` edge materialises its target `Language` node:
+    /// a language id no scanned stream produced still yields exactly one
+    /// `Language` node (through [`materialise_language`]) and the edge survives
+    /// [`finalize_graph`]'s dangling-edge cleanup. A target a scanned stream
+    /// already rooted stays that single node — the materialisation is
+    /// idempotent, never a duplicate.
+    #[test]
+    fn applies_to_admission_materialises_its_language_node() {
+        let constraint = "implementation.constraint.law".to_string();
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            constraint.clone(),
+            Node {
+                kind: NodeKind::Constraint,
+                ..Node::default()
+            },
+        );
+
+        // No scanned stream produced `rust`: the admission materialises it.
+        materialise_language(&mut graph, "rust");
+        graph
+            .applies_to
+            .insert((constraint.clone(), "rust".to_string()));
+        finalize_graph(&mut graph);
+        assert_eq!(
+            graph.nodes.get("rust").map(|n| n.kind),
+            Some(NodeKind::Language),
+            "a target language id no stream produced must be a real Language node"
+        );
+        assert!(
+            graph
+                .applies_to
+                .contains(&(constraint.clone(), "rust".to_string())),
+            "the applies-to edge must survive the dangling-edge cleanup"
+        );
+
+        // A language a stream already rooted stays that single node.
+        materialise_language(&mut graph, "rust");
+        assert_eq!(
+            graph
+                .nodes
+                .values()
+                .filter(|n| n.kind == NodeKind::Language)
+                .count(),
+            1,
+            "the materialisation must stay idempotent beside a stream-rooted language"
+        );
+        assert_eq!(
+            graph.nodes.get("rust").map(|n| n.kind),
+            Some(NodeKind::Language)
+        );
     }
 
     /// exclude-apg-layout phase-03 task-2: the tool-owned top-level `apg/`

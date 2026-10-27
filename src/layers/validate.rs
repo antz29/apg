@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::catalog::Layer;
+use super::code_refs::LANGUAGE_ROOTS;
 use super::node_file::{NodeFile, NodeProperties, fqn};
 
 // ---------------------------------------------------------------------------
@@ -218,10 +219,10 @@ pub fn validate_trees_acyclic(
 /// The SPEC §4 durable edge kinds — the complete list. Plan edges
 /// (`contains` plan tiers, `gates`, `satisfies`, the Task→Implementation
 /// verbs) and `reviews` are **transient** kinds — not here. The matrix rows
-/// cover the twelve two-authored-endpoint kinds; `implemented-by` and
-/// `details` (both a code-FQN target) have a code-exempt endpoint and are
-/// special-cased in [`validate_edge`].
-pub(crate) const EDGE_KINDS: [&str; 14] = [
+/// cover the twelve two-authored-endpoint kinds; `implemented-by`, `details`
+/// (both a code-FQN target) and `applies-to` (a scan Language-identity target)
+/// have a code-exempt endpoint and are special-cased in [`validate_edge`].
+pub(crate) const EDGE_KINDS: [&str; 15] = [
     "requires",
     "contains",
     "driven-by",
@@ -236,6 +237,7 @@ pub(crate) const EDGE_KINDS: [&str; 14] = [
     "represents",
     "implemented-by",
     "details",
+    "applies-to",
 ];
 
 /// One SPEC §4 matrix row: `(kind, source-layer, source-types,
@@ -253,7 +255,8 @@ pub(crate) type MatrixRow = (
 );
 
 /// The SPEC §4 edge-kind matrix — only the two-authored-endpoint kinds are
-/// listed; `implemented-by` (Component → code) and `details` (Note → code) are
+/// listed; `implemented-by` (Component → code), `details` (Note → code) and
+/// `applies-to` (implementation constraint → Language identity) are
 /// special-cased in [`validate_edge`].
 pub(crate) const MATRIX: &[MatrixRow] = &[
     (
@@ -439,11 +442,12 @@ pub fn validate_edges(edges: &[(&str, &str, &str)]) -> anyhow::Result<()> {
 /// Validate one `(kind, source, target)` edge against the SPEC §4 matrix.
 /// The source of every §4 edge is an authored node — parsed first, so a
 /// malformed source FQN or unknown layer is a dangling-reference write-time
-/// error for every kind. `implemented-by` and `details` (both a code-FQN
-/// target) have a code-exempt **target**: only their source is validated here;
-/// code-FQN validation against the scanned graph is task-10
-/// ([`validate_code_refs`]). For every other kind, both endpoints must parse
-/// as authored-node FQNs and the (layer, type) shape must match a matrix row.
+/// error for every kind. `implemented-by`, `details` (both a code-FQN target)
+/// and `applies-to` (a scan Language identity) have a code-exempt **target**:
+/// only their source is validated here (code-FQN validation against the
+/// scanned graph is [`validate_code_refs`]). For every other kind, both
+/// endpoints must parse as authored-node FQNs and the (layer, type) shape must
+/// match a matrix row.
 pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::Result<()> {
     let (src_layer, src_type, _src_name) = parse_fqn(source)?;
 
@@ -475,6 +479,27 @@ pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::R
             if parse_fqn(target).is_ok() {
                 anyhow::bail!(
                     "`details` target `{target}` from source `{source}` must be a code identity, not an authored node — a `details` edge names exactly one code FQN"
+                );
+            }
+            Ok(())
+        }
+        // applies-to: an implementation-layer constraint → a scan Language
+        // identity. The target is exempt from the authored-FQN pairing and from
+        // the scanned-code check — but it is neither an authored node nor
+        // another arbitrary code FQN: it must be one of the ten language roots
+        // `available_languages`/`id_prefix_for` recognise, because the ingestor
+        // materialises that bare id as a real `Language` node.
+        "applies-to" => {
+            if src_layer != Layer::Implementation || src_type != "constraint" {
+                anyhow::bail!(
+                    "`applies-to` source `{source}` must be an Implementation Constraint (an implementation constraint binds tier 4), not {}.{src_type}",
+                    src_layer.layer_dir()
+                );
+            }
+            if !LANGUAGE_ROOTS.contains(&target) {
+                anyhow::bail!(
+                    "`applies-to` target `{target}` from source `{source}` must be a scan Language identity ({}), not an authored node or another code FQN",
+                    LANGUAGE_ROOTS.join(", ")
                 );
             }
             Ok(())
@@ -1257,7 +1282,9 @@ pub fn derive_coupling(
 ///
 /// A constraint's *scope* is declared by its **layer** (SPEC §7.1): a `global`
 /// constraint binds the whole durable spec, a `<tier>` constraint binds that
-/// tier. It has no attachment property or edge; satisfaction is review-only.
+/// tier. An `implementation` constraint binds all of tier 4 unless it carries
+/// one `applies-to` edge per Language it binds (each validated by
+/// [`validate_edge`]; satisfaction stays review-only).
 ///
 /// `existing` is the current identity universe, exactly as in [`validate_node`]:
 /// every node that already exists (or is co-proposed in the change) — *not* the
@@ -1294,10 +1321,11 @@ pub fn eval_constraint(
 /// parses, the endpoint is authored and MUST be present (a dangling authored
 /// reference is an error) and MUST carry a matching counterpart (the target
 /// node's in-edge with source = this node's FQN and equal kind + properties;
-/// the symmetric rule for an in-edge's source). If it does not parse, it is a
-/// code FQN and the pairing check is skipped — the `implemented-by` target and
-/// a `details` target may both be code, and this parse-based rule is the
-/// clean, correct discriminator that matches "code nodes have no files".
+/// the symmetric rule for an in-edge's source). If it does not parse, it is
+/// code-side and the pairing check is skipped — the `implemented-by` target, a
+/// `details` target and an `applies-to` Language identity all have no node
+/// file, and this parse-based rule is the clean, correct discriminator that
+/// matches "code nodes have no files".
 ///
 /// Transient edges are OUT of scope here: committed durable node files carry
 /// only §4 edges ([`validate_edges`] refuses the transient kinds

@@ -56,4 +56,30 @@ mod unit {
             "spec_rel_pairs must NOT declare a Details Note→Note pair: {spec:?}"
         );
     }
+
+    /// The `AppliesTo` pair is declared once, in the shared enumeration: the
+    /// load path (`build_load_files`/`copy_from`) writes and COPYs the
+    /// `AppliesTo` table from it, and the merge allowlist resolves the same
+    /// `Constraint → Language` pair so an authored `applies-to` row lands.
+    #[test]
+    fn applies_to_pair_is_declared_for_the_load_path_and_merge_guard() {
+        let spec = spec_rel_pairs();
+        assert!(
+            spec.iter().any(|(t, f, to)| {
+                *t == "AppliesTo" && *f == NodeKind::Constraint && *to == NodeKind::Language
+            }),
+            "spec_rel_pairs must declare AppliesTo Constraint→Language: {spec:?}"
+        );
+        assert!(
+            rel_table_pairs().contains(&("AppliesTo", "Constraint", "Language")),
+            "the merge guard must admit the AppliesTo pair"
+        );
+        assert!(
+            !spec
+                .iter()
+                .filter(|(t, ..)| *t == "AppliesTo")
+                .any(|(_, f, to)| *f != NodeKind::Constraint || *to != NodeKind::Language),
+            "AppliesTo must declare exactly the Constraint→Language pair"
+        );
+    }
 }

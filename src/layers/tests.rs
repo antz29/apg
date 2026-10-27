@@ -889,11 +889,15 @@ mod unit {
 
     /// The §3.3 edge-kind matrix is complete and internally consistent: its
     /// rows cover exactly the two-authored-endpoint kinds (all of
-    /// [`EDGE_KINDS`] except the code-exempt `implemented-by`/`details`), and
-    /// every row's source/target type is a real type of its layer's catalog.
+    /// [`EDGE_KINDS`] except the code-exempt `implemented-by`/`details`/
+    /// `applies-to`), and every row's source/target type is a real type of its
+    /// layer's catalog. `applies-to` is the language-scope kind: an
+    /// implementation constraint to a scan Language identity is accepted, while
+    /// a non-implementation source, an authored-node target or another code FQN
+    /// is refused (every target must be one of the ten `LANGUAGE_ROOTS`).
     #[test]
     fn edge_kind_matrix_is_complete_and_consistent() {
-        let exempt = ["implemented-by", "details"];
+        let exempt = ["implemented-by", "details", "applies-to"];
         let kinds: BTreeSet<&str> = MATRIX.iter().map(|(k, ..)| *k).collect();
         let expected: BTreeSet<&str> = EDGE_KINDS
             .iter()
@@ -919,6 +923,42 @@ mod unit {
                     tl.layer_dir()
                 );
             }
+        }
+
+        // applies-to: an implementation constraint → a scan Language identity.
+        for lang in ["rust", "go", "ts", "md", "agent"] {
+            assert!(
+                validate_edge("applies-to", "implementation.constraint.law", lang).is_ok(),
+                "an implementation constraint must bind language `{lang}`"
+            );
+        }
+        // Only an implementation-layer constraint is a valid source.
+        for src in [
+            "requirements.constraint.law",
+            "domain.constraint.law",
+            "solution.constraint.law",
+            "global.constraint.law",
+            "solution.component.cmp1",
+        ] {
+            let msg = validate_edge("applies-to", src, "rust")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("applies-to"), "must name kind: {msg}");
+            assert!(msg.contains(src), "must name source: {msg}");
+        }
+        // The target must be a bare Language identity — never an authored-node
+        // FQN and never another code FQN.
+        for target in [
+            "domain.constraint.law",
+            "solution.component.cmp1",
+            "apg.main",
+            "rust.apg.main",
+        ] {
+            let msg = validate_edge("applies-to", "implementation.constraint.law", target)
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("applies-to"), "must name kind: {msg}");
+            assert!(msg.contains(target), "must name target: {msg}");
         }
     }
 
@@ -1529,9 +1569,15 @@ mod unit {
 
     /// `code_identity` strips exactly ONE leading language root — every root in
     /// `LANGUAGE_ROOTS`, a bare FQN unchanged, and only a real `<root>.`
-    /// boundary (so `rusty.main` is never mangled).
+    /// boundary (so `rusty.main` is never mangled). `LANGUAGE_ROOTS` is the
+    /// complete `available_languages` vocabulary: the tenth id, `agent`, is a
+    /// member and `agent.<file-stem>` strips to the bare stem exactly once.
     #[test]
     fn code_identity_strips_one_language_root() {
+        assert!(
+            LANGUAGE_ROOTS.contains(&"agent") && LANGUAGE_ROOTS.len() == 10,
+            "LANGUAGE_ROOTS must carry the ten available_languages ids: {LANGUAGE_ROOTS:?}"
+        );
         for root in LANGUAGE_ROOTS {
             assert_eq!(
                 code_identity(&format!("{root}.apg.cmd_scan")),
@@ -1539,6 +1585,11 @@ mod unit {
                 "`{root}.` must strip to the bare identity"
             );
         }
+        // The agent identity is `agent.<file-stem>`: one root strip, never two.
+        assert_eq!(
+            code_identity("agent.go-frontend-implementer"),
+            "go-frontend-implementer"
+        );
         assert_eq!(code_identity("apg.cmd_scan"), "apg.cmd_scan");
         assert_eq!(code_identity("/abs/store.go"), "/abs/store.go");
         // ONE root only, and only a real `<root>.` boundary.

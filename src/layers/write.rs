@@ -247,8 +247,9 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// property-aware §4 rules ([`validate_assembled_rules`]: acyclic
 /// contains trees; `Entity (kind: event)` publishes/subscribes
 /// targets) and [`check_edge_pairing`], every written constraint passes
-/// [`eval_constraint`]'s structure rules (a constraint's scope is its layer and
-/// it carries no attachment), and — when
+/// [`eval_constraint`]'s structure rules (a constraint's scope is its layer,
+/// and an implementation-layer constraint may narrow tier 4 with one
+/// `applies-to` edge per Language it binds), and — when
 /// the `graph.jsonl` export exists —
 /// every assembled `implemented-by` target is Real or Pending against the
 /// exported scanned graph ([`validate_code_refs`]; a Drift target aborts before
@@ -394,7 +395,11 @@ pub fn validate_change_over(
 
     // Constraint validation (SPEC §7.1): [`eval_constraint`] owns the
     // structural rules (name allowlist, type-in-layer, uniqueness). A
-    // constraint's scope is its layer; it has no attachment property or edge.
+    // constraint's scope is its layer: an implementation constraint binds all
+    // of tier 4 unless it narrows that scope with one `applies-to` edge per
+    // Language it binds — those edges passed the out-edge matrix above
+    // (implementation constraint → Language identity), the write funnel's
+    // acceptance point.
     for n in writes {
         if n.node_type != "constraint" {
             continue;

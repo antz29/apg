@@ -5,9 +5,14 @@ mod unit {
     use super::*;
     use crate::layers::NodeProperties;
 
-    /// The two record kinds the write-through re-merge used to drop through
-    /// `_ => None`: authored `uses` (Person→Component) and `calls`
-    /// (Service→Service) map to their rel tables.
+    /// The authored record kinds the write-through re-merge used to drop through
+    /// `_ => None`: `uses` (Person→Component), `calls` (Service→Service) and
+    /// `applies-to` (implementation constraint → scan Language identity) all map
+    /// to their rel tables, and the live DB's `AppliesTo` row reconstructs to
+    /// the same record. The merge materialises the Language row a target needs
+    /// when the record set/DB holds none (a language id no scanned stream
+    /// produced, say `rust` in a Go-only repo), so the pair lands instead of
+    /// being skipped as a dangling endpoint.
     #[test]
     fn edge_merge_maps_authored_uses_and_calls() {
         assert_eq!(
@@ -35,6 +40,53 @@ mod unit {
                 "domain.service.b",
                 Some(&NodeProperties::default())
             ))
+        );
+
+        // applies-to: implementation constraint → the scan Language identity
+        // `rust`, mapped to the `AppliesTo` rel table.
+        let props = NodeProperties::from([("note".to_string(), "tier-4".to_string())]);
+        let applies = Record::AppliesTo {
+            from: "implementation.constraint.law".into(),
+            to: "rust".into(),
+            properties: props.clone(),
+        };
+        assert_eq!(
+            edge_merge(&applies),
+            Some((
+                "AppliesTo",
+                "implementation.constraint.law",
+                "rust",
+                Some(&props)
+            ))
+        );
+        assert!(rel_pair_allowed("AppliesTo", "Constraint", "Language"));
+        // The live DB's AppliesTo row reconstructs to the same record.
+        assert_eq!(
+            crate::artifacts::db::durable_edge_record(
+                "AppliesTo",
+                "implementation.constraint.law".into(),
+                "rust".into(),
+                props,
+            ),
+            applies
+        );
+
+        // The merge materialises the target row before the edge: with no
+        // `Language` row labelled by the record set, `rust` is the row to
+        // create (`MERGE (n:Language {fqn})`), so `merge_edge` cannot skip the
+        // pair as a dangling endpoint.
+        let unlabelled = std::collections::HashMap::new();
+        assert_eq!(
+            crate::artifacts::merge::applies_to_missing_languages(
+                std::slice::from_ref(&applies),
+                &unlabelled
+            ),
+            vec!["rust"]
+        );
+        // A target the record set already labels needs no row.
+        let labelled = std::collections::HashMap::from([("rust".to_string(), "Language")]);
+        assert!(
+            crate::artifacts::merge::applies_to_missing_languages(&[applies], &labelled).is_empty()
         );
     }
 

@@ -250,6 +250,13 @@ enum Export {
         from: String,
         to: String,
     },
+    /// An implementation constraint → scan Language identity. `applies-to` is
+    /// hyphenated, so it carries an explicit rename off `snake_case`.
+    #[serde(rename = "applies-to")]
+    AppliesTo {
+        from: String,
+        to: String,
+    },
     Reviews {
         from: String,
         to: String,
@@ -671,6 +678,15 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
         write_line(
             &mut w,
             &Export::Details {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.applies_to {
+        write_line(
+            &mut w,
+            &Export::AppliesTo {
                 from: a.clone(),
                 to: b.clone(),
             },

@@ -750,7 +750,7 @@ const TRANSIENT_EDGE_TABLES: [&str; 26] = [
 /// [`edge_merge`](crate::artifacts::merge::edge_merge)'s table arm — every
 /// `table` here is an element of [`DURABLE_EDGE_TABLES`], so the fallback is
 /// unreachable.
-fn durable_edge_record(
+pub(crate) fn durable_edge_record(
     table: &str,
     from: String,
     to: String,
@@ -823,6 +823,11 @@ fn durable_edge_record(
             properties,
         },
         "Details" => Record::Details {
+            from,
+            to,
+            properties,
+        },
+        "AppliesTo" => Record::AppliesTo {
             from,
             to,
             properties,
@@ -929,10 +934,11 @@ const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
 /// carries. The shared `Contains`/`Calls`/`Uses` tables also hold code rows; a
 /// row whose source is not a durable node is skipped, so only authored pairs
 /// are reconstructed.
-const DURABLE_EDGE_TABLES: [(&str, &str); 14] = [
+const DURABLE_EDGE_TABLES: [(&str, &str); 15] = [
     ("Contains", "contains"),
     ("DrivenBy", "driven-by"),
     ("SpecImplementedBy", "implemented-by"),
+    ("AppliesTo", "applies-to"),
     ("Calls", "calls"),
     ("Publishes", "publishes"),
     ("Subscribes", "subscribes"),
