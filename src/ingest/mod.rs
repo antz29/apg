@@ -1792,6 +1792,13 @@ fn admit_task_record(graph: &mut Graph, lang: &str, opts: &IngestOptions, r: Rec
 /// Drop the task-edge rows whose `(Task, to)` kind pair the schema does not
 /// declare (the sibling of `filter_edges` for the twenty per-kind operation
 /// tables, whose `to` kind is fixed).
+///
+/// The keep predicate reads the target's node **kind**, never its `status` or
+/// location, so a task operation row keyed on a planned FQN survives unchanged
+/// once the declaration realizes it at that FQN (the FQN is kept, the node
+/// carries the declaration's own kind, and all five verbs of a kind share this
+/// one predicate); a still-planned target is judged by the kind its placeholder
+/// records.
 fn filter_task_ops(
     graph: &Graph,
     edges: &HashSet<(String, String)>,
