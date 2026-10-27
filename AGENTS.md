@@ -12,15 +12,17 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   compiler API, npm-installed with a committed `package-lock.json`, C#:
   `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary
   built on Roslyn `Microsoft.CodeAnalysis.CSharp`, Python: `src/pylib` — a
-  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, and the
-  bundled structural scanner: `src/structlib` — a standalone `structfrontend`
-  binary that graphs every tracked text/config/packaging file the code frontends
-  don't claim, serving the Markdown stream (absorbing the retired `src/mdlib`
+  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, the bundled
+  structural scanner: `src/structlib` — a standalone `structfrontend` binary
+  that graphs every tracked text/config/packaging file the code frontends don't
+  claim, serving the Markdown stream (absorbing the retired `src/mdlib`
   Markdown frontend) plus the per-format structural streams — shell, YAML, JSON,
-  TOML, XML, Dockerfile, Makefile, INI — and residual `misc`) parses a codebase
-  and streams
-  one JSON object per
-  line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
+  TOML, XML, Dockerfile, Makefile, INI — and residual `misc`, and the agent
+  frontend: `src/agentlib` — a standalone `agentfrontend` binary that graphs the
+  `.opencode/agents/` definition files (the distributed agents are `*.md`) as one
+  `Agent` node per file, keyed by the extension-stripped file stem) parses a
+  codebase and streams one JSON object per line to stdout — the **unified JSONL
+  schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
   never does graph assembly.
 - The **ingestor** (`src/ingest.rs`) spawns the scanner, resolves identity
@@ -32,17 +34,20 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
   tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
-  the Python (`src/pylib`) and bundled structural (`src/structlib`) crates) and
-  stages them to `target/<profile>/frontends`. The base `apg` binary itself is
+  the Python (`src/pylib`), bundled structural (`src/structlib`) and bundled
+  agent (`src/agentlib`) crates) and stages them to
+  `target/<profile>/frontends`. The base `apg` binary itself is
   built against a prebuilt static liblbug plus `openssl@3` (no bundled
   LadybugDB and no `cmake`); the Homebrew `scanner` formula installs it together
-  with the bundled `structfrontend`, while the seven per-language frontends ship
-  as their own formulae. Run a scan with `apg scan <dir>` (or the
-  `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
-  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
-  `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`; `0` to skip) limits what
-  build.rs compiles — `struct` is the bundled structural scanner.
+  with the bundled `structfrontend` and `agentfrontend`, while the seven
+  per-language frontends ship as their own formulae. Run a scan with
+  `apg scan <dir>` (or the `apg_scan` tool). `apg` resolves frontends at
+  runtime relative to the binary (`<exe_dir>/frontends` or
+  `<exe_dir>/../libexec/frontends`) or via `APG_FRONTEND_DIR`.
+  `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`, `cpp`, `rust`, `ts`,
+  `csharp`, `struct`, `py`, `agent`; `0` to skip) limits what build.rs
+  compiles — `struct` and `agent` are the bundled structural and
+  agent-definition scanners.
 - **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
   deps (what must be on `PATH` when a user runs `apg scan`), and the engine pin
   that sets its language-version ceiling are declared on its solution container
@@ -65,11 +70,16 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   with stable Rust + crates.io and needs nothing at scan time (it never shells
   out), bounded by `serde`/`serde_json`/`unicode-normalization` 0.1 with no
   language-version ceiling; it is not a per-language formula — the base
-  `scanner` package ships it. The build
+  `scanner` package ships it. The bundled agent frontend (`agentfrontend`,
+  `src/agentlib`) also builds with stable Rust + crates.io (`serde`/
+  `serde_json`), needs nothing at scan time (it never shells out), and has no
+  language-version ceiling; like the structural scanner, it is not a
+  per-language formula — the base `scanner` package ships it. The build
   toolchains are pinned in repo-visible files consumed by every
   frontend-compiling path, exact where the mechanism can enforce it: Rust
   `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and all
-  three cargo frontend crates) and Node on the `26.x` line
+  four cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`,
+  `src/agentlib`) and Node on the `26.x` line
   (`src/tslib/package.json` `engines.node` range `>=26.8.1 <27`, enforced
   fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the exact
   `26.9.0`). Go is exact on the release Linux CI path (`GOTOOLCHAIN` +
@@ -137,7 +147,9 @@ The project builds a single `apg` binary (package `apg`):
   `.opencode/agents/` by the **`agent-builder`** agent, never by init. If the
   project's `.opencode/` holds files that duplicate the installed suite
   (`~/.config/opencode/`), init prints a **loud warning** listing
-  them — it never deletes anything.
+  them — it never deletes anything. `apg init` is a main-checkout operation: it
+  refuses a target inside a linked worktree, naming the main checkout to run it
+  from.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [--no-progress] [--force] [blacklist...]`
   — run the pipeline; writes `apg/.trans/db.lbug`, `apg/.trans/graph.jsonl`,
@@ -174,11 +186,13 @@ The project builds a single `apg` binary (package `apg`):
   name is immutable); `edge add|update|rm <kind> <from> <to>` writes **both**
   endpoint files as one mutation (the out half in the source's file, the
   matching in half in the target's; `add` refuses a duplicate, `update` is
-  properties-only). Guarded — refuses outside a project worktree. **Durable
+  properties-only). Guarded — requires a project context (a project worktree on
+  its branch) and never runs on the repo's default branch. **Durable
   `node`/`edge` mutations require a live session and are not committed until
   `apg session save`** — see *Sessions: caller-owned durable mutation* below.
 - `apg session <sub> …` — the session-scoped single-writer coordinator that owns
-  the worktree's `apg/.trans/db.lbug`: `start` launches it (foreground),
+  the worktree's `apg/.trans/db.lbug`: `start` launches it (foreground; it
+  requires a project context and refuses on the default branch),
   `save` — make the buffered node-file set durable (one atomic write + commit);
   `abort` — discard the buffered set and release the session; `end` — release
   the DB/socket and exit (refuses while the buffer is dirty).
@@ -193,7 +207,15 @@ The project builds a single `apg` binary (package `apg`):
   `done`/`undone` (assertion-only), `note` (task notes — **banned**, see
   *Plan notes are banned* below), `complete`
   (milestone-only), `render`, `verify` (the pre-merge coherence gate; the
-  binary applies nothing).
+  binary applies nothing). A task's edge set is set with
+  `--assigned-to <agent-fqn>` (exactly one Agent from the branch graph's
+  roster), `--implements <component-fqn>`, and one repeated
+  `--<kind>-<verb> <fqn>` flag per operation (`kind` is
+  module/file/struct/function; `verb` is create/modify/delete/move/rename —
+  `--module-create`, `--function-rename`, …), with
+  `--target <destination-fqn>` supplying a renames/moves destination; `add`
+  requires `--assigned-to`, while `update` takes the same task flags and leaves
+  an omitted dimension unchanged (see *Plans, tasks & feedback*).
 - `apg project <sub> …` — project contexts (worktrees, git2-operated):
   `start <name>` (from the main checkout: worktree + branch + branch DB off
   the default branch, prints `apg/.worktrees/<name>`), `merge <name>` (from
@@ -310,13 +332,15 @@ Every test in the repo belongs to exactly one of three tiers, defined by the law
 **Test layout.** The **unit/int** tiers live in a sibling `src/<module>/tests.rs`
 (or `src/tests.rs` for the crate root), reached by a `#[cfg(test)] mod tests;`
 declaration in the production module — the frontend crates' library roots
-included (`src/structlib/src/tests.rs`, `src/pylib/src/tests.rs`). Every
+included (`src/structlib/src/tests.rs`, `src/pylib/src/tests.rs`,
+`src/agentlib/src/tests.rs`). Every
 unit/int test still sits in an inner `unit` or `int` submodule, so libtest's
 path filter selects a tier (`…::tests::unit::`, `…::tests::int::`). The **e2e**
 tier moved OUT of the production module tree into the crate's own top-level
 `tests/<module>_e2e.rs` integration crate — the root crate's `tests/*_e2e.rs`
 (e.g. `tests/main_e2e.rs`, `tests/splice_e2e.rs`) plus the frontend crates'
-`src/structlib/tests/structlib_e2e.rs` and `src/pylib/tests/pylib_e2e.rs`. Each
+`src/structlib/tests/structlib_e2e.rs`, `src/pylib/tests/pylib_e2e.rs` and
+`src/agentlib/tests/agentlib_e2e.rs`. Each
 is wrapped in `mod e2e` and shares its crate's `tests/common/mod.rs`, so its
 libtest paths are `e2e::…` (no longer `tests::e2e::…`). Every **e2e** test also
 carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
@@ -373,10 +397,10 @@ gate beneath itself while it is running.
 `[workspace]`), so their tiers are run from their own directories, never by the
 root gate: `(cd src/structlib && cargo test)` /
 `(cd src/structlib && cargo test e2e:: -- --ignored --test-threads=4)`, and
-likewise `src/pylib`. Wiring those invocations into `scripts/gate.sh` has not
-been done (`scripts/**` is **run-only for every agent except
-`build-implementer`, which owns it** and may change a step), so the root
-`scripts/gate.sh` does NOT run them — invoke them yourself when a change
+likewise `src/pylib` and `src/agentlib`. Wiring those invocations into
+`scripts/gate.sh` has not been done (`scripts/**` is **run-only for every
+agent except `build-implementer`, which owns it** and may change a step), so the
+root `scripts/gate.sh` does NOT run them — invoke them yourself when a change
 touches a frontend crate.
 
 Listing quirks (verified): `cargo test -- --list` **includes `#[ignore]`d
@@ -601,7 +625,12 @@ Edge records:
 Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
 `Language` node per `lang_switch` stream (its FQN is the bare language id, e.g.
 `rust`) and roots every module FQN under it. `<language-id>` is the stream's
-declared id verbatim (`go`/`java`/`cpp`/`rust`/`ts`/`js`/`csharp`/`py`/`md`).
+declared id verbatim: the code frontends' `go`/`java`/`cpp`/`rust`/`ts`/`js`/
+`csharp`/`py`, the agent frontend's `agent`, and the bundled structural
+scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
+`misc` — the nineteen ids `layers::LANGUAGE_ROOTS` names (see
+`src/layers/code_refs.rs`, mirrored by `src/ingest/` and
+`src/incremental/language.rs`).
 
 | kind | FQN |
 |---|---|
@@ -612,6 +641,7 @@ declared id verbatim (`go`/`java`/`cpp`/`rust`/`ts`/`js`/`csharp`/`py`/`md`).
 | function (overloaded) | `parent.name(T1,T2,...)` — erased, comma-separated params |
 | Go `init` | `parent.init#<file-basename>` |
 | TypeScript | `<language-id>.<pkg.relpath.name>` — the rooted npm package + dot-path prefix per ES-module file (`ts.@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
+| agent | `agent.<file-stem>` — one per `.opencode/agents/` definition file, at its repo-relative path and line span |
 
 A `File` FQN is its repo-relative path (relative to the git toplevel, or the
 scan root outside a repo) and an `UnresolvedTarget` FQN is a foreign symbol
@@ -908,10 +938,12 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   and enumeration included ("what is in this file/module?", "what does this
   unit depend on?") — the first tool call is a graph query (the `apg_*` suite,
   or `apg_query`); reach for a file tool second.
-- **In the graph:** the tracked source every language frontend claims, and now
-  also the tracked text/config/packaging files the bundled structural scanner
-  claims (`Cargo.toml`, `install.sh`, `.github/workflows/release.yml`, Markdown,
-  shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI and residual `misc`).
+- **In the graph:** the tracked source every code frontend claims, and now also
+  the tracked text/config/packaging files the bundled structural scanner claims
+  (`Cargo.toml`, `install.sh`, `.github/workflows/release.yml`, Markdown,
+  shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI and residual `misc`) plus the
+  `.opencode/agents/` definition files the agent frontend claims as `Agent`
+  nodes (the structural scanner leaves that tree to it).
   **Not in the graph (no symbols, not no node):** Ruby sources (no frontend yet
   — `apg-ruby` is pending) and binaries have no frontend, so they appear only
   as residual `misc` `File` nodes with no symbols. The only paths with no node
