@@ -986,6 +986,12 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
             "details" => {
                 g.details.insert((s("from"), s("to")));
             }
+            // Endpoint-only like `details`: the `applies-to` wire record is
+            // type/from/to (an implementation constraint → a scan Language
+            // identity), so the serialized-properties column never travels.
+            "applies-to" => {
+                g.applies_to.insert((s("from"), s("to")));
+            }
             "reviews" => {
                 g.reviews.insert((s("from"), s("to")));
             }

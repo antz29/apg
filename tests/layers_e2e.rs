@@ -1989,6 +1989,50 @@ mod e2e {
             "the applies-to wire shape is type/from/to: {wire}"
         );
 
+        // The export is proven through the SHARED reader, not only as a raw
+        // JSON line: `read_graph_jsonl` rebuilds the graph's `applies_to` set
+        // from that wire record, and writing the graph back keeps it.
+        let graph = testutil::read_graph_jsonl(&export).unwrap();
+        assert_eq!(
+            graph.applies_to,
+            std::collections::HashSet::from([(LAW.to_string(), "rust".to_string())]),
+            "read_graph_jsonl must rebuild exactly the (constraint, Language) pair"
+        );
+        let roundtrip = std::env::temp_dir().join(format!(
+            "apg-applies-to-roundtrip-{}.jsonl",
+            std::process::id()
+        ));
+        apg::load::write_graph_jsonl(&graph, &roundtrip).unwrap();
+        let rewritten: Vec<serde_json::Value> = std::fs::read_to_string(&roundtrip)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let rewritten_applies: Vec<&serde_json::Value> = rewritten
+            .iter()
+            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("applies-to"))
+            .collect();
+        assert_eq!(
+            rewritten_applies.len(),
+            1,
+            "the read→write round-trip must keep exactly one applies-to record"
+        );
+        let rewritten_wire = rewritten_applies[0];
+        assert_eq!(
+            rewritten_wire.get("from").and_then(|v| v.as_str()),
+            Some(LAW)
+        );
+        assert_eq!(
+            rewritten_wire.get("to").and_then(|v| v.as_str()),
+            Some("rust")
+        );
+        assert_eq!(
+            rewritten_wire.as_object().map(|o| o.len()),
+            Some(3),
+            "the round-tripped applies-to wire shape stays type/from/to: {rewritten_wire}"
+        );
+        std::fs::remove_file(&roundtrip).unwrap();
+
         // The DB projection carries the row — `AppliesTo` FROM Constraint TO
         // Language, its serialized-properties column intact. Ingest admission
         // materialised `rust` (the only Language row no stream rooted — the

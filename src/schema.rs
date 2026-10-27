@@ -502,10 +502,10 @@ pub enum Record {
     /// Implementation Constraint → Language: the languages the constraint
     /// binds. An implementation constraint binds **all** of tier 4 unless it
     /// carries one `applies-to` edge per Language it binds. The target is a
-    /// scan Language identity (`rust`/`go`/…, the ten ids
-    /// `code_refs::LANGUAGE_ROOTS` names) — neither an authored-node FQN nor
-    /// another code FQN — and the ingestor materialises that bare id as a real
-    /// `Language` node.
+    /// scan Language identity `code_refs::LANGUAGE_ROOTS` names (the
+    /// structural stream ids and `agent` included) — neither an authored-node
+    /// FQN nor another code FQN — and the ingestor materialises that bare id
+    /// as a real `Language` node.
     #[serde(rename = "applies-to")]
     AppliesTo {
         from: String,
