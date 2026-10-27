@@ -281,7 +281,6 @@ one JSON file per authored spec node, FQN `<layer>.<type>.<name>`):
 |---|---|
 | `db.lbug` | LadybugDB graph index (queryable) |
 | `graph.jsonl` | Self-contained export (canonical FQNs, no opaque ids) |
-| `config.json` | Classification config |
 | `apg-frontend.log` | Full scanner + ingestor log |
 
 ### 3. `apg query "<cypher>"`
@@ -416,6 +415,13 @@ its branch DB). Main is never a mutation place — `apg node`/`apg edge`/`apg
 plan`/`apg review`/`apg session start` refuse outside a project context (the
 default branch is never a mutation place).
 
+`apg project delete <name>` — also run from the main checkout — is the abandon
+path for a project that is not merged: it removes the project's worktree and
+deletes its branch, discarding that branch's commits. It refuses unsafe states
+(a worktree with tracked uncommitted changes, a branch not hosted at
+`apg/.worktrees/<name>`, the main checkout's current branch) and never touches
+the default branch.
+
 The durable spec is a **node-file store** under `apg/layers/` — one JSON file
 per node, authored with `apg node add|rm <layer> <type> <name>` and
 `apg edge add|rm <kind> <from> <to>` from a live session (see
@@ -446,6 +452,16 @@ scan language id (a code language, a structural stream, or `agent`). The
 ←realises— Component —implemented-by→ code`; every code node is claimed by
 exactly one Component (no shared claims), any requirement traces down to the
 code that implements it, any code traces up to the why.
+
+`apg spec lint [--tier requirements|domain|solution]` is the deterministic,
+read-only integrity check over that node-file store: it reports the mechanical
+R2/R3/R4 violations, the tier-1-3 body-budget rule, and the shared mechanical
+validator set — the edge-kind matrix, the event-only `publishes`/`subscribes`
+target rule, and the model cardinalities, the same functions the write path
+calls — as blocking errors, plus the non-blocking tier-1-3 wording advisories.
+It never writes. `--tier` narrows the per-node rules and advisories to one
+layer; omitted, it checks all tiers. Change-set delta coverage is not a lint
+rule — that is the `apg plan verify` gate.
 
 ### Sessions (caller-controlled durability)
 

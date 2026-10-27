@@ -48,6 +48,7 @@ namespace TransientPlan {
     class Plan
     class PlanPhase
     class Task
+    class Feedback
 }
 
 namespace PlannedImplementation {
@@ -56,6 +57,11 @@ namespace PlannedImplementation {
     class PlannedStruct["Struct (planned)"]
     class PlannedFunction["Function (planned)"]
 }
+
+%% `reviews` targets any authored node, plan artifact, or code unit (the Reviews
+%% rel table's full target set, listed in the Feedback note below); this box is
+%% a wildcard, not a node type.
+class ReviewedNode["any node"]
 
 %% Cardinalities:
 %% 1     = exactly one
@@ -194,6 +200,9 @@ Task --> "0..1" Function : function_rename
 Task --> "0..1" PlannedFunction : function_create
 Task --> "0..1" PlannedFunction : target
 
+%% Feedback — one review item, attached to exactly one target
+Feedback --> "0..*" ReviewedNode : reviews
+
 %% ==================================================
 %% NOTES
 %% ==================================================
@@ -205,4 +214,5 @@ note for ImplementationConstraint "An implementation constraint binds all of tie
 note for Agent "One per definition file under `.opencode/agents/`, its FQN `agent.<file-stem>` — the extension-stripped file name, e.g. `agent.go-frontend-implementer` — located at that file's path and line span."
 note for Plan "One per project."
 note for Task "A task's own properties are title and status; its assigned Agent, the Component it implements, and the code it touches are edges. Every task assigns exactly one Agent. Move/rename: operation edge to existing source plus target edge to matching planned destination. Create: operation edge to planned destination only. Target-less tasks are allowed for no-change activities."
+note for Feedback "A review item attached to exactly one target; reviews targets any Module, Function, Struct, File, Requirement, Plan, PlanPhase, Task, Stakeholder, Entity, System, Container, Component, User, DomainGroup, Value, Service, Person, Constraint or Note. A new Feedback is open with an empty disposition; the coordinator's action sets actioned with disposition fixed or wont-fix; the reviewer's resolve sets resolved (terminal), while reject returns it to open with disposition rejected. An artifact is done only when every Feedback on it is resolved — apg plan complete and the verify gate refuse otherwise."
 ```
