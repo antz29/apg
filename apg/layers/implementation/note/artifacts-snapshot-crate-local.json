@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "artifacts-snapshot-crate-local",
+  "body": "tests/artifacts_e2e.rs::snapshot is a crate-local byte-identity helper. Limit: the e2e integration crates do not share it, so a second crate needing byte-identity comparisons cannot reuse it. Upgrade by promoting it to tests/common/mod.rs when a second e2e crate needs byte-identity snapshots.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.snapshot",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

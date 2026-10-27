@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "force-full-scan-consults-store",
+  "body": "Coordinator::force_full_scan calls cmd_scan without --force: no live session exists at that point, so only the derived-artifact discard is needed, and its scan still consults the shared fact store and may warm-reuse it. Limit: an abort whose phantom projection warm reuse would reproduce is not healed by this rebuild. Upgrade to pass --force there if a phantom projection is ever observed to survive a warm reuse after an abort.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.force_full_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "fullscan-forced-single-producer",
+  "body": "FullScanReason::Forced is produced only by incremental::prepare(force = true); delta::plan never emits it. Limit: the variant is a prepare-level signal, so a future caller needing a forced rebuild must thread the force signal rather than expect delta::plan to produce this reason. Upgrade when a second producer path, or a consumer other than cmd_scan's reason log, needs the same verdict.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.delta.FullScanReason",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
