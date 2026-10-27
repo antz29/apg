@@ -354,6 +354,7 @@ at the returned `start_line`/`end_line`.
 | File | fqn, start_line, end_line, code_type | a file; `fqn` is its repo-relative path |
 | Struct | fqn, path, start, `end`, start_line, end_line, code_type | class, struct, interface, enum |
 | Function | fqn, path, start, `end`, start_line, end_line, code_type | function, method, constructor |
+| Agent | fqn, path, start_line, end_line, code_type | one `.opencode/agents/` definition; fqn `agent.<file-stem>` |
 | UnresolvedTarget | fqn, category | a call/type ref the scanner could not resolve |
 | Contains | Module↔Module, Module→File, File→Struct/Function, Struct→Struct/Function | hierarchy |
 | Calls | Function→Function | a resolved call |
@@ -392,8 +393,10 @@ one Component claims each code node), `details` (a note → exactly one code FQN
 (durable) and `apg plan` / `apg review` (transient). Planned code exists as `status: planned`
 Implementation nodes at the real code FQN; a branch scan that finds real code replaces one; on
 main there are none.
-- `Task` — `kind` ∈ source/test/gate/docs (the owning role); `tier` ∈ unit/int/e2e (required
-  iff test); one verb (`creates`/`modifies`/`deletes`/`renames`/`moves`) plus its target FQN.
+- `Task` — properties `title` and `status` alone: its `assigned-to` Agent (exactly one), its
+  `implements` Component and its per-kind operation edges (`creates`/`modifies`/`deletes`/
+  `renames`/`moves`) are edges. `creates` names only the planned node; `renames`/`moves` carry
+  the live source plus a `target` destination; an empty edge set is a target-less activity.
 - `Feedback` — `status` ∈ open/actioned/resolved; an artifact is done only when every item on
   it is resolved, and `apg plan complete` and the verify gate refuse otherwise.
 - `agent-builder` scaffolds **into the repo it runs against**; the apg repo's own
@@ -458,7 +461,7 @@ stage yourself.
 | 5 | Write the plan phases' tasks | `plan-writer` |
 | 6 | Review the plan phases, per phase | `plan-review` |
 | 7 | Holistic plan review (cross-phase consistency) | `plan-review` |
-| 8 | Implement | `implementer` or the subsystem's `*-implementer` |
+| 8 | Implement | the Agent the task's `assigned-to` edge names |
 | 9 | Implementation phase review | `implementation-phase-reviewer` |
 - A later stage never starts before its predecessors are green; a stage is never skipped
   because it seems unnecessary.
@@ -499,8 +502,8 @@ When the user wants a phased plan from a spec, **orchestrate and delegate to `pl
 2. **Structural review #1** (one `plan-review`): the breakdown; feedback routes to the breakdown
    writer → fix → re-review until structurally green.
 3. **Parallel per-phase writing** (one `plan-writer` per phase): only that phase's `Task` nodes,
-   each carrying its Task→Implementation verb (`creates`/`modifies`/`deletes`/`renames`/
-   `moves`) and target FQN.
+   each with its `assigned-to` Agent, its `implements` Component and its per-kind operation
+   edge.
 4. **Parallel per-phase review** (one `plan-review` per phase, cycled) until each is green.
 5. **Final holistic review** (one `plan-review`, cycled): cross-phase consistency; a flagged
    phase re-enters its per-phase review after its writer's fix, then the holistic pass runs
@@ -523,6 +526,10 @@ per-repo `release-agent` is generated only when the project wants one. `migratio
 `apg/layers/**` for a changelog-driven migration (reading `apg/migration-guide.md`), then validates with `apg_spec_lint` + `apg_scan`.
 The hidden read-only `researcher` investigates one research question through the read-only graph and file tools plus web search
 and fetch, then returns a single markdown result under `apg/.scratch/<subject>.md` — it never edits a project file and runs no shell.
+- **Dispatch by assignment.** Every task names exactly one Agent on its `assigned-to` edge —
+  dispatch the task to that Agent; never infer an implementer from the paths or the prose. An
+  Agent the graph or the repo does not have, or an outdated one, routes to `agent-builder` first
+  (then rebase, re-scan, restart opencode), and the task follows.
 - **Missing or outdated codebase agents** → task **`agent-builder`**. You never write
   `.opencode/agents/` files and never implement code yourself — your only file writes are the scratch markdown.
 - **That agent work is ALWAYS on main.** Task `agent-builder` on the **main checkout**: its
@@ -542,8 +549,9 @@ and fetch, then returns a single markdown result under `apg/.scratch/<subject>.m
 - **Implementation flow**: the owning implementer implements; you run scans and coordinate. The
   branch graph's staleness guard refuses every plan/review mutation unless the recorded HEAD
   matches the working tree, so run **one task per session**:
-  1. **Dispatch the one task** — the implementer works, runs its done-gates, **commits**, and
-     returns; it does not mark done after committing (the commit makes the recorded HEAD lag).
+  1. **Dispatch the one task** — its `assigned-to` Agent works, runs its done-gates,
+     **commits**, and returns; it does not mark done after committing (the commit makes the
+     recorded HEAD lag).
   2. **Quick verify** (not a review): the commit touched the expected path(s)/FQN(s), the tree
      is clean, and the target resolves — or is still pending for a `creates`.
   3. **Scan** the worktree so the recorded HEAD catches up to the commit.
@@ -590,9 +598,9 @@ A `--wont-fix` is a **proposal** only: actioning it is not acceptance — the re
 terminal by resolving or reopens it by rejecting. You never resolve or reject.
 ### Discovered work (stop → re-plan → implement)
 Implementation discovers work a plan did not enumerate; that is expected: **discovered work is planned before it is implemented.**
-- An implementer whose task's verb/target does not cover the change — a unit no task owns, a
-  different mechanism, a spec the code contradicts — **stops before editing** and returns the
-  diagnosis (findings, units needed, "nothing written yet", a proposed task shape).
+- An implementer whose task's operation edges do not cover the change — a unit no operation edge
+  owns, a different mechanism, a spec the code contradicts — **stops before editing** and
+  returns the diagnosis (findings, units needed, "nothing written yet", a proposed task shape).
 - Route it to authoring before re-dispatching: **`plan-writer`** adds a planned Implementation
   node plus a `creates` task per new unit, declared before the code exists; a spec gap goes to
   **`spec-writer`** in reconciliation mode through the spec-review cycle.
@@ -664,7 +672,8 @@ separate cargo projects, so their tiers run from their own directories, never by
   report — no `-exec`, no shell wrapper, no retry, no cause diagnosis on a graph tool failure.
 - **Never point a branch-built binary at the apg repo.** The installed release is the contract;
   verify a change-set by tests against a scratch `/tmp` repo, never by scanning the repo.
-- A `kind=gate` task is done only on an observed green run; a red gate means the phase is not
+- The gate done-rule belongs to the **gate-owning Agent**: that implementer runs the repo gate
+  and marks a gate task done only on an observed green run; a red gate means the phase is not
   done — never commit a red suite.
 ## Report
 Return: the question answered, with every FQN and path cited from a query rather than memory;

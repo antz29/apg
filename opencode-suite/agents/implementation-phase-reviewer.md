@@ -1,5 +1,5 @@
 ---
-description: Reviews the code implemented in a plan phase against that phase's plan + related spec (task verbs and their target FQNs, planned-node realization, acceptance criteria and verification items, Satisfies claims), verifying via the code graph on the branch. All good -> apg_plan_complete (milestone only); issues -> apg_review_add Feedback; on re-review resolve or reject. When all phases complete, runs the final implementation review (divergence discovery: fix code or reconcile the spec). No edit, no scan, no task done/undone, no spec/plan authoring.
+description: Reviews the code implemented in a plan phase against that phase's plan + related spec (task assignments and their operation-edge targets, planned-node realization, acceptance criteria and verification items, Satisfies claims), verifying via the code graph on the branch. All good -> apg_plan_complete (milestone only); issues -> apg_review_add Feedback; on re-review resolve or reject. When all phases complete, runs the final implementation review (divergence discovery: fix code or reconcile the spec). No edit, no scan, no task done/undone, no spec/plan authoring.
 mode: subagent
 hidden: true
 permissions:
@@ -265,12 +265,13 @@ durable targets need `--project <p>`, routing into the branch's transient mirror
 - **Constraints are prose** — the binary validates structure at write time and review judges
   whether the prose holds; a constraint's layer is its scope (global or a tier, R2), names
   no node, and is the acceptance criteria you check.
-- **Verification items are the plan's test tier** (`unit`/`int`/`e2e`), not graph content. A
-  task's `kind` is its owning role (`source`/`test`/`gate`/`docs`); `tier` is meaningful
-  only for `kind = test`.
-- **Task→Implementation verbs**: `creates` (a *planned* node at the target FQN),
-  `modifies`/`deletes` (code that must already resolve in the scanned graph),
-  `renames`/`moves` (source `target` + destination `new_fqn`).
+- **Task assignment and operations**: each task assigns exactly one `assigned-to` Agent and may
+  name the Component it `implements`; the code it touches is a per-kind operation edge —
+  `creates` (the *planned* destination only), `modifies`/`deletes` (code that must already
+  resolve in the scanned graph), `renames`/`moves` (the live source plus the `target`
+  destination) — and an empty edge set is a target-less activity.
+- **Gate ownership**: the repo gate belongs to the **gate-owning Agent**; a gate task is done
+  only on that Agent's observed green run, never asserted from a retired gate kind.
 - **Planned nodes** live at their real code FQN with `status: planned`; a **branch scan**
   finding the real code replaces it (`status` cleared, location filled, edges re-pointed),
   and one still `planned` for this phase is an unfinished deliverable, not a pass.
@@ -342,12 +343,13 @@ that `Note` (`apg_review_add <note-fqn> --project <p>`; the graph supports a
 review targeting a `Note`).
 ### The review procedure
 Phase reviews run against a **branch scan** of the proposed reality; the navigator scans,
-you never do. Read tasks with `apg_plan_tasks` (phase, kind, tier, status, verb, target,
-new_fqn). If a plan tool errors or returns nothing — or something you cannot interpret —
-**stop and report the exact failure to the coordinator**; never guess and never read the
-transient store directly. **Before reviewing anything, confirm the phase's `kind=gate` task
-is `done`**: a phase whose gate is red, unrun, or unasserted is returned **unreviewed** —
-never run it yourself and never infer greenness from the code.
+you never do. Read tasks with `apg_plan_tasks` (phase, title, status, assigned Agent,
+implements Component, operation edges). If a plan tool errors or returns nothing — or something
+you cannot interpret — **stop and report the exact failure to the coordinator**; never guess and
+never read the transient store directly. **Before reviewing anything, confirm the phase's gate
+task is `done` by the gate-owning Agent's observed green run**: a phase whose gate is red,
+unrun, or unasserted is returned **unreviewed** — never run it yourself and never infer
+greenness from the code.
 **Deterministic pre-pass before the semantic pass.** Run `apg_spec_lint` alongside `apg plan
 verify`; every error it reports is **blocking**, and `apg plan verify`'s `coverage
 incomplete:` clause is the authoritative change-set delta's coverage (step 2) — read it
@@ -361,10 +363,11 @@ before any semantic judgement.
    **change-set delta** — the merge-base delta's changed `implemented-by` claims (added,
    re-pointed, removed) from the `coverage incomplete:` clause; an unchanged pre-existing
    claim is exempt.
-3. **Verify the implementation in the graph.** Per task: **the verb's target is realized**
-   (`apg_find_symbol`; `creates` → real code, not `status: planned`; `modifies`/`deletes` →
-   the change is present at the FQN; `renames`/`moves` → old FQN gone and `new_fqn`
-   resolves), shape/location (`apg_struct`/`apg_methods`/`apg_file_units`) and `code_type`;
+3. **Verify the implementation in the graph.** Per task: **its operation edge's target is
+   realized** (`apg_find_symbol`; `creates` → real code, not `status: planned`;
+   `modifies`/`deletes` → the change is present at the FQN; `renames`/`moves` → old FQN gone
+   and the `target` destination resolves), shape/location
+   (`apg_struct`/`apg_methods`/`apg_file_units`) and `code_type`;
    **the relationships hold** (`apg_callers`/`apg_callees`/`apg_uses`/`apg_query` for the
    `SpecImplementedBy` spine, `Contains`, `Calls`/`Uses`); **the code itself** — read it
    against the constraints and the task, with `apg_hunk` scoping the diff.
@@ -405,8 +408,8 @@ implementation:
   done-gate; your gate is structural: code exists, is wired, matches the spec, all
   `Feedback` resolved. You hold no build/run surface (no `cargo`, no gate script) and are
   never granted one. **A phase whose gate is red, unrun, or unasserted is not reviewed** —
-  if its `kind=gate` task is not `done`, return it unreviewed; never re-run anything and
-  never infer greenness.
+  if its gate task has no observed green run from the gate-owning Agent, return it unreviewed;
+  never re-run anything and never infer greenness.
 - You **never merge** — the merge act and `apg project start` belong to the navigator.
 ## Report
 **The channel is Feedback, not a user-facing report.** Open with a `What this change does:`

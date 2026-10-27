@@ -207,16 +207,17 @@ note, and time-relative wording ("today", "now", "no longer", "currently", "was"
 are rewritten as what is.
 ### Constraint awareness
 The spec's laws are **`constraint` nodes** — prose, never executed; the layer is the scope (R2)
-and names no node. The binary validates structure at write time; whether the prose holds is
-assessed by review. Constraints are emergent — never a precondition; don't invent laws the spec
-doesn't need.
+and names no node. An **implementation-layer** constraint binds all of tier 4 unless it carries
+one **`applies-to` edge per Language it binds**, and every `applies-to` target is a Language node.
+The binary validates structure at write time; whether the prose holds is assessed by review.
+Constraints are emergent — never a precondition; don't invent laws the spec doesn't need.
 ### The spec graph (node-file model)
 Nodes — `apg node add|update|rm <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*`: the name is identity and is never updatable.
 Edges — `apg edge add|update|rm <kind> <from> <to> [--property k=v]* [--unset-property k]*`: `update` is properties-only; `add` refuses an existing FQN or edge (no implicit upsert).
 - **Tier 1** — `apg node add requirements requirement <name> --body … [--property feature=<feature>]` (and `stakeholder`/`user`); `requires` roots each requirement in a Stakeholder/User and `contains` decomposes the tree until each requirement is atomic and testable.
 - **Tier 2** — `apg node add domain group|actor|entity|value|service <name> --body … [--property kind=entity|event] [--property attribute=core|supporting|generic] [--property root=<name>]`: an `entity` requires `kind=entity|event`; a `group` takes `attribute` and an optional aggregate `root`; an `actor` is a participation identity that represents a User and interacts with services.
 - **Tier 3** — `apg node add solution system|container|component|person|role <name> --body … [--property kind=app|service|db|queue] [--property applies-to=container|component|both]`: the C4 hierarchy via `contains` (System ⊃ Container ⊃ Component); a `role` requires `applies-to`; a `person` represents an Actor and uses Components.
-- **Tier 4** — scanned code nodes, never authored by you.
+- **Tier 4** — scanned code nodes, never authored by you; an `implementation` **constraint** binds all of tier 4 unless it carries one `applies-to` edge per Language it binds, every target a Language node.
 - **Constraints** — `apg node add <layer> constraint <name> --body "X must hold"`: the layer is the scope.
 - **Notes** — `apg node add implementation note <name> --body …`, attached with `apg edge add details <note-fqn> <code-fqn>`: implementation-layer code, at most one note per code identity.
 - **Spine edges** — end-to-end traceability:

@@ -195,6 +195,9 @@ The spine is `Requirement ←driven-by— Service ←realises— Component
 Stakeholder/User and drive a Service, Services are realised by Components,
 Components resolve to real or planned code. Constraints are prose — the binary
 checks structure, satisfaction is your call; read the body against the code.
+An **implementation-layer** constraint binds all of tier 4 unless it carries one
+`applies-to` edge per Language it binds, and every target is a Language node —
+flag a silent narrowing or a non-Language target.
 Names match `[a-z0-9][a-z0-9-]*`, unique per (layer, type). A tier-1–3 body is
 one present-tense sentence of at most 244 characters (`requirements.requirement.spec-body-budget`); over budget is blocking.
 ## Hard limits

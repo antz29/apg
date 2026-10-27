@@ -346,10 +346,10 @@ above: a durable node/edge mutation is a session act.
 - **Stop-and-report.** Tool-failure prose is terminal: when a graph tool errors or returns nothing the agent stops
   and reports the exact failure (which tool, the invocation, what it returned or errored, the graph state) to the
   coordinator, who runs the scan — no raw-file fallback, no JSONL fallback, no retry, no cause diagnosis.
-- **Stop-and-report on discovered work.** An implementer that finds its task's verb/target does not cover the
-  change — a unit no task owns, a different mechanism, a spec the code contradicts — stops before editing and
-  returns the diagnosis plus a proposed task shape; the coordinator re-plans first (a planned node plus a
-  `creates` task per new unit, declared before the code exists).
+- **Stop-and-report on discovered work.** An implementer that finds its task's operation edges do not cover the
+  change — a unit no operation edge owns, a different mechanism, a spec the code contradicts — stops before editing
+  and returns the diagnosis plus a proposed task shape; the coordinator re-plans first (a planned node plus a
+  `creates` edge per new unit, declared before the code exists).
 - **No-internals prose.** Generated bodies name only the apg tools as the interface to the graph — no
   `.trans`/`layers` filesystem paths in prose.
 ### <name>-implementer (one per detected subsystem; file `<name>-implementer.md`)
@@ -380,9 +380,9 @@ above: a durable node/edge mutation is a session act.
   sibling cross-denial is honoured by the fs tools too. An agent whose grants include a root path would permit a
   main-checkout write: broken scaffold. The fs tools are worktree-only for **every** agent, the `release-agent`
   included.
-- **Discovered work stops the implementer.** A change beyond the task's verb/target is reported, not implemented:
-  the coordinator routes it to the plan-writer (or spec-writer) and re-dispatches. Discovered work is planned
-  before it is implemented.
+- **Discovered work stops the implementer.** A change its task's operation edges do not cover is reported, not
+  implemented: the coordinator routes it to the plan-writer (or spec-writer) and re-dispatches. Discovered work
+  is planned before it is implemented.
 - **Ponytail — the lazy-senior-developer discipline (fixed level: `ultra`).** Every implementer body carries it:
   the implementer is a **lazy senior developer**, and the best code is the code never written — it solves the
   whole problem with the **least new code**. The level is **fixed at `ultra`** — no interactive level switch and
@@ -415,6 +415,9 @@ above: a durable node/edge mutation is a session act.
   - **Return contract:** end the report to the coordinator with one or two lines stating what was **skipped** or
     not checked, and any **risk** the coordinator must know.
 - **`apg_plan_done` / `apg_plan_undone`** mark plan tasks done as they complete, and reverse that assertion.
+- **Gate ownership.** Name the gate-owning implementer and state the rule in its body: it runs the
+  repo gate and marks a gate task done only on an observed green run; a red gate means the
+  phase is not done.
 - **`apg_review`** is read-only: the implementer never actions Feedback — when it addresses an item it returns a
   claim (fixed/wont-fix) to the coordinator, who performs the shallow claim-vs-change check and then actions it.
 - **git: `add` + `commit` only** — no `push`/`tag` grant (absent verbs are denied by deny-by-default); git runs
@@ -555,7 +558,8 @@ commit the result on main with the agent files and the model map.
    `generated` field; deny-by-default permissions (exact patterns, no chaining, cross-denied, worktree-rooted
    globs, verified gates, commit-only git) carrying the common shape (read-guard, `question` dropped,
    stop-and-report tool-failure prose, no-internals body); the project-flow facts (agents operate inside the
-   project worktree, plan/task state is transient, node-file mutations are the spec-writer's, not theirs); the
+   project worktree, a task reaches the Agent its `assigned-to` edge names, plan/task state is transient,
+   node-file mutations are the spec-writer's, not theirs); the
    `opencode.json` merge; and the `AGENTS.md` hygiene edit — the last two on main, committed with the agent files.
 6. **Register** each generated agent into `codebase-navigator.md`'s `subagent` allowlist (deny-all default, named
    allows).
