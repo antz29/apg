@@ -1273,6 +1273,100 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase-05 task-2: `code_kinds_from_export` prefers the kind a **record
+    /// names** over the seed placeholder's `module` default
+    /// (`src/splice/seed.rs`, `tree_authored_identity`), so no FQN a record
+    /// names can be materialised at `module`.
+    ///
+    /// The export here is **partial**: it names its parent Module and one
+    /// realized Struct, and carries a `planned_node` record for a Function —
+    /// present, but not one of the four Implementation code records. The plan
+    /// store declares that Function and a second Struct, which resolve at
+    /// their declared kind, and it conflicts with the realized Struct's kind
+    /// to prove the export's kind wins. An FQN no record names stays **absent**
+    /// from the map — never invented as `module`. A BOGUS `db.lbug` proves the
+    /// accessor never opens it, and the map asserted here is exactly the one
+    /// `tree_authored_identity` reads for its placeholder kinds.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp_dir apg root + graph.jsonl/plan-store files); run via cargo test-e2e"]
+    fn code_kinds_from_export_prefers_the_recorded_planned_kind_over_the_module_fallback() {
+        let dir = std::env::temp_dir().join(format!("apg-kinds-recorded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let trans = dir.join(specs::TRANS);
+        std::fs::create_dir_all(trans.join("plans")).unwrap();
+
+        let graph = [
+            r#"{"type":"scan_meta","git_sha":"abc","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
+            r#"{"type":"module","fqn":"rust.apg"}"#,
+            r#"{"type":"struct","fqn":"rust.apg.Real","path":"src/real.rs","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
+            // Present in the export, but not a code record: skipped, so the
+            // plan store's declared kind is the only kind it has.
+            r#"{"type":"planned_node","fqn":"rust.apg.DeclaredFn","kind":"function","name":"DeclaredFn","parent":"rust.apg"}"#,
+            r#"{"type":"contains","from":"rust.apg","to":"rust.apg.Real"}"#,
+        ]
+        .join("\n");
+        std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
+
+        // Two FQNs the export names no code record for (declared Struct and
+        // Function), plus a conflicting re-declaration of the realized Struct
+        // — the export's Struct must beat the plan store's Function.
+        specs::write_jsonl(
+            &trans.join("plans").join("foo.jsonl"),
+            &[
+                Record::PlannedNode {
+                    fqn: "rust.apg.DeclaredStruct".into(),
+                    kind: "struct".into(),
+                    name: "DeclaredStruct".into(),
+                    parent: "rust.apg".into(),
+                },
+                Record::PlannedNode {
+                    fqn: "rust.apg.DeclaredFn".into(),
+                    kind: "function".into(),
+                    name: "DeclaredFn".into(),
+                    parent: "rust.apg".into(),
+                },
+                Record::PlannedNode {
+                    fqn: "rust.apg.Real".into(),
+                    kind: "function".into(),
+                    name: "Real".into(),
+                    parent: "rust.apg".into(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // A bogus DB — never opened by the kind accessor.
+        std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
+
+        let kinds = code_kinds_from_export(&dir).unwrap();
+        assert_eq!(
+            kinds.get("rust.apg.DeclaredStruct").map(String::as_str),
+            Some("struct"),
+            "a plan-declared Struct absent from the export resolves at its declared kind, not `module`"
+        );
+        assert_eq!(
+            kinds.get("rust.apg.DeclaredFn").map(String::as_str),
+            Some("function"),
+            "a plan-declared Function the export names only as a non-code record still resolves at its declared kind"
+        );
+        assert_eq!(
+            kinds.get("rust.apg.Real").map(String::as_str),
+            Some("struct"),
+            "a record the export names keeps the export's kind over the plan store's conflict"
+        );
+        assert!(
+            !kinds.contains_key("rust.apg.gone"),
+            "an FQN no record names stays absent from the map — the caller's `module` default is not invented here"
+        );
+        assert_eq!(
+            kinds.len(),
+            4,
+            "two export code records (`rust.apg`, `rust.apg.Real`) plus two plan-declared kinds"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase-01 task-19: a routed durable write through a live session is
     /// projected into the session-held `db.lbug` IMMEDIATELY — a separate
     /// routed reader sees the mutation before any save — but it is BUFFERED,
