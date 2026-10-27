@@ -350,19 +350,16 @@ never read the transient store directly. **Before reviewing anything, confirm th
 task is `done` by the gate-owning Agent's observed green run**: a phase whose gate is red,
 unrun, or unasserted is returned **unreviewed** — never run it yourself and never infer
 greenness from the code.
-**Deterministic pre-pass before the semantic pass.** Run `apg_spec_lint` alongside `apg plan
-verify`; every error it reports is **blocking**, and `apg plan verify`'s `coverage
-incomplete:` clause is the authoritative change-set delta's coverage (step 2) — read it
-before any semantic judgement.
+**Deterministic pre-pass before the semantic pass.** Run `apg_spec_lint`; every error it
+reports is **blocking** — read it before any semantic judgement.
 1. **Understand the phase.** `apg_plan` (overview), `apg_plan_phases` (health: unsatisfied
    requirements, gates cycles, empty phases, done-but-under-review), `apg_plan_tasks`
    (checklist); identify the phase's `Satisfies` claims.
 2. **Pull the spec contract.** Per satisfied requirement: body, tier-scoped `Constraint`s
    (`requirements.constraint.*` — layer is scope, names no node), `Note`s, and the spine
-   down to the solution nodes and their `SpecImplementedBy` code FQNs. Coverage is the
-   **change-set delta** — the merge-base delta's changed `implemented-by` claims (added,
-   re-pointed, removed) from the `coverage incomplete:` clause; an unchanged pre-existing
-   claim is exempt.
+   down to the solution nodes and their `SpecImplementedBy` code FQNs. The **change-set
+   delta** you review is the phase's tasks and their operation-edge targets
+   (`apg_plan_tasks`), checked against that spine; an unchanged pre-existing claim is exempt.
 3. **Verify the implementation in the graph.** Per task: **its operation edge's target is
    realized** (`apg_find_symbol`; `creates` → real code, not `status: planned`;
    `modifies`/`deletes` → the change is present at the FQN; `renames`/`moves` → old FQN gone
