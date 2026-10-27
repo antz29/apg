@@ -132,6 +132,27 @@ pub(crate) fn root_stem(root: &str) -> String {
         .unwrap_or_else(|| root.to_string())
 }
 
+/// The crate prefix one crate's declarations render under — the first segment
+/// of every module identity this frontend emits for the crate, before the
+/// ingestor roots that identity under the `rust` language root.
+///
+/// A declaration in a separate non-root cargo package lands at the prefix
+/// rendered for that package's target: [`package_prefix_map`]'s override gives
+/// a single-target package its cargo PACKAGE name (a nested `agentfrontend`
+/// package renders `agentfrontend`, whatever its directory), while a
+/// multi-target package with distinct target names keeps its per-target
+/// display-name fallback. Because the ingestor roots the identity verbatim, a
+/// declaration of `f` in that nested package reaches the graph as
+/// `rust.agentfrontend.f` — byte-for-byte the FQN of a planned node authored
+/// there. The `rust` language root is added ingestor-side, not here, and is the
+/// one tolerated portability segment between the identity this frontend emits
+/// and the planned node's FQN.
+///
+/// The lib + bin collision suffixes are exactly what planned-node realization
+/// must tolerate: the keeper (the lib target) keeps `rust.<pkg>`, and the
+/// single colliding bin renders `rust.<pkg>-bin`. A crate with no override
+/// (synthetic/no-manifest, distinct-name multi-target package, foreign crate)
+/// renders [`fallback_prefix`] unchanged.
 pub(crate) fn crate_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
     // The loaded project's override takes precedence (phase-05 task-10,
     // libbin-fix): the cargo PACKAGE name for a single-target package, and the
