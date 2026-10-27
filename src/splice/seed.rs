@@ -606,9 +606,10 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
 /// `details`, `reviews`) exactly as the real scan's assembled graph does — the
 /// real scan has the actual code nodes; the tree has none. A `PlannedNode`
 /// placeholder enters at its exact FQN (no language re-rooting) at the
-/// Implementation kind the export resolves for that FQN — `module` only where
-/// the export names none — so the kind-paired Task operation edges
-/// (`struct_modify` and its siblings) survive finalize exactly as they do
+/// recorded kind [`crate::artifacts::code_kinds_from_export`] resolves for that
+/// FQN — the export's code record, else the plan store's declared kind, and
+/// `module` only for a FQN no record names — so the kind-paired Task operation
+/// edges (`struct_modify` and its siblings) survive finalize exactly as they do
 /// against the real nodes. Being a code kind, the placeholder contributes no
 /// authored row to the digest; its only effect is to keep those edges. The
 /// export's `agent` records are carried the same way, as `Agent` placeholders,
@@ -635,11 +636,12 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
     // Placeholder code nodes for the code universe — the analog of the real
     // scan's actual code nodes, without which `ingest`'s finalize would prune
     // every authored→code edge (the target node would be absent). Each carries
-    // the Implementation kind the export resolves, so the kind-paired Task
-    // operation edges survive finalize; only a FQN the export does not name
-    // falls back to `module`. Code kinds contribute no authored row, so the
-    // digest is unchanged by their presence other than through the edges they
-    // keep.
+    // the recorded Implementation kind, so the kind-paired Task operation edges
+    // survive finalize — a stale or partial export cannot drop them, because
+    // the plan store's declared kind covers a FQN the export omits. Only a FQN
+    // no record names (a plan declaration carrying no kind) falls back to
+    // `module`. Code kinds contribute no authored row, so the digest is
+    // unchanged by their presence other than through the edges they keep.
     let kinds = crate::artifacts::code_kinds_from_export(apg_root)?;
     for fqn in scanned.iter().chain(planned.iter()) {
         records.push(Record::PlannedNode {
