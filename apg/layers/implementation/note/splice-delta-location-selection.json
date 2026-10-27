@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "splice-delta-location-selection",
+  "body": "Limit: the splice delta selects only nodes whose location path is in the re-emission target set, so a location-less planned placeholder is never selected for the located kinds and a declaration whose file is cached/unchanged is never re-emitted — a placeholder masking such a declaration cannot be realized by the splice. Upgrade when a scan must realize a declaration whose file is cached/unchanged.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.apply.location_in_targets",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

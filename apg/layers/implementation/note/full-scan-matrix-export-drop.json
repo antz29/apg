@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "full-scan-matrix-export-drop",
+  "body": "Limit: the full-scan matrix drops the branch's seeded export before authoring, simultaneously forcing NoPreviousExport and letting Module/File be declared planned although the crate/file already exist; a fixture that must pin authoring-time acceptance against a live branch DB can only declare Struct/Function at absent FQNs. Upgrade when a test needs to pin authoring acceptance rather than realization.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.planned_node_of_every_kind_realizes_on_a_full_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
