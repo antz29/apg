@@ -10689,4 +10689,224 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// Phase-01 task-1 (e2e): the full-scan realization matrix for a ROOT
+    /// crate. A planned `Module`, `File`, `Struct` and `Function` each declared
+    /// at its root-crate FQN must be REALIZED by the next full load — the
+    /// placeholder replaced by the scanned declaration: `status` cleared, the
+    /// location filled (File/Struct/Function), and the FQN kept. Module is
+    /// inherently location-less (SPEC §4), so its realization is status + kind
+    /// only.
+    ///
+    /// The scan is forced onto the FULL-LOAD path (the branch's seeded export
+    /// and DB are removed first), which is the seam this matrix evidence-gates:
+    /// the incremental splice is a different path, covered by
+    /// `splice_e2e::planned_node_realizes_on_the_splice_for_every_kind`.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
+    /// scan is real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
+    fn planned_node_of_every_kind_realizes_on_a_full_scan() {
+        /// Asserts one kind's outcome and appends its observed row to the
+        /// evidence matrix, so a red run names every kind's pre-fix state.
+        fn check(
+            recs: &[serde_json::Value],
+            kind: &str,
+            fqn: &str,
+            located: bool,
+            matrix: &mut Vec<String>,
+            failures: &mut Vec<String>,
+        ) {
+            let rec = recs
+                .iter()
+                .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(fqn));
+            let status = rec
+                .and_then(|r| r.get("status"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let ty = rec
+                .and_then(|r| r.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let start = rec
+                .and_then(|r| r.get("start_line"))
+                .and_then(|v| v.as_u64());
+            let end = rec.and_then(|r| r.get("end_line")).and_then(|v| v.as_u64());
+            let path = rec
+                .and_then(|r| r.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            matrix.push(format!(
+                "{kind} `{fqn}`: record={} type={ty:?} status={status:?} lines={start:?}..{end:?} path={path:?}",
+                rec.is_some()
+            ));
+            let Some(_) = rec else {
+                failures.push(format!(
+                    "{kind} `{fqn}`: FQN not kept — the node is absent from the export"
+                ));
+                return;
+            };
+            if ty != kind {
+                failures.push(format!("{kind} `{fqn}`: realized as `{ty}`, not `{kind}`"));
+            }
+            if status == "planned" {
+                failures.push(format!(
+                    "{kind} `{fqn}`: LEFT PLANNED — status was not cleared by the full load"
+                ));
+            }
+            if located {
+                let (s, e) = (start.unwrap_or(0), end.unwrap_or(0));
+                if s == 0 || e < s {
+                    failures.push(format!(
+                        "{kind} `{fqn}`: location not filled (start_line={s}, end_line={e})"
+                    ));
+                }
+                if kind != "file" && path != "src/lib.rs" {
+                    failures.push(format!(
+                        "{kind} `{fqn}`: wrong path `{path}` (want `src/lib.rs`)"
+                    ));
+                }
+            }
+        }
+
+        const MODULE_FQN: &str = "rust.planned-realize";
+        const FILE_FQN: &str = "src/lib.rs";
+        const STRUCT_FQN: &str = "rust.planned-realize.Widget";
+        const FUNCTION_FQN: &str = "rust.planned-realize.compute";
+
+        let base = std::env::temp_dir().join(format!("apg-planned-realize-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A ROOT cargo crate. The declared FQNs are absent at this point (only
+        // `placeholder` exists), so `plan add planned` accepts them as a plan
+        // of the delta, not the present.
+        scratch_repo_init(&repo_dir);
+        // A Rust scan runs cargo metadata, which writes `Cargo.lock`; target/
+        // and the lock stay out of git so the checkout remains clean for
+        // `project start`'s clean-default gate (this fixture is a library).
+        std::fs::write(repo_dir.join(".gitignore"), "Cargo.lock\n/target\n").unwrap();
+        std::fs::write(
+            repo_dir.join("Cargo.toml"),
+            "[package]\nname = \"planned-realize\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(repo_dir.join("src")).unwrap();
+        std::fs::write(
+            repo_dir.join("src/lib.rs"),
+            "pub fn placeholder() -> i32 { 0 }\n",
+        )
+        .unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        run(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        // `project start` seeds the branch DB from main's scan.
+        run(&repo_dir, &["scan", ".", "--language", "rust"]);
+        run(&repo_dir, &["project", "start", "demo"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+
+        // Drop the branch's seeded export/DB. This is the fresh-branch state a
+        // plan is authored in — nothing at these FQNs is scanned code yet — so
+        // the four declarations are a plan of the delta, not the present; it
+        // also forces the evidence scan onto the FULL-LOAD path (without a
+        // previous export the incremental preparation cannot splice).
+        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
+            let _ = std::fs::remove_file(wt.join(rel));
+        }
+
+        // Declare the four planned nodes through the real authoring surface —
+        // exactly the records a scan reads out of `.trans/plans/<project>.jsonl`.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        for (kind, fqn, name) in [
+            ("module", MODULE_FQN, "planned-realize"),
+            ("file", FILE_FQN, "lib.rs"),
+            ("struct", STRUCT_FQN, "Widget"),
+            ("function", FUNCTION_FQN, "compute"),
+        ] {
+            run(
+                &wt,
+                &["plan", "add", "demo", "planned", kind, fqn, "--name", name],
+            );
+        }
+
+        // The real declarations land at those FQNs.
+        std::fs::write(
+            wt.join("src/lib.rs"),
+            "pub struct Widget {\n    pub value: i32,\n}\n\npub fn compute(value: i32) -> i32 {\n    value + 1\n}\n\npub fn placeholder() -> i32 { 0 }\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "implement the planned nodes");
+
+        // A full load: the branch has no seeded export/DB, so the scanner
+        // re-emits the whole tree and the ingestor assembles from scratch.
+        run(&wt, &["scan", ".", "--language", "rust"]);
+
+        let recs = export_records(&wt);
+        let mut matrix = Vec::new();
+        let mut failures = Vec::new();
+        check(
+            &recs,
+            "module",
+            MODULE_FQN,
+            false,
+            &mut matrix,
+            &mut failures,
+        );
+        check(&recs, "file", FILE_FQN, true, &mut matrix, &mut failures);
+        check(
+            &recs,
+            "struct",
+            STRUCT_FQN,
+            true,
+            &mut matrix,
+            &mut failures,
+        );
+        check(
+            &recs,
+            "function",
+            FUNCTION_FQN,
+            true,
+            &mut matrix,
+            &mut failures,
+        );
+        assert!(
+            failures.is_empty(),
+            "full-scan planned-node realization matrix (pre-fix evidence):\n{}\nfailures:\n{}",
+            matrix.join("\n"),
+            failures.join("\n")
+        );
+        println!(
+            "full-scan planned-node realization matrix:\n{}",
+            matrix.join("\n")
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
