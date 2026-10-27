@@ -120,6 +120,14 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
 /// Admits `node` at `fqn`, streaming one progress symbol when a code kind is
 /// admitted ([`Progress::node`] is silent for every other kind). The early
 /// returns below admit nothing and so emit nothing.
+///
+/// A planned placeholder and a scanned declaration at the same FQN converge on
+/// the declaration for all four Implementation kinds — Module, File, Struct and
+/// Function: the FQN is kept, `status: planned` is cleared, and the node carries
+/// the declaration's own kind and location (a Module is location-less, SPEC §4).
+/// The admission order does not change that: a declaration admitted after a
+/// placeholder replaces it, and a placeholder admitted after a declaration is
+/// dropped.
 fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut Progress<'_>>) {
     // A real declaration replaces an unresolved-target placeholder (which lives
     // only in `graph.nodes`, not in `seen`), never the other way around.
