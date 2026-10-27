@@ -40,6 +40,7 @@ import {
 // tool module runs `Plugin.define({ id, setup })` at module scope, so the
 // registration-shape e2e below can assert the returned plugin object directly.
 import apgQuery from "../tools/apg_query.ts"
+import apgScan from "../tools/apg_scan.ts"
 
 /// A faked opencode 2.x tool-executor context — the V2 shape
 /// `{ agent, sessionID, messageID, id }` (no V1 `directory`/`worktree`) — plus
@@ -1017,6 +1018,66 @@ test.skipIf(!enabled)(
       expect(started as string).toBe(NO_DB_ERROR)
       expect(Date.now() - t3).toBeLessThan(5000)
     } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+  15000,
+)
+
+// scan-force phase-02.task-3: the `apg_scan` tool's spawned argv carries
+// `--force` when the caller asks for a from-scratch rebuild, and not otherwise.
+// `APG_BINARY` points at an argv-recording STUB, so the stub replaces the binary
+// entirely: no real scan runs, let alone against the apg repo
+// (`global.constraint.no-real-project-test`).
+test.skipIf(!enabled)(
+  "e2e: apg_scan passes --force to the spawned scan only when force is set",
+  async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-scan-force-"))
+    // The scratch project carries an `apg/.trans` dir so the tool's
+    // findProjectRoot resolves repo as the root from the plugin load location.
+    const repo = path.join(base, "repo")
+    fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
+
+    const recorded = path.join(base, "argv.txt")
+    const stub = path.join(base, "stub-apg")
+    // Record the argv the tool hands over, then exit 0 (an empty summary
+    // renders as the tool's "Scan completed successfully.").
+    fs.writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" > '${recorded}'\nexit 0\n`, {
+      mode: 0o755,
+    })
+    const argv = () => fs.readFileSync(recorded, "utf8").split("\n").filter(Boolean)
+
+    type AddedTool = {
+      execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
+    }
+    const added: AddedTool[] = []
+    const editor = { add: (tool: AddedTool) => added.push(tool) }
+
+    const previousBinary = process.env.APG_BINARY
+    process.env.APG_BINARY = stub
+    try {
+      await apgScan.setup({
+        location: { directory: repo },
+        permission: { assert: async () => {} },
+        tool: { transform: async (fn: (e: typeof editor) => void) => void fn(editor) },
+      } as never)
+      expect(added).toHaveLength(1)
+      const tool = added[0]
+
+      // force: true -> the spawned scan carries --force.
+      expect(await tool.execute!({ force: true }, v2Context(repo))).toEqual({
+        content: "Scan completed successfully.",
+      })
+      expect(argv()).toEqual(["scan", repo, "--force"])
+
+      // force omitted -> the default scan argv, with no --force.
+      expect(await tool.execute!({}, v2Context(repo))).toEqual({
+        content: "Scan completed successfully.",
+      })
+      expect(argv()).toEqual(["scan", repo])
+    } finally {
+      if (previousBinary === undefined) delete process.env.APG_BINARY
+      else process.env.APG_BINARY = previousBinary
       fs.rmSync(base, { recursive: true, force: true })
     }
   },

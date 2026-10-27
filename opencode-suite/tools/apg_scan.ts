@@ -27,7 +27,7 @@ export default Plugin.define({
         name: "apg_scan",
         options: { codemode: false },
         description:
-          "Rebuild the project's LadybugDB graph database (apg/.trans/db.lbug + apg/.trans/graph.jsonl) by running the apg scanner + ingestor pipeline. Run this when source files have changed and the graph is stale.",
+          "Rebuild the project's LadybugDB graph database (apg/.trans/db.lbug + apg/.trans/graph.jsonl) by running the apg scanner + ingestor pipeline. Run this when source files have changed and the graph is stale. Pass `force` for a from-scratch rebuild: it discards the derived index and export and re-runs every frontend instead of reusing the shared fact store, leaving apg/layers and source files untouched.",
         input: {
           type: "object",
           properties: {
@@ -51,6 +51,11 @@ export default Plugin.define({
               type: "string",
               description: "Comma-separated module dirs to scan (Go/C++). Restricts scanning to these modules; defaults to auto-discovery.",
             },
+            force: {
+              type: "boolean",
+              description:
+                "Force a from-scratch rebuild: discard apg/.trans/db.lbug (with its sidecars) and apg/.trans/graph.jsonl, and re-run every frontend rather than reusing the shared fact store. apg/layers and source files are left untouched.",
+            },
           },
           required: [],
           additionalProperties: false,
@@ -68,6 +73,9 @@ export default Plugin.define({
 
           const spawnArgs: string[] = [apgBinary(), "scan", dir]
 
+          if (input.force) {
+            spawnArgs.push("--force")
+          }
           if (input.language) {
             spawnArgs.push("--language", input.language)
           }

@@ -44,6 +44,7 @@ import apgSession from "../tools/apg_session.ts"
 import apgPlanTasks from "../tools/apg_plan_tasks.ts"
 import apgPlan from "../tools/apg_plan.ts"
 import apgReview from "../tools/apg_review.ts"
+import apgScan from "../tools/apg_scan.ts"
 
 test("lit single-quotes and escapes \\ ' \" and newlines", () => {
   expect(lit("plain")).toBe("'plain'")
@@ -806,6 +807,7 @@ test("mainAnchoredResource takes no canonicaliser argument", () => {
 // test stays pure in-memory.
 
 type AddedToolProperty = {
+  type?: string
   description?: string
   items?: { properties?: Record<string, AddedToolProperty>; required?: string[] }
 }
@@ -919,4 +921,17 @@ test("apg_plan's overview derives each phase's targets from the operation edges"
   expect(tool.description ?? "").toContain(
     "targets — derived from each task's assigned Agent, implements Component and per-kind operation edges",
   )
+})
+
+// scan-force phase-02.task-2: `apg scan --force` is a true rebuild (discard the
+// derived index + export, re-run every frontend instead of reusing the shared
+// fact store). The tool-level `description` is the surface an agent reads to
+// DISCOVER the option, so both it and the `force` input are pinned; `execute`
+// never runs here (the argv it assembles is pinned in the opt-in boundary e2e).
+test("apg_scan declares a boolean force input and names the from-scratch rebuild in its description", async () => {
+  const tool = await registeredTool(apgScan)
+  expect(tool.name).toBe("apg_scan")
+  expect(tool.input?.properties?.force?.type).toBe("boolean")
+  expect(tool.input?.properties?.force?.description).toContain("from-scratch rebuild")
+  expect(tool.description ?? "").toContain("from-scratch rebuild")
 })
