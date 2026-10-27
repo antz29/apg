@@ -273,9 +273,12 @@ pub fn ingest_with_reuse(
 }
 
 /// Merges cached per-file fact units into an assembled graph. A fresh node at
-/// an FQN wins; a cached node fills a gap. Cached edges are added only when
-/// both endpoints exist after the merge (the same dangling-edge rule the
-/// ingestor applies), and a cached edge already present is a no-op.
+/// an FQN wins; a cached node fills a gap and supersedes a `planned`
+/// placeholder — the plan store's placeholder never masks the real declaration
+/// the cache still holds, exactly as a scanned declaration supersedes one in
+/// [`insert_node`]. Cached edges are added only when both endpoints exist after
+/// the merge (the same dangling-edge rule the ingestor applies), and a cached
+/// edge already present is a no-op.
 ///
 /// The merge is deliberately THREE passes — every unit's nodes first, then the
 /// module records, then every unit's edges — so a cross-file edge whose
@@ -297,7 +300,8 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     }
 
     // Pass 1: every unit's nodes (a fresh node at an FQN wins; a cached node
-    // fills a gap; an UnresolvedTarget placeholder yields to a real node).
+    // fills a gap or supersedes a `planned` placeholder; an UnresolvedTarget
+    // placeholder yields to a real node).
     for (frag, stored_root, lang) in &loaded {
         select_language(&mut progress, lang);
         let (modules, nodes, _) = frag.project(stored_root, &reuse.reader_root);
@@ -316,6 +320,14 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
                     }
                     graph.nodes.insert(fqn, node);
                 }
+                // A cached declaration supersedes a `planned` placeholder exactly
+                // as a scanned declaration does in [`insert_node`]: the plan
+                // store's placeholder never masks real code the cache holds.
+                Some(existing)
+                    if existing.status.as_deref() == Some("planned") && node.status.is_none() =>
+                {
+                    graph.nodes.insert(fqn, node);
+                }
                 Some(_) => {
                     // A freshly re-emitted node (or another cached unit's node)
                     // already claims the FQN; keep it.
@@ -328,11 +340,22 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
         }
     }
 
+    // A cached Module is admitted where the graph has no node, or where the
+    // node at its FQN is a `planned` placeholder the cached declaration
+    // supersedes (`insert_node` swaps the placeholder for the real Module); any
+    // other present node keeps its claim.
+    let module_needs_insert = |graph: &Graph, fqn: &str| {
+        graph
+            .nodes
+            .get(fqn)
+            .is_none_or(|n| n.status.as_deref() == Some("planned"))
+    };
+
     // Pass 2: cached module records — a module declared by a reused unit must
     // exist for its Module→File `contains` edges to survive. Inserted when the
-    // spool did not emit it.
+    // spool emitted no real Module at the FQN.
     for (m, lang) in cached_modules {
-        if !graph.nodes.contains_key(&m) {
+        if module_needs_insert(graph, &m) {
             select_language(&mut progress, &lang);
             insert_node(
                 graph,
@@ -362,7 +385,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
         };
         select_language(&mut progress, lang);
         for m in &scaffolding.modules {
-            if !graph.nodes.contains_key(m) {
+            if module_needs_insert(graph, m) {
                 insert_node(
                     graph,
                     m.clone(),
