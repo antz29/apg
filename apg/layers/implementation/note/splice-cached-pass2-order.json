@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "splice-cached-pass2-order",
-  "body": "splice_cached's pass-2 cached module records iterate a HashMap, so per-language counts are order-independent but the symbol emission order on the pass-2 path is nondeterministic. Upgrade to a BTreeMap when deterministic stream order is ever required.",
+  "body": "splice_cached's pass-2 cached module records iterate a HashMap, so per-language counts are order-independent but the symbol emission order on the pass-2 path is nondeterministic. The pass-1 merge admits a cached real declaration over a planned placeholder, and the pass-2/pass-2b module guards treat any planned node as absent, so a superseded placeholder and the real cached declaration each emit one progress symbol at the same FQN; upgrade if a progress tally is ever asserted per final FQN. Pass 2b's Language guard remains `contains_key` because a plan-store placeholder is never a Language. Upgrade the module map to a BTreeMap when deterministic stream order is ever required.",
   "properties": {},
   "out": [
     {

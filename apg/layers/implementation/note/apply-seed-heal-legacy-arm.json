@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "apply-seed-heal-legacy-arm",
+  "body": "Limits: the seed-row heal is a legacy-DB defense arm — post-assembly-fix no CLI sequence produces the planned-row-plus-cached-real-declaration seed state (authoring refuses realized FQNs; any landing scan targets the declaration file; a sibling warm scan trips the stale-seed guard into a full load), so the arm is pinned only by the direct-apply fixture, which additionally forges the delta's removed_fqns for the assembled-absent boundary; the heal keys the literal planned status and an unset/empty assembled status, so a new placeholder status spelling or a fifth plan-declarable kind must extend seed_planned_located/assembled_real; a superseded planned placeholder authored no outgoing code rels, so the step-3 authored-rel delete is inert for it. Upgrade if a CLI-observable legacy seed path, a new placeholder status or kind, or placeholders carrying outgoing edges appear.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.apply.apply",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cached-declaration-e2e-oracle-scope",
+  "body": "Limits: the export oracle scopes out the language-scaffolding records (the bare language root and Contains edges incident to it), because the reuse spool carries no module records so the assembly lacks a Language node while the no-reuse reference materialises one from a Record::Module — upgrade to a strict full-export comparison when the reuse assembly replays the language root on the spawned path; and the Module arm exercises pass 2, not pass 2b (skipped_langs empty) — add a skipped-language fixture if pass 2b's planned-aware guard ever needs direct pinning.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.ingest_e2e.e2e.cached_declaration_supersedes_a_planned_placeholder",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "upsert-arms-planned-row-span-clobber",
-  "body": "Limit: the located (Struct/Function/File) arms CASE-guard only status against a planned incoming row; location and code_type are still written unconditionally in ON MATCH, so a planned located row — if a future delta selection admits one — would clobber the realized node's span with its zero-valued location. Upgrade by CASE-guarding the location/code_type properties in the located arms if a change admits planned located rows into the splice delta.",
+  "body": "Limit: the located (Struct/Function/File) arms' ON MATCH CASE guards only status; location and code_type are written unconditionally. The Phase-7 seed-row heal now routes planned located seed rows through these arms, and safety rests on the heal's gate (assembled node real AND located), not on the upsert guard — the arriving row carries the real declaration's own span, so the zero-span clobber requires an admitted row whose assembled node lacks a location, which the gate excludes. Upgrade by CASE-guarding the location/code_type properties in the located arms if a future selection can admit rows without an assembled location.",
   "properties": {},
   "out": [
     {
