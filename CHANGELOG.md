@@ -9,6 +9,75 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.27.0
+
+Minor release: `apg scan` now graphs the agent definitions apg distributes, the
+plan task record is edge-modelled, planned nodes are realised on every build
+path, `apg scan --force` is a true rebuild, and `apg init` installs a ninth
+(researcher) agent with a gitignored `apg/.scratch/` workspace.
+
+**Agent frontend and `Agent` nodes.** A new bundled frontend (`agentfrontend`,
+`src/agentlib` — stable Rust + `serde`/`serde_json`, nothing needed on `PATH` at
+scan time) graphs each definition file under `.opencode/agents/` as exactly one
+`Agent` node per file, keyed by the extension-stripped file stem at its
+repo-relative path and line span (`agent.<file-stem>`). It joins the scan driver
+as the `agent` language id with its own non-fallback `--id-prefix`, ships in the
+base `scanner` package beside `structfrontend` (formula, Linux tarball and
+installer alike), and is carried through ingest, the DB projection, the
+`graph.jsonl` export, the fact cache and the incremental splice fast path; the
+structural scanner no longer claims `.opencode/agents/`, so the tree is claimed
+exactly once. `Agent` is the identity a plan task's `assigned-to` edge names.
+
+**Edge-modelled plan tasks.** A `Task` now carries only `title` and `status`; its
+model is its edges — exactly one `assigned-to` `Agent`, an optional `implements`
+`Component`, and one per-kind operation edge per operation
+(`creates`/`modifies`/`deletes`/`renames`/`moves`, rendered
+`module_`/`file_`/`struct_`/`function_`-prefixed) with `--target` naming a
+renames/moves destination. The task-only `kind`/`tier`/`verb`/`target`/`new_fqn`
+fields are retired from the wire schema, ingest, projection and export.
+`apg plan add`/`update` author the edges, `apg plan render` groups tasks by their
+assigned agent and prints one line per operation edge, the plan overview derives
+its targets column from them, `apg_plan_tasks` reports an assigned agent missing
+from the branch graph as drift, and the verify gate's coverage check reads every
+operation-edge destination.
+
+**Planned-node realisation is total.** A planned node is replaced by the real
+declaration at its FQN on both build paths — full scan and incremental splice —
+for all four implementation kinds, across crate boundaries, with its incident
+edges re-pointed and its kind preserved; a node that is still planned survives
+both paths unchanged, and the verify gate now judges realisation.
+
+**`apg scan --force`.** A true rebuild: it discards `db.lbug` (with its
+`wal`/`shm` sidecars) and `graph.jsonl` before scanning, and bypasses both reuse
+paths — the unchanged-tree fast path and the shared fact store's warm cache and
+incremental fact reuse — so every frontend re-runs. The store itself and
+`apg/layers/**` are left untouched, and without the flag both reuse paths behave
+exactly as before. The `apg_scan` suite tool exposes the same flag.
+
+**Ninth agent, research escalation and the scratch surface.** `apg init` now
+installs nine distributed agents — the read-only `researcher` joins the roster —
+and scaffolds a gitignored `apg/.scratch/` (created by `apg init` and
+`apg project start`, its `.gitignore` entry added exactly once) where the
+researcher writes its result markdown. Spec-writer, plan-writer, spec-review and
+plan-review return a RESEARCH REQUEST when research blocks them; the navigator
+triages it and re-dispatches that stage fresh rather than guessing.
+
+**Guards, locking and schema documentation.** Node/edge, plan and review
+mutations run their project-context guard before resolving the session, plan
+store or target, and every refusal names the current branch and the fix;
+`apg init` refuses a target inside a linked worktree; `apg session start`
+requires a project context; a scan holds the extended write lock across the whole
+pipeline; spec freshness is judged under that lock; and `apg session end`/`abort`
+wait for the server to remove its socket. A new normative `SCHEMA.md` states the
+edge-kind matrix, the whole-model cardinalities, the tier-4 `Agent` class and the
+edge-modelled task record; the scan `Language` vocabulary covers every structural
+stream id; an implementation-layer constraint may now carry one `applies-to` edge
+per Language it binds (without one it binds all of tier 4), round-tripped through
+merge and the export reader; and the `apg spec lint` documentation now states it
+blocks R3/R4 (R2 is enforced at write time, not linted).
+
+No durable-spec model change.
+
 ## v0.26.0
 
 Minor release: the distributed navigator can now dispatch the `migration-agent`,
