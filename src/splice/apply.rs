@@ -171,11 +171,18 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
 
     // --- 1. Select the delta's code units from the assembled graph ---------
     //
-    // The seeded Module FQNs, fetched ONCE (also reused for the delete scope in
-    // step 2): a module the seed does not own — a package/dir the previous scan
-    // did not have — is always re-decided, because the seed can vouch for
-    // neither its row nor its outgoing Contains rels.
-    let seeded_modules: BTreeSet<String> = seed_modules(conn)?.into_iter().collect();
+    // Every seeded Module FQN with its planned flag, fetched ONCE (also reused
+    // for the delete scope in step 2): a module the seed does not own — a
+    // package/dir the previous scan did not have — is always re-decided, because
+    // the seed can vouch for neither its row nor its outgoing Contains rels.
+    // Only a real row is in the delete scope; a `planned` placeholder is owned
+    // by the seed but never disappears.
+    let seeded_modules = seed_modules(conn)?;
+    let seeded_real: BTreeSet<&str> = seeded_modules
+        .iter()
+        .filter(|(_, planned)| !**planned)
+        .map(|(fqn, _)| fqn.as_str())
+        .collect();
     let mut delta_funcs: Vec<String> = Vec::new();
     let mut delta_structs: Vec<String> = Vec::new();
     let mut delta_agents: Vec<String> = Vec::new();
@@ -206,7 +213,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 // carry them (a skipped language's scaffolding) — that guard is
                 // preserved. A delta File/Module added UNDER an untouched module
                 // is handled additively by the `Contains` merge in step 6.
-                if reached(fqn) || !seeded_modules.contains(fqn) {
+                if reached(fqn) || !seeded_real.contains(fqn.as_str()) {
                     delta_modules.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Module");
                 }
@@ -249,12 +256,12 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // path (or whose FQN directly names one, for a File) is therefore in scope;
     // it disappears iff the assembled graph does not re-emit it.
     let mut in_scope: BTreeMap<String, &'static str> = code_fqns_in_paths(conn, delta.targets)?;
-    for m in &seeded_modules {
+    for &m in &seeded_real {
         // Only a module whose ENTIRE file subtree is in the delta can be
         // genuinely gone; an untouched module (or one with any reused file left)
         // is left exactly as the seed left it.
         if fully_reached(m) {
-            in_scope.insert(m.clone(), "Module");
+            in_scope.insert(m.to_string(), "Module");
         }
     }
     for fqn in delta.removed_fqns {
@@ -569,15 +576,18 @@ fn code_fqns_in_paths(
     Ok(out)
 }
 
-/// Every **real** seeded Module FQN — `planned` placeholder modules are
-/// transient records the splice never owns (the authored/transient seed
-/// assumption), so they are excluded from the delete scope.
-fn seed_modules(conn: &Connection) -> anyhow::Result<Vec<String>> {
+/// Every seeded Module FQN with whether it is a `planned` placeholder. The flag
+/// keeps the two facts apart: the seed owns the Module row either way, but only
+/// a real row can ever disappear from the delete scope.
+fn seed_modules(conn: &Connection) -> anyhow::Result<BTreeMap<String, bool>> {
     let (_, rows) = query_rows(
         conn,
-        "MATCH (n:Module) WHERE n.status IS NULL OR n.status <> 'planned' RETURN n.fqn AS fqn",
+        "MATCH (n:Module) RETURN n.fqn AS fqn, n.status AS status",
     )?;
-    Ok(rows.iter().map(|r| cell(r, 0)).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (cell(r, 0), cell(r, 1) == "planned"))
+        .collect())
 }
 
 /// The File FQNs transitively contained under each seeded Module — the module's
