@@ -3450,4 +3450,458 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// Phase-03 task-1 (e2e): the INCIDENT-EDGE realization matrix. Every
+    /// FQN-keyed edge family incident to a planned Implementation node must
+    /// still resolve to the **real** node after the incremental splice lands
+    /// the declaration at that FQN:
+    ///
+    /// * the per-kind task operation edge (`module_create` … `function_create`),
+    /// * a renames/moves destination (the task `Target` edge),
+    /// * a Component's `implemented-by` (`SpecImplementedBy`),
+    /// * a Note's `details` (`Details`),
+    /// * the parent `Contains` edge.
+    ///
+    /// One planned `Module`, `File`, `Struct` and `Function` is declared, every
+    /// family is projected onto each placeholder, the declaration is landed,
+    /// and the incremental splice realizes it. Each family is queried BOTH
+    /// before the splice (the edge really was keyed on the planned FQN — so a
+    /// post-splice miss is a DROP, never a fixture that never authored it) and
+    /// after (the edge resolves to the node with `status: planned` cleared).
+    /// The kept-vs-dropped verdict is printed per family per kind; a dropping
+    /// family fails with the whole matrix in the panic message, so the Phase-3
+    /// source tasks (filter_task_ops / finalize_graph) decide what to fix from
+    /// evidence rather than suspicion.
+    ///
+    /// The transient plan rows are authored through the candidate binary's
+    /// `apg plan add` surface (which projects them into the branch DB exactly as
+    /// an agent authoring the plan would); the durable Component/Note rows are
+    /// written under `apg/layers/` and projected through the same
+    /// `artifacts::reingest_layers` seam the session's admission path uses — a
+    /// whole-model `session save` is out of scope here, and the fixture's
+    /// authored rows are byte-identical to the scan's own `ingest_tree`
+    /// records.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
+    /// scan is real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust+agent frontends/db.lbug); run via cargo test-e2e"]
+    fn realization_keeps_every_incident_edge_on_the_real_node() {
+        use apg::artifacts;
+        use apg::testutil::{ApgCommand, Repo, wt_commit};
+        use std::collections::BTreeSet;
+
+        const MODULE_FQN: &str = "rust.planned-splice.widget";
+        const FILE_FQN: &str = "src/widget.rs";
+        const STRUCT_FQN: &str = "rust.planned-splice.widget.Widget";
+        const FUNCTION_FQN: &str = "rust.planned-splice.widget.compute";
+        // The live code each renames/moves source names, so the plan-authoring
+        // validation resolves it against the branch graph.
+        const LIVE_MODULE: &str = "rust.planned-splice";
+        const LIVE_FILE: &str = "src/lib.rs";
+        const LIVE_STRUCT: &str = "rust.planned-splice.Placeholder";
+        const LIVE_FUNCTION: &str = "rust.planned-splice.placeholder";
+        const COMPONENT_FQN: &str = "solution.component.incident-edges";
+        const NOTE_FQN: &str = "implementation.note.incident-edges";
+
+        /// `count(*)` over `query` on the DB at `db_path`, read-only.
+        fn count_rows(db_path: &Path, query: &str) -> i64 {
+            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (_, rows) = query_rows(&conn, query).unwrap();
+            let n = rows
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|c| c.trim().parse::<i64>().ok())
+                .unwrap_or(0);
+            drop(conn);
+            drop(db);
+            n
+        }
+        fn edge_present(db_path: &Path, matched: &str) -> bool {
+            count_rows(db_path, &format!("{matched} RETURN count(*) AS n")) > 0
+        }
+
+        let repo = Repo::new("p3-incident-edges");
+        // The isolated HOME lives outside the scanned repo (cargo's caches).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-p3-incident-edges-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A ROOT cargo crate whose initial code carries one live identity of
+        // each kind — the renames/moves SOURCES the plan's operations name.
+        // `Cargo.lock`/`target` stay ignored so the tree remains clean.
+        repo.write(
+            ".gitignore",
+            "Cargo.lock\n/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write(
+            "Cargo.toml",
+            "[package]\nname = \"planned-splice\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.write(
+            "src/lib.rs",
+            "pub struct Placeholder;\n\npub fn placeholder() -> i32 { 0 }\n",
+        );
+        // The agent frontend's sole claim: `agent.implementer` is the roster
+        // identity a plan task must assign (the authoring surface requires
+        // exactly one).
+        repo.write(
+            ".opencode/agents/implementer.md",
+            "---\nname: implementer\n---\nTest implementer.\n",
+        );
+        repo.commit_all("init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", &home_s).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        run(&repo.root, &["init", "."]);
+        repo.commit_all("apg init");
+        // Main's full scan includes the `agent` stream so the branch graph
+        // carries the Agent roster a task assignment resolves against.
+        let main_scan = run(&repo.root, &["scan", ".", "--language", "rust,agent"]);
+        assert!(
+            String::from_utf8_lossy(&main_scan.stderr)
+                .contains("[load] writing parquet load files"),
+            "main's cold scan must full-load"
+        );
+        run(&repo.root, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+        let apg_root = wt.join("apg");
+        let db_path = apg_root.join(".trans").join("db.lbug");
+
+        // --- Author the plan: the four planned nodes, then one task per kind
+        // carrying BOTH a `creates` on the planned FQN and a renames/moves
+        // operation whose `--target` destination is that same FQN. Authoring
+        // projects the transient rows into the branch DB (read-your-writes), so
+        // the placeholder + family edges are the seed state the splice sees.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        for (kind, fqn, name, parent) in [
+            ("module", MODULE_FQN, "widget", "rust"),
+            ("file", FILE_FQN, "widget.rs", MODULE_FQN),
+            ("struct", STRUCT_FQN, "Widget", FILE_FQN),
+            ("function", FUNCTION_FQN, "compute", FILE_FQN),
+        ] {
+            run(
+                &wt,
+                &[
+                    "plan", "add", "demo", "planned", kind, fqn, "--name", name, "--parent", parent,
+                ],
+            );
+        }
+        for (i, (kind, fqn, live)) in [
+            ("module", MODULE_FQN, LIVE_MODULE),
+            ("file", FILE_FQN, LIVE_FILE),
+            ("struct", STRUCT_FQN, LIVE_STRUCT),
+            ("function", FUNCTION_FQN, LIVE_FUNCTION),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let create = format!("--{kind}-create");
+            let rename = format!("--{kind}-rename");
+            let k = (i + 1).to_string();
+            let args: Vec<String> = vec![
+                "plan".into(),
+                "add".into(),
+                "demo".into(),
+                "task".into(),
+                "1".into(),
+                k,
+                "--title".into(),
+                format!("{kind} incident edge"),
+                "--assigned-to".into(),
+                "agent.implementer".into(),
+                create,
+                fqn.into(),
+                rename,
+                live.into(),
+                "--target".into(),
+                fqn.into(),
+            ];
+            run(&wt, &args.iter().map(String::as_str).collect::<Vec<_>>());
+        }
+
+        // --- Author the durable incident families against the same planned
+        // FQNs: a Component `implemented-by` each kind and a Note `details`
+        // each kind, projected through the session's own reingest seam.
+        let solution = apg::layers::NodeFile {
+            layer: "solution".into(),
+            node_type: "component".into(),
+            name: "incident-edges".into(),
+            body: String::new(),
+            properties: Default::default(),
+            out: [MODULE_FQN, FILE_FQN, STRUCT_FQN, FUNCTION_FQN]
+                .iter()
+                .map(|t| apg::layers::OutEdge {
+                    kind: "implemented-by".into(),
+                    target: (*t).to_string(),
+                    properties: Default::default(),
+                })
+                .collect(),
+            in_edges: Vec::new(),
+        };
+        let note = apg::layers::NodeFile {
+            layer: "implementation".into(),
+            node_type: "note".into(),
+            name: "incident-edges".into(),
+            body: "Incident-edge realization matrix.".into(),
+            properties: Default::default(),
+            out: [MODULE_FQN, FILE_FQN, STRUCT_FQN, FUNCTION_FQN]
+                .iter()
+                .map(|t| apg::layers::OutEdge {
+                    kind: "details".into(),
+                    target: (*t).to_string(),
+                    properties: Default::default(),
+                })
+                .collect(),
+            in_edges: Vec::new(),
+        };
+        let mut layer_files = Vec::new();
+        for (layer, node) in [
+            (apg::layers::Layer::Solution, &solution),
+            (apg::layers::Layer::Implementation, &note),
+        ] {
+            let path = apg::layers::node_file_path(&apg_root, layer, &node.node_type, &node.name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, serde_json::to_string_pretty(node).unwrap()).unwrap();
+            layer_files.push(
+                path.strip_prefix(&wt)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        let planned: BTreeSet<String> = [MODULE_FQN, FILE_FQN, STRUCT_FQN, FUNCTION_FQN]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let layer_records =
+            apg::layers::ingest_tree(&apg_root, &BTreeSet::new(), &planned).unwrap();
+        artifacts::reingest_layers(&apg_root, &BTreeSet::new(), &layer_records).unwrap();
+        let layer_paths: Vec<&str> = layer_files.iter().map(String::as_str).collect();
+        wt_commit(&wt, &layer_paths, "author the incident-edge spec rows");
+
+        // --- One row per kind: (kind flag, label, planned FQN, create table,
+        // contains parent label, contains parent FQN, task k).
+        let kinds = [
+            (
+                "module",
+                "Module",
+                MODULE_FQN,
+                "ModuleCreate",
+                "Language",
+                "rust",
+                1u32,
+            ),
+            (
+                "file",
+                "File",
+                FILE_FQN,
+                "FileCreate",
+                "Module",
+                MODULE_FQN,
+                2,
+            ),
+            (
+                "struct",
+                "Struct",
+                STRUCT_FQN,
+                "StructCreate",
+                "File",
+                FILE_FQN,
+                3,
+            ),
+            (
+                "function",
+                "Function",
+                FUNCTION_FQN,
+                "FunctionCreate",
+                "File",
+                FILE_FQN,
+                4,
+            ),
+        ];
+        let families = |label: &str,
+                        fqn: &str,
+                        create: &str,
+                        parent_label: &str,
+                        parent_fqn: &str,
+                        task: &str|
+         -> [(&'static str, String); 5] {
+            [
+                (
+                    "task operation (creates)",
+                    format!(
+                        "MATCH (t:Task {{fqn: '{task}'}})-[:{create}]->(n:{label}) \
+                         WHERE n.fqn = '{fqn}'"
+                    ),
+                ),
+                (
+                    "renames/moves destination (Target)",
+                    format!(
+                        "MATCH (t:Task {{fqn: '{task}'}})-[:Target]->(n:{label}) \
+                         WHERE n.fqn = '{fqn}'"
+                    ),
+                ),
+                (
+                    "implemented-by (SpecImplementedBy)",
+                    format!(
+                        "MATCH (c:Component {{fqn: '{COMPONENT_FQN}'}})-[:SpecImplementedBy]->\
+                         (n:{label}) WHERE n.fqn = '{fqn}'"
+                    ),
+                ),
+                (
+                    "details (Details)",
+                    format!(
+                        "MATCH (x:Note {{fqn: '{NOTE_FQN}'}})-[:Details]->(n:{label}) \
+                         WHERE n.fqn = '{fqn}'"
+                    ),
+                ),
+                (
+                    "contains (parent)",
+                    format!(
+                        "MATCH (p:{parent_label} {{fqn: '{parent_fqn}'}})-[:Contains]->\
+                         (n:{label}) WHERE n.fqn = '{fqn}'"
+                    ),
+                ),
+            ]
+        };
+
+        let mut evidence = Vec::new();
+        let mut failures = Vec::new();
+        let mut pre: BTreeMap<(String, &'static str), bool> = BTreeMap::new();
+
+        // Pre-splice: every family is keyed on the planned placeholder.
+        for (_, label, fqn, create, parent_label, parent_fqn, k) in kinds {
+            let task = format!("demo/plan.phase-01.task-{k}");
+            for (family, matched) in families(label, fqn, create, parent_label, parent_fqn, &task) {
+                let hit = edge_present(&db_path, &matched);
+                evidence.push(format!(
+                    "{label:<8} {family:<38} pre-splice keyed on `{fqn}`: {hit}"
+                ));
+                if !hit {
+                    failures.push(format!(
+                        "{label} `{fqn}`: the {family} edge was never projected onto the \
+                         planned placeholder — the fixture is wrong, not the splice"
+                    ));
+                }
+                pre.insert((fqn.to_string(), family), hit);
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "every incident edge family must be keyed on the planned placeholder before the \
+             splice:\n{}\nfailures:\n{}",
+            evidence.join("\n"),
+            failures.join("\n")
+        );
+
+        // --- Land the declarations at the planned FQNs and take the splice.
+        std::fs::write(
+            wt.join("src/lib.rs"),
+            "pub mod widget;\n\npub struct Placeholder;\n\npub fn placeholder() -> i32 { 0 }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            wt.join("src/widget.rs"),
+            "pub struct Widget {\n    pub value: i32,\n}\n\npub fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
+        )
+        .unwrap();
+        wt_commit(
+            &wt,
+            &["src/lib.rs", "src/widget.rs"],
+            "implement the planned nodes",
+        );
+
+        let spliced_scan = run(&wt, &["scan", ".", "--language", "rust,agent"]);
+        let spliced_err = String::from_utf8_lossy(&spliced_scan.stderr).into_owned();
+        assert!(
+            spliced_err.contains("[load] splice:"),
+            "the realization scan must take the splice path: {spliced_err}"
+        );
+        assert!(
+            !spliced_err.contains("[load] writing parquet load files"),
+            "the splice path must skip the full load: {spliced_err}"
+        );
+
+        // --- Post-splice: every family must resolve to the REAL node (status
+        // cleared) at its FQN. A miss is a DROP: the edge was there pre-splice.
+        let mut verdicts: Vec<String> = Vec::new();
+        for (_, label, fqn, create, parent_label, parent_fqn, k) in kinds {
+            let task = format!("demo/plan.phase-01.task-{k}");
+            for (family, matched) in families(label, fqn, create, parent_label, parent_fqn, &task) {
+                let was = pre[&(fqn.to_string(), family)];
+                let hit = count_rows(
+                    &db_path,
+                    &format!(
+                        "{matched} AND (n.status IS NULL OR n.status <> 'planned') \
+                         RETURN count(*) AS n"
+                    ),
+                ) > 0;
+                let verdict = match (was, hit) {
+                    (true, true) => "KEPT",
+                    (true, false) => "DROPPED",
+                    (false, _) => "NOT-AUTHORED",
+                };
+                verdicts.push(format!(
+                    "{label:<8} {family:<38} {verdict:<13} post={hit} [{fqn}]"
+                ));
+                if was && !hit {
+                    failures.push(format!(
+                        "{label} `{fqn}`: the {family} edge was keyed on the planned node but did \
+                         NOT resolve to the realized node after the splice (DROPPED)"
+                    ));
+                }
+            }
+        }
+        println!(
+            "incident-edge realization matrix (per family per kind):\n{}",
+            verdicts.join("\n")
+        );
+        assert!(
+            failures.is_empty(),
+            "incident-edge realization matrix (pre-fix evidence for Phase-3 tasks 2/3):\n{}\n\
+             failures:\n{}",
+            verdicts.join("\n"),
+            failures.join("\n")
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
