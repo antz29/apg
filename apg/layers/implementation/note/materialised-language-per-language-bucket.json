@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "materialised-language-per-language-bucket",
+  "body": "A materialised `applies-to` `Language` root reports its `Language` kind increment correctly, but its per-language tally lands in the last-selected stream bucket, because the admission does not re-select the target language (matching the streamed-admission sibling). Limit: the closing per-language line can attribute an authored-only language to another stream's bucket. Upgrade: re-select the materialised target's language bucket when the per-language line must attribute an authored-only Language to itself.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.materialise_language",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
