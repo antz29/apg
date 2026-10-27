@@ -532,6 +532,29 @@ fn assert_graph_jsonl_consistent(graph_path: &Path) {
     std::fs::remove_file(&round_trip).unwrap();
 }
 
+/// Every regular file under `dir` as `(path relative to `dir`, bytes)`, sorted —
+/// the byte-identity snapshot the forced-scan acceptance test compares before
+/// and after the rebuild.
+fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).unwrap() {
+            let p = entry.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                out.push((
+                    p.strip_prefix(dir).unwrap().to_string_lossy().into_owned(),
+                    std::fs::read(&p).unwrap(),
+                ));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// e2e tier -- real I/O: every test here builds a real project context
 /// (git worktree + `db.lbug`), writes node files/JSONL on disk or spawns the
 /// `apg` binary. Each is `#[ignore]`d, so a plain `cargo test` never runs
@@ -3777,6 +3800,142 @@ mod e2e {
                 .map(str::trim),
             Some("1"),
             "the Reviews pairing on the mutated node must survive the partial delta"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// scan-force phase-01 task-4 (acceptance, scratch /tmp repo, CANDIDATE
+    /// binary only — `global.constraint.no-real-project-test`): `apg scan
+    /// --force` is a TRUE REBUILD. It discards `db.lbug` (with its `.wal`/`.shm`
+    /// sidecars) and `graph.jsonl` through the one shared discard and rebuilds
+    /// both from freshly emitted facts, while every `apg/layers/**` node file
+    /// and every source file stays byte-identical and the shared fact store's
+    /// `scan.json` survives untouched.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/facts store); run via cargo test-e2e"]
+    fn forced_scan_discards_the_derived_index_and_rebuilds_it_from_scratch() {
+        use std::os::unix::fs::MetadataExt;
+
+        let repo = Repo::new("forced-rebuild");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write("main.go", "package main\n\nfunc main() {}\n");
+        repo.commit_all("source");
+        // A real project worktree (branch `foo`): durable node-file writes are
+        // refused on the default branch, and the whole forced rebuild runs here.
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(specs::LAYOUT);
+        // One durable node file: the authored state the rebuild must preserve.
+        layers::write_project(
+            &apg_root,
+            &[layers::NodeFile {
+                layer: "requirements".to_string(),
+                node_type: "requirement".to_string(),
+                name: "keep".to_string(),
+                body: "survives --force".to_string(),
+                properties: std::collections::BTreeMap::new(),
+                out: Vec::new(),
+                in_edges: Vec::new(),
+            }],
+            &[],
+        )
+        .unwrap();
+
+        let run = |args: &[&str]| -> String {
+            let out = testutil::ApgCommand::new(args).cwd(&wt).output();
+            assert!(
+                out.status.success(),
+                "{args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+
+        // The cold scan: a real pipeline run that emits the graph and records
+        // the shared store's baseline.
+        assert!(
+            run(&["scan", "."]).contains("[scan] running go frontend"),
+            "the cold scan must run the go frontend"
+        );
+        let trans = apg_root.join(specs::TRANS);
+        let db = trans.join("db.lbug");
+        assert!(
+            db.exists() && trans.join("graph.jsonl").exists(),
+            "the cold scan must produce db.lbug + graph.jsonl"
+        );
+
+        // Plant the sidecars so their discard is observable whatever lbug
+        // leaves behind after a clean close.
+        let sentinel: &[u8] = b"planted sidecar";
+        std::fs::write(trans.join("db.lbug.wal"), sentinel).unwrap();
+        std::fs::write(trans.join("db.lbug.shm"), sentinel).unwrap();
+
+        let layers_before = snapshot(&apg_root.join(layers::LAYERS_DIR));
+        assert!(!layers_before.is_empty(), "the node files must exist");
+        let sources_before: Vec<(String, Vec<u8>)> =
+            ["go.mod", "main.go", ".gitignore", "apg/config.json"]
+                .iter()
+                .map(|rel| (rel.to_string(), std::fs::read(wt.join(rel)).unwrap()))
+                .collect();
+        let store = apg::cache::FactStore::resolve(&apg_root).unwrap().root;
+        let record = store.join("scan.json");
+        let record_before = std::fs::read(&record).unwrap();
+        let inode_before = std::fs::metadata(&db).unwrap().ino();
+
+        // The forced rebuild: the pre-force verdict is still printed, then the
+        // discard + full pipeline run (no fast path, no warm reuse).
+        let err = run(&["scan", ".", "--force"]);
+        assert!(
+            err.contains("[scan] forced rebuild (--force) — full scan"),
+            "the forced reason must be logged: {err}"
+        );
+        assert!(
+            err.contains("[scan] running go frontend"),
+            "the forced scan must re-run the frontend: {err}"
+        );
+        assert!(
+            !err.contains("fast-path") && !err.contains("warm cache"),
+            "the forced scan must bypass both reuse paths: {err}"
+        );
+
+        // Both derived artifacts are back, `db.lbug` as a NEW file.
+        assert!(
+            db.exists() && trans.join("graph.jsonl").exists(),
+            "the forced scan must rebuild db.lbug + graph.jsonl"
+        );
+        assert_ne!(
+            std::fs::metadata(&db).unwrap().ino(),
+            inode_before,
+            "db.lbug must be discarded and rebuilt, never reused"
+        );
+        for sidecar in ["db.lbug.wal", "db.lbug.shm"] {
+            let path = trans.join(sidecar);
+            assert!(
+                !path.exists() || std::fs::read(&path).unwrap() != sentinel,
+                "the planted {sidecar} must be discarded, not carried over"
+            );
+        }
+
+        // The durable node files, every source file and the shared store record
+        // are untouched.
+        assert_eq!(
+            snapshot(&apg_root.join(layers::LAYERS_DIR)),
+            layers_before,
+            "apg/layers/** must stay byte-identical"
+        );
+        let sources_after: Vec<(String, Vec<u8>)> =
+            ["go.mod", "main.go", ".gitignore", "apg/config.json"]
+                .iter()
+                .map(|rel| (rel.to_string(), std::fs::read(wt.join(rel)).unwrap()))
+                .collect();
+        assert_eq!(
+            sources_after, sources_before,
+            "the scanned sources must stay byte-identical"
+        );
+        assert_eq!(
+            std::fs::read(&record).unwrap(),
+            record_before,
+            "the shared fact store's scan.json must survive untouched"
         );
 
         testutil::remove(&repo);

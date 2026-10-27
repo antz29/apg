@@ -145,6 +145,10 @@ SCAN OPTIONS:
   --no-progress               Progress is on by default when stderr is a
                               terminal; this flag turns off the start line,
                               the per-node symbols and the summary
+  --force                     Rebuild from scratch: discard db.lbug and
+                              graph.jsonl, then re-run every frontend rather
+                              than assembling from the shared fact cache;
+                              apg/layers and source files are untouched
   <blacklist...>              FQN prefixes to exclude from the graph"
         .to_string()
 }

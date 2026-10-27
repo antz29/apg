@@ -154,7 +154,7 @@ mod e2e {
         .save(&store)
         .unwrap();
 
-        let prepared = prepare(&repo_dir, &apg_root, &config);
+        let prepared = prepare(&repo_dir, &apg_root, &config, false);
         assert!(
             matches!(prepared.full_scan, Some(FullScanReason::NoPreviousExport)),
             "a non-empty target set with no previous export must full-scan: {:?}",

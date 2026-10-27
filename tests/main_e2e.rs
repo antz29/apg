@@ -5988,6 +5988,103 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// scan-force phase-01 task-5 (acceptance, scratch /tmp repo, CANDIDATE
+    /// binary only): an unchanged tree still takes the FRESH fast path on a
+    /// plain re-scan, while the SAME tree scanned with `--force` prints that
+    /// same pre-force verdict, logs neither the warm-cache nor the
+    /// frontend-skipped line, and rebuilds `db.lbug` from scratch.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn forced_scan_bypasses_the_fast_path_and_the_warm_cache_on_an_unchanged_tree() {
+        use std::os::unix::fs::MetadataExt;
+
+        let base = std::env::temp_dir().join(format!("apg-scan-force-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+        // it never shells out to bun install.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run = |args: &[&str]| -> String {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&repo_dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+
+        run(&["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        assert!(
+            run(&["scan", "."]).contains("[scan] running go frontend"),
+            "the cold scan must run the go frontend"
+        );
+        let db = repo_dir.join("apg/.trans/db.lbug");
+
+        // ---- (1) a plain re-scan of the unchanged tree: FRESH ⇒ fast path ----
+        let plain = run(&["scan", "."]);
+        assert!(plain.contains("→ FRESH"), "plain re-scan verdict: {plain}");
+        assert!(
+            plain.contains("fast-path"),
+            "the fast path must be taken: {plain}"
+        );
+        assert!(
+            !plain.contains("[scan] running"),
+            "the fast path must spawn no frontend: {plain}"
+        );
+        let inode_before = std::fs::metadata(&db).unwrap().ino();
+
+        // ---- (2) the SAME tree with --force: the same pre-force verdict, both
+        // reuse paths bypassed, and db.lbug rebuilt from scratch ----
+        let forced = run(&["scan", ".", "--force"]);
+        assert!(
+            forced.contains("→ FRESH"),
+            "the forced scan still prints the pre-force verdict: {forced}"
+        );
+        assert!(
+            forced.contains("[scan] forced rebuild (--force) — full scan"),
+            "the forced reason must be logged: {forced}"
+        );
+        assert!(
+            !forced.contains("fast-path"),
+            "the forced scan must override the fast path: {forced}"
+        );
+        assert!(
+            !forced.contains("warm cache"),
+            "the forced scan must not consult the warm cache: {forced}"
+        );
+        assert!(
+            !forced.contains("frontend skipped"),
+            "the forced scan must skip no frontend: {forced}"
+        );
+        assert!(
+            forced.contains("[scan] running go frontend"),
+            "the forced scan must re-run the frontend: {forced}"
+        );
+        assert_ne!(
+            std::fs::metadata(&db).unwrap().ino(),
+            inode_before,
+            "the forced scan must rebuild db.lbug"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     // -------------------------------------------------------------------
     // Phase-02 win-B incremental integration (tasks 17 / 19). Every scenario
     // runs the CANDIDATE binary only, against a scratch /tmp git repo

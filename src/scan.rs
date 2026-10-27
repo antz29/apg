@@ -82,6 +82,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut module_dirs: Vec<String> = Vec::new();
     let mut no_build_scripts = false;
     let mut no_progress = false;
+    let mut force = false;
     let mut positional: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -114,6 +115,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             }
             "--no-progress" => {
                 no_progress = true;
+            }
+            "--force" => {
+                force = true;
             }
             _ => positional.push(args[i].clone()),
         }
@@ -181,13 +185,25 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // Staleness of the pre-scan DB vs the tree (STALE/FRESH/N-A).
     log.ln(&git::staleness_line(&apg_root, &git_state));
 
+    // `--force` is a TRUE REBUILD: discard the derived index and export through
+    // the ONE shared deletion mechanism, so the freshness fast path below
+    // cannot reuse the old DB and the pipeline has no prior export to splice.
+    // Run after the verdict above, which is therefore the honest pre-force
+    // state, and before the fast-path probe. The shared fact store
+    // (`<git-common-dir>/apg/facts`) lives outside `.trans` and is never
+    // removed here; `apg/layers/**` and the scanned sources are never touched.
+    if force {
+        session::discard_derived_index(&trans_dir);
+    }
+
     // Win-A fast path (scan-freshness): when the pre-scan DB's recorded content
     // identity matches the tree exactly, the existing DB is reusable and every
     // language frontend is skipped — reuse the DB and return BEFORE any
     // frontend spawn or DB rebuild. The predicate is content identity (never
     // mtime) and is the same rule `is_stale`/`staleness_line` use, so the
     // printed verdict and the fast-path decision can never disagree. A stale
-    // tree falls through to the full pipeline below.
+    // tree falls through to the full pipeline below, and a `--force` scan has
+    // already discarded the DB, so the force override always rebuilds.
     if git::is_fresh(&apg_root) {
         log.ln(
             "[scan] fast-path: tree unchanged since the recorded scan — reusing db.lbug (frontends skipped)",
@@ -272,15 +288,17 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // no full-tree walk, and zero frontends. The ordinary `prepare` runs only
     // when the warm probe misses. A blacklist is never folded into the cache
     // key, so a blacklisted scan falls back to the ordinary path (never a warm
-    // reuse of facts recorded under a different FQN filter).
-    let warm = if blacklist.is_empty() {
+    // reuse of facts recorded under a different FQN filter). A `--force` scan
+    // gates the probe off outright: the store is never consulted for the reuse
+    // decision (the ordinary `prepare` still resolves it to record a baseline).
+    let warm = if blacklist.is_empty() && !force {
         warm_prepared(&project_dir, &apg_root, &git_state, &scan_config)
     } else {
         None
     };
     let warm_complete = warm.is_some();
     let incremental =
-        warm.unwrap_or_else(|| incremental::prepare(&project_dir, &apg_root, &scan_config));
+        warm.unwrap_or_else(|| incremental::prepare(&project_dir, &apg_root, &scan_config, force));
     let mut handoff = FrontendHandoff::default();
     let mut reuse_plan: Option<incremental::ReusePlan> = None;
     if let Some(reason) = &incremental.full_scan {

@@ -119,6 +119,7 @@ mod unit {
             ),
             (FullScanReason::NoPreviousExport, "no-previous-export"),
             (FullScanReason::DeltaUnavailable, "delta-unavailable"),
+            (FullScanReason::Forced, "forced"),
         ];
         for (reason, tag) in &variants {
             assert_eq!(reason.tag(), *tag);

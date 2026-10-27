@@ -75,6 +75,32 @@ mod unit {
             review_block.contains("add/action/resolve/reject/list"),
             "the apg review verbs must be unchanged: {review_block}"
         );
+        // scan-force phase-01 task-3: the SCAN OPTIONS block documents `--force`
+        // as the from-scratch rebuild that discards the derived index + export
+        // and re-runs every frontend (never a warm/incremental fact reuse).
+        let scan_options = help
+            .lines()
+            .skip_while(|l| !l.contains("SCAN OPTIONS:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let force_line = scan_options
+            .lines()
+            .skip_while(|l| !l.contains("--force"))
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            force_line.contains("Rebuild from scratch"),
+            "the scan options document --force as a from-scratch rebuild: {force_line}"
+        );
+        assert!(
+            force_line.contains("db.lbug") && force_line.contains("graph.jsonl"),
+            "the --force line names the discarded derived index and export: {force_line}"
+        );
+        assert!(
+            force_line.contains("re-run every frontend") && force_line.contains("fact cache"),
+            "the --force line names the frontend re-run over the shared fact cache: {force_line}"
+        );
     }
 
     /// Phase-03 task-5: the per-language spawn verdict. On the incremental

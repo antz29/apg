@@ -90,6 +90,9 @@ pub enum FullScanReason {
     NoPreviousExport,
     /// The delta could not be computed (a corrupt/unreadable store record).
     DeltaUnavailable,
+    /// The caller asked for a from-scratch rebuild (`apg scan --force`): the
+    /// shared fact store is never consulted for the reuse decision.
+    Forced,
 }
 
 impl FullScanReason {
@@ -103,6 +106,7 @@ impl FullScanReason {
             FullScanReason::CacheKeyDrift { .. } => "cache-key-drift",
             FullScanReason::NoPreviousExport => "no-previous-export",
             FullScanReason::DeltaUnavailable => "delta-unavailable",
+            FullScanReason::Forced => "forced",
         }
     }
 
@@ -126,6 +130,7 @@ impl FullScanReason {
             FullScanReason::DeltaUnavailable => {
                 "previous scan record unavailable — full scan".to_string()
             }
+            FullScanReason::Forced => "forced rebuild (--force) — full scan".to_string(),
         }
     }
 }

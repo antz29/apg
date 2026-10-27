@@ -227,8 +227,9 @@ pub fn live_session(apg_root: &Path) -> bool {
 /// Removing only `db.lbug` is not enough: a `db.lbug.wal` left behind by an
 /// unclean exit makes the next `Database::new("db.lbug")` panic with a
 /// database-id mismatch, so the sidecars must go too. This is the ONE discard
-/// used by every forced-rebuild path ([`Coordinator::force_full_scan`] and
-/// `run_pipeline`'s stale-socket guard and full-load branch).
+/// used by every forced-rebuild path: `apg scan --force`,
+/// [`Coordinator::force_full_scan`], and `run_pipeline`'s stale-socket guard and
+/// full-load branch. No caller keeps a second deletion list.
 ///
 /// The node files under `apg/layers/**` are the system of record and are never
 /// touched here; the caller rebuilds the index from them (plus a fresh scan of
@@ -724,6 +725,14 @@ impl Coordinator {
     /// root (the session owns the layout root, whose parent is the project
     /// dir). The scan's process-global `chdir` into `.trans` is restored so the
     /// serve loop's remaining lifetime is unaffected.
+    ///
+    /// The discard runs here, BEFORE [`crate::cmd_scan`] takes the spec lock —
+    /// no live session exists at this point, so this path may delete without
+    /// contending. It then calls `cmd_scan` WITHOUT `--force`: its scan still
+    /// consults the shared fact store for the reuse decision (the warm probe is
+    /// on) and may warm-reuse recorded facts, whereas `apg scan --force` never
+    /// consults the store for that decision. Both paths leave the store itself
+    /// in place; only the derived `.trans` artifacts are discarded.
     fn force_full_scan(apg_root: &Path) -> anyhow::Result<()> {
         // Discard the derived index and its export: with no `db.lbug` the scan
         // freshness fast path cannot fire, and with no `graph.jsonl` there is

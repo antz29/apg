@@ -205,10 +205,17 @@ pub struct PipelineInput {
 /// set, the re-emission target set, the removed-FQN set, and the reusable-file
 /// list.
 ///
+/// `force` is the caller's from-scratch request (`apg scan --force`): it
+/// returns the full-scan [`Prepared`] with [`FullScanReason::Forced`] BEFORE
+/// the recorded scan, the delta and the stored manifest/state are read, so the
+/// shared fact store is never consulted for the reuse decision. The store root
+/// is still resolved (the completed rebuild records a fresh baseline there)
+/// and the current manifest is still built.
+///
 /// The signature early cutoff uses the persisted signature map: a changed file
 /// whose byte edit did not alter its exported signature does **not** pull its
 /// reverse dependencies; its own facts are still re-emitted.
-pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey) -> Prepared {
+pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force: bool) -> Prepared {
     let cache_key = CacheKey::compute(config);
     let store_root = match FactStore::resolve(apg_root) {
         Ok(s) => s.root,
@@ -226,6 +233,19 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey) -> Pre
             };
         }
     };
+    if force {
+        return Prepared {
+            store_root,
+            cache_key,
+            full_scan: Some(FullScanReason::Forced),
+            targets_rel: BTreeSet::new(),
+            changed_rel: BTreeSet::new(),
+            removed_fqns: BTreeSet::new(),
+            reuse_candidates: Vec::new(),
+            manifest: Manifest::build(scan_root),
+            recorded_content_key: None,
+        };
+    }
     // The content identity the delta is derived from, captured BEFORE the
     // completed scan rewrites the shared `scan.json` (feedback-101): the win-C
     // splice seeds the LOCAL db.lbug and must refuse it when its own recorded

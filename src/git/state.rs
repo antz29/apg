@@ -471,7 +471,10 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 /// The verdict is the SAME content-identity rule [`is_fresh`] uses, so the
 /// printed line and the fast-path decision can never disagree (a recorded-dirty
 /// tree whose content digest changed at the same sha prints STALE, never FRESH
-/// followed by a full pipeline run).
+/// followed by a full pipeline run). The one exception is `apg scan --force`:
+/// it prints this pre-force verdict and then discards the index and rebuilds
+/// anyway, so a FRESH line there is followed by a full pipeline run by design —
+/// the forced scan is the only path that overrides the verdict it just printed.
 pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
     let Some(cur_sha) = current.sha.as_deref() else {
         return "Git state: N/A (not a git repo)".to_string();
