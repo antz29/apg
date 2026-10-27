@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "kind-string-mapping-e2e-covered",
+  "body": "Limit: the planned_node record's kind-string to NodeKind mapping is exercised only by the e2e realization matrices, not by this int test, which admits at the already-mapped NodeKind; upgrade by extracting the mapping to a pure helper if the unit tier ever needs to pin it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.tests.int.planned_placeholder_kind_keeps_the_kind_paired_task_op_edges",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

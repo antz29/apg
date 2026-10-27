@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "gate-e2e-bare-author-inprocess-driver",
+  "body": "Limits: realization is proven for a BARE (language-agnostic) authored planned FQN satisfied by the crate-prefixed scanned node; the crate-prefixed-authored case rides the exact-identity fast path and is not separately exercised — upgrade if FQN rendering or the crate-prefix rule changes. And: green/refusal verdicts are driven through plan_verify_at in-process against a real branch DB, not the `apg plan verify` child process, so the CLI's exit-code mapping is not exercised — upgrade if the CLI wrapper stops being a thin Err-to-exit mapping.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.apply_gate_realizes_a_planned_node_in_a_separate_crate",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "realization-candidates-no-suffix-synthesis",
+  "body": "Limit: realization_candidates does not synthesize overload (params) suffixes, so a planned node authored without them is not realized by a scanned overload; the task text explicitly mandates no suffix guessing. Upgrade if a plan must declare an overloaded function before its suffix is known.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.verify.realization_candidates",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
