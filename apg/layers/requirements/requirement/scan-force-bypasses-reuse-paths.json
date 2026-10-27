@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "scan-force-bypasses-reuse-paths",
-  "body": "A forced scan rebuilds its graph from scratch: the freshness fast path finds its database absent, the shared fact store is bypassed, not deleted, and the splice seed is absent, so the frontends re-run and the full load alone runs.",
+  "body": "A forced scan rebuilds its graph from scratch: the freshness fast path finds its database absent, the shared fact store is bypassed and left in place, and the splice seed is absent, so the frontends re-run and the full load alone runs.",
   "properties": {
     "feature": "scan-force"
   },
