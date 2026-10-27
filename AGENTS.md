@@ -219,12 +219,31 @@ The project builds a single `apg` binary (package `apg`):
 - `apg project <sub> …` — project contexts (worktrees, git2-operated):
   `start <name>` (from the main checkout: worktree + branch + branch DB off
   the default branch, prints `apg/.worktrees/<name>`), `merge <name>` (from
-  the main checkout: verify gate → merge → unguarded main rebuild).
+  the main checkout: verify gate → merge → unguarded main rebuild),
+  `delete <name>` (from the main checkout: abandon a project — remove its
+  worktree and delete its branch, discarding the branch's commits; refuses an
+  invalid name, the default branch, a branch the main checkout has checked
+  out, a missing project or mismatched worktree, and tracked uncommitted
+  changes in the worktree).
 - `apg review <sub> …` — the closed, coordinator-mediated writer↔reviewer
   feedback cycle over the transient `.trans` mirrors: `add`, `action`,
   `resolve`, `reject`, `list`. The owning writer returns an ACTIONED/WONT-FIX
   claim; the coordinator runs `action` after the shallow consistency check;
   only the reviewer resolves/rejects.
+- `apg spec <sub> …` — the deterministic, read-only durable-spec lint:
+  `lint [--tier requirements|domain|solution]` reads the durable node files
+  and reports, as errors, the R3 rule (a node holds at most one note), the R4
+  rule (a note's `details` edge names exactly one code FQN — never another
+  note and never an authored-node FQN), the note-confinement rule (a note
+  attaches only to implementation-layer code), the tier-1-3 body budget (one
+  sentence of at most 244 characters), and the shared structural validator set
+  the write path itself calls (the SPEC §4 edge-kind matrix, the event-only
+  `publishes`/`subscribes` target rule, and the whole-model cardinalities);
+  non-blocking R1/R5 wording advisories are emitted for tier-1-3 bodies
+  (constraints exempt). `--tier` scopes a run to one tier plus the typed
+  upstream spine paths it requires (omitted = every tier). It never writes,
+  never reads the merge-base tree, and leaves the plan change-set
+  delta/coverage gates to `apg plan verify`.
 - `apg --version`, `apg --help`.
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
