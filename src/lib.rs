@@ -106,7 +106,7 @@ USAGE:
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg spec <sub> …            Deterministic, read-only durable-spec lint:
-                              lint — report the R2/R3/R4 rule violations and
+                              lint — report the R3/R4 rule violations and
                               the shared structural validator set as errors,
                               plus the non-blocking tier-1-3 wording advisories
   apg node <sub> …            Durable node-file model mutations:

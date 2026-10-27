@@ -1,5 +1,5 @@
 //! Relocated e2e tests for the `spec_lint` module: the deterministic
-//! `apg spec lint` report (R2/R3/R4 and the shared validator set; the
+//! `apg spec lint` report (R3/R4 and the shared validator set; the
 //! change-set delta gates are plan-verification concerns and are excluded,
 //! SPEC §9.3) and the write-surface advisory/refusal hooks (`apg node add` /
 //! `apg node update`). Real I/O only; every test is `#[ignore]`d and runs

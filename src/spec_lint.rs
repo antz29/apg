@@ -5,7 +5,7 @@
 //! sits beside review. It reports the shared mechanical validator set (the
 //! SPEC §4 edge-kind matrix, the event-only `publishes`/`subscribes` target
 //! rule, and the whole-model cardinalities — the SAME functions the write path
-//! calls, never a reimplementation), the mechanical R2/R3/R4 violations, and
+//! calls, never a reimplementation), the mechanical R3/R4 violations, and
 //! the tier-1-3 body-budget rule as **errors**, and emits non-blocking advisory
 //! wording warnings for tier-1-3 node bodies a reviewer is likely to reject.
 //!
