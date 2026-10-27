@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "separate-crate-e2e-cli-reachable-scope",
+  "body": "Limit: this e2e pins the CLI-reachable planned-node realization contract only — the splice_cached placeholder-masking corner paired with location-based delta selection (reachable solely by hand-editing plan JSONL) is deliberately not exercised here. Upgrade if that corner becomes CLI-reachable: extend this test (or a sibling) to drive a planned placeholder against a cached, unchanged declaration and assert realization.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.planned_node_in_a_separate_cargo_project_realizes_like_the_root_crate",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

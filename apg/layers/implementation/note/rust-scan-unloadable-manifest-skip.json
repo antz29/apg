@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "rust-scan-unloadable-manifest-skip",
+  "body": "Limit: a discovered Cargo manifest that yields no loadable package is skipped with a warning (the per-manifest error arm continues rather than aborting), and the separate-crate planned-node e2e fixture depends on that behavior: src/agentlib's package is discovered with src/lib.rs absent at main and must be skipped, not fail the scan, until the code lands. Upgrade if discovery ever fails closed on an unloadable manifest: the scan must then surface per-manifest errors and the fixture guard must revisit its assumption.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg-rustfrontend.scanner.scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
