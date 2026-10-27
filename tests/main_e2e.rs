@@ -10909,4 +10909,355 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// Phase-02 task-3 (e2e): a planned `Function` authored at a SEPARATE,
+    /// non-root cargo package's crate-prefixed FQN realizes exactly like a
+    /// root-crate planned `Function` — status cleared, location filled, FQN
+    /// kept — on BOTH build paths (an incremental splice against a
+    /// placeholder-bearing seed, then a full load).
+    ///
+    /// The fixture is agentfrontend-shaped: root crate `rootcrate` plus a
+    /// nested non-root package at `src/agentlib` whose cargo `[package] name`
+    /// is `agentfrontend`. The crate prefix is the PACKAGE name, not the
+    /// directory, so the ingestor roots the declaration at
+    /// `rust.agentfrontend.collect_definitions` — byte-for-byte the authored
+    /// planned FQN. `rootcrate`'s `helper` is the control: both must reach the
+    /// SAME realized shape.
+    ///
+    /// Evidence order: declare the planned nodes while only `rootcrate` has a
+    /// body, force a full load to record the planned placeholders (`status:
+    /// planned`, no location), land the code, then (a) the incremental SPLICE
+    /// against that placeholder-bearing seed and (b) a FULL load with the
+    /// artifacts and the shared fact store dropped. Scratch /tmp repo +
+    /// candidate binary only (`global.constraint.no-real-project-test`); a real
+    /// rust-frontend build + scan is real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
+    fn planned_node_in_a_separate_cargo_project_realizes_like_the_root_crate() {
+        /// Asserts the pre-code export holds `fqn` only as a planned,
+        /// location-less placeholder.
+        fn assert_planned(recs: &[serde_json::Value], fqn: &str, kind: &str, located: bool) {
+            let rec = recs
+                .iter()
+                .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(fqn))
+                .unwrap_or_else(|| panic!("planned `{fqn}` must be in the pre-code export"));
+            assert_eq!(
+                rec.get("type").and_then(|v| v.as_str()),
+                Some(kind),
+                "planned `{fqn}` record: {rec}"
+            );
+            assert_eq!(
+                rec.get("status").and_then(|v| v.as_str()),
+                Some("planned"),
+                "planned `{fqn}` status: {rec}"
+            );
+            if located {
+                assert_eq!(
+                    rec.get("start_line").and_then(|v| v.as_u64()),
+                    Some(0),
+                    "a planned `{fqn}` must carry no location: {rec}"
+                );
+            }
+        }
+
+        /// Asserts one authored FQN's realized record and returns
+        /// `(evidence row, realized shape)`. A realized record carries NO
+        /// `status` key (the export skips the empty status) and a filled
+        /// location; the planned placeholder is `status: planned` + no span.
+        fn realized_row(
+            recs: &[serde_json::Value],
+            fqn: &str,
+            want_path: &str,
+            label: &str,
+            failures: &mut Vec<String>,
+        ) -> (String, String) {
+            let rec = recs
+                .iter()
+                .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(fqn));
+            let ty = rec
+                .and_then(|r| r.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let path = rec
+                .and_then(|r| r.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let start_line = rec
+                .and_then(|r| r.get("start_line"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let end_line = rec
+                .and_then(|r| r.get("end_line"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let status_key = rec.and_then(|r| r.get("status")).is_some();
+            let located = start_line > 0 && end_line >= start_line;
+            let row = format!(
+                "{label} `{fqn}`: record={} type={ty:?} status_key={status_key} \
+                 lines={start_line}..{end_line} path={path:?}",
+                rec.is_some()
+            );
+            let shape = format!("type={ty} status_key={status_key} located={located}");
+            if rec.is_none() {
+                failures.push(format!(
+                    "{label} `{fqn}`: FQN not kept — the node is absent from the export"
+                ));
+                return (row, shape);
+            }
+            if ty != "function" {
+                failures.push(format!(
+                    "{label} `{fqn}`: realized as `{ty}`, not `function`"
+                ));
+            }
+            if status_key {
+                failures.push(format!(
+                    "{label} `{fqn}`: LEFT PLANNED — the realized record still carries a `status`"
+                ));
+            }
+            if !located {
+                failures.push(format!(
+                    "{label} `{fqn}`: location not filled ({start_line}..{end_line})"
+                ));
+            }
+            if path != want_path {
+                failures.push(format!(
+                    "{label} `{fqn}`: wrong path `{path}` (want `{want_path}`)"
+                ));
+            }
+            (row, shape)
+        }
+
+        const MODULE_FQN: &str = "rust.agentfrontend";
+        const SEPARATE_FQN: &str = "rust.agentfrontend.collect_definitions";
+        const ROOT_FQN: &str = "rust.rootcrate.helper";
+        const SEPARATE_PATH: &str = "src/agentlib/src/lib.rs";
+        const ROOT_PATH: &str = "src/main.rs";
+
+        let base =
+            std::env::temp_dir().join(format!("apg-planned-sep-crate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        scratch_repo_init(&repo_dir);
+        // A Rust scan runs cargo metadata, which writes `Cargo.lock` and may
+        // build into `target/`; both stay out of git so the checkout remains
+        // clean for `project start`'s clean-default gate.
+        std::fs::write(
+            repo_dir.join(".gitignore"),
+            "Cargo.lock\n/target\n**/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo_dir.join("Cargo.toml"),
+            "[package]\nname = \"rootcrate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(repo_dir.join("src")).unwrap();
+        std::fs::write(repo_dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+        // The nested NON-ROOT package: its identity is the cargo PACKAGE name
+        // (`agentfrontend`), not its directory (`agentlib`). Its `lib.rs` is
+        // ABSENT here — the package loads only once the code below exists, so
+        // the module itself is a planned delta.
+        std::fs::create_dir_all(repo_dir.join("src/agentlib")).unwrap();
+        std::fs::write(
+            repo_dir.join("src/agentlib/Cargo.toml"),
+            "[package]\nname = \"agentfrontend\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let stderr_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+
+        run(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        run(&repo_dir, &["scan", ".", "--language", "rust"]);
+        run(&repo_dir, &["project", "start", "demo"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+        let facts = repo_dir.join(".git/apg/facts");
+
+        // Declare the delta through the real authoring surface: the separate
+        // crate's module + Function, and the root crate's control Function.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "planned",
+                "module",
+                MODULE_FQN,
+                "--name",
+                "agentfrontend",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "planned",
+                "function",
+                SEPARATE_FQN,
+                "--name",
+                "collect_definitions",
+                "--parent",
+                MODULE_FQN,
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "planned",
+                "function",
+                ROOT_FQN,
+                "--name",
+                "helper",
+                "--parent",
+                "rust.rootcrate",
+            ],
+        );
+
+        // A FULL load while no code exists at those FQNs: the placeholders the
+        // realization must replace. Dropping the DB, the export and the shared
+        // fact store forces the full path (the plan store survives).
+        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
+            let _ = std::fs::remove_file(wt.join(rel));
+        }
+        let _ = std::fs::remove_dir_all(&facts);
+        let pre = run(&wt, &["scan", ".", "--language", "rust"]);
+        assert!(
+            !stderr_of(&pre).contains("full load skipped"),
+            "the pre-code scan must be a full load: {}",
+            stderr_of(&pre)
+        );
+        let planned = export_records(&wt);
+        assert_planned(&planned, MODULE_FQN, "module", false);
+        assert_planned(&planned, SEPARATE_FQN, "function", true);
+        assert_planned(&planned, ROOT_FQN, "function", true);
+
+        // The real declarations land at exactly the authored FQNs.
+        std::fs::write(
+            wt.join(ROOT_PATH),
+            "fn main() {\n    println!(\"{}\", helper());\n}\n\nfn helper() -> i32 {\n    1\n}\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(wt.join("src/agentlib/src")).unwrap();
+        std::fs::write(
+            wt.join(SEPARATE_PATH),
+            "//! A separate non-root cargo package.\n\npub fn collect_definitions() -> usize {\n    0\n}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "implement the planned functions");
+
+        let mut matrix: Vec<String> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+
+        // (a) The incremental SPLICE: the previous DB holds the planned rows,
+        // the delta holds the declarations. It must upsert, not re-load.
+        let splice_err = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
+        assert!(
+            splice_err.contains("[scan] incremental:")
+                && splice_err.contains("[load] splice:")
+                && splice_err.contains("full load skipped"),
+            "the post-code scan must take the incremental splice path: {splice_err}"
+        );
+        let recs = export_records(&wt);
+        let (root_row, root_shape) =
+            realized_row(&recs, ROOT_FQN, ROOT_PATH, "splice/root", &mut failures);
+        let (sep_row, sep_shape) = realized_row(
+            &recs,
+            SEPARATE_FQN,
+            SEPARATE_PATH,
+            "splice/separate",
+            &mut failures,
+        );
+        matrix.push(format!("splice path:\n  {root_row}\n  {sep_row}"));
+        assert_eq!(
+            root_shape, sep_shape,
+            "splice: the separate crate must realize exactly as the root crate does \
+             (root `{ROOT_FQN}` vs separate `{SEPARATE_FQN}`)"
+        );
+        assert!(
+            recs.iter()
+                .any(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(MODULE_FQN)),
+            "splice: the separate crate's Module `{MODULE_FQN}` must be in the export"
+        );
+
+        // (b) A FULL load from the same planned state: artifacts + shared fact
+        // store dropped, then re-scanned. The planned records still arrive (the
+        // plan store survives) and the scanned declarations must still win.
+        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
+            let _ = std::fs::remove_file(wt.join(rel));
+        }
+        let _ = std::fs::remove_dir_all(&facts);
+        let full_err = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
+        assert!(
+            !full_err.contains("full load skipped"),
+            "the post-splice scan must be a full load: {full_err}"
+        );
+        let full_recs = export_records(&wt);
+        let (root_row, full_root_shape) =
+            realized_row(&full_recs, ROOT_FQN, ROOT_PATH, "full/root", &mut failures);
+        let (sep_row, full_sep_shape) = realized_row(
+            &full_recs,
+            SEPARATE_FQN,
+            SEPARATE_PATH,
+            "full/separate",
+            &mut failures,
+        );
+        matrix.push(format!("full path:\n  {root_row}\n  {sep_row}"));
+        assert_eq!(
+            full_root_shape, full_sep_shape,
+            "full: the separate crate must realize exactly as the root crate does \
+             (root `{ROOT_FQN}` vs separate `{SEPARATE_FQN}`)"
+        );
+        assert_eq!(
+            (root_shape.as_str(), sep_shape.as_str()),
+            (full_root_shape.as_str(), full_sep_shape.as_str()),
+            "the splice and the full load must realize the same shape"
+        );
+
+        assert!(
+            failures.is_empty(),
+            "separate-crate planned-node realization:\n{}\nfailures:\n{}",
+            matrix.join("\n"),
+            failures.join("\n")
+        );
+        println!(
+            "separate-crate planned-node realization:\n{}",
+            matrix.join("\n")
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
