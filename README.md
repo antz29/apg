@@ -341,7 +341,12 @@ Node types:
 | `File` | `fqn` (path relative to the git toplevel / scan root — the file's identity), `start_line`, `end_line`, `code_type` |
 | `Struct` | `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type` |
 | `Function` | `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type` |
+| `Agent` | `fqn`, `path`, `start_line`, `end_line`, `code_type` |
 | `UnresolvedTarget` | `fqn`, `category` (`builtin`/`stdlib`/`external`/`func-value`/`interface-method`/`unknown`) |
+
+One `Agent` node exists per definition file under `.opencode/agents/`: its FQN is
+the extension-stripped file name (`agent.go-frontend-implementer`), located at
+that definition file's path and line span beside the file's `File` node.
 
 Edge types: `Contains` (Module→Module, Module→File, File→Struct, File→Function,
 Struct→Struct, Struct→Function), `Calls` (Function→Function), `Uses`
@@ -410,7 +415,7 @@ project prefix. Six layers:
 | layer | node types |
 |---|---|
 | `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
-| `domain` | `group` (core/supporting/generic), `actor`, `entity` (`entity`/`event`), `value`, `service`, `constraint` |
+| `domain` | `group` (core/supporting/generic; either nests subgroups or holds leaf contents, never both), `actor`, `entity` (`entity`/`event`), `value`, `service`, `constraint` |
 | `solution` | `system`, `container` (app/service/db/queue), `component`, `person`, `role` (requires `applies-to` container/component/both), `constraint` |
 | `implementation` | `note`, `constraint` (attach-only — a note attaches only to implementation-layer code and its `details` edge names exactly one code FQN) |
 | `global` | `constraint` (the laws) |
@@ -419,10 +424,14 @@ project prefix. Six layers:
 Node files carry both halves of every edge (the out half in the source's file,
 the matching in half in the target's). Constraints are **prose** — the binary
 validates structure and references at write time; whether the prose holds is
-assessed by review, never executed. The **spine** threads the tiers end to end:
+assessed by review, never executed. An `implementation`-layer constraint binds
+the whole implementation tier unless it carries one `applies-to` edge per
+`Language` it binds — every `applies-to` target is a `Language` node. The
+**spine** threads the tiers end to end:
 `Stakeholder/User —requires→ Requirement ←driven-by— Service
-←realises— Component —implemented-by→ code`; any requirement traces down to
-the code that implements it, any code traces up to the why.
+←realises— Component —implemented-by→ code`; every code node is claimed by
+exactly one Component (no shared claims), any requirement traces down to the
+code that implements it, any code traces up to the why.
 
 ### Sessions (caller-controlled durability)
 
@@ -485,9 +494,12 @@ node is real code, and the spine resolves straight through to it.
 The plan serializes to the gitignored, branch-local
 `apg/.trans/plans/<project>.jsonl`; feedback lives in the `.trans/<tier>/`
 mirrors (in the tier dir of the attached node). Both die with the branch —
-nothing is committed. Tasks carry a **verb + target**: `creates` (a planned
-node), `modifies`/`deletes` (existing code), `renames`/`moves` (`--fqn` source
-→ `--to` destination).
+nothing is committed. A task's own properties are **title** and **status**;
+everything else about it is edges: exactly one **assigned-to** Agent, an
+optional **implements** Component, and its per-kind operation edges —
+`creates` (a planned node), `modifies`/`deletes` (existing code),
+`renames`/`moves` (the live source, plus a `target` edge to the planned
+destination). A target-less activity carries no operation edge.
 
 - `apg plan done` is an **implementer assertion** — no graph verification.
 - `apg plan complete` is a **milestone only** — the plan survives until verify.
