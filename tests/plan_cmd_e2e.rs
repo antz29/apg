@@ -5766,4 +5766,262 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-06 task-1 (e2e): the verify gate's planned-node realization
+    /// verdict across a SEPARATE, non-root cargo package.
+    ///
+    /// Fixture (agentfrontend-shaped): root crate `rootcrate` plus a nested
+    /// non-root package at `src/agentlib` whose cargo `[package] name` is
+    /// `agentfrontend`. The Rust frontend renders that package's declaration at
+    /// the crate-prefixed identity `rust.agentfrontend.collect_definitions`
+    /// (the cargo PACKAGE name, not the directory) — the identity the branch
+    /// graph carries once the code lands.
+    ///
+    /// The planned Function is authored at the LANGUAGE-AGNOSTIC identity
+    /// (`agentfrontend.collect_definitions`, no root) BEFORE its code exists:
+    /// `apg plan add … planned` refuses an FQN that already resolves to real
+    /// scanned code, so the plan records must predate the declaration. The
+    /// pre-code scan records the placeholders; landing the separate crate's
+    /// `lib.rs` and re-scanning then makes the gate satisfy the bare authored
+    /// node through `realization_candidates`' `<root>.<identity>` variant
+    /// (`rust.agentfrontend.collect_definitions`) — the tolerance this test
+    /// exists to pin.
+    ///
+    /// A SECOND planned Function (`agentfrontend.never_lands`) that no code
+    /// realizes is then authored in the same crate: the gate must refuse
+    /// naming exactly that awaiting FQN, with the realized one still satisfied
+    /// (absent from the blocker list).
+    ///
+    /// The planned records are realized through a DIFFERENT FQN than their
+    /// placeholder (bare authored vs rooted scanned), and the newly landed
+    /// file carries fresh facts in the delta, so the known Phase-7
+    /// cached-fact masking defect (a placeholder admitted ahead of a cached
+    /// real declaration at the SAME FQN) cannot apply here.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg/rust frontend/db.lbug/plan store); run via cargo test-e2e"]
+    fn apply_gate_realizes_a_planned_node_in_a_separate_crate() {
+        /// The checkout's `apg/.trans/graph.jsonl` export, parsed per line.
+        fn export(wt: &Path) -> Vec<serde_json::Value> {
+            let path = wt.join("apg/.trans/graph.jsonl");
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect()
+        }
+
+        /// The one export record at `fqn`.
+        fn record<'a>(recs: &'a [serde_json::Value], fqn: &str) -> &'a serde_json::Value {
+            recs.iter()
+                .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(fqn))
+                .unwrap_or_else(|| panic!("`{fqn}` must be in the export"))
+        }
+
+        const MODULE: &str = "agentfrontend";
+        const PLANNED_FN: &str = "agentfrontend.collect_definitions";
+        const REALIZED_FN: &str = "rust.agentfrontend.collect_definitions";
+        const AWAITING_FN: &str = "agentfrontend.never_lands";
+        const LIB_PATH: &str = "src/agentlib/src/lib.rs";
+
+        let repo = Repo::new("gate-separate-crate");
+        // `cargo metadata` (the Rust scan) writes a lockfile and may build into
+        // `target/`; both stay out of git so the checkout remains clean for the
+        // plan store's staleness gate.
+        repo.write(
+            ".gitignore",
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\nCargo.lock\n/target\n**/target\n",
+        );
+        repo.write(
+            "Cargo.toml",
+            "[package]\nname = \"rootcrate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.write("src/main.rs", "fn main() {}\n");
+        // The nested NON-ROOT package: its identity is the cargo PACKAGE name
+        // (`agentfrontend`), not its directory (`agentlib`). Its `lib.rs` is
+        // ABSENT here — the declaration lands only in the second commit.
+        repo.write(
+            "src/agentlib/Cargo.toml",
+            "[package]\nname = \"agentfrontend\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.commit_all("root crate + nested agentfrontend package");
+
+        let wt = repo.start_project("demo");
+        let apg_root = wt.join(specs::LAYOUT);
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::spawn_apg(args, dir);
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        // Author the plan + the planned nodes BEFORE any code exists.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan", "add", "demo", "planned", "module", MODULE, "--name", MODULE,
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "planned",
+                "function",
+                PLANNED_FN,
+                "--name",
+                "collect_definitions",
+                "--parent",
+                MODULE,
+            ],
+        );
+
+        // Pre-code scan: the placeholders are recorded; the crate-prefixed
+        // declaration's FQN is nowhere in the graph yet.
+        run(&wt, &["scan", ".", "--language", "rust"]);
+        let pre = export(&wt);
+        let planned = record(&pre, PLANNED_FN);
+        assert_eq!(
+            planned.get("type").and_then(|v| v.as_str()),
+            Some("function"),
+            "{planned}"
+        );
+        assert_eq!(
+            planned.get("status").and_then(|v| v.as_str()),
+            Some("planned"),
+            "the planned record must predate the code: {planned}"
+        );
+        assert!(
+            pre.iter()
+                .all(|r| r.get("fqn").and_then(|v| v.as_str()) != Some(REALIZED_FN)),
+            "the crate-prefixed declaration must not exist before it lands"
+        );
+
+        // Land the separate crate's declaration and commit: a clean tree is
+        // what the plan store's staleness gate (and the verify gate) read.
+        std::fs::create_dir_all(wt.join("src/agentlib/src")).unwrap();
+        std::fs::write(
+            wt.join(LIB_PATH),
+            "//! A separate non-root cargo package.\n\npub fn collect_definitions() -> usize {\n    0\n}\n",
+        )
+        .unwrap();
+        wt_commit_paths(&wt, &["src/agentlib"], "implement the separate crate");
+        run(&wt, &["scan", ".", "--language", "rust"]);
+
+        // The scanned implementation node is the crate-prefixed identity —
+        // real, located, no planned status.
+        let recs = export(&wt);
+        let real = record(&recs, REALIZED_FN);
+        assert_eq!(
+            real.get("type").and_then(|v| v.as_str()),
+            Some("function"),
+            "{real}"
+        );
+        assert!(
+            real.get("status").is_none(),
+            "the realized node keeps no planned status: {real}"
+        );
+        assert_eq!(
+            real.get("path").and_then(|v| v.as_str()),
+            Some(LIB_PATH),
+            "{real}"
+        );
+        assert!(
+            real.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) > 0,
+            "the realized node carries a location: {real}"
+        );
+
+        // The plan record survives the scans and the bare FQN stays a planned
+        // placeholder: the scanner never re-prefixes the planned node's FQN,
+        // so an EXACT-FQN match could not satisfy it — only
+        // `realization_candidates`' `<root>.<identity>` variant can. This is
+        // what makes the green below attributable rather than vacuous.
+        let plan_records = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "demo")).unwrap();
+        assert!(
+            plan_records
+                .iter()
+                .any(|r| matches!(r, Record::PlannedNode { fqn, .. } if fqn == PLANNED_FN)),
+            "the scan must not drop the planned-node record: {plan_records:?}"
+        );
+        let bare = recs
+            .iter()
+            .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(PLANNED_FN))
+            .expect("the bare planned placeholder must still be in the export");
+        assert_eq!(
+            bare.get("status").and_then(|v| v.as_str()),
+            Some("planned"),
+            "the bare authored FQN must stay a planned placeholder: {bare}"
+        );
+
+        // GREEN: the bare authored planned node is satisfied by the rooted
+        // scanned node (`realization_candidates`' `<root>.<identity>` variant).
+        assert!(
+            plan_verify_at(&apg_root, "demo").is_ok(),
+            "the gate must realize the separate crate's planned function"
+        );
+
+        // A second planned Function in the same crate that no code realizes:
+        // the gate refuses, naming exactly that awaiting FQN.
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "planned",
+                "function",
+                AWAITING_FN,
+                "--name",
+                "never_lands",
+                "--parent",
+                MODULE,
+            ],
+        );
+        let err = plan_verify_at(&apg_root, "demo")
+            .expect_err("an unrealized planned function must block the gate");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coherence gate blocked"), "{msg}");
+        assert!(
+            msg.contains(&format!(
+                "planned function node `{AWAITING_FN}` is not realized"
+            )),
+            "{msg}"
+        );
+        assert_eq!(
+            msg.matches("is not realized").count(),
+            1,
+            "exactly the awaiting FQN blocks verify: {msg}"
+        );
+        assert!(
+            !msg.contains("collect_definitions"),
+            "the realized planned node stays satisfied and is never named as a blocker: {msg}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
