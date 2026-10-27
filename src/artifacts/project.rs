@@ -286,10 +286,10 @@ pub fn code_universes_from_export(
 ///   scan realized the planned node), and a FQN with no declared kind stays
 ///   absent from the map — the caller's `module` default covers it.
 ///
-/// **Totality.** Both legs key on the export's own `fqn` field (the one the
-/// sibling universe reader uses), so every FQN [`code_universes_from_export`]
-/// returns that a record names resolves at its recorded kind — a stale or
-/// partial export cannot leave it to the caller's `module` default.
+/// **Totality.** Both legs key on the same `fqn` identity the sibling universe
+/// reader keys on, so every FQN [`code_universes_from_export`] returns that a
+/// record names resolves at its recorded kind — a stale or partial export
+/// cannot leave it to the caller's `module` default.
 ///
 /// The export is parsed as generic JSON: the `scan_meta` control record and
 /// every spec/plan/edge record are skipped, exactly as the sibling does.
