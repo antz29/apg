@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "planned-implementation-node",
-  "body": "A code identity a plan declares before any code exists: a module, file, struct, or function record carrying a code FQN, a declared kind, and a planned status, with no location and the target of a creates edge.",
+  "body": "A code identity a plan declares ahead of its code: a module, file, struct, or function record carrying a code FQN, a declared kind, a planned status, and the target of a creates edge, located only once a scan realizes it.",
   "properties": {
     "kind": "entity"
   },
