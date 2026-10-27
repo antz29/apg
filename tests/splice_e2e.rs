@@ -4373,4 +4373,581 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// Phase-07 task-5 (e2e): the SPLICE-side seed-row heal — the assembled
+    /// graph holds the real declaration in a NON-target file, and the splice
+    /// realizes the planned seed row anyway.
+    ///
+    /// The heal arm (`rust.apg.splice.apply.apply`, phase-07 task-4) selects a
+    /// seeded `status: planned` row by FQN when the assembled graph carries the
+    /// REAL declaration at that FQN (`assembled_real` plus a filled location for
+    /// the located kinds); the path-based selection can never reach a
+    /// location-less placeholder, so this is the only arm that can heal one. A
+    /// still-planned FQN with no code keeps its row and every incident edge
+    /// under the Phase-4 exclusion gate
+    /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`), and
+    /// a FQN the assembled graph lacks entirely is left to `removed_fqns` —
+    /// which never deletes a `planned` row either (`db_code_label` excludes the
+    /// placeholders).
+    ///
+    /// WHY APPLY-LEVEL: the CLI cannot produce this seed state once the assembly
+    /// is fixed. Authoring refuses a realized FQN
+    /// (`plan_cmd::authoring::plan_add_planned_at`), so a planned row must be
+    /// projected before its code exists; the first scan after the code lands
+    /// targets the declaration file (it changed) and realizes the located kinds
+    /// through the normal path-based selection; and a sibling worktree that
+    /// warms the shared facts first leaves THIS worktree's seed DB on the
+    /// previous content key, which `splice::seed_checked` refuses (StaleSeed) in
+    /// favour of the full-load assembly (the realization task-2's matrix pins).
+    /// The heal is therefore the legacy-seed defense-in-depth arm, and its exact
+    /// input is constructed over a real scratch `db.lbug` with the same
+    /// `build_db`/`seed`/`apply`/`publish` machinery every other splice e2e
+    /// drives: planned `Module`/`File`/`Struct`/`Function` rows whose real
+    /// declarations exist only in the assembled (cached-fact) graph, a delta
+    /// whose ONLY target is an unrelated file, and a second planned Module with
+    /// no code anywhere (plus a planned child Function the assembled graph lacks
+    /// entirely).
+    ///
+    /// Asserted in ONE splice: (1) HEAL POSITIVE — all four seed rows realize
+    /// (status cleared, location filled, FQN kept) although the declaration's
+    /// file is not a target; (2) GATE CLOSED — the no-code Module keeps its row
+    /// and every incoming/outgoing edge byte-identically, the assembled-absent
+    /// child Function (named in `removed_fqns`) is never healed, selected or
+    /// deleted, and `nodes_deleted` stays 0; (3) EXPORT-VS-DB AGREEMENT — the
+    /// published DB's healed rows equal a full rebuild's and the published
+    /// export's healed records agree with both.
+    ///
+    /// Real I/O (db.lbug/graph.jsonl/fs), so `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    fn splice_heals_a_planned_seed_row_the_assembly_realizes() {
+        const MODULE_FQN: &str = "rust.heal.widget";
+        const FILE_FQN: &str = "heal/widget.rs";
+        const STRUCT_FQN: &str = "rust.heal.widget.Widget";
+        const FUNCTION_FQN: &str = "rust.heal.widget.Widget.compute";
+        // The no-code planned Module: carried by the assembled graph as the
+        // plan store's placeholder, never realized (so its row and every
+        // incident edge must survive verbatim). Its planned child File is the
+        // Module's outgoing `Contains` (Module→File is a declared pair).
+        const NOCODE_MODULE: &str = "rust.heal.orphan";
+        const NOCODE_CHILD_FILE: &str = "heal/ghost.rs";
+        // A planned child Function the assembled graph lacks ENTIRELY and the
+        // delta's `removed_fqns` names — the assembled-absent boundary.
+        const NOCODE_ABSENT: &str = "rust.heal.orphan.ghost";
+        // The delta's only re-emission target — unrelated to every FQN above.
+        const OTHER_FILE: &str = "heal/other.rs";
+        const TASK_FQN: &str = "demo/plan.phase-01.task-1";
+        const COMPONENT_FQN: &str = "solution.component.heal-seed";
+        const NOTE_FQN: &str = "implementation.note.heal-seed";
+
+        /// One row of `fqn`'s own label: `(status)` for Module,
+        /// `(status, start_line, end_line)` for File, `(status, path,
+        /// start_line, end_line)` for Struct/Function. `None` when absent.
+        fn db_row(db_path: &Path, label: &str, fqn: &str) -> Option<Vec<String>> {
+            let query = match label {
+                "Module" => format!("MATCH (n:Module {{fqn: '{fqn}'}}) RETURN n.status AS status"),
+                "File" => format!(
+                    "MATCH (n:File {{fqn: '{fqn}'}}) RETURN n.status AS status, \
+                     n.start_line AS sl, n.end_line AS el"
+                ),
+                _ => format!(
+                    "MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.status AS status, \
+                     n.path AS path, n.start_line AS sl, n.end_line AS el"
+                ),
+            };
+            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (_, rows) = query_rows(&conn, &query).unwrap();
+            let row = rows.into_iter().next();
+            drop(conn);
+            drop(db);
+            row
+        }
+
+        /// The node's own row plus its COMPLETE incoming and outgoing edge set.
+        /// The patterns name no relation type (`label(r)` renders it), so every
+        /// family incident to the FQN is in the snapshot — including one the
+        /// fixture does not explicitly assert.
+        fn snapshot(db_path: &Path, label: &str, fqn: &str) -> Vec<String> {
+            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let mut out = Vec::new();
+            for (tag, query) in [
+                (
+                    "row",
+                    format!(
+                        "MATCH (n:{label} {{fqn: '{fqn}'}}) \
+                         RETURN n.fqn AS fqn, n.status AS status"
+                    ),
+                ),
+                (
+                    "out",
+                    format!(
+                        "MATCH (m:{label} {{fqn: '{fqn}'}})-[r]->(b) \
+                         RETURN label(r) AS rel, labels(b) AS kind, b.fqn AS fqn"
+                    ),
+                ),
+                (
+                    "in",
+                    format!(
+                        "MATCH (a)-[r]->(m:{label} {{fqn: '{fqn}'}}) \
+                         RETURN label(r) AS rel, labels(a) AS kind, a.fqn AS fqn"
+                    ),
+                ),
+            ] {
+                let (_, rows) = query_rows(&conn, &query).unwrap();
+                let mut rows: Vec<String> = rows.into_iter().map(|r| r.join("|")).collect();
+                rows.sort();
+                out.extend(rows.into_iter().map(|r| format!("{tag}: {r}")));
+            }
+            drop(conn);
+            drop(db);
+            out
+        }
+
+        /// Every export record whose `fqn` is in `fqns`, canonicalized.
+        fn export_records(path: &Path, fqns: &BTreeSet<String>) -> BTreeSet<String> {
+            std::fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .filter(|v| {
+                    v.get("fqn")
+                        .and_then(|f| f.as_str())
+                        .is_some_and(|f| fqns.contains(f))
+                })
+                .map(|v| v.to_string())
+                .collect()
+        }
+
+        let planned = |kind: NodeKind| Node {
+            kind,
+            status: Some("planned".to_string()),
+            ..Node::default()
+        };
+
+        // --- The seeded DB: the four planned placeholders (the state the plan
+        // authoring projection produces), the no-code planned Module with its
+        // full incident family, the planned child Function the assembled graph
+        // will lack, an unrelated file, and the previous `Scan` row.
+        let mut seed = Graph::default();
+        seed.nodes.insert(
+            "rust".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        seed.nodes
+            .insert(MODULE_FQN.into(), planned(NodeKind::Module));
+        seed.nodes.insert(FILE_FQN.into(), planned(NodeKind::File));
+        seed.nodes
+            .insert(STRUCT_FQN.into(), planned(NodeKind::Struct));
+        seed.nodes
+            .insert(FUNCTION_FQN.into(), planned(NodeKind::Function));
+        seed.nodes
+            .insert(NOCODE_MODULE.into(), planned(NodeKind::Module));
+        seed.nodes
+            .insert(NOCODE_CHILD_FILE.into(), planned(NodeKind::File));
+        seed.nodes
+            .insert(NOCODE_ABSENT.into(), planned(NodeKind::Function));
+        seed.nodes.insert(
+            OTHER_FILE.into(),
+            located(NodeKind::File, OTHER_FILE, 1, 10),
+        );
+        seed.nodes.insert(
+            TASK_FQN.into(),
+            Node {
+                kind: NodeKind::Task,
+                title: Some("heal the planned seed row".into()),
+                status: Some("pending".into()),
+                ..Node::default()
+            },
+        );
+        seed.nodes.insert(
+            COMPONENT_FQN.into(),
+            Node {
+                kind: NodeKind::Component,
+                ..Node::default()
+            },
+        );
+        seed.nodes.insert(
+            NOTE_FQN.into(),
+            Node {
+                kind: NodeKind::Note,
+                body: Some("The splice-side seed-row heal.".into()),
+                ..Node::default()
+            },
+        );
+        for (from, to) in [
+            ("rust", MODULE_FQN),
+            (MODULE_FQN, FILE_FQN),
+            (FILE_FQN, STRUCT_FQN),
+            (FILE_FQN, FUNCTION_FQN),
+            ("rust", NOCODE_MODULE),
+            (NOCODE_MODULE, NOCODE_CHILD_FILE),
+            (NOCODE_CHILD_FILE, NOCODE_ABSENT),
+        ] {
+            seed.contains.insert((from.into(), to.into()));
+        }
+        seed.module_create
+            .insert((TASK_FQN.into(), NOCODE_MODULE.into()));
+        seed.function_create
+            .insert((TASK_FQN.into(), NOCODE_ABSENT.into()));
+        seed.spec_implemented_by
+            .insert((COMPONENT_FQN.into(), NOCODE_MODULE.into()));
+        seed.details.insert((NOTE_FQN.into(), NOCODE_MODULE.into()));
+        seed.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+
+        // --- The assembled graph: the four cached real declarations (the heal's
+        // premise), the still-planned no-code Module, NO child Function, and the
+        // unrelated changed file the delta's target set names.
+        let mut assembled = Graph::default();
+        assembled.nodes.insert(
+            "rust".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        assembled.nodes.insert(
+            MODULE_FQN.into(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        assembled
+            .nodes
+            .insert(FILE_FQN.into(), located(NodeKind::File, FILE_FQN, 1, 20));
+        assembled.nodes.insert(
+            STRUCT_FQN.into(),
+            located(NodeKind::Struct, FILE_FQN, 1, 10),
+        );
+        assembled.nodes.insert(
+            FUNCTION_FQN.into(),
+            located(NodeKind::Function, FILE_FQN, 12, 18),
+        );
+        assembled
+            .nodes
+            .insert(NOCODE_MODULE.into(), planned(NodeKind::Module));
+        assembled
+            .nodes
+            .insert(NOCODE_CHILD_FILE.into(), planned(NodeKind::File));
+        assembled.nodes.insert(
+            OTHER_FILE.into(),
+            located(NodeKind::File, OTHER_FILE, 1, 40),
+        );
+        assembled.nodes.insert(
+            TASK_FQN.into(),
+            Node {
+                kind: NodeKind::Task,
+                title: Some("heal the planned seed row".into()),
+                status: Some("pending".into()),
+                ..Node::default()
+            },
+        );
+        assembled.nodes.insert(
+            COMPONENT_FQN.into(),
+            Node {
+                kind: NodeKind::Component,
+                ..Node::default()
+            },
+        );
+        assembled.nodes.insert(
+            NOTE_FQN.into(),
+            Node {
+                kind: NodeKind::Note,
+                body: Some("The splice-side seed-row heal.".into()),
+                ..Node::default()
+            },
+        );
+        for (from, to) in [
+            ("rust", MODULE_FQN),
+            (MODULE_FQN, FILE_FQN),
+            (FILE_FQN, STRUCT_FQN),
+            (FILE_FQN, FUNCTION_FQN),
+            ("rust", NOCODE_MODULE),
+            (NOCODE_MODULE, NOCODE_CHILD_FILE),
+        ] {
+            assembled.contains.insert((from.into(), to.into()));
+        }
+        assembled
+            .module_create
+            .insert((TASK_FQN.into(), NOCODE_MODULE.into()));
+        assembled
+            .spec_implemented_by
+            .insert((COMPONENT_FQN.into(), NOCODE_MODULE.into()));
+        assembled
+            .details
+            .insert((NOTE_FQN.into(), NOCODE_MODULE.into()));
+        assembled.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+        assert!(
+            !assembled.nodes.contains_key(NOCODE_ABSENT),
+            "the assembled-absent boundary requires the Function to be missing entirely"
+        );
+
+        let dir = scratch("heal-seed-row");
+        let prev_path = dir.join("db.lbug");
+        let export = dir.join("graph.jsonl");
+        build_db(&prev_path, &seed);
+
+        // Fixture sanity: the four rows really are planned, location-less seed
+        // rows, and the no-code Module's incident family exists before the
+        // splice (so a post-splice miss is a DROP, never a fixture that never
+        // authored it).
+        for (label, fqn) in [
+            ("Module", MODULE_FQN),
+            ("File", FILE_FQN),
+            ("Struct", STRUCT_FQN),
+            ("Function", FUNCTION_FQN),
+        ] {
+            let row = db_row(&prev_path, label, fqn)
+                .unwrap_or_else(|| panic!("`{fqn}` is absent from the seeded DB"));
+            assert_eq!(
+                cell(&row, 0),
+                "planned",
+                "`{fqn}` must be a planned seed row"
+            );
+        }
+        let before_carried = snapshot(&prev_path, "Module", NOCODE_MODULE);
+        let before_absent = snapshot(&prev_path, "Function", NOCODE_ABSENT);
+        assert!(
+            before_carried.iter().any(|l| l.starts_with("row:")),
+            "the no-code planned Module must have its own seed row"
+        );
+        assert!(
+            before_carried
+                .iter()
+                .filter(|l| l.starts_with("in:"))
+                .count()
+                >= 2
+                && before_carried.iter().any(|l| l.starts_with("out:")),
+            "the no-code planned Module must carry its incoming and outgoing edges \
+             before the splice: {before_carried:?}"
+        );
+        assert!(
+            before_absent.iter().any(|l| l.starts_with("row:"))
+                && before_absent
+                    .iter()
+                    .filter(|l| l.starts_with("in:"))
+                    .count()
+                    >= 2,
+            "the assembled-absent planned Function must carry its row and incoming \
+             edges before the splice: {before_absent:?}"
+        );
+
+        let targets: BTreeSet<String> = [OTHER_FILE.to_string()].into_iter().collect();
+        assert!(
+            !targets.contains(FILE_FQN),
+            "the declaration's file must be a NON-target (the heal's premise)"
+        );
+        let removed: BTreeSet<String> = [NOCODE_ABSENT.to_string()].into_iter().collect();
+
+        let seeded = seed_or_panic(&prev_path);
+        let report = seeded
+            .apply(&SpliceDelta {
+                graph: &assembled,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+
+        // --- (1) HEAL POSITIVE: every planned seed row whose real declaration
+        // the assembled graph carries realizes — status cleared, location
+        // filled, FQN kept — although the declaration's file is not a target.
+        let mut failures = Vec::new();
+        for (label, fqn, located_kind) in [
+            ("Module", MODULE_FQN, false),
+            ("File", FILE_FQN, true),
+            ("Struct", STRUCT_FQN, true),
+            ("Function", FUNCTION_FQN, true),
+        ] {
+            let Some(row) = db_row(&seeded.temp_path, label, fqn) else {
+                failures.push(format!(
+                    "{label} `{fqn}`: FQN not kept — absent after the splice"
+                ));
+                continue;
+            };
+            let status = cell(&row, 0);
+            if !status.is_empty() {
+                failures.push(format!(
+                    "{label} `{fqn}`: status {status:?}, want \"\" — the seed-row heal must \
+                     clear the planned placeholder"
+                ));
+            }
+            if located_kind {
+                let (path, sl, el) = match label {
+                    "File" => (
+                        String::new(),
+                        cell(&row, 1).parse().unwrap_or(0),
+                        cell(&row, 2).parse().unwrap_or(0),
+                    ),
+                    _ => (
+                        cell(&row, 1),
+                        cell(&row, 2).parse().unwrap_or(0),
+                        cell(&row, 3).parse().unwrap_or(0),
+                    ),
+                };
+                if sl == 0 || el < sl {
+                    failures.push(format!(
+                        "{label} `{fqn}`: location not filled \
+                         (start_line={sl}, end_line={el})"
+                    ));
+                }
+                if label != "File" && path != FILE_FQN {
+                    failures.push(format!(
+                        "{label} `{fqn}`: wrong path `{path}` (want `{FILE_FQN}`)"
+                    ));
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the assembled real declarations must heal every planned seed row:\n{}",
+            failures.join("\n")
+        );
+
+        // The healed rows keep their FQN-keyed `Contains` edges (the heal is an
+        // in-place upsert, and the delta re-emits the assembled `Contains`).
+        let db = Database::new(&seeded.temp_path, SystemConfig::default().read_only(true)).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        for matched in [
+            format!(
+                "MATCH (p:Language {{fqn: 'rust'}})-[:Contains]->(n:Module {{fqn: '{MODULE_FQN}'}})"
+            ),
+            format!(
+                "MATCH (m:Module {{fqn: '{MODULE_FQN}'}})-[:Contains]->(f:File {{fqn: '{FILE_FQN}'}})"
+            ),
+            format!(
+                "MATCH (f:File {{fqn: '{FILE_FQN}'}})-[:Contains]->(s:Struct {{fqn: '{STRUCT_FQN}'}})"
+            ),
+            format!(
+                "MATCH (f:File {{fqn: '{FILE_FQN}'}})-[:Contains]->(x:Function {{fqn: '{FUNCTION_FQN}'}})"
+            ),
+        ] {
+            let (_, rows) = query_rows(&conn, &format!("{matched} RETURN count(*) AS n")).unwrap();
+            let n = rows
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|c| c.trim().parse::<i64>().ok())
+                .unwrap_or(0);
+            assert_eq!(n, 1, "the healed rows must keep the edge `{matched}`");
+        }
+        drop(conn);
+        drop(db);
+
+        // --- (2) GATE CLOSED: the no-code planned Module keeps its row AND
+        // every incoming/outgoing edge byte-identically, and the
+        // assembled-absent planned Function (named in `removed_fqns`) is never
+        // healed, selected or deleted.
+        let after_carried = snapshot(&seeded.temp_path, "Module", NOCODE_MODULE);
+        assert_eq!(
+            after_carried,
+            before_carried,
+            "a still-planned Module with no code must keep its row and every incident/outgoing \
+             edge byte-identical through the heal splice\nbefore:\n{}\nafter:\n{}",
+            before_carried.join("\n"),
+            after_carried.join("\n")
+        );
+        let after_absent = snapshot(&seeded.temp_path, "Function", NOCODE_ABSENT);
+        assert_eq!(
+            after_absent,
+            before_absent,
+            "a planned row the assembled graph lacks entirely must not be healed, selected or \
+             deleted (even when `removed_fqns` names it)\nbefore:\n{}\nafter:\n{}",
+            before_absent.join("\n"),
+            after_absent.join("\n")
+        );
+        assert_eq!(
+            report.nodes_deleted, 0,
+            "the heal splice must never widen the delete scope for a planned row: {report:?}"
+        );
+
+        // --- (3) EXPORT-VS-DB AGREEMENT: publish, then compare the healed rows
+        // to a full rebuild of the same assembled graph and the export to both.
+        publish(seeded, &assembled, &export).unwrap();
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &assembled);
+        for (label, fqn) in [
+            ("Module", MODULE_FQN),
+            ("File", FILE_FQN),
+            ("Struct", STRUCT_FQN),
+            ("Function", FUNCTION_FQN),
+        ] {
+            assert_eq!(
+                db_row(&prev_path, label, fqn),
+                db_row(&expected_path, label, fqn),
+                "the spliced DB's healed {label} `{fqn}` must equal a full rebuild's"
+            );
+        }
+        let healed: BTreeSet<String> = [MODULE_FQN, FILE_FQN, STRUCT_FQN, FUNCTION_FQN]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let reference = dir.join("reference.jsonl");
+        load::write_graph_jsonl(&assembled, &reference).unwrap();
+        assert_eq!(
+            export_records(&export, &healed),
+            export_records(&reference, &healed),
+            "the published export must carry a full rebuild's records for the healed FQNs"
+        );
+        // The export's own healed records agree with the spliced DB rows (status
+        // cleared; the located kinds' path/lines).
+        let published = std::fs::read_to_string(&export).unwrap();
+        let record = |fqn: &str| -> serde_json::Value {
+            published
+                .lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .find(|v| v.get("fqn").and_then(|f| f.as_str()) == Some(fqn))
+                .unwrap_or_else(|| panic!("`{fqn}` has no record in the published export"))
+        };
+        for (label, fqn) in [
+            ("Module", MODULE_FQN),
+            ("File", FILE_FQN),
+            ("Struct", STRUCT_FQN),
+            ("Function", FUNCTION_FQN),
+        ] {
+            let row = db_row(&prev_path, label, fqn)
+                .unwrap_or_else(|| panic!("`{fqn}` is absent from the published spliced DB"));
+            let rec = record(fqn);
+            assert!(
+                rec.get("status").is_none(),
+                "the export's `{fqn}` must carry no planned status: {rec}"
+            );
+            if label == "Module" {
+                continue;
+            }
+            let (sl, el) = match label {
+                "File" => (
+                    cell(&row, 1).parse::<u32>().unwrap_or(0),
+                    cell(&row, 2).parse::<u32>().unwrap_or(0),
+                ),
+                _ => (
+                    cell(&row, 2).parse::<u32>().unwrap_or(0),
+                    cell(&row, 3).parse::<u32>().unwrap_or(0),
+                ),
+            };
+            assert_eq!(rec["start_line"], sl, "export/DB start_line for `{fqn}`");
+            assert_eq!(rec["end_line"], el, "export/DB end_line for `{fqn}`");
+            if label != "File" {
+                assert_eq!(rec["path"], FILE_FQN, "export/DB path for `{fqn}`");
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
