@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "applies-to-merge-targets-not-deduplicated",
+  "body": "`applies_to_missing_languages` lists the applies-to targets the merged record set does not already label, without deduplicating: several records sharing one target in a single delta issue a redundant no-op `MERGE (n:Language {fqn})` and re-insert the same `known` key. Limit: materialisation statement count scales with record count, not with distinct languages. Upgrade: dedupe the missing-target list before materialising if one batch can carry many applies-to records naming the same language.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.merge_records",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
