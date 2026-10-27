@@ -3203,12 +3203,15 @@ mod e2e {
     }
 
     /// Phase-01 task-2 (e2e): the SPLICE realization matrix for a ROOT crate.
-    /// A planned `Module`, `File`, `Struct` and `Function` each declared at its
+    /// A planned `File`, `Struct` and `Function` each declared at its
     /// root-crate FQN must be REALIZED by the next incremental splice — the
     /// seeded placeholder replaced by the scanned declaration: `status` cleared,
-    /// the location filled (File/Struct/Function), and the FQN kept. Module is
-    /// inherently location-less (SPEC §4), so its realization is status + kind
-    /// only.
+    /// the location filled, and the FQN kept. The location-less planned `Module`
+    /// (SPEC §4) is deliberately NOT re-decided under the Phase-4 exclusion gate
+    /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`): it
+    /// keeps its row and `planned` status verbatim, and the Phase-7 seed-row heal
+    /// (plan.phase-07.task-4) is what later realizes it once the assembled graph
+    /// holds the real declaration.
     ///
     /// The branch DB is seeded with all four `status: planned` placeholders
     /// first: authoring a plan against the branch's live DB projects its
@@ -3418,9 +3421,17 @@ mod e2e {
             evidence.push(format!(
                 "{kind} `{fqn}` post-splice: status={status:?} path={path:?} lines={sl}..{el}"
             ));
-            if status == "planned" {
+            // A still-planned Module keeps its row and status verbatim; a
+            // located kind must have its placeholder's status cleared.
+            let want_status = if kind == "Module" { "planned" } else { "" };
+            if status != want_status {
                 failures.push(format!(
-                    "{kind} `{fqn}`: LEFT PLANNED — the splice upsert did not clear status"
+                    "{kind} `{fqn}`: status {status:?}, want {want_status:?} — {}",
+                    if kind == "Module" {
+                        "a still-planned Module must keep its row verbatim"
+                    } else {
+                        "the splice upsert must clear the planned placeholder"
+                    }
                 ));
             }
             if located {
@@ -3453,8 +3464,7 @@ mod e2e {
 
     /// Phase-03 task-1 (e2e): the INCIDENT-EDGE realization matrix. Every
     /// FQN-keyed edge family incident to a planned Implementation node must
-    /// still resolve to the **real** node after the incremental splice lands
-    /// the declaration at that FQN:
+    /// still resolve at that FQN after the incremental splice:
     ///
     /// * the per-kind task operation edge (`module_create` … `function_create`),
     /// * a renames/moves destination (the task `Target` edge),
@@ -3464,10 +3474,14 @@ mod e2e {
     ///
     /// One planned `Module`, `File`, `Struct` and `Function` is declared, every
     /// family is projected onto each placeholder, the declaration is landed,
-    /// and the incremental splice realizes it. Each family is queried BOTH
+    /// and the incremental splice applies the delta. Each family is queried BOTH
     /// before the splice (the edge really was keyed on the planned FQN — so a
     /// post-splice miss is a DROP, never a fixture that never authored it) and
-    /// after (the edge resolves to the node with `status: planned` cleared).
+    /// after: a located kind's node is realized (`status: planned` cleared),
+    /// while the location-less planned Module keeps its row and status verbatim
+    /// under the Phase-4 exclusion gate (`requirements.requirement.
+    /// still-planned-node-keeps-node-and-edges`) — a still-planned FQN's
+    /// incident families must resolve to that planned node, not be dropped.
     /// The kept-vs-dropped verdict is printed per family per kind; a dropping
     /// family fails with the whole matrix in the panic message, so the Phase-3
     /// source tasks (filter_task_ops / finalize_graph) decide what to fix from
@@ -3859,19 +3873,23 @@ mod e2e {
             "the splice path must skip the full load: {spliced_err}"
         );
 
-        // --- Post-splice: every family must resolve to the REAL node (status
-        // cleared) at its FQN. A miss is a DROP: the edge was there pre-splice.
+        // --- Post-splice: every family must resolve at its FQN. A miss is a
+        // DROP: the edge was there pre-splice. A located kind's node is realized
+        // (status cleared), so its families carry the status guard; the planned
+        // Module is a still-planned row under the Phase-4 exclusion gate, so its
+        // families resolve to that planned node.
         let mut verdicts: Vec<String> = Vec::new();
         for (_, label, fqn, create, parent_label, parent_fqn, k) in kinds {
             let task = format!("demo/plan.phase-01.task-{k}");
+            let realized = match label {
+                "Module" => "",
+                _ => " AND (n.status IS NULL OR n.status <> 'planned')",
+            };
             for (family, matched) in families(label, fqn, create, parent_label, parent_fqn, &task) {
                 let was = pre[&(fqn.to_string(), family)];
                 let hit = count_rows(
                     &db_path,
-                    &format!(
-                        "{matched} AND (n.status IS NULL OR n.status <> 'planned') \
-                         RETURN count(*) AS n"
-                    ),
+                    &format!("{matched}{realized} RETURN count(*) AS n"),
                 ) > 0;
                 let verdict = match (was, hit) {
                     (true, true) => "KEPT",

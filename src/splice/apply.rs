@@ -175,14 +175,12 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // for the delete scope in step 2): a module the seed does not own — a
     // package/dir the previous scan did not have — is always re-decided, because
     // the seed can vouch for neither its row nor its outgoing Contains rels.
-    // Only a real row is in the delete scope; a `planned` placeholder is owned
-    // by the seed but never disappears.
+    // A `planned` placeholder is owned the same way, and it is NEVER re-decided
+    // or deleted: the assembled graph cannot re-emit its row or its outgoing
+    // Contains rels, so re-deciding it would clear the planned status and drop
+    // edges a full rebuild keeps
+    // (`requirements.requirement.still-planned-node-keeps-node-and-edges`).
     let seeded_modules = seed_modules(conn)?;
-    let seeded_real: BTreeSet<&str> = seeded_modules
-        .iter()
-        .filter(|(_, planned)| !**planned)
-        .map(|(fqn, _)| fqn.as_str())
-        .collect();
     let mut delta_funcs: Vec<String> = Vec::new();
     let mut delta_structs: Vec<String> = Vec::new();
     let mut delta_agents: Vec<String> = Vec::new();
@@ -205,15 +203,19 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
             }
             NodeKind::Module => {
                 // A module is re-decided when the delta's target set reaches a
-                // File in its SEED subtree, OR when the seed has no Module row
-                // for it at all (a NEW package/dir: the assembled graph is the
-                // only source of truth for its node and its Contains rels). An
-                // otherwise-untouched module's seed row and outgoing Contains
-                // rels are already exact, and the assembled graph may not even
-                // carry them (a skipped language's scaffolding) — that guard is
-                // preserved. A delta File/Module added UNDER an untouched module
+                // File in its SEED subtree — and only then for a REAL seed row,
+                // OR when the seed has no Module row for it at all (a NEW
+                // package/dir: the assembled graph is the only source of truth
+                // for its node and its Contains rels). An otherwise-untouched
+                // module's seed row and outgoing Contains rels are already exact,
+                // and the assembled graph may not even carry them (a skipped
+                // language's scaffolding) — that guard is preserved. A `planned`
+                // placeholder is seed-owned even though it can never be reached:
+                // the delta cannot re-emit its row or its rels, so it keeps both
+                // verbatim. A delta File/Module added UNDER an untouched module
                 // is handled additively by the `Contains` merge in step 6.
-                if reached(fqn) || !seeded_real.contains(fqn.as_str()) {
+                let seed_owns_real = seeded_modules.get(fqn).is_some_and(|planned| !*planned);
+                if (reached(fqn) && seed_owns_real) || !seeded_modules.contains_key(fqn) {
                     delta_modules.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Module");
                 }
@@ -256,12 +258,13 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // path (or whose FQN directly names one, for a File) is therefore in scope;
     // it disappears iff the assembled graph does not re-emit it.
     let mut in_scope: BTreeMap<String, &'static str> = code_fqns_in_paths(conn, delta.targets)?;
-    for &m in &seeded_real {
-        // Only a module whose ENTIRE file subtree is in the delta can be
-        // genuinely gone; an untouched module (or one with any reused file left)
-        // is left exactly as the seed left it.
-        if fully_reached(m) {
-            in_scope.insert(m.to_string(), "Module");
+    for (m, planned) in &seeded_modules {
+        // Only a REAL module whose ENTIRE file subtree is in the delta can be
+        // genuinely gone; a `planned` placeholder never disappears, and an
+        // untouched module (or one with any reused file left) is left exactly as
+        // the seed left it.
+        if !*planned && fully_reached(m) {
+            in_scope.insert(m.clone(), "Module");
         }
     }
     for fqn in delta.removed_fqns {
