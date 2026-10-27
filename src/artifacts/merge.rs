@@ -258,8 +258,19 @@ impl ArtifactDb {
         // have rooted in this DB: materialise the row first (idempotent beside
         // one a stream did root), or `merge_edge`'s dangling-endpoint skip
         // would silently drop the edge.
-        for to in applies_to_missing_languages(records, &known) {
+        //
+        // The row is created on `conn`, so it exists only inside this
+        // transaction — `merge_edge`'s `node_label`/`count` open a fresh
+        // `self.db` connection that cannot see it. Register the identity in
+        // `known` so the endpoint is paired from the record set instead of
+        // re-probed against the DB (and the edge dropped as dangling).
+        let missing: Vec<String> = applies_to_missing_languages(records, &known)
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        for to in &missing {
             conn.query(&format!("MERGE (n:Language {{fqn: {}}})", lit(to)))?;
+            known.insert(to.clone(), "Language");
         }
         for r in records {
             if let Some((table, from, to, properties)) = edge_merge(r) {

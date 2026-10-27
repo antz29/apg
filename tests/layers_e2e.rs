@@ -1887,7 +1887,9 @@ mod e2e {
     /// end. The write funnel (`write_project` — the path a live session's save
     /// flushes its buffered node set through) accepts an
     /// `implementation.constraint` plus an `applies-to` edge naming a
-    /// `LANGUAGE_ROOTS` id and commits it in one mutation. A full scan then
+    /// `LANGUAGE_ROOTS` id and commits it in one mutation. The write-through's
+    /// own projection must already carry the `AppliesTo` row (pre-scan, the
+    /// live merge path); a full scan then
     /// carries both artifacts: the DB holds the `AppliesTo` row
     /// (`Constraint → Language`, properties intact) and `graph.jsonl`
     /// serializes the `applies-to` wire record — and because ingest admission
@@ -1914,6 +1916,29 @@ mod e2e {
         let head_before = testutil::commit_count(&wt);
 
         write_project(&wt_apg, &[law], &[]).unwrap();
+
+        // The LIVE MERGE PATH alone must carry the edge: the branch DB's
+        // projection delta lands at admission (`merge_records`), before any
+        // scan rebuilds the graph. The merge materialises `rust` on its own
+        // transaction's connection, so the endpoint identity must be visible to
+        // that same transaction's edge write — otherwise the `AppliesTo` row is
+        // silently dropped and only a later full scan restores it.
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert_eq!(
+                query_cells(
+                    &db,
+                    "MATCH (c:Constraint)-[:AppliesTo]->(l:Language) RETURN c.fqn, l.fqn"
+                ),
+                vec![vec![LAW.to_string(), "rust".to_string()]],
+                "the live merge must write the AppliesTo row before any scan"
+            );
+            assert_eq!(
+                query_cells(&db, "MATCH (l:Language) WHERE l.fqn = 'rust' RETURN l.fqn"),
+                vec![vec!["rust".to_string()]],
+                "the live merge must materialise exactly one Language row for the never-scanned `rust`"
+            );
+        }
 
         // The edge is durable (a pairing-exempt Language target needs no node
         // file) and the mutation committed exactly once.
