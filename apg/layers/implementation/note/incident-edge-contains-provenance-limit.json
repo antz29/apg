@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "incident-edge-contains-provenance-limit",
+  "body": "Limit: this matrix's contains cells cannot discriminate plan-sourced Contains from scanner-sourced ones — both are the same (parent, child) FQN-pair set member with no edge properties or provenance, and the scanner re-emits Language→Module, Module→File, File→Struct and File→Function on the realization scan, so the cells prove the realized node keeps the edge, not that the plan-only row survived in isolation. The limit is structural (any plan edge that could differ from the scanner's is by definition an invalid pair finalize_graph should drop), unclosable by a test in the current graph model. Upgrade only if Contains ever gains edge properties or a provenance column.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.realization_keeps_every_incident_edge_on_the_real_node",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
