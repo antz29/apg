@@ -1813,6 +1813,19 @@ fn filter_task_ops(
 /// §7). Split out so the win-B splice path can merge cached facts first and
 /// then finalize once (phase-02 task-7) — an edge to a symbol the target-only
 /// spool did not emit must not be pruned before the cached unit lands.
+///
+/// Every validator resolves an endpoint through `graph.nodes` — the node the
+/// FQN currently holds, i.e. the realized Module/File/Struct/Function — never
+/// through a placeholder's `status` or missing location, so an edge keyed on a
+/// planned FQN keeps resolving once the declaration lands: the renames/moves
+/// destination (`target`), a Component's `implemented-by`
+/// (`spec_implemented_by`), a Note's `details` (both endpoints exist), and a
+/// parent's `contains` (a code pair in `valid_contains_pair`). The planned
+/// record's parent `contains` is re-inserted on every build — after
+/// `insert_node` even when the placeholder was already superseded — but it is
+/// the same FQN-keyed pair onto the realized node, so that re-derivation is
+/// idempotent and the retain still drops only a dangling or wrong-kind
+/// endpoint.
 pub(crate) fn finalize_graph(graph: &mut Graph) {
     // Drop edges whose endpoints do not exist (dangling ids, blacklisted nodes).
     // Containment is a strict tree: the code pairs (Language→Module,
