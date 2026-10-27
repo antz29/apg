@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "graph-jsonl-reader-hand-maintained-match",
+  "body": "`read_graph_jsonl` is a hand-maintained per-record-type match ending in an `unknown type` bail, so every new `Export` variant needs its own arm or the shared read→write consistency path trips. Limit: the reader's type coverage is not derived from the writer's variant set, so a writer-only change compiles while the reader bails at runtime. Upgrade: derive the dispatch from the `Export` variants (or a shared table) if a second reader ever needs the same mapping.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.testutil.read_graph_jsonl",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

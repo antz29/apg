@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "layers-e2e-roundtrip-private-helper",
+  "body": "The applies-to e2e round-trip writes its rewrite to a temp-dir file and parses it, instead of reusing `assert_graph_jsonl_consistent`, because that helper is private to the sibling `tests/artifacts_e2e.rs` integration crate. Limit: the round-trip check is reproduced locally rather than shared. Upgrade: call the shared helper once it moves into `apg::testutil`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "tests/layers_e2e.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
