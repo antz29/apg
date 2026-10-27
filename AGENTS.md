@@ -648,11 +648,12 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 
 ### Data model
 
-- 5 code node types:
+- 6 code node types:
   - `Module` — property: `fqn`
   - `File` — properties: `fqn` (the repo-relative path from the git toplevel / scan root), `start_line`, `end_line` (`1..total-lines`), `code_type`
   - `Struct` — properties: `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type`
   - `Function` — properties: `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type`
+  - `Agent` — properties: `fqn`, `path`, `start_line`, `end_line`, `code_type` — one per definition file under `.opencode/agents/`, with the FQN `agent.<file-stem>` (the extension-stripped file name, e.g. `agent.go-frontend-implementer`) located at that definition file's path and line span; this identity is what a task's `assigned-to` edge names
   - `UnresolvedTarget` — properties: `fqn`, `category` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
 - 5 code edge types:
   - `Contains` — Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
@@ -672,9 +673,10 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   `Component`, `Person`, `Role` (the `solution.role` type; `applies-to`
   container|component|both), `Constraint` (prose; tier-scoped — its layer
   is its scope, it names no node), `Note`. Transient labels: `Plan`,
-  `PlanPhase`, `Task` (kind/tier/status), `Feedback` (body/status/
-  disposition). The four Implementation kinds may carry `status: planned` for
-  not-yet-built code (see "Planned Implementation nodes" below).
+  `PlanPhase`, `Task` (title/status — see *Plans, tasks & feedback*),
+  `Feedback` (body/status/disposition). The four Implementation kinds may
+  carry `status: planned` for not-yet-built code (see "Planned Implementation
+  nodes" below).
 - Authored edge labels: `Contains` (hierarchy), `Requires` (Stakeholder/User →
   Requirement), `DrivenBy` (Service → Requirement), `Reads`/`Writes` (Service
   → Entity of its leaf Group), `Calls` (Actor/Service → Service),
@@ -682,7 +684,9 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   Entity), `Realises` (Component → Service), `IsRole` (Container/Component →
   Role), `Uses` (Person → Component), `Represents` (Actor → User, Person →
   Actor), `SpecImplementedBy` (the DB rel-table name for the authored
-  `implemented-by` kind: Component → code), `Details` (a note → exactly one
+  `implemented-by` kind: Component → code), `AppliesTo` (the DB rel-table name
+  for the authored `applies-to` kind: implementation constraint → Language),
+  `Details` (a note → exactly one
   code FQN — the single implementation-layer code identity the note deepens).
   Transient: `Gates` (PlanPhase→PlanPhase), `Satisfies` (PlanPhase→
   Requirement), `Reviews` (Feedback→any). `contains` trees are
@@ -710,7 +714,7 @@ matching in in the target's); a pairing mismatch fails at scan. The six layers:
 | layer | types |
 |---|---|
 | `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
-| `domain` | `group` (attribute core/supporting/generic, optional `root`), `actor`, `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
+| `domain` | `group` (attribute core/supporting/generic, optional `root`; a group is either a container of child groups or a leaf holding services and entities — the two modes are exclusive), `actor`, `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
 | `solution` | `system`, `container` (kind app/service/db/queue), `component`, `person`, `role` (requires `applies-to` container/component/both), `constraint` |
 | `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
 | `global` | `constraint` (the laws) |
@@ -718,7 +722,10 @@ matching in in the target's); a pairing mismatch fails at scan. The six layers:
 
 **Constraints are prose**: the binary validates structure + references at write
 time; whether the prose holds is assessed by review, never executed. A
-`domain-rule`-style law is a `constraint` node, not an invariant.
+`domain-rule`-style law is a `constraint` node, not an invariant. An
+`implementation`-layer constraint binds **all of tier 4** unless it carries one
+`applies-to` edge per Language it binds — every `applies-to` target is a
+Language node.
 
 The **spine** threads the tiers end to end:
 `Stakeholder/User —requires→ Requirement ←driven-by— Service ←realises—
@@ -760,10 +767,14 @@ asserted by the binary.
 
 ### Plans, tasks & feedback (transient)
 
-- `Task {fqn, title, kind, tier, status}` carries a two-axis classification:
-  `kind` ∈ source/test/gate/docs is the **owning role** (orthogonal,
-  `source` default); `tier` ∈ unit/int/e2e is the verification depth,
-  required iff `kind = test`, rejected otherwise. Every task is
+- `Task {fqn, title, status}` carries `title` and `status` as its own
+  properties; its model is edges: exactly one `assigned-to` Agent, an optional
+  `implements` Component, and its per-kind operation edges —
+  `creates`/`modifies`/`deletes`/`renames`/`moves`, each rendered
+  `module_`/`file_`/`struct_`/`function_`-prefixed (`module_create`, …).
+  `creates` targets a planned node; `modifies`/`deletes` target existing code;
+  `renames`/`moves` carry the live source plus a `target` edge to the planned
+  destination; a target-less activity carries an empty edge set. Every task is
   implementer-workable — the human's decision point is plan end: the verify
   gate + merge act are the single delivery moment.
 - `Feedback {fqn, body, status, disposition}` is a review item;
