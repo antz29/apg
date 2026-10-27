@@ -3922,4 +3922,463 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// Phase-04 task-3 (e2e): a still-planned node the graph never realizes is
+    /// not touched by EITHER build path. A planned `Module` at an FQN with no
+    /// code anywhere (`rust.never-landed.ghost`) holds every incident
+    /// family — `Language —Contains→ Module`, `Task —ModuleCreate→ Module`,
+    /// `Component —SpecImplementedBy→ Module`, `Note —Details→ Module` — AND
+    /// its own OUTGOING `Contains` to two planned child Files. The node row and
+    /// the complete incoming + outgoing edge set are snapshotted with
+    /// relation-type-agnostic patterns (so an unasserted family still breaks
+    /// equality) before and after:
+    ///
+    /// 1. a FULL load (the branch DB + export are removed, so the scan cannot
+    ///    splice), and
+    /// 2. an incremental SPLICE that changes only `src/lib.rs` and a new
+    ///    `src/realized.rs` — files unrelated to the still-planned module.
+    ///
+    /// Both snapshots must equal the pre-build snapshot byte for byte. In the
+    /// SAME splice a second planned, LOCATED FQN
+    /// (`rust.never-landed.realized.compute`) whose declaration lands must
+    /// REALIZE — status cleared, location filled, FQN kept at its own label —
+    /// proving the still-planned exclusion did not overreach into the
+    /// location-based kinds.
+    ///
+    /// INTERIM STATE (Phase-4): a planned `Module` whose code DOES land keeps
+    /// its planned row until the Phase-7 seed-row heal
+    /// (`plan.phase-07.task-4`), so the landing FQN here is deliberately a
+    /// `Function` (a located kind), never a Module. Phase-7 task-4 flips the
+    /// two interim Module arms in this file's realization matrices; THIS
+    /// test's no-code still-planned Module assertion stays asserted verbatim
+    /// and must never be weakened by that flip-back.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
+    /// scan is real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust+agent frontends/db.lbug); run via cargo test-e2e"]
+    fn still_planned_node_keeps_its_node_and_edges_across_a_scan() {
+        use apg::artifacts;
+        use apg::testutil::{ApgCommand, Repo, wt_commit};
+        use std::collections::BTreeSet;
+
+        const GHOST_MODULE: &str = "rust.never-landed.ghost";
+        const GHOST_FILE_A: &str = "src/ghost.rs";
+        const GHOST_FILE_B: &str = "src/ghost_extra.rs";
+        const LANDING_FUNCTION: &str = "rust.never-landed.realized.compute";
+        const COMPONENT_FQN: &str = "solution.component.still-planned-ghost";
+        const NOTE_FQN: &str = "implementation.note.still-planned-ghost";
+        const TASK_FQN: &str = "demo/plan.phase-01.task-1";
+
+        /// `count(*)` over `query` on the DB at `db_path`, read-only.
+        fn count_rows(db_path: &Path, query: &str) -> i64 {
+            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (_, rows) = query_rows(&conn, query).unwrap();
+            let n = rows
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|c| c.trim().parse::<i64>().ok())
+                .unwrap_or(0);
+            drop(conn);
+            drop(db);
+            n
+        }
+        fn edge_present(db_path: &Path, matched: &str) -> bool {
+            count_rows(db_path, &format!("{matched} RETURN count(*) AS n")) > 0
+        }
+        /// The Module's own row plus its COMPLETE incoming and outgoing edge
+        /// set. The patterns name no relation type (`label(r)` renders it), so
+        /// every family incident to the FQN is in the snapshot — including one
+        /// the fixture does not explicitly assert.
+        fn snapshot(db_path: &Path, fqn: &str) -> Vec<String> {
+            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let mut out = Vec::new();
+            for (tag, query) in [
+                (
+                    "row",
+                    format!(
+                        "MATCH (n:Module {{fqn: '{fqn}'}}) \
+                         RETURN n.fqn AS fqn, n.status AS status"
+                    ),
+                ),
+                (
+                    "out",
+                    format!(
+                        "MATCH (m:Module {{fqn: '{fqn}'}})-[r]->(b) \
+                         RETURN label(r) AS rel, labels(b) AS kind, b.fqn AS fqn"
+                    ),
+                ),
+                (
+                    "in",
+                    format!(
+                        "MATCH (a)-[r]->(m:Module {{fqn: '{fqn}'}}) \
+                         RETURN label(r) AS rel, labels(a) AS kind, a.fqn AS fqn"
+                    ),
+                ),
+            ] {
+                let (_, rows) = query_rows(&conn, &query).unwrap();
+                let mut rows: Vec<String> = rows.into_iter().map(|r| r.join("|")).collect();
+                rows.sort();
+                out.extend(rows.into_iter().map(|r| format!("{tag}: {r}")));
+            }
+            drop(conn);
+            drop(db);
+            out
+        }
+
+        let repo = Repo::new("p4-still-planned");
+        // The isolated HOME lives outside the scanned repo (cargo's caches).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-p4-still-planned-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A ROOT cargo crate. `Cargo.lock`/`target` stay ignored so the tree
+        // remains clean for `project start`'s clean-default gate.
+        repo.write(
+            ".gitignore",
+            "Cargo.lock\n/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write(
+            "Cargo.toml",
+            "[package]\nname = \"never-landed\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.write("src/lib.rs", "pub fn placeholder() -> i32 { 0 }\n");
+        // The agent frontend's sole claim: `agent.implementer` is the roster
+        // identity the task assignment must resolve against.
+        repo.write(
+            ".opencode/agents/implementer.md",
+            "---\nname: implementer\n---\nTest implementer.\n",
+        );
+        repo.commit_all("init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", &home_s).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        run(&repo.root, &["init", "."]);
+        repo.commit_all("apg init");
+        // Main's full scan includes the `agent` stream so the branch graph
+        // carries the Agent roster a task assignment resolves against.
+        let main_scan = run(&repo.root, &["scan", ".", "--language", "rust,agent"]);
+        assert!(
+            String::from_utf8_lossy(&main_scan.stderr)
+                .contains("[load] writing parquet load files"),
+            "main's cold scan must full-load"
+        );
+        run(&repo.root, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+        let apg_root = wt.join("apg");
+        let db_path = apg_root.join(".trans").join("db.lbug");
+
+        // --- Declare the planned nodes. The ghost Module's FQN has no code
+        // anywhere in the fixture (its planned Files are never created), so it
+        // is the still-planned node both build paths must leave verbatim. Its
+        // two planned child Files are the Module's OUTGOING Contains. The
+        // second FQN is a LOCATED kind whose declaration lands in the splice.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        for (kind, fqn, name, parent) in [
+            ("module", GHOST_MODULE, "ghost", Some("rust")),
+            ("file", GHOST_FILE_A, "ghost.rs", Some(GHOST_MODULE)),
+            ("file", GHOST_FILE_B, "ghost_extra.rs", Some(GHOST_MODULE)),
+            ("function", LANDING_FUNCTION, "compute", None),
+        ] {
+            let mut args: Vec<String> = vec![
+                "plan".into(),
+                "add".into(),
+                "demo".into(),
+                "planned".into(),
+                kind.into(),
+                fqn.into(),
+                "--name".into(),
+                name.into(),
+            ];
+            if let Some(parent) = parent {
+                args.push("--parent".into());
+                args.push(parent.into());
+            }
+            run(&wt, &args.iter().map(String::as_str).collect::<Vec<_>>());
+        }
+        // The task operation family: one `module_create` on the still-planned
+        // Module, assigned to the scratch roster's sole Agent.
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "task",
+                "1",
+                "1",
+                "--title",
+                "the ghost module stays planned",
+                "--assigned-to",
+                "agent.implementer",
+                "--module-create",
+                GHOST_MODULE,
+            ],
+        );
+
+        // --- Author the durable incident families against the same FQN: a
+        // Component `implemented-by` and a Note `details`, projected through
+        // the session's own reingest seam.
+        let solution = apg::layers::NodeFile {
+            layer: "solution".into(),
+            node_type: "component".into(),
+            name: "still-planned-ghost".into(),
+            body: String::new(),
+            properties: Default::default(),
+            out: vec![apg::layers::OutEdge {
+                kind: "implemented-by".into(),
+                target: GHOST_MODULE.into(),
+                properties: Default::default(),
+            }],
+            in_edges: Vec::new(),
+        };
+        let note = apg::layers::NodeFile {
+            layer: "implementation".into(),
+            node_type: "note".into(),
+            name: "still-planned-ghost".into(),
+            body: "A still-planned Module keeps its row and every incident edge.".into(),
+            properties: Default::default(),
+            out: vec![apg::layers::OutEdge {
+                kind: "details".into(),
+                target: GHOST_MODULE.into(),
+                properties: Default::default(),
+            }],
+            in_edges: Vec::new(),
+        };
+        let mut layer_files = Vec::new();
+        for (layer, node) in [
+            (apg::layers::Layer::Solution, &solution),
+            (apg::layers::Layer::Implementation, &note),
+        ] {
+            let path = apg::layers::node_file_path(&apg_root, layer, &node.node_type, &node.name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, serde_json::to_string_pretty(node).unwrap()).unwrap();
+            layer_files.push(
+                path.strip_prefix(&wt)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        let planned: BTreeSet<String> =
+            [GHOST_MODULE, GHOST_FILE_A, GHOST_FILE_B, LANDING_FUNCTION]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let layer_records =
+            apg::layers::ingest_tree(&apg_root, &BTreeSet::new(), &planned).unwrap();
+        artifacts::reingest_layers(&apg_root, &BTreeSet::new(), &layer_records).unwrap();
+        let layer_paths: Vec<&str> = layer_files.iter().map(String::as_str).collect();
+        wt_commit(&wt, &layer_paths, "author the still-planned spec rows");
+
+        // --- Pre-build: every incident family is keyed on the planned Module
+        // (so a post-build miss is a DROP, never a fixture that never authored
+        // it), and the full row + edge snapshot is the reference both build
+        // paths must reproduce byte for byte.
+        let families = [
+            (
+                "task operation (ModuleCreate)",
+                format!(
+                    "MATCH (t:Task {{fqn: '{TASK_FQN}'}})-[:ModuleCreate]->\
+                     (n:Module {{fqn: '{GHOST_MODULE}'}})"
+                ),
+            ),
+            (
+                "implemented-by (SpecImplementedBy)",
+                format!(
+                    "MATCH (c:Component {{fqn: '{COMPONENT_FQN}'}})-[:SpecImplementedBy]->\
+                     (n:Module {{fqn: '{GHOST_MODULE}'}})"
+                ),
+            ),
+            (
+                "details (Details)",
+                format!(
+                    "MATCH (x:Note {{fqn: '{NOTE_FQN}'}})-[:Details]->\
+                     (n:Module {{fqn: '{GHOST_MODULE}'}})"
+                ),
+            ),
+            (
+                "contains (Language parent)",
+                format!(
+                    "MATCH (p:Language {{fqn: 'rust'}})-[:Contains]->\
+                     (n:Module {{fqn: '{GHOST_MODULE}'}})"
+                ),
+            ),
+            (
+                "outgoing contains (planned child file A)",
+                format!(
+                    "MATCH (m:Module {{fqn: '{GHOST_MODULE}'}})-[:Contains]->\
+                     (f:File {{fqn: '{GHOST_FILE_A}'}})"
+                ),
+            ),
+            (
+                "outgoing contains (planned child file B)",
+                format!(
+                    "MATCH (m:Module {{fqn: '{GHOST_MODULE}'}})-[:Contains]->\
+                     (f:File {{fqn: '{GHOST_FILE_B}'}})"
+                ),
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (family, matched) in &families {
+            if !edge_present(&db_path, matched) {
+                failures.push(format!(
+                    "the {family} edge was never projected onto the still-planned Module \
+                     `{GHOST_MODULE}` — the fixture is wrong, not the build path"
+                ));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "every incident family must be keyed on the still-planned Module before the build:\n{}",
+            failures.join("\n")
+        );
+        let before = snapshot(&db_path, GHOST_MODULE);
+
+        // --- Build path 1: FULL load. Removing the branch's DB + export makes
+        // the incremental preparation unable to splice, so the whole tree is
+        // re-emitted and re-assembled from scratch.
+        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
+            std::fs::remove_file(wt.join(rel)).unwrap();
+        }
+        let full = run(&wt, &["scan", ".", "--language", "rust,agent"]);
+        let full_err = String::from_utf8_lossy(&full.stderr).into_owned();
+        assert!(
+            full_err.contains("[load] writing parquet load files"),
+            "the scan after removing the DB + export must FULL-load: {full_err}"
+        );
+        assert!(
+            !full_err.contains("[load] splice:"),
+            "the removed DB + export must force a full load, never a splice: {full_err}"
+        );
+        let after_full = snapshot(&db_path, GHOST_MODULE);
+        assert_eq!(
+            after_full,
+            before,
+            "a FULL scan must leave a no-code still-planned Module's row and every \
+             incident/outgoing edge byte-identical\nbefore:\n{}\nafter:\n{}",
+            before.join("\n"),
+            after_full.join("\n")
+        );
+
+        // --- Build path 2: an incremental SPLICE changing unrelated files.
+        // `src/lib.rs` + the new `src/realized.rs` land the second planned FQN;
+        // neither file belongs to the still-planned Module.
+        std::fs::write(
+            wt.join("src/lib.rs"),
+            "pub mod realized;\n\npub fn placeholder() -> i32 { 0 }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            wt.join("src/realized.rs"),
+            "pub fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
+        )
+        .unwrap();
+        wt_commit(
+            &wt,
+            &["src/lib.rs", "src/realized.rs"],
+            "land the planned function in unrelated files",
+        );
+        let spliced_scan = run(&wt, &["scan", ".", "--language", "rust,agent"]);
+        let spliced_err = String::from_utf8_lossy(&spliced_scan.stderr).into_owned();
+        assert!(
+            spliced_err.contains("[load] splice:"),
+            "the follow-on scan must take the splice path: {spliced_err}"
+        );
+        assert!(
+            !spliced_err.contains("[load] writing parquet load files"),
+            "the splice path must skip the full load: {spliced_err}"
+        );
+        let after_splice = snapshot(&db_path, GHOST_MODULE);
+        assert_eq!(
+            after_splice,
+            before,
+            "an incremental SPLICE changing unrelated files must leave a no-code \
+             still-planned Module's row and every incident/outgoing edge byte-identical\n\
+             before:\n{}\nafter:\n{}",
+            before.join("\n"),
+            after_splice.join("\n")
+        );
+
+        // --- The same splice must still realize the landed LOCATED FQN: the
+        // planned placeholder is gone, the real node keeps the FQN with its
+        // status cleared and its location filled.
+        let db = Database::new(&db_path, SystemConfig::default().read_only(true)).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        let (_, rows) = query_rows(
+            &conn,
+            &format!(
+                "MATCH (n:Function {{fqn: '{LANDING_FUNCTION}'}}) \
+                 RETURN n.status AS status, n.path AS path, \
+                 n.start_line AS sl, n.end_line AS el"
+            ),
+        )
+        .unwrap();
+        drop(conn);
+        drop(db);
+        let row = rows.first().unwrap_or_else(|| {
+            panic!(
+                "the landed planned Function `{LANDING_FUNCTION}` is absent from the spliced \
+                 DB — its FQN was not kept"
+            )
+        });
+        let status = cell(row, 0);
+        let path = cell(row, 1);
+        let sl: u64 = cell(row, 2).parse().unwrap_or(0);
+        let el: u64 = cell(row, 3).parse().unwrap_or(0);
+        assert_eq!(
+            status, "",
+            "the landed planned Function must have its status cleared (real node kept, not a \
+             removed placeholder)"
+        );
+        assert_eq!(
+            path, "src/realized.rs",
+            "the landed planned Function must carry its real path"
+        );
+        assert!(
+            sl > 0 && el >= sl,
+            "the landed planned Function's location must be filled (start_line={sl}, \
+             end_line={el})"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
