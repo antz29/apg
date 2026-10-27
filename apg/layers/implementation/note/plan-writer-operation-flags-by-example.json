@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "plan-writer-operation-flags-by-example",
+  "body": "The plan-writer template names the task operation-flag family by example — `--module-create`, `--file-modify`, … — rather than enumerating all twenty flags. Limit: the template's example list is not exhaustive, so a reader must consult the CLI for the full set. Upgrade: extend the example list (or enumerate the family) whenever the CLI's operation-flag set changes, so the template cannot fall out of step silently.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/agents/plan-writer.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
