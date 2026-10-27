@@ -244,6 +244,7 @@ apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
 apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
 apg scan --no-progress                   # silence the live progress stream
+apg scan --force                         # true rebuild: discard db.lbug + graph.jsonl and re-run every frontend (bypasses the fact cache)
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
 
