@@ -756,7 +756,7 @@ asserted by the binary.
   plan-writer declares it as a **planned Implementation node** — a
   `Module`/`File`/`Struct`/`Function` record at its **real code FQN** carrying
   `status: planned` (`apg plan add <project> planned <kind> <fqn>`). A planned
-  node has no location and is the target of a `creates` task.
+  node has no location and is the target of a `creates` operation edge.
 - When the code actually exists, the next **branch scan replaces the planned
   node**: the scanner finds the FQN, clears `status`, fills in the location,
   and re-points incident edges. On `main` there are no planned nodes — every
