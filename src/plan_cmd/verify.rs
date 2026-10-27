@@ -50,9 +50,13 @@ pub(crate) fn plan_verify(args: &[String]) -> anyhow::Result<()> {
 /// authored `fqn` itself, its language-agnostic identity, and every
 /// `<root>.<identity>` variant. Pure — the caller checks each against the
 /// branch DB, so a planned node named bare (`apg.cache`) is realized by rooted
-/// scanned code (`rust.apg.cache`) and vice versa. An `UnresolvedTarget` at a
-/// candidate is never real: the caller's `impl_label` check admits only the four
-/// Implementation labels.
+/// scanned code (`rust.apg.cache`) and vice versa; the rooted variant covers a
+/// separate non-root cargo crate too, whose declaration renders crate-prefixed
+/// (`rust.agentfrontend.<fn>`), so a planned node authored bare
+/// (`agentfrontend.collect_definitions`) is satisfied by it. Only the identity
+/// strip and the known roots are applied — no crate-prefix or suffix guessing.
+/// An `UnresolvedTarget` at a candidate is never real: the caller's `impl_label`
+/// check admits only the four Implementation labels.
 pub(crate) fn realization_candidates(fqn: &str) -> Vec<String> {
     let identity = crate::layers::code_identity(fqn);
     let mut out = vec![fqn.to_string(), identity.to_string()];
