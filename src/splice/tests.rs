@@ -226,4 +226,60 @@ mod unit {
             "a declared Note→Module details edge must contribute to the digest"
         );
     }
+
+    /// The splice writer's planned-placeholder backstop covers EVERY
+    /// status-bearing kind, not only the Module arm: a `planned` row can never
+    /// re-mark a realized (non-`planned`) Struct, Function or File, while a
+    /// realized row still writes its own cleared status and location. The row
+    /// selection keeps a location-less planned row out of the delta today
+    /// (Phase 4 revisits the still-planned Module), so the writer's own
+    /// guarantee is what pins the invariant against a future selection change.
+    #[test]
+    fn every_status_bearing_kind_keeps_a_realized_status_against_a_planned_row() {
+        use crate::splice::apply::upsert_statement;
+
+        let rows = vec!["{fqn: 'x', status: 'planned'}".to_string()];
+        for label in ["Module", "Struct", "Function", "File"] {
+            let stmt = upsert_statement(label, &rows).expect("a status-bearing label upserts");
+            assert!(
+                stmt.contains("ON CREATE SET") && stmt.contains("n.status = row.status"),
+                "{label} must write the row's own status on create: {stmt}"
+            );
+            assert!(
+                stmt.contains("ON MATCH SET")
+                    && stmt.contains("row.status = 'planned'")
+                    && stmt.contains("n.status <> 'planned'")
+                    && stmt.contains("THEN n.status ELSE row.status END"),
+                "{label} must keep a realized status against a planned row: {stmt}"
+            );
+        }
+        // The located kinds still write the location of a realized row.
+        for label in ["Struct", "Function"] {
+            let stmt = upsert_statement(label, &rows).unwrap();
+            for prop in [
+                "n.path = row.path",
+                "n.start = row.start",
+                "n.`end` = row.end_pos",
+                "n.start_line = row.sline",
+                "n.end_line = row.eline",
+            ] {
+                assert!(stmt.contains(prop), "{label} must write {prop}: {stmt}");
+            }
+        }
+        let file = upsert_statement("File", &rows).unwrap();
+        for prop in ["n.start_line = row.sline", "n.end_line = row.eline"] {
+            assert!(file.contains(prop), "File must write {prop}: {file}");
+        }
+        // Labels without a status column carry no status write at all.
+        for label in ["Agent", "UnresolvedTarget", "Language"] {
+            let stmt = upsert_statement(label, &rows).unwrap();
+            assert!(
+                !stmt.contains("n.status"),
+                "{label} has no status column: {stmt}"
+            );
+        }
+        // No rows (or an unknown label) is not an upsert.
+        assert!(upsert_statement("Module", &[]).is_none());
+        assert!(upsert_statement("Task", &rows).is_none());
+    }
 }

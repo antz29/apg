@@ -754,8 +754,11 @@ fn delete_authored_rels(
 ///
 /// * an in-place upsert (`MERGE … SET`, never a node delete) so incoming
 ///   Calls/Uses from units OUTSIDE the re-emission target set survive;
-/// * the Module planned-placeholder backstop — a `planned` row never re-marks a
-///   realized Module (`ON MATCH` keeps a non-`planned` status untouched);
+/// * the planned-placeholder backstop on EVERY status-bearing kind (Module,
+///   Struct, Function, File): `ON CREATE` writes the row's own status, and
+///   `ON MATCH` keeps an existing non-`planned` status when the row is
+///   `planned`, else writes the row's status — so a realized row always clears
+///   a planned placeholder and writes its own location;
 /// * the per-label property set `build_load_files` writes (Module: status;
 ///   Struct/Function: path/start/`end`/start_line/end_line/code_type/status;
 ///   File: start_line/end_line/code_type/status; Agent: path/start_line/
@@ -819,11 +822,25 @@ fn upsert_node(
             _ => continue,
         });
     }
-    if rows.is_empty() {
+    let Some(stmt) = upsert_statement(label, &rows) else {
         return Ok((0, 0));
+    };
+    conn.query(&stmt)?;
+    Ok((rows.len() as u64, 1))
+}
+
+/// The batched `UNWIND … AS row MERGE … SET` statement for `label` over the
+/// ready-made row maps, or `None` when there are no rows or `label` takes no
+/// upsert. Every status-bearing arm (Module, Struct, Function, File) carries the
+/// planned-placeholder backstop described on [`upsert_node`]: `ON CREATE` writes
+/// the row's own status, `ON MATCH` keeps an existing non-`planned` status when
+/// the row is `planned` and otherwise writes the row's status.
+pub(super) fn upsert_statement(label: &str, rows: &[String]) -> Option<String> {
+    if rows.is_empty() {
+        return None;
     }
     let list = rows.join(", ");
-    let stmt = match label {
+    Some(match label {
         // The `ON MATCH` branch is the planned-placeholder backstop in batched
         // form: a `planned` row leaves a realized (non-`planned`, non-NULL)
         // Module's status untouched; every other case sets the row's status
@@ -834,16 +851,26 @@ fn upsert_node(
              ON MATCH SET n.status = CASE WHEN row.status = 'planned' \
              AND (n.status IS NULL OR n.status <> 'planned') THEN n.status ELSE row.status END"
         ),
+        // The located kinds carry the same backstop alongside their location: a
+        // `planned` row leaves a realized node's status untouched, while a
+        // realized row writes its own cleared status and location.
         "Struct" | "Function" => format!(
             "UNWIND [{list}] AS row MERGE (n:{label} {{fqn: row.fqn}}) \
-             SET n.path = row.path, n.start = row.start, n.`end` = row.end_pos, \
+             ON CREATE SET n.path = row.path, n.start = row.start, n.`end` = row.end_pos, \
              n.start_line = row.sline, n.end_line = row.eline, \
-             n.code_type = row.ctype, n.status = row.status"
+             n.code_type = row.ctype, n.status = row.status \
+             ON MATCH SET n.path = row.path, n.start = row.start, n.`end` = row.end_pos, \
+             n.start_line = row.sline, n.end_line = row.eline, n.code_type = row.ctype, \
+             n.status = CASE WHEN row.status = 'planned' \
+             AND (n.status IS NULL OR n.status <> 'planned') THEN n.status ELSE row.status END"
         ),
         "File" => format!(
             "UNWIND [{list}] AS row MERGE (n:File {{fqn: row.fqn}}) \
-             SET n.start_line = row.sline, n.end_line = row.eline, \
-             n.code_type = row.ctype, n.status = row.status"
+             ON CREATE SET n.start_line = row.sline, n.end_line = row.eline, \
+             n.code_type = row.ctype, n.status = row.status \
+             ON MATCH SET n.start_line = row.sline, n.end_line = row.eline, \
+             n.code_type = row.ctype, n.status = CASE WHEN row.status = 'planned' \
+             AND (n.status IS NULL OR n.status <> 'planned') THEN n.status ELSE row.status END"
         ),
         "Agent" => format!(
             "UNWIND [{list}] AS row MERGE (n:Agent {{fqn: row.fqn}}) \
@@ -855,10 +882,8 @@ fn upsert_node(
              SET n.category = row.category"
         ),
         "Language" => format!("UNWIND [{list}] AS row MERGE (n:Language {{fqn: row.fqn}})"),
-        _ => return Ok((0, 0)),
-    };
-    conn.query(&stmt)?;
-    Ok((rows.len() as u64, 1))
+        _ => return None,
+    })
 }
 
 /// The (path, start, end, start_line, end_line) location columns of a
