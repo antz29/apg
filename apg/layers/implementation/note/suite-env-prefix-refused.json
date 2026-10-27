@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "suite-env-prefix-refused",
+  "body": "Env-prefixed suite commands (APG_SUITE_E2E=1 bun test ...) are refused by the implementer's shell grant, so an ad-hoc opt-in suite run must either use Bun's automatic .env autoload in opencode-suite/ or, preferably, the gate script (scripts/gate.sh --e2e), which exports APG_SUITE_E2E itself. Limit: a one-off opt-in suite case cannot be run with a direct env-prefixed invocation. Upgrade when the shell grant admits env-prefixed commands, at which point the .env workaround and this note are obsolete.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "scripts/gate.sh",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

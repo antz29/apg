@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "boundary-argv-exact-pin",
+  "body": "The boundary e2e case pins the exact stub argv for the forced scan ([\"scan\", <repo>, \"--force\"]). Limit: any future scan flag inserted ahead of --force in apg_scan's spawnArgs breaks the equality assertion even though the behaviour is correct. Upgrade by relaxing the assertion to a containment check when another flag is added before --force.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/tests/boundary.e2e.test.ts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
