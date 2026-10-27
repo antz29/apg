@@ -37,7 +37,7 @@ export default Plugin.define({
             },
             language: {
               type: "string",
-              description: "Language(s) to scan: java, go, cpp, rust, ts, or csharp. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted.",
+              description: "Language(s) to scan: go, java, cpp, rust, ts, js, csharp, py, agent, plus the structural stream ids md, sh, yaml, json, toml, xml, dockerfile, makefile, ini, misc — each must be an installed frontend. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted.",
             },
             blacklist: {
               type: "string",
