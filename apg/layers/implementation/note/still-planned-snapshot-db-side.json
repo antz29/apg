@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "still-planned-snapshot-db-side",
+  "body": "Limit: this test's still-planned snapshot asserts the DB row plus all incident/outgoing edges, not the exported graph.jsonl record, because the export models no edges; upgrade if a future task requires export-vs-DB parity for still-planned rows.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.still_planned_node_keeps_its_node_and_edges_across_a_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

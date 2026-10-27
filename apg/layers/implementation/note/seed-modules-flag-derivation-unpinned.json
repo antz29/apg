@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "seed-modules-flag-derivation-unpinned",
+  "body": "Limit: the planned-flag derivation (status == \"planned\" exactly, NULL/other = real) is observable only through a live db.lbug query, so no pure unit/int test pins it directly; the proof is the Phase-4 still-planned e2e plus the splice e2e tier. Upgrade if the status vocabulary ever grows beyond NULL/'planned'.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.apply.seed_modules",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
