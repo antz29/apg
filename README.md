@@ -455,7 +455,7 @@ code that implements it, any code traces up to the why.
 
 `apg spec lint [--tier requirements|domain|solution]` is the deterministic,
 read-only integrity check over that node-file store: it reports the mechanical
-R2/R3/R4 violations, the tier-1-3 body-budget rule, and the shared mechanical
+R3/R4 violations, the tier-1-3 body-budget rule, and the shared mechanical
 validator set — the edge-kind matrix, the event-only `publishes`/`subscribes`
 target rule, and the model cardinalities, the same functions the write path
 calls — as blocking errors, plus the non-blocking tier-1-3 wording advisories.
