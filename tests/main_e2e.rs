@@ -11260,4 +11260,397 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// Phase-07 task-3 (e2e): the CLI regression shape for the cached-fact
+    /// assembly. A planned `Function` authored at its rooted FQN realizes on
+    /// the scan that lands its code; a later UNRELATED commit (a different
+    /// source file) leaves `src/lib.rs` byte-identical, so the follow-on scan
+    /// reuses its cached fact unit instead of re-emitting it. The plan store
+    /// still declares the FQN planned, so the assembly re-admits that
+    /// placeholder before the cached declaration supersedes it — and BOTH
+    /// published artifacts must still carry the REAL node: the `graph.jsonl`
+    /// export record (no `status` key, location filled, FQN kept) AND the
+    /// `db.lbug` row (`status` cleared, location filled, FQN kept), agreeing on
+    /// the path and the span. That export-versus-DB parity is the divergence
+    /// check: an assembly that let the placeholder win would publish a
+    /// still-planned export next to a real DB row (or the reverse).
+    ///
+    /// A force-full-load variant then drops the seed DB and export while
+    /// keeping the shared fact store warm: the warm-cache assembly still
+    /// splices the cached declaration, the missing seed makes the DB build take
+    /// the full-load branch, and both artifacts must agree with the splice.
+    /// The unchanged-tree follow-on then takes the freshness fast path and must
+    /// leave both artifacts untouched.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
+    /// scan is real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
+    fn planned_node_realizes_when_its_file_is_reused() {
+        const FUNCTION_FQN: &str = "rust.reuse-demo.compute";
+        const FUNCTION_PATH: &str = "src/lib.rs";
+
+        /// Asserts the export record AND the DB row at `FUNCTION_FQN` are the
+        /// SAME realized `Function` — status cleared on both sides, location
+        /// filled, FQN kept — and that they agree on the path and span. Returns
+        /// the shared `(start_line, end_line)`; appends one evidence row.
+        fn assert_real_both(
+            wt: &Path,
+            label: &str,
+            evidence: &mut Vec<String>,
+            failures: &mut Vec<String>,
+        ) -> (u64, u64) {
+            let recs = export_records(wt);
+            let export: Vec<&serde_json::Value> = recs
+                .iter()
+                .filter(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(FUNCTION_FQN))
+                .collect();
+            let db_path = wt.join("apg/.trans/db.lbug");
+            let db = Database::new(&db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (_, rows) = splice::query_rows(
+                &conn,
+                &format!(
+                    "MATCH (n:Function {{fqn: '{FUNCTION_FQN}'}}) \
+                     RETURN n.status AS status, n.path AS path, \
+                     n.start_line AS sl, n.end_line AS el"
+                ),
+            )
+            .unwrap();
+            drop(conn);
+            drop(db);
+
+            let exp = export.first().map(|rec| {
+                (
+                    rec.get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    rec.get("status")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    rec.get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    rec.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0),
+                    rec.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0),
+                )
+            });
+            let dbr = rows.first().map(|r| {
+                (
+                    r.first().cloned().unwrap_or_default(),
+                    r.get(1).cloned().unwrap_or_default(),
+                    r.get(2)
+                        .and_then(|c| c.trim().parse::<u64>().ok())
+                        .unwrap_or(0),
+                    r.get(3)
+                        .and_then(|c| c.trim().parse::<u64>().ok())
+                        .unwrap_or(0),
+                )
+            });
+            evidence.push(format!(
+                "{label}: export records={} type={:?} status={:?} path={:?} lines={:?}..{:?}; \
+                 db rows={} status={:?} path={:?} lines={:?}..{:?}",
+                export.len(),
+                exp.as_ref().map(|e| e.0.as_str()),
+                exp.as_ref().and_then(|e| e.1.as_deref()),
+                exp.as_ref().map(|e| e.2.as_str()),
+                exp.as_ref().map(|e| e.3),
+                exp.as_ref().map(|e| e.4),
+                rows.len(),
+                dbr.as_ref().map(|r| r.0.as_str()),
+                dbr.as_ref().map(|r| r.1.as_str()),
+                dbr.as_ref().map(|r| r.2),
+                dbr.as_ref().map(|r| r.3),
+            ));
+
+            if export.len() != 1 {
+                failures.push(format!(
+                    "{label}: the export must carry exactly ONE record at `{FUNCTION_FQN}` (got {})",
+                    export.len()
+                ));
+            }
+            if rows.len() != 1 {
+                failures.push(format!(
+                    "{label}: the DB must carry exactly ONE Function row at `{FUNCTION_FQN}` (got {})",
+                    rows.len()
+                ));
+            }
+            match &exp {
+                None => failures.push(format!(
+                    "{label}: `{FUNCTION_FQN}` absent from the export — FQN not kept"
+                )),
+                Some((ty, status, path, sl, el)) => {
+                    if ty.as_str() != "function" {
+                        failures.push(format!(
+                            "{label}: export `{FUNCTION_FQN}` realized as `{ty}`, not `function`"
+                        ));
+                    }
+                    if status.is_some() {
+                        failures.push(format!(
+                            "{label}: the export record still carries a `status` ({status:?}) — \
+                             the planned placeholder won the cached declaration"
+                        ));
+                    }
+                    if path.as_str() != FUNCTION_PATH {
+                        failures.push(format!(
+                            "{label}: export path `{path}`, want `{FUNCTION_PATH}`"
+                        ));
+                    }
+                    if *sl == 0 || el < sl {
+                        failures.push(format!("{label}: export location not filled ({sl}..{el})"));
+                    }
+                }
+            }
+            match &dbr {
+                None => failures.push(format!(
+                    "{label}: `{FUNCTION_FQN}` absent from the DB — FQN not kept"
+                )),
+                Some((status, path, sl, el)) => {
+                    if !status.is_empty() {
+                        failures.push(format!(
+                            "{label}: the DB row still carries status {status:?} — \
+                             the planned placeholder won the cached declaration"
+                        ));
+                    }
+                    if path.as_str() != FUNCTION_PATH {
+                        failures.push(format!("{label}: DB path `{path}`, want `{FUNCTION_PATH}`"));
+                    }
+                    if *sl == 0 || el < sl {
+                        failures.push(format!("{label}: DB location not filled ({sl}..{el})"));
+                    }
+                }
+            }
+
+            match (&exp, &dbr) {
+                (Some((_, _, exp_path, exp_sl, exp_el)), Some((_, db_path_s, db_sl, db_el))) => {
+                    if exp_path != db_path_s || exp_sl != db_sl || exp_el != db_el {
+                        failures.push(format!(
+                            "{label}: export-vs-DB DIVERGENCE — export `{exp_path}` \
+                             {exp_sl}..{exp_el} vs DB `{db_path_s}` {db_sl}..{db_el}"
+                        ));
+                    }
+                    (*exp_sl, *exp_el)
+                }
+                _ => (0, 0),
+            }
+        }
+
+        let base = std::env::temp_dir().join(format!("apg-planned-reuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A ROOT cargo crate. `src/other.rs` is the later UNRELATED change;
+        // `src/lib.rs` stays byte-identical across it, so its fact unit is
+        // REUSED on the follow-on scan. `Cargo.lock`/`target` stay ignored so
+        // the checkout remains clean for `project start`'s clean-default gate.
+        scratch_repo_init(&repo_dir);
+        std::fs::write(
+            repo_dir.join(".gitignore"),
+            "Cargo.lock\n/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo_dir.join("Cargo.toml"),
+            "[package]\nname = \"reuse-demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(repo_dir.join("src")).unwrap();
+        std::fs::write(
+            repo_dir.join("src/lib.rs"),
+            "pub mod other;\n\npub fn placeholder() -> i32 { 0 }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo_dir.join("src/other.rs"),
+            "pub fn unrelated() -> i32 { 7 }\n",
+        )
+        .unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let stderr_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+
+        run(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        // Main's cold full scan records the fact baseline (units + scan.json)
+        // the branch scan diffs against and the branch DB is seeded from.
+        let main_scan = stderr_of(&run(&repo_dir, &["scan", ".", "--language", "rust"]));
+        assert!(
+            main_scan.contains("[load] writing parquet load files"),
+            "main's cold scan must full-load: {main_scan}"
+        );
+        run(&repo_dir, &["project", "start", "demo"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+        let facts = repo_dir.join(".git/apg/facts");
+        assert!(
+            facts.is_dir(),
+            "the shared fact store must exist at {}",
+            facts.display()
+        );
+
+        // Author the planned Function at its ROOTED FQN while no code exists
+        // there (the branch DB is main's seed), so this is a plan of the delta.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "planned",
+                "function",
+                FUNCTION_FQN,
+                "--name",
+                "compute",
+            ],
+        );
+
+        // The declaration lands at exactly the authored FQN: the file is the
+        // re-emission TARGET of this scan, so both artifacts must be real.
+        std::fs::write(
+            wt.join(FUNCTION_PATH),
+            "pub mod other;\n\npub fn placeholder() -> i32 { 0 }\n\n\
+             pub fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "implement the planned function");
+        let landing = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
+        assert!(
+            !landing.contains("fast-path") && landing.contains("[scan] incremental:"),
+            "the landing scan must take the incremental path: {landing}"
+        );
+        let mut evidence = Vec::new();
+        let mut failures = Vec::new();
+        let landing_span =
+            assert_real_both(&wt, "landing/incremental", &mut evidence, &mut failures);
+
+        // The UNRELATED commit: only `src/other.rs` changes (its body, so the
+        // signature early cutoff pulls no dependents). `src/lib.rs` is reused
+        // from the fact store, so the cached declaration — not a re-emission —
+        // must supersede the still-declared planned placeholder.
+        std::fs::write(
+            wt.join("src/other.rs"),
+            "pub fn unrelated() -> i32 { 7 + 1 }\n",
+        )
+        .unwrap();
+        scratch_commit_all(&wt, "unrelated change warming src/lib.rs's facts");
+        let reused = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
+        assert!(
+            reused.contains("[scan] incremental: 1 target file(s)"),
+            "only the unrelated file may be re-emitted: {reused}"
+        );
+        assert!(
+            reused.contains("[load] splice:") && reused.contains("full load skipped"),
+            "the reuse scan must take the splice path: {reused}"
+        );
+        assert!(
+            !reused.contains("[load] writing parquet load files"),
+            "the reuse scan must not full-load: {reused}"
+        );
+        let reused_span = assert_real_both(&wt, "reuse/splice", &mut evidence, &mut failures);
+        assert_eq!(
+            landing_span, reused_span,
+            "the reused declaration must keep the realized node's span"
+        );
+
+        // Force-full-load variant: drop the seed DB + export but KEEP the
+        // warm fact store. The assembly still splices the cached declaration
+        // (warm cache, zero frontends) and the missing seed makes the DB build
+        // full-load — both artifacts must agree with the splice.
+        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
+            let _ = std::fs::remove_file(wt.join(rel));
+        }
+        let warm_full = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
+        assert!(
+            warm_full.contains("[scan] warm cache:")
+                || warm_full.contains("[scan] incremental: 0 target file(s)"),
+            "the full-load variant must still assemble from the warm fact store \
+             (warm cache or a zero-target reuse plan): {warm_full}"
+        );
+        assert!(
+            warm_full.contains("[load] splice: no previous db.lbug to seed from — full load"),
+            "the only full-load reason may be the dropped seed: {warm_full}"
+        );
+        assert!(
+            warm_full.contains("[load] writing parquet load files"),
+            "the variant must take the full-load branch: {warm_full}"
+        );
+        let warm_span = assert_real_both(&wt, "warm/full", &mut evidence, &mut failures);
+        assert_eq!(
+            reused_span, warm_span,
+            "the full load must realize the same span as the splice"
+        );
+
+        // Unchanged-tree follow-on: the freshness fast path returns before any
+        // rebuild, so the export bytes and the DB row stay exactly as they are.
+        let export_path = wt.join("apg/.trans/graph.jsonl");
+        let export_before = std::fs::read(&export_path).unwrap();
+        let db_before = std::fs::metadata(wt.join("apg/.trans/db.lbug"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let fast = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
+        assert!(
+            fast.contains("fast-path"),
+            "an unchanged tree must take the freshness fast path: {fast}"
+        );
+        assert_eq!(
+            export_before,
+            std::fs::read(&export_path).unwrap(),
+            "the fast path must not rewrite the export"
+        );
+        assert_eq!(
+            db_before,
+            std::fs::metadata(wt.join("apg/.trans/db.lbug"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            "the fast path must not rewrite db.lbug"
+        );
+        let fast_span = assert_real_both(&wt, "unchanged/fast-path", &mut evidence, &mut failures);
+        assert_eq!(
+            reused_span, fast_span,
+            "the fast path must leave the realized row untouched"
+        );
+
+        assert!(
+            failures.is_empty(),
+            "planned-node realization through reused facts:\n{}\nfailures:\n{}",
+            evidence.join("\n"),
+            failures.join("\n")
+        );
+        println!(
+            "planned-node realization through reused facts:\n{}",
+            evidence.join("\n")
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
