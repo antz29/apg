@@ -3207,11 +3207,12 @@ mod e2e {
     /// root-crate FQN must be REALIZED by the next incremental splice — the
     /// seeded placeholder replaced by the scanned declaration: `status` cleared,
     /// the location filled, and the FQN kept. The location-less planned `Module`
-    /// (SPEC §4) is deliberately NOT re-decided under the Phase-4 exclusion gate
-    /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`): it
-    /// keeps its row and `planned` status verbatim, and the Phase-7 seed-row heal
-    /// (plan.phase-07.task-4) is what later realizes it once the assembled graph
-    /// holds the real declaration.
+    /// (SPEC §4) realizes through the Phase-7 seed-row heal
+    /// (plan.phase-07.task-4): the assembled graph holds the real declaration
+    /// and the heal upserts the seed row, so it too clears its status — while a
+    /// planned Module with NO code keeps its row and `planned` status verbatim
+    /// under the Phase-4 exclusion gate
+    /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`).
     ///
     /// The branch DB is seeded with all four `status: planned` placeholders
     /// first: authoring a plan against the branch's live DB projects its
@@ -3421,17 +3422,14 @@ mod e2e {
             evidence.push(format!(
                 "{kind} `{fqn}` post-splice: status={status:?} path={path:?} lines={sl}..{el}"
             ));
-            // A still-planned Module keeps its row and status verbatim; a
-            // located kind must have its placeholder's status cleared.
-            let want_status = if kind == "Module" { "planned" } else { "" };
-            if status != want_status {
+            // Every kind's seeded placeholder is cleared by the splice: the
+            // located kinds through the path-based selection, the Module through
+            // the Phase-7 seed-row heal once the assembled graph holds the real
+            // declaration.
+            if !status.is_empty() {
                 failures.push(format!(
-                    "{kind} `{fqn}`: status {status:?}, want {want_status:?} — {}",
-                    if kind == "Module" {
-                        "a still-planned Module must keep its row verbatim"
-                    } else {
-                        "the splice upsert must clear the planned placeholder"
-                    }
+                    "{kind} `{fqn}`: status {status:?}, want \"\" — the splice upsert \
+                     must clear the planned placeholder"
                 ));
             }
             if located {
@@ -3477,11 +3475,11 @@ mod e2e {
     /// and the incremental splice applies the delta. Each family is queried BOTH
     /// before the splice (the edge really was keyed on the planned FQN — so a
     /// post-splice miss is a DROP, never a fixture that never authored it) and
-    /// after: a located kind's node is realized (`status: planned` cleared),
-    /// while the location-less planned Module keeps its row and status verbatim
-    /// under the Phase-4 exclusion gate (`requirements.requirement.
-    /// still-planned-node-keeps-node-and-edges`) — a still-planned FQN's
-    /// incident families must resolve to that planned node, not be dropped.
+    /// after: every kind's node is realized (`status: planned` cleared) — the
+    /// located kinds through the path-based selection, the location-less Module
+    /// through the Phase-7 seed-row heal once the assembled graph holds the real
+    /// declaration — so each family must resolve to the REAL node, never to a
+    /// leftover placeholder.
     /// The kept-vs-dropped verdict is printed per family per kind; a dropping
     /// family fails with the whole matrix in the panic message, so the Phase-3
     /// source tasks (filter_task_ops / finalize_graph) decide what to fix from
@@ -3874,17 +3872,12 @@ mod e2e {
         );
 
         // --- Post-splice: every family must resolve at its FQN. A miss is a
-        // DROP: the edge was there pre-splice. A located kind's node is realized
-        // (status cleared), so its families carry the status guard; the planned
-        // Module is a still-planned row under the Phase-4 exclusion gate, so its
-        // families resolve to that planned node.
+        // DROP: the edge was there pre-splice. Every kind's node is realized
+        // (status cleared), so its families carry the status guard.
         let mut verdicts: Vec<String> = Vec::new();
         for (_, label, fqn, create, parent_label, parent_fqn, k) in kinds {
             let task = format!("demo/plan.phase-01.task-{k}");
-            let realized = match label {
-                "Module" => "",
-                _ => " AND (n.status IS NULL OR n.status <> 'planned')",
-            };
+            let realized = " AND (n.status IS NULL OR n.status <> 'planned')";
             for (family, matched) in families(label, fqn, create, parent_label, parent_fqn, &task) {
                 let was = pre[&(fqn.to_string(), family)];
                 let hit = count_rows(
@@ -3945,13 +3938,12 @@ mod e2e {
     /// proving the still-planned exclusion did not overreach into the
     /// location-based kinds.
     ///
-    /// INTERIM STATE (Phase-4): a planned `Module` whose code DOES land keeps
-    /// its planned row until the Phase-7 seed-row heal
-    /// (`plan.phase-07.task-4`), so the landing FQN here is deliberately a
-    /// `Function` (a located kind), never a Module. Phase-7 task-4 flips the
-    /// two interim Module arms in this file's realization matrices; THIS
+    /// Phase-7 task-4 landed the seed-row heal: a planned `Module` whose code
+    /// DOES land now realizes (the assembled graph holds the real declaration),
+    /// so the landing FQN here stays a `Function` (a located kind) to keep this
+    /// test's subject — a Module NO code ever realizes — unambiguous. THIS
     /// test's no-code still-planned Module assertion stays asserted verbatim
-    /// and must never be weakened by that flip-back.
+    /// and is never weakened by the heal.
     ///
     /// Scratch /tmp repo + candidate binary only
     /// (`global.constraint.no-real-project-test`); a real rust-frontend build +

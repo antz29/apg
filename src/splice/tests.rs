@@ -230,10 +230,11 @@ mod unit {
     /// The splice writer's planned-placeholder backstop covers EVERY
     /// status-bearing kind, not only the Module arm: a `planned` row can never
     /// re-mark a realized (non-`planned`) Struct, Function or File, while a
-    /// realized row still writes its own cleared status and location. The row
-    /// selection keeps a location-less planned row out of the delta today
-    /// (Phase 4 revisits the still-planned Module), so the writer's own
-    /// guarantee is what pins the invariant against a future selection change.
+    /// realized row still writes its own cleared status and location. Selection
+    /// only ever hands this writer an assembled-REAL row — the Phase-7 seed-row
+    /// heal selects a planned seed placeholder by FQN only when the assembled
+    /// graph holds the real declaration — so the writer's own guarantee is what
+    /// pins the invariant against a future selection change.
     #[test]
     fn every_status_bearing_kind_keeps_a_realized_status_against_a_planned_row() {
         use crate::splice::apply::upsert_statement;

@@ -175,12 +175,30 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // for the delete scope in step 2): a module the seed does not own — a
     // package/dir the previous scan did not have — is always re-decided, because
     // the seed can vouch for neither its row nor its outgoing Contains rels.
-    // A `planned` placeholder is owned the same way, and it is NEVER re-decided
-    // or deleted: the assembled graph cannot re-emit its row or its outgoing
-    // Contains rels, so re-deciding it would clear the planned status and drop
-    // edges a full rebuild keeps
+    // A `planned` placeholder is owned the same way, and a STILL-planned one is
+    // NEVER re-decided or deleted: the assembled graph cannot re-emit its row or
+    // its outgoing Contains rels, so re-deciding it would clear the planned
+    // status and drop edges a full rebuild keeps
     // (`requirements.requirement.still-planned-node-keeps-node-and-edges`).
+    // Phase-07 task-4's seed-row heal is the exact complement: when the
+    // ASSEMBLED graph holds the REAL declaration at the FQN, the placeholder is
+    // upserted so the DB row realizes — the still-planned case above is
+    // untouched.
     let seeded_modules = seed_modules(conn)?;
+    // The located-kind half of the seed's planned placeholders. A planned
+    // `File`/`Struct`/`Function` row carries no location, so the path-based
+    // selection below can never reach it; the seed-row heal (phase-07 task-4)
+    // selects it by FQN when the ASSEMBLED graph holds the real declaration —
+    // the cached declaration task-2 lets supersede the placeholder. Strictly
+    // gated on assembled-real: a still-planned FQN with no code keeps its seed
+    // row and every incident edge (phase-4), and a FQN the assembled graph lacks
+    // entirely is left to `removed_fqns`.
+    let seeded_planned_located = seed_planned_located(conn)?;
+    let healed_located = |fqn: &str, node: &crate::graph::Node, label: &'static str| {
+        assembled_real(node)
+            && node.location.is_some()
+            && seeded_planned_located.get(fqn) == Some(&label)
+    };
     let mut delta_funcs: Vec<String> = Vec::new();
     let mut delta_structs: Vec<String> = Vec::new();
     let mut delta_agents: Vec<String> = Vec::new();
@@ -211,23 +229,32 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 // and the assembled graph may not even carry them (a skipped
                 // language's scaffolding) — that guard is preserved. A `planned`
                 // placeholder is seed-owned even though it can never be reached:
-                // the delta cannot re-emit its row or its rels, so it keeps both
-                // verbatim. A delta File/Module added UNDER an untouched module
-                // is handled additively by the `Contains` merge in step 6.
+                // unless the heal below realizes it, it keeps its row and its
+                // rels verbatim. A delta File/Module added UNDER an untouched
+                // module is handled additively by the `Contains` merge in step 6.
                 let seed_owns_real = seeded_modules.get(fqn).is_some_and(|planned| !*planned);
-                if (reached(fqn) && seed_owns_real) || !seeded_modules.contains_key(fqn) {
+                // The seed-row heal: a seeded Module placeholder whose assembled
+                // node is now REAL (the cached/re-emitted declaration, not the
+                // plan store's `planned` placeholder) is upserted so the DB row
+                // realizes. A still-planned Module with no code keeps its
+                // assembled `planned` node, so the heal gate stays closed and
+                // the Phase-4 exclusion is unchanged.
+                let healed =
+                    seeded_modules.get(fqn).is_some_and(|planned| *planned) && assembled_real(node);
+                if (reached(fqn) && seed_owns_real) || !seeded_modules.contains_key(fqn) || healed {
                     delta_modules.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Module");
                 }
             }
             NodeKind::Struct => {
-                if location_in_targets(node, delta.targets) {
+                if location_in_targets(node, delta.targets) || healed_located(fqn, node, "Struct") {
                     delta_structs.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Struct");
                 }
             }
             NodeKind::Function => {
-                if location_in_targets(node, delta.targets) {
+                if location_in_targets(node, delta.targets) || healed_located(fqn, node, "Function")
+                {
                     delta_funcs.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Function");
                 }
@@ -241,7 +268,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                     delta_labels.insert(fqn.clone(), "Agent");
                 }
             }
-            NodeKind::File if delta.targets.contains(fqn) => {
+            NodeKind::File if delta.targets.contains(fqn) || healed_located(fqn, node, "File") => {
                 delta_files.push(fqn.clone());
                 delta_labels.insert(fqn.clone(), "File");
             }
@@ -591,6 +618,32 @@ fn seed_modules(conn: &Connection) -> anyhow::Result<BTreeMap<String, bool>> {
         .iter()
         .map(|r| (cell(r, 0), cell(r, 1) == "planned"))
         .collect())
+}
+
+/// Every seeded `File`/`Struct`/`Function` FQN holding a `planned` placeholder,
+/// with its label. The located planned row carries no location, so the
+/// path-based delta selection can never reach it; phase-07 task-4's seed-row
+/// heal selects it by FQN instead — and only when the assembled graph holds the
+/// real declaration.
+fn seed_planned_located(conn: &Connection) -> anyhow::Result<BTreeMap<String, &'static str>> {
+    let mut out = BTreeMap::new();
+    for label in ["File", "Struct", "Function"] {
+        let (_, rows) = query_rows(
+            conn,
+            &format!("MATCH (n:{label}) WHERE n.status = 'planned' RETURN n.fqn AS fqn"),
+        )?;
+        for row in rows {
+            out.insert(cell(&row, 0), label);
+        }
+    }
+    Ok(out)
+}
+
+/// True when the assembled node is a REAL declaration: the plan store's
+/// placeholder carries `status: planned`, while a scanned or cached declaration
+/// leaves the status unset (or empty).
+fn assembled_real(node: &crate::graph::Node) -> bool {
+    matches!(node.status.as_deref(), None | Some(""))
 }
 
 /// The File FQNs transitively contained under each seeded Module — the module's
