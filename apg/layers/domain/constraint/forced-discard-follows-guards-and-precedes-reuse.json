@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "forced-discard-follows-guards-and-precedes-reuse",
+  "body": "The discard of the derived index and export runs after the live-session refusal and the spec-lock acquisition and before any reuse decision, so a scan never deletes an index a live session holds open.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

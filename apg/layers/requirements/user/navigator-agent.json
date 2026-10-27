@@ -112,6 +112,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.still-planned-node-keeps-node-and-edges",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
       "properties": {}
     },
@@ -127,12 +132,27 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.still-planned-node-keeps-node-and-edges",
+      "target": "requirements.requirement.verify-gate-judges-planned-realization",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.verify-gate-judges-planned-realization",
+      "target": "requirements.requirement.scan-force-discards-derived-artifacts",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-force-bypasses-reuse-paths",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-force-leaves-authored-and-source-state",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-tool-force-input",
       "properties": {}
     }
   ],

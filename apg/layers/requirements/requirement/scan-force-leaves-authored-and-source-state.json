@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-force-leaves-authored-and-source-state",
+  "body": "The forced discard removes derived artifacts alone, so every `apg/layers` node file and every scanned source file survives a forced scan unchanged.",
+  "properties": {
+    "feature": "scan-force"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-rebuild-control",
+      "properties": {}
+    }
+  ]
+}

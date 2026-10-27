@@ -115,6 +115,16 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.planned-node-realization",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.planned-node-realization-gate",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.project-context-guard",
       "properties": {}
     },
@@ -200,12 +210,7 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.planned-node-realization",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.planned-node-realization-gate",
+      "source": "solution.component.forced-scan-discard",
       "properties": {}
     }
   ]

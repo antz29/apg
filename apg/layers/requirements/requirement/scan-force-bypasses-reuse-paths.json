@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-force-bypasses-reuse-paths",
+  "body": "A forced scan rebuilds its graph from scratch: the freshness fast path finds its database absent and the splice finds its seed absent, so the full load alone runs.",
+  "properties": {
+    "feature": "scan-force"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-rebuild-control",
+      "properties": {}
+    }
+  ]
+}

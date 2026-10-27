@@ -17,6 +17,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.init-refuses-inside-linked-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.init-reports-agent-count",
       "properties": {}
     },
@@ -97,7 +102,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.init-refuses-inside-linked-worktree",
+      "target": "requirements.requirement.scan-tool-force-input",
       "properties": {}
     }
   ],

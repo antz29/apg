@@ -114,6 +114,16 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.planned-node-realization",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.planned-node-realization-gate",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.project-context-guard",
       "properties": {}
     },
@@ -204,12 +214,7 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.planned-node-realization",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.planned-node-realization-gate",
+      "target": "solution.component.forced-scan-discard",
       "properties": {}
     }
   ],

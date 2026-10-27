@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "derived-index-discard-is-one-mechanism",
+  "body": "One shared discard removes the derived index, its sidecars and the export for every forced-rebuild path, and a scan without the force flag keeps both reuse paths untouched.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

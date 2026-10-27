@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-tool-force-input",
+  "body": "The `apg_scan` suite tool accepts a `force` input that appends `--force` to the scan arguments it spawns, so an agent forces a rebuild from inside the tool suite.",
+  "properties": {
+    "feature": "scan-force"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    }
+  ]
+}

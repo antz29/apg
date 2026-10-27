@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-force-discards-derived-artifacts",
+  "body": "`apg scan --force` deletes `db.lbug` with its `wal` and `shm` sidecars plus `graph.jsonl` from `apg/.trans` before the scan begins.",
+  "properties": {
+    "feature": "scan-force"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-rebuild-control",
+      "properties": {}
+    }
+  ]
+}
