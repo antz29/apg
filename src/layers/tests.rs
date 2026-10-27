@@ -892,9 +892,10 @@ mod unit {
     /// [`EDGE_KINDS`] except the code-exempt `implemented-by`/`details`/
     /// `applies-to`), and every row's source/target type is a real type of its
     /// layer's catalog. `applies-to` is the language-scope kind: an
-    /// implementation constraint to a scan Language identity is accepted, while
-    /// a non-implementation source, an authored-node target or another code FQN
-    /// is refused (every target must be one of the ten `LANGUAGE_ROOTS`).
+    /// implementation constraint to a scan Language identity is accepted (a
+    /// structural-stream id such as `sh` included), while a non-implementation
+    /// source, an authored-node target or another code FQN is refused (every
+    /// target must be one of the nineteen `LANGUAGE_ROOTS`).
     #[test]
     fn edge_kind_matrix_is_complete_and_consistent() {
         let exempt = ["implemented-by", "details", "applies-to"];
@@ -925,8 +926,10 @@ mod unit {
             }
         }
 
-        // applies-to: an implementation constraint → a scan Language identity.
-        for lang in ["rust", "go", "ts", "md", "agent"] {
+        // applies-to: an implementation constraint → a scan Language identity,
+        // including the structural scanner's stream ids (a `sh` Language root
+        // exists in this repo's own graph).
+        for lang in ["rust", "go", "ts", "md", "agent", "sh"] {
             assert!(
                 validate_edge("applies-to", "implementation.constraint.law", lang).is_ok(),
                 "an implementation constraint must bind language `{lang}`"
@@ -947,12 +950,15 @@ mod unit {
             assert!(msg.contains(src), "must name source: {msg}");
         }
         // The target must be a bare Language identity — never an authored-node
-        // FQN and never another code FQN.
+        // FQN, another code FQN, a structural-stream-rooted FQN, or an id the
+        // scan vocabulary does not carry.
         for target in [
             "domain.constraint.law",
             "solution.component.cmp1",
             "apg.main",
             "rust.apg.main",
+            "sh.scripts.deploy",
+            "python",
         ] {
             let msg = validate_edge("applies-to", "implementation.constraint.law", target)
                 .unwrap_err()
@@ -1570,13 +1576,18 @@ mod unit {
     /// `code_identity` strips exactly ONE leading language root — every root in
     /// `LANGUAGE_ROOTS`, a bare FQN unchanged, and only a real `<root>.`
     /// boundary (so `rusty.main` is never mangled). `LANGUAGE_ROOTS` is the
-    /// complete `available_languages` vocabulary: the tenth id, `agent`, is a
-    /// member and `agent.<file-stem>` strips to the bare stem exactly once.
+    /// complete `available_languages` vocabulary (nineteen ids: the code/agent
+    /// ids plus the structural streams, `md` included): `agent` is a member and
+    /// `agent.<file-stem>` strips to the bare stem exactly once, and a
+    /// structural root strips the same way.
     #[test]
     fn code_identity_strips_one_language_root() {
         assert!(
-            LANGUAGE_ROOTS.contains(&"agent") && LANGUAGE_ROOTS.len() == 10,
-            "LANGUAGE_ROOTS must carry the ten available_languages ids: {LANGUAGE_ROOTS:?}"
+            LANGUAGE_ROOTS.contains(&"agent")
+                && LANGUAGE_ROOTS.contains(&"sh")
+                && LANGUAGE_ROOTS.contains(&"misc")
+                && LANGUAGE_ROOTS.len() == 19,
+            "LANGUAGE_ROOTS must carry the nineteen available_languages ids: {LANGUAGE_ROOTS:?}"
         );
         for root in LANGUAGE_ROOTS {
             assert_eq!(
@@ -1590,6 +1601,9 @@ mod unit {
             code_identity("agent.go-frontend-implementer"),
             "go-frontend-implementer"
         );
+        // A structural-scanner root strips exactly once, like a code root.
+        assert_eq!(code_identity("sh.something"), "something");
+        assert_eq!(code_identity("sh.sh.install"), "sh.install");
         assert_eq!(code_identity("apg.cmd_scan"), "apg.cmd_scan");
         assert_eq!(code_identity("/abs/store.go"), "/abs/store.go");
         // ONE root only, and only a real `<root>.` boundary.

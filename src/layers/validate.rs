@@ -486,9 +486,11 @@ pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::R
         // applies-to: an implementation-layer constraint → a scan Language
         // identity. The target is exempt from the authored-FQN pairing and from
         // the scanned-code check — but it is neither an authored node nor
-        // another arbitrary code FQN: it must be one of the ten language roots
-        // `available_languages`/`id_prefix_for` recognise, because the ingestor
-        // materialises that bare id as a real `Language` node.
+        // another arbitrary code FQN: it must be the bare id of one of the scan
+        // Languages `available_languages`/`id_prefix_for` recognise (every
+        // `LANGUAGE_ROOTS` member, the structural streams and `md` included),
+        // because the ingestor materialises that bare id as a real `Language`
+        // node.
         "applies-to" => {
             if src_layer != Layer::Implementation || src_type != "constraint" {
                 anyhow::bail!(
@@ -498,7 +500,7 @@ pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::R
             }
             if !LANGUAGE_ROOTS.contains(&target) {
                 anyhow::bail!(
-                    "`applies-to` target `{target}` from source `{source}` must be a scan Language identity ({}), not an authored node or another code FQN",
+                    "`applies-to` target `{target}` from source `{source}` must be a bare scan Language identity ({}), not an authored node or another code FQN",
                     LANGUAGE_ROOTS.join(", ")
                 );
             }
