@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "readme-single-force-example",
+  "body": "README documents --force as a single example line inside the apg scan options block. Limit: the README has no structured scan-flags table, so a later flag has no canonical place to be listed. Upgrade by moving the flag documentation into a dedicated table when README gains one.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "README.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

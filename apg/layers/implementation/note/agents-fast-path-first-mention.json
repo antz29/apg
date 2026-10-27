@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "agents-fast-path-first-mention",
+  "body": "AGENTS.md first names the unchanged-tree fast path inside the --force sentence. Limit: the fast path has no dedicated section or anchor, so later prose that refers to it has no canonical definition to point at. Upgrade when the freshness fast path gets its own prose section in AGENTS.md.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "AGENTS.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
