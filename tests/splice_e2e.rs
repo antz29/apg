@@ -3201,4 +3201,253 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Phase-01 task-2 (e2e): the SPLICE realization matrix for a ROOT crate.
+    /// A planned `Module`, `File`, `Struct` and `Function` each declared at its
+    /// root-crate FQN must be REALIZED by the next incremental splice — the
+    /// seeded placeholder replaced by the scanned declaration: `status` cleared,
+    /// the location filled (File/Struct/Function), and the FQN kept. Module is
+    /// inherently location-less (SPEC §4), so its realization is status + kind
+    /// only.
+    ///
+    /// The branch DB is seeded with all four `status: planned` placeholders
+    /// first: authoring a plan against the branch's live DB projects its
+    /// `Record::PlannedNode` declarations into the DB as `planned` code rows
+    /// (`artifacts::write_jsonl_and_reingest`, read-your-writes), which is the
+    /// seed state the splice must realize. Landing the declarations then drives
+    /// a genuine incremental splice (`[load] splice:` on stderr, no full-load
+    /// lines) — the delta selection/UPSERT seam this matrix evidence-gates.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
+    /// scan is real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
+    fn planned_node_realizes_on_the_splice_for_every_kind() {
+        use apg::testutil::{ApgCommand, Repo, wt_commit};
+
+        const MODULE_FQN: &str = "rust.planned-splice.widget";
+        const FILE_FQN: &str = "src/widget.rs";
+        const STRUCT_FQN: &str = "rust.planned-splice.widget.Widget";
+        const FUNCTION_FQN: &str = "rust.planned-splice.widget.compute";
+
+        /// One row of `fqn`'s own label in the DB, as the label's
+        /// `(status, …location)` columns: `(status)` for Module,
+        /// `(status, start_line, end_line)` for File, `(status, path,
+        /// start_line, end_line)` for Struct/Function. `None` when the FQN is
+        /// absent from that table.
+        fn db_row(db_path: &Path, label: &str, fqn: &str) -> Option<Vec<String>> {
+            let query = match label {
+                "Module" => format!("MATCH (n:Module {{fqn: '{fqn}'}}) RETURN n.status AS status"),
+                "File" => format!(
+                    "MATCH (n:File {{fqn: '{fqn}'}}) RETURN n.status AS status, \
+                     n.start_line AS sl, n.end_line AS el"
+                ),
+                _ => format!(
+                    "MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.status AS status, \
+                     n.path AS path, n.start_line AS sl, n.end_line AS el"
+                ),
+            };
+            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (_, rows) = query_rows(&conn, &query).unwrap();
+            let row = rows.into_iter().next();
+            drop(conn);
+            drop(db);
+            row
+        }
+
+        let repo = Repo::new("p1-splice-planned");
+        // The isolated HOME lives outside the scanned repo (cargo's caches).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-p1-splice-planned-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A ROOT cargo crate. `Cargo.lock`/`target` stay ignored so the tree
+        // remains clean for `project start`'s clean-default gate.
+        repo.write(
+            ".gitignore",
+            "Cargo.lock\n/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write(
+            "Cargo.toml",
+            "[package]\nname = \"planned-splice\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.write("src/lib.rs", "pub fn placeholder() -> i32 { 0 }\n");
+        repo.commit_all("init source");
+
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", &home_s).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        run(&repo.root, &["init", "."]);
+        repo.commit_all("apg init");
+        // Main's full scan: the branch DB is seeded from it on `project start`.
+        let main_scan = run(&repo.root, &["scan", ".", "--language", "rust"]);
+        assert!(
+            String::from_utf8_lossy(&main_scan.stderr)
+                .contains("[load] writing parquet load files"),
+            "main's cold scan must full-load"
+        );
+        run(&repo.root, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+
+        // The four planned nodes are absent from the scanned graph, so a plan of
+        // the delta may declare them; authoring projects them into the branch DB
+        // as `planned` code rows (the seed state the splice must realize).
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        for (kind, fqn, name) in [
+            ("module", MODULE_FQN, "widget"),
+            ("file", FILE_FQN, "widget.rs"),
+            ("struct", STRUCT_FQN, "Widget"),
+            ("function", FUNCTION_FQN, "compute"),
+        ] {
+            run(
+                &wt,
+                &["plan", "add", "demo", "planned", kind, fqn, "--name", name],
+            );
+        }
+
+        let db_path = wt.join("apg").join(".trans").join("db.lbug");
+        let mut evidence = Vec::new();
+        let mut failures = Vec::new();
+
+        // Pre-splice: every kind is a `planned`, location-less placeholder in the
+        // seeded DB — the state the splice must realize.
+        for (kind, fqn) in [
+            ("Module", MODULE_FQN),
+            ("File", FILE_FQN),
+            ("Struct", STRUCT_FQN),
+            ("Function", FUNCTION_FQN),
+        ] {
+            let row = db_row(&db_path, kind, fqn);
+            let status = row.as_ref().map(|r| cell(r, 0)).unwrap_or_default();
+            evidence.push(format!("{kind} `{fqn}` pre-splice: status={status:?}"));
+            match row {
+                None => failures.push(format!(
+                    "{kind} `{fqn}`: absent from the seeded DB — no planned placeholder to realize"
+                )),
+                Some(_) if status != "planned" => failures.push(format!(
+                    "{kind} `{fqn}`: seeded status {status:?}, want `planned`"
+                )),
+                Some(_) => {}
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "the seeded DB must carry every planned placeholder:\n{}\nfailures:\n{}",
+            evidence.join("\n"),
+            failures.join("\n")
+        );
+
+        // The real declarations land at the planned FQNs in a new module/file.
+        std::fs::write(
+            wt.join("src/lib.rs"),
+            "pub mod widget;\n\npub fn placeholder() -> i32 { 0 }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            wt.join("src/widget.rs"),
+            "pub struct Widget {\n    pub value: i32,\n}\n\npub fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
+        )
+        .unwrap();
+        wt_commit(
+            &wt,
+            &["src/lib.rs", "src/widget.rs"],
+            "implement the planned nodes",
+        );
+
+        // The localized re-scan takes the SPLICE path against the seeded DB.
+        let spliced_scan = run(&wt, &["scan", ".", "--language", "rust"]);
+        let spliced_err = String::from_utf8_lossy(&spliced_scan.stderr).into_owned();
+        assert!(
+            spliced_err.contains("[load] splice:"),
+            "the realization scan must take the splice path: {spliced_err}"
+        );
+        assert!(
+            !spliced_err.contains("[load] writing parquet load files"),
+            "the splice path must skip the full load: {spliced_err}"
+        );
+
+        // Post-splice: the DB row itself is realized — status cleared, location
+        // filled, FQN kept at its own label.
+        for (kind, fqn, located) in [
+            ("Module", MODULE_FQN, false),
+            ("File", FILE_FQN, true),
+            ("Struct", STRUCT_FQN, true),
+            ("Function", FUNCTION_FQN, true),
+        ] {
+            let Some(row) = db_row(&db_path, kind, fqn) else {
+                failures.push(format!(
+                    "{kind} `{fqn}`: FQN not kept — absent from the spliced DB"
+                ));
+                continue;
+            };
+            let status = cell(&row, 0);
+            let (path, sl, el) = match kind {
+                "Module" => (String::new(), 0, 0),
+                "File" => (
+                    FILE_FQN.to_string(),
+                    cell(&row, 1).parse().unwrap_or(0),
+                    cell(&row, 2).parse().unwrap_or(0),
+                ),
+                _ => (
+                    cell(&row, 1),
+                    cell(&row, 2).parse().unwrap_or(0),
+                    cell(&row, 3).parse().unwrap_or(0),
+                ),
+            };
+            evidence.push(format!(
+                "{kind} `{fqn}` post-splice: status={status:?} path={path:?} lines={sl}..{el}"
+            ));
+            if status == "planned" {
+                failures.push(format!(
+                    "{kind} `{fqn}`: LEFT PLANNED — the splice upsert did not clear status"
+                ));
+            }
+            if located {
+                if sl == 0 || el < sl {
+                    failures.push(format!(
+                        "{kind} `{fqn}`: location not filled (start_line={sl}, end_line={el})"
+                    ));
+                }
+                if kind != "File" && path != FILE_FQN {
+                    failures.push(format!(
+                        "{kind} `{fqn}`: wrong path `{path}` (want `{FILE_FQN}`)"
+                    ));
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "splice planned-node realization matrix (pre-fix evidence):\n{}\nfailures:\n{}",
+            evidence.join("\n"),
+            failures.join("\n")
+        );
+        println!(
+            "splice planned-node realization matrix:\n{}",
+            evidence.join("\n")
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
