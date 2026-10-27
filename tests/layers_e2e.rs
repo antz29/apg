@@ -119,6 +119,17 @@ fn scan_repo(tag: &str) -> Repo {
     repo
 }
 
+/// Every cell of every row `sql` returns, rendered as strings — the shared
+/// reader the projection assertions compare against.
+fn query_cells(db: &artifacts::ArtifactDb, sql: &str) -> Vec<Vec<String>> {
+    db.conn()
+        .unwrap()
+        .query(sql)
+        .unwrap()
+        .map(|row| row.iter().map(|v| v.to_string()).collect())
+        .collect()
+}
+
 /// e2e tier -- real I/O: every test here writes node files / `apg/layers`
 /// trees under the temp dir, reads them back, or opens `db.lbug` / runs
 /// git. Each is `#[ignore]`d, so a plain `cargo test` never runs one; the
@@ -1866,6 +1877,150 @@ mod e2e {
             "the transient Reviews pairing must survive the durable mutation: {out}"
         );
         drop(db);
+
+        testutil::remove(&repo);
+    }
+
+    // --- Tier-4 constraint language scope (phase-07 task-24) ---
+
+    /// An implementation constraint's `applies-to` Language scope lands end to
+    /// end. The write funnel (`write_project` — the path a live session's save
+    /// flushes its buffered node set through) accepts an
+    /// `implementation.constraint` plus an `applies-to` edge naming a
+    /// `LANGUAGE_ROOTS` id and commits it in one mutation. A full scan then
+    /// carries both artifacts: the DB holds the `AppliesTo` row
+    /// (`Constraint → Language`, properties intact) and `graph.jsonl`
+    /// serializes the `applies-to` wire record — and because ingest admission
+    /// materialises the target's `Language` node, an id the Go-only checkout
+    /// never scanned (`rust`) keeps its edge instead of being dropped as a
+    /// dangling endpoint. A target that is not a Language identity (an authored
+    /// node, or another code FQN) is refused before anything is written or
+    /// committed.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
+    fn applies_to_scope_lands_in_projection_and_export_and_refuses_non_language() {
+        let (wt_apg, repo, wt) = mutation_fixture("applies-to");
+        const LAW: &str = "implementation.constraint.language-scope";
+
+        // A tier-4 constraint narrowing its scope to `rust` — a Language
+        // identity no stream of this Go-only fixture produced.
+        let mut props = NodeProperties::new();
+        props.insert("reason".to_string(), "tier-4".to_string());
+        let mut law = node("implementation", "constraint", "language-scope");
+        law.body = "Tier-4 code obeys this rule.".to_string();
+        let mut applies = out_edge("applies-to", "rust");
+        applies.properties = props.clone();
+        law.out.push(applies);
+        let head_before = testutil::commit_count(&wt);
+
+        write_project(&wt_apg, &[law], &[]).unwrap();
+
+        // The edge is durable (a pairing-exempt Language target needs no node
+        // file) and the mutation committed exactly once.
+        let back = read_node_file(&wt_apg, "implementation", "constraint", "language-scope");
+        assert_eq!(back.body, "Tier-4 code obeys this rule.");
+        let written = back
+            .out
+            .iter()
+            .find(|oe| oe.kind == "applies-to")
+            .expect("the applies-to edge must be written");
+        assert_eq!(written.target, "rust");
+        assert_eq!(
+            written.properties.get("reason").map(String::as_str),
+            Some("tier-4")
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            head_before + 1,
+            "one durable mutation commits once"
+        );
+
+        // A full scan carries both artifacts.
+        testutil::scan_checkout(&wt).unwrap();
+
+        // graph.jsonl serializes the record in its wire shape: type/from/to,
+        // with the DB-only properties column never leaking into the export.
+        let export = wt_apg.join(apg::specs::TRANS).join("graph.jsonl");
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&export)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let applies_lines: Vec<&serde_json::Value> = lines
+            .iter()
+            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("applies-to"))
+            .collect();
+        assert_eq!(
+            applies_lines.len(),
+            1,
+            "graph.jsonl must carry exactly one applies-to record"
+        );
+        let wire = applies_lines[0];
+        assert_eq!(wire.get("from").and_then(|v| v.as_str()), Some(LAW));
+        assert_eq!(wire.get("to").and_then(|v| v.as_str()), Some("rust"));
+        assert_eq!(
+            wire.as_object().map(|o| o.len()),
+            Some(3),
+            "the applies-to wire shape is type/from/to: {wire}"
+        );
+
+        // The DB projection carries the row — `AppliesTo` FROM Constraint TO
+        // Language, its serialized-properties column intact. Ingest admission
+        // materialised `rust` (the only Language row no stream rooted — the
+        // payload stream rooted `go`), so the dangling-edge cleanup kept the
+        // edge.
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert_eq!(
+                query_cells(
+                    &db,
+                    "MATCH (c:Constraint)-[r:AppliesTo]->(l:Language) RETURN c.fqn, l.fqn, r.properties"
+                ),
+                vec![vec![
+                    LAW.to_string(),
+                    "rust".to_string(),
+                    properties_json(&props)
+                ]],
+                "the projection must carry the AppliesTo row with its properties"
+            );
+            assert_eq!(
+                query_cells(&db, "MATCH (l:Language) WHERE l.fqn = 'rust' RETURN l.fqn"),
+                vec![vec!["rust".to_string()]],
+                "ingest admission must materialise exactly one Language row for the never-scanned `rust`"
+            );
+        }
+
+        // A non-Language target is refused at the same funnel: neither an
+        // authored node FQN nor another code FQN is a Language identity, and a
+        // refused write lands neither a node file nor a commit.
+        let head_before = testutil::commit_count(&wt);
+        for (n, target) in ["solution.component.payments", "fixture.mod.Store"]
+            .into_iter()
+            .enumerate()
+        {
+            let name = format!("wrong-scope-{n}");
+            let mut bad = node("implementation", "constraint", &name);
+            bad.out.push(out_edge("applies-to", target));
+            let err = write_project(&wt_apg, &[bad], &[]).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("applies-to"),
+                "the refusal must name the kind: {msg}"
+            );
+            assert!(
+                msg.contains(target),
+                "the refusal must name the refused target: {msg}"
+            );
+            assert!(
+                !node_file_path(&wt_apg, Layer::Implementation, "constraint", &name).exists(),
+                "a refused applies-to write must not land a file"
+            );
+            assert_eq!(
+                testutil::commit_count(&wt),
+                head_before,
+                "a refused applies-to write must not commit"
+            );
+        }
 
         testutil::remove(&repo);
     }
