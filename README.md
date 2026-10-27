@@ -19,7 +19,9 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug + a
   only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python),
   plus a **bundled structural scanner** in the base package that graphs the
   tracked text/config/packaging files the code frontends don't claim (Markdown,
-  shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files).
+  shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files),
+  and a **bundled agent frontend** that graphs `.opencode/agents/*.md`
+  definitions as `Agent` nodes.
 - **Exact edges for Go, Java, Rust, TypeScript, and C#** — call resolution uses
   the compiler's type checker (go/types, javac, rust-analyzer, the official
   TypeScript compiler, or Roslyn); C++ is heuristic (tree-sitter), and
@@ -46,9 +48,10 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug + a
 - [opencode](https://opencode.ai) **2.x** (for the chat plugin — the plugin depends on `@opencode/plugin`)
 
 The `scanner` formula builds the `apg` binary and ships the bundled
-**structural scanner** (`structfrontend`); the per-language frontends are
-separate formulae (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`,
-`apg-csharp`, `apg-py`). Install the base plus the frontends for the
+**structural scanner** (`structfrontend`) and the bundled **agent-definition
+frontend** (`agentfrontend`); the per-language frontends are separate formulae
+(`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`,
+`apg-py`). Install the base plus the frontends for the
 languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
@@ -67,10 +70,11 @@ The other three frontends need no runtime at scan time: the C++ frontend is a
 native tree-sitter binary, the C# frontend (`apg-csharp`) is a self-contained
 single-file publish (its .NET SDK is build-time only), and the Python
 (`apg-py`) frontend resolves from filesystem markers and never shells out. The
-bundled structural scanner is likewise self-contained and never shells out —
-it needs nothing on `PATH`. On Linux the base `apg` binary links
-OpenSSL dynamically, so `libssl.so.3` must be present (the installer warns if
-it is missing — see [below](#install-linux-curl--sh)).
+bundled structural scanner and agent-definition frontend are likewise
+self-contained and never shell out — they need nothing on `PATH`. On Linux the
+base `apg` binary links OpenSSL dynamically, so `libssl.so.3` must be present
+(the installer warns if it is missing — see
+[below](#install-linux-curl--sh)).
 
 ### Frontend dependency contract
 
@@ -207,6 +211,10 @@ Sets up the project:
   - `migration-agent` — rewrites `apg/layers/**` for a migration, then validates.
   - `researcher` — investigates one research question read-only and returns a markdown result in `apg/.scratch/`.
 
+`apg init` is a **main-checkout operation**: run it from the repo's main
+checkout, never inside a project worktree (`apg/.worktrees/<name>`) — it
+refuses there and names the main checkout.
+
 The suite installs the first time and is then kept in sync (files are
 re-written only when their contents change), so running `apg init` again after
 upgrading `apg` updates the tools and agents where required.
@@ -234,7 +242,11 @@ opencode **v2** only — the `~/.config/opencode/` layout and the
 
 Runs the scanner + ingestor for the project in `dir` (default: current
 directory). Language is auto-detected from the source files — **every language
-present** in a multi-language repo is scanned and merged into one graph.
+present** in a multi-language repo is scanned and merged into one graph. A scan
+always includes the bundled structural streams when `structfrontend` is
+installed, and an auto-detected scan (no `--language`) also includes every
+`.opencode/agents/` definition when `agentfrontend` is installed — the
+definitions landing as `Agent` nodes.
 
 ```
 apg scan
@@ -244,7 +256,7 @@ apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
 apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
 apg scan --no-progress                   # silence the live progress stream
-apg scan --force                         # true rebuild: discard db.lbug + graph.jsonl and re-run every frontend (bypasses the fact cache)
+apg scan --force                         # true rebuild: discard db.lbug + graph.jsonl, bypass the fast path and fact cache, re-run every frontend (sources and apg/layers untouched)
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
 
@@ -314,7 +326,7 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_project` | project lifecycle — `start` (main → worktree + branch + branch DB), `verify`, `merge` |
 | `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges (require a live session) |
 | `apg_session` | start a live session for a worktree — spawns `apg session start` detached, waits for its socket, returns while the session stays live |
-| `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, task notes, verify gate |
+| `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, verify gate |
 | `apg_review` / `apg_review_*` | coordinator-mediated writer↔reviewer feedback cycle (transient mirrors) |
 | `apg_rm` | path-scoped remove — resolves its path against the caller's project dir and self-enforces the acting agent's granted globs + the project/worktree boundary |
 | `apg_mv` | path-scoped move/rename — source and destination each resolved against the caller's project dir and scope-checked (agent globs + worktree boundary; both ends) |
@@ -400,9 +412,9 @@ the worktree at `apg/.worktrees/<name>`, copies the main checkout's current
 scan into it (`apg scan` must be current on main first — start refuses a stale
 or missing scan), and **prints the worktree path**; sessions then operate with
 cwd inside the worktree (walk-up discovery finds the worktree's own `apg/` and
-its branch DB). Main is never a
-mutation place — `apg node`/`apg edge`/`apg plan`/`apg review` refuse outside a
-project context.
+its branch DB). Main is never a mutation place — `apg node`/`apg edge`/`apg
+plan`/`apg review`/`apg session start` refuse outside a project context (the
+default branch is never a mutation place).
 
 The durable spec is a **node-file store** under `apg/layers/` — one JSON file
 per node, authored with `apg node add|rm <layer> <type> <name>` and
@@ -427,7 +439,8 @@ the matching in half in the target's). Constraints are **prose** — the binary
 validates structure and references at write time; whether the prose holds is
 assessed by review, never executed. An `implementation`-layer constraint binds
 the whole implementation tier unless it carries one `applies-to` edge per
-`Language` it binds — every `applies-to` target is a `Language` node. The
+`Language` it binds — every `applies-to` target is a `Language` node naming any
+scan language id (a code language, a structural stream, or `agent`). The
 **spine** threads the tiers end to end:
 `Stakeholder/User —requires→ Requirement ←driven-by— Service
 ←realises— Component —implemented-by→ code`; every code node is claimed by
@@ -504,10 +517,10 @@ destination). A target-less activity carries no operation edge.
 
 - `apg plan done` is an **implementer assertion** — no graph verification.
 - `apg plan complete` is a **milestone only** — the plan survives until verify.
-- `apg plan note` attaches task notes (execution context, surfaced at the human gate).
 - `apg plan verify <project>` runs the **pre-merge coherence gate** (every
   planned node **realized** — a branch scan found real code at its FQN; all
-  feedback resolved; derived solution coverage holds) and prints the merge
+  feedback resolved; every `implemented-by` claim and added/changed requirement
+  in the change-set delta is covered by a task or phase) and prints the merge
   handoff. `apg project merge <name>` (from the main checkout) then runs
   verify → merge → unguarded main rebuild. Push/tag remain human-approved acts.
 
@@ -609,8 +622,9 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`; `0` to
-skip all; `struct` is the bundled structural scanner) to
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`;
+`0` to skip all; `struct` is the bundled structural scanner and `agent` the
+agent-definition frontend) to
 limit what build.rs compiles — the split brew formulae rely on this.
 
 The test suite is split into three tiers (`global.constraint.test-tier-boundaries`):
@@ -661,9 +675,10 @@ src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
 src/csharplib/       C# scanner (Roslyn; separate build)
 src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
 src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
+src/agentlib/        bundled agent-definition frontend — `.opencode/agents/*.md` → Agent nodes (standalone non-workspace Rust crate)
 opencode-suite/      install template for `apg init` (plugins/, lib/, agents/; embedded in src/main.rs)
 install.sh           curl | sh installer for Linux (prebuilt release tarballs)
-Formula/scanner.rb     apg binary (ingestor + query CLI) + bundled structural scanner
+Formula/scanner.rb     apg binary (ingestor + query CLI) + bundled structural and agent-definition frontends
 Formula/apg-go.rb      Go scanner frontend
 Formula/apg-java.rb    Java scanner frontend
 Formula/apg-cpp.rb     C++ scanner frontend

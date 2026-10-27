@@ -168,7 +168,7 @@ Task --> "0..1" Module : module_delete
 Task --> "0..1" Module : module_move
 Task --> "0..1" Module : module_rename
 Task --> "0..1" PlannedModule : module_create
-Task --> "0..1" PlannedModule : target
+Task --> "0..*" PlannedModule : target
 
 %% File operations
 Task --> "0..1" File : file_modify
@@ -176,7 +176,7 @@ Task --> "0..1" File : file_delete
 Task --> "0..1" File : file_move
 Task --> "0..1" File : file_rename
 Task --> "0..1" PlannedFile : file_create
-Task --> "0..1" PlannedFile : target
+Task --> "0..*" PlannedFile : target
 
 %% Struct operations
 Task --> "0..1" Struct : struct_modify
@@ -184,7 +184,7 @@ Task --> "0..1" Struct : struct_delete
 Task --> "0..1" Struct : struct_move
 Task --> "0..1" Struct : struct_rename
 Task --> "0..1" PlannedStruct : struct_create
-Task --> "0..1" PlannedStruct : target
+Task --> "0..*" PlannedStruct : target
 
 %% Function operations
 Task --> "0..1" Function : function_modify
@@ -192,7 +192,7 @@ Task --> "0..1" Function : function_delete
 Task --> "0..1" Function : function_move
 Task --> "0..1" Function : function_rename
 Task --> "0..1" PlannedFunction : function_create
-Task --> "0..1" PlannedFunction : target
+Task --> "0..*" PlannedFunction : target
 
 %% ==================================================
 %% NOTES
