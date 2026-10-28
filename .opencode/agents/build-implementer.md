@@ -102,6 +102,16 @@ permissions:
   - { action: shell, resource: "cargo fmt --manifest-path src/structlib/Cargo.toml *", effect: allow }
   - { action: shell, resource: "cargo test --manifest-path src/structlib/Cargo.toml", effect: allow }
   - { action: shell, resource: "cargo test --manifest-path src/structlib/Cargo.toml *", effect: allow }
+  - { action: shell, resource: "cargo build --manifest-path src/agentlib/Cargo.toml", effect: allow }
+  - { action: shell, resource: "cargo build --manifest-path src/agentlib/Cargo.toml *", effect: allow }
+  - { action: shell, resource: "cargo check --manifest-path src/agentlib/Cargo.toml", effect: allow }
+  - { action: shell, resource: "cargo check --manifest-path src/agentlib/Cargo.toml *", effect: allow }
+  - { action: shell, resource: "cargo clippy --manifest-path src/agentlib/Cargo.toml", effect: allow }
+  - { action: shell, resource: "cargo clippy --manifest-path src/agentlib/Cargo.toml *", effect: allow }
+  - { action: shell, resource: "cargo fmt --manifest-path src/agentlib/Cargo.toml", effect: allow }
+  - { action: shell, resource: "cargo fmt --manifest-path src/agentlib/Cargo.toml *", effect: allow }
+  - { action: shell, resource: "cargo test --manifest-path src/agentlib/Cargo.toml", effect: allow }
+  - { action: shell, resource: "cargo test --manifest-path src/agentlib/Cargo.toml *", effect: allow }
   - { action: apg_rm, resource: "*", effect: deny }
   - { action: apg_rm, resource: "apg/.worktrees/*/scripts/**", effect: allow }
   - { action: apg_rm, resource: "apg/.worktrees/*/build.rs", effect: allow }
@@ -282,8 +292,9 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   agents), `opencode-suite/**` (core implementer), `README.md`
   (docs-implementer), `.opencode/**`, and the generated/dependency trees.
 - **Standalone cargo crates you gate**: `src/rustlib`, `src/pylib`,
-  `src/structlib` via `cargo <cmd> --manifest-path src/<crate>/Cargo.toml`. You
-  exercise their tests; you do not edit their source.
+  `src/structlib`, `src/agentlib` via `cargo <cmd> --manifest-path
+  src/<crate>/Cargo.toml`. You exercise their tests; you do not edit their
+  source.
 
 ## Project flow (operational)
 
@@ -308,7 +319,8 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   them, as `ask`).
 - **Gate**: `scripts/gate.sh` and `scripts/gate.sh *` (so `--e2e` matches).
 - **Cargo**: root `cargo build`/`check`/`clippy`/`fmt`/`test` (+ args), and the
-  standalone crates with `--manifest-path src/{rustlib,pylib,structlib}/Cargo.toml`.
+  standalone crates with `--manifest-path
+  src/{rustlib,pylib,structlib,agentlib}/Cargo.toml`.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call
   passes TWO checks: the tool's own action rules, then the tool's
   `edit`-scope assert (`edit` is the operative write scope; both rule sets
@@ -320,7 +332,7 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   → `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`,
   stopping at the first failure; `--e2e` appends the opt-in e2e tier.
 - **Also run the standalone crates' tests** (`cargo test --manifest-path
-  src/{rustlib,pylib,structlib}/Cargo.toml`).
+  src/{rustlib,pylib,structlib,agentlib}/Cargo.toml`).
 - **A `kind=gate` task is done only on a real, observed green run.**
 - **There is no such thing as a pre-existing failure.** Fix your input, or
   report a code fault owned by another agent to the coordinator. Never commit

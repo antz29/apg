@@ -185,7 +185,7 @@ Solve the whole problem with the **least new content**. The level is fixed at
 - The durable spec node files and the transient plan/feedback files are **never
   read directly**; the graph-state paths are denied to `read`/`glob`/`grep`.
 - You write only `README.md` and `SCHEMA.md` (both worktree-rooted). You never
-  author spec/plan/ review nodes. **Never call `apg_plan_note`** (banned, not
+  author spec/plan/review nodes. **Never call `apg_plan_note`** (banned, not
   granted).
 
 ## Feedback (coordinator-mediated — you never action it)

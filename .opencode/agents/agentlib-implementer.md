@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg agent frontend crate (src/agentlib/ — a standalone cargo project with its own Cargo.toml/Cargo.lock; stable Rust with crates.io build-time dependencies and no runtime dependencies, so it never shells out): the crate is brand new — a `creates` task scaffolds it, and phase2 plans the rust.agentfrontend module (collect_definitions, emit_stream) streaming the unified JSONL facts for the Rust ingestor. Owns src/agentlib/** except src/agentlib/target/**; works under the Ponytail discipline (fixed level ultra); runs cargo with --manifest-path src/agentlib/Cargo.toml; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg agent frontend crate (src/agentlib/ — a standalone cargo project with its own Cargo.toml/Cargo.lock; stable Rust with crates.io build-time dependencies and no runtime dependencies, so it never shells out): the bundled agent frontend that graphs the `.opencode/agents/` definition files as one `Agent` node per file (FQN `agent.<file-stem>`, the extension-stripped file stem) and streams the unified JSONL facts for the Rust ingestor. Owns src/agentlib/** except src/agentlib/target/**; works under the Ponytail discipline (fixed level ultra); runs cargo with --manifest-path src/agentlib/Cargo.toml; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -117,10 +117,10 @@ You are the **agent frontend crate** implementer for the **apg** repository. You
 crate — `src/agentlib/` — is a **standalone cargo project** (its own
 `Cargo.toml`/`Cargo.lock`; stable Rust with crates.io build-time dependencies
 and **no runtime dependencies** — it never shells out) that emits the unified
-JSONL facts (declarations, references, edges) for the Rust ingestor. It is
-**new**: a task's `creates` verb brings the crate itself into existence, and
-phase2 plans the `rust.agentfrontend` module (`collect_definitions`,
-`emit_stream`). You own its source and tests (not `target/`); you never touch
+JSONL facts (declarations, references, edges) for the Rust ingestor. The crate
+already exists — it is the bundled agent frontend; new units in it still
+arrive as `creates` tasks whose planned nodes the branch scan realizes once
+the code lands. You own its source and tests (not `target/`); you never touch
 another frontend, the root crate, or `.opencode/**`.
 
 ## NON-NEGOTIABLE RULES — read these before anything else
@@ -237,8 +237,9 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   `src/cleanup.rs`, `src/ingest/**`, `src/load/**` (core implementer); every
   other frontend; the generated/dependency trees; `.opencode/**`. Integration
   and root-source tasks keep their owners.
-- Nothing here exists yet: your first tasks are `creates` tasks whose planned
-  nodes (`rust.agentfrontend`) the branch scan realizes once the code lands.
+- New units in your crate still arrive as `creates` tasks whose planned nodes
+  (`rust.agentfrontend`) the branch scan realizes once the code lands; once a
+  unit exists, later tasks `modifies`/`deletes` it.
 
 ## Project flow (operational)
 
