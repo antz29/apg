@@ -2,18 +2,18 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "session-dirty-mark-covers-every-changed-file",
-  "body": "A mutation marks dirty every durable node row whose file it changes: both endpoints of an authored edge, the source alone for a code-target edge, and every neighbour losing an in half.",
+  "body": "A mutation marks dirty every durable node row whose file it changes: both endpoints of an authored edge, the source alone for a code-target edge, and on a node delete every authored neighbour whose in or out half names the removed node.",
   "properties": {},
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.cli-session-operator",
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.session-durability",
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
       "properties": {}
     }
   ]
