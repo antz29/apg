@@ -7,17 +7,22 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.artifacts.project.code_kinds_from_export",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.filter_task_ops",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "rust.apg.ingest.insert_node",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.splice_cached",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.apply.apply",
       "properties": {}
     },
     {
@@ -33,16 +38,6 @@
     {
       "kind": "realises",
       "target": "domain.service.planned-node-realization",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.ingest.splice_cached",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.splice.apply.apply",
       "properties": {}
     }
   ],
