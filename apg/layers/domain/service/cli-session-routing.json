@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "cli-session-routing",
-  "body": "The session routing service: a durable mutation reaches the live session's buffer and index projection while a session is live, and a read through the session observes pending changes while a direct read observes the last saved state.",
+  "body": "The session routing service: a durable mutation lands in the live session's database and that session's read observes it at once, while a read outside the session observes the last saved state.",
   "properties": {},
   "out": [
     {
@@ -52,12 +52,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cli-session-write-back-buffer",
+      "target": "requirements.requirement.session-start-requires-project-context",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.session-start-requires-project-context",
+      "target": "requirements.requirement.session-write-through-to-the-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.admission-checks-the-model-not-persistence",
       "properties": {}
     }
   ],

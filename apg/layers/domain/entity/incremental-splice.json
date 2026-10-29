@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "incremental-splice",
-  "body": "The incremental database build: it seeds a working copy of the previous database, applies the code delta, and publishes the database and its export atomically, holding the authored rows in the seed.",
+  "body": "The incremental database build: it seeds a working copy of the previous database, applies the code delta, and publishes the database atomically while holding the authored rows in the seed.",
   "properties": {
     "kind": "entity"
   },

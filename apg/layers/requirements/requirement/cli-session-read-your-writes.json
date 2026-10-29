@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-read-your-writes",
-  "body": "A read routed through a live session observes every buffered mutation at the point of admission, saved or pending, while a read with the session absent returns the last saved state.",
+  "body": "A read routed through a live session observes every mutation at the moment it lands in the held database, saved or pending, while a read with the session absent returns the last saved state.",
   "properties": {
     "feature": "cli-session-substrate"
   },

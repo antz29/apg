@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "graph-materialization",
+  "body": "The program graph's single derived database: what a scan writes it from, how a scan replaces it, and when a database is discarded for a rebuild.",
+  "properties": {
+    "attribute": "core",
+    "root": "derived-database"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.derived-database",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

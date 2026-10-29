@@ -1,9 +1,0 @@
-{
-  "layer": "domain",
-  "type": "constraint",
-  "name": "cli-session-buffer-is-pending-not-durable",
-  "body": "A buffered change is a pending intention: a mutation admitted to a live session applies to the live database alone, and the node files become durable only at a save's commit.",
-  "properties": {},
-  "out": [],
-  "in": []
-}

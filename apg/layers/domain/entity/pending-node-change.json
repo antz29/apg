@@ -1,8 +1,8 @@
 {
   "layer": "domain",
   "type": "entity",
-  "name": "cli-session-buffer",
-  "body": "The pending change set of a live session: the node-file writes and deletes accepted since the previous save, which a save makes durable and an abort discards.",
+  "name": "pending-node-change",
+  "body": "The node identities a session changed since its last save: rows carrying a dirty mark together with the identities awaiting removal, consumed by the save alone.",
   "properties": {
     "kind": "entity"
   },

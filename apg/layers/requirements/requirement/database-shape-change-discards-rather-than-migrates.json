@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "database-shape-change-discards-rather-than-migrates",
+  "body": "A database whose table shape or recorded version the running binary fails to recognise is discarded and rebuilt, so a shape change costs one rescan and leaves every node file untouched.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

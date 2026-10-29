@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-delete-removes-the-node-at-once",
+  "body": "A session delete drops the node from the database at once, so every ordinary read reports it absent while the removed identity stays pending for the save that deletes its file.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
+      "properties": {}
+    }
+  ]
+}

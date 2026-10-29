@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-save-serialisation-is-lossless",
+  "body": "A node file saved from a dirty row carries the body, properties, typed fields, and both edge halves with their per-edge properties the database holds, in a deterministic order that keeps an unchanged re-save diff-free.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
+      "properties": {}
+    }
+  ]
+}

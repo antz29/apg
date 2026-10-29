@@ -37,12 +37,17 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.spec-authoring",
+      "target": "domain.service.project-context-guard",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.project-context-guard",
+      "target": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.validate.validate_cardinalities",
       "properties": {}
     }
   ],

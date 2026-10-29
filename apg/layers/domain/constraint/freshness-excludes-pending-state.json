@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "freshness-excludes-pending-state",
+  "body": "The freshness fast path holds the database stale whenever it carries pending state with its session gone, and a discarded database is recoverable by one rescan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

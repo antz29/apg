@@ -2,13 +2,13 @@
   "layer": "domain",
   "type": "value",
   "name": "pending-change-set",
-  "body": "The in-memory node-file writes and deletes a live session accepted since its previous save.",
+  "body": "The dirty rows and pending removals a live session holds since its previous save.",
   "properties": {},
   "out": [],
   "in": [
     {
       "kind": "contains",
-      "source": "domain.entity.cli-session-buffer",
+      "source": "domain.entity.pending-node-change",
       "properties": {}
     }
   ]

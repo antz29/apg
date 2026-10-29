@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "save-boundary-validates-its-write-set",
+  "body": "A save validates the structure of every row it serialises and the pair validity of every edge it writes, leaving tier-crossing coverage to the spec lint and the merge gate.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

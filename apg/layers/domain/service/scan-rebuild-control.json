@@ -2,17 +2,17 @@
   "layer": "domain",
   "type": "service",
   "name": "scan-rebuild-control",
-  "body": "The capability that grants a scan operator a from-scratch rebuild: the force flag discards the derived index and export, so every scan-time reuse path stands down while authored and source state survive.",
+  "body": "The capability that grants a scan operator a from-scratch rebuild: the force flag discards the derived index, so every scan-time reuse path stands down while authored and source state survive.",
   "properties": {},
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.scan-force-discards-derived-artifacts",
+      "target": "requirements.requirement.scan-force-bypasses-reuse-paths",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.scan-force-bypasses-reuse-paths",
+      "target": "requirements.requirement.scan-force-discards-derived-artifacts",
       "properties": {}
     },
     {

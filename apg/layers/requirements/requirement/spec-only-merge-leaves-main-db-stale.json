@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "spec-only-merge-leaves-main-db-stale",
-  "body": "A spec-only change-set merged into main leaves main's database carrying the merged authored nodes and edges, matching the graph export written by the same rebuild.",
+  "body": "A spec-only change-set merged into main leaves main's database carrying the merged authored nodes and edges exactly as the merge rebuild assembles them.",
   "properties": {
     "feature": "splice-equivalence"
   },

@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "two-representations-only",
+  "body": "The graph has exactly two representations — the git-tracked node files that are its system of record at rest and the derived database a scan rebuilds — and every model question resolves against one of those two.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

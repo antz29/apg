@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "database-shape",
+  "body": "The table set and recorded scan row that tell a running binary whether a database is its own.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.derived-database",
+      "properties": {}
+    }
+  ]
+}

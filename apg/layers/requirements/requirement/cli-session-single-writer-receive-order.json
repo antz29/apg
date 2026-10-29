@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-single-writer-receive-order",
-  "body": "The session is the single writer of the buffered node files and the live database, applying routed mutations in receive order and applying a replayed client identifier at most once.",
+  "body": "The session is the single writer of the worktree database and the node files it serialises, applying routed mutations in receive order and applying a replayed client identifier at most once.",
   "properties": {
     "feature": "cli-session-substrate"
   },

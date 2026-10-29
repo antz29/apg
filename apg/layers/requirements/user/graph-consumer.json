@@ -27,12 +27,32 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.planned-node-realizes-through-the-cached-fact-assembly",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.planned-realization-repoints-incident-edges",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.planned-node-realizes-through-the-cached-fact-assembly",
+      "target": "requirements.requirement.graph-export-removed",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.graph-has-two-representations",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.code-universe-read-from-the-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.two-representation-model-documented",
       "properties": {}
     }
   ],

@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "graph-has-two-representations",
+  "body": "The graph has exactly two representations: the git-tracked node files under `apg/layers` as the system of record at rest, and the derived database under `apg/.trans` that a scan rebuilds from those files and the scanned code.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

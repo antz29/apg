@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "spec-lint-tier-scope-is-cumulative",
+  "body": "`apg spec lint --tier <tier>` checks that tier together with every tier above it, including each coverage rule whose supplying tier falls in scope.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
+      "properties": {}
+    }
+  ]
+}

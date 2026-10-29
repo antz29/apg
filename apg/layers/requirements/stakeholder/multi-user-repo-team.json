@@ -19,6 +19,16 @@
       "kind": "requires",
       "target": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.database-shape-change-discards-rather-than-migrates",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-reads-the-previous-database-first",
+      "properties": {}
     }
   ],
   "in": []

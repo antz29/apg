@@ -1,0 +1,56 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "session-durability",
+  "body": "The capability that makes a session's pending database state durable: the dirty marks, the pending removals, the node-file serialisation, and the single commit that clears them.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-dirty-mark-covers-every-changed-file",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-delete-removes-the-node-at-once",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-save-validates-what-it-writes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-save-serialises-pending-rows",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-save-serialisation-is-lossless",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.cli-session",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.session-pending-state",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-durability",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-coordinator",
+      "properties": {}
+    }
+  ]
+}

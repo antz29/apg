@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-crash-recovery",
-  "body": "A socket that answers a connect and a ping marks a live session, and a present socket that fails to answer marks an unclean exit whose derived index is discarded and rebuilt from the on-disk node files.",
+  "body": "A socket that answers a connect and a ping marks a live session, and a socket that fails to answer, or a database carrying pending state after its session is gone, marks an unclean exit whose derived index is discarded and rebuilt.",
   "properties": {
     "feature": "cli-session-substrate"
   },

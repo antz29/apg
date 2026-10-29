@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "derived-database",
+  "body": "The database a scan materialises from the durable node files and the scanned code: it carries every field a node file holds, and a scan rebuilds it from scratch.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.database-shape",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

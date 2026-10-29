@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "admission-holds-no-persistence-invariant",
+  "body": "Admission checks one mutation's model and holds no persistence invariant, so a session builds its model across mutations in any creation order.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

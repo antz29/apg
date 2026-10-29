@@ -65,6 +65,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.forced-scan-discard",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.identity-layer",
       "properties": {}
     },
@@ -210,7 +215,12 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.forced-scan-discard",
+      "source": "solution.component.session-pending-state",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.code-universe-read",
       "properties": {}
     }
   ]

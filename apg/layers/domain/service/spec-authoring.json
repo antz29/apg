@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.constraint-scope-is-its-layer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.details-target-set-consistency",
       "properties": {}
     },
@@ -22,7 +27,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.group-containment-is-leaf-scoped",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.implementation-constraint-language-scope",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.implemented-by-is-exclusive",
       "properties": {}
     },
     {
@@ -52,17 +67,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.constraint-scope-is-its-layer",
+      "target": "requirements.requirement.spec-lint-tier-scope-is-cumulative",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.implemented-by-is-exclusive",
+      "target": "requirements.requirement.tier-crossing-coverage-is-lint-and-merge",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.group-containment-is-leaf-scoped",
+      "target": "requirements.requirement.two-representation-model-documented",
       "properties": {}
     }
   ],

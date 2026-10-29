@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "freshness-fast-path",
-  "body": "The reuse path of a scan: it reuses the existing database when the current tree's content identity equals the scan already recorded, so the rebuild that corrects a divergence is skipped.",
+  "body": "The reuse path of a scan: it reuses the existing database when the current tree's content identity equals the scan already recorded and the pending set is empty, so a rebuilding scan corrects a divergence.",
   "properties": {
     "kind": "entity"
   },

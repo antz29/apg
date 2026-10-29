@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "merge-validates-against-the-branch-database",
+  "body": "`apg project merge` validates the whole branch model and every component's `implemented-by` claim against the branch worktree's database, so each claimed target is real scanned code.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

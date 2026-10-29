@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "pending-change-is-not-durable",
+  "body": "A change admitted to a live session lives in the derived database as pending state, and the node files become durable at a save's commit alone.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

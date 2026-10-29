@@ -7,17 +7,17 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.load.export.Export.Task",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.authoring.plan_add_task_at",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.authoring.plan_update_task_at",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.authoring.validate_task_operations",
       "properties": {}
     },
     {
@@ -38,11 +38,6 @@
     {
       "kind": "realises",
       "target": "domain.service.plan-tooling",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.plan_cmd.authoring.validate_task_operations",
       "properties": {}
     }
   ],

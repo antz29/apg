@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-clean-end-and-abandon",
-  "body": "A session end completes on a clean buffer and reports pending changes while staying live on a dirty one, and a session abort discards the buffer and rebuilds the index from the on-disk node files.",
+  "body": "A session end completes over an empty pending set and reports pending changes while staying live over a full one, and a session abort discards the pending set and rebuilds the index from the node files.",
   "properties": {
     "feature": "cli-session-substrate"
   },

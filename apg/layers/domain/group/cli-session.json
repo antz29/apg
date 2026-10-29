@@ -10,11 +10,6 @@
   "out": [
     {
       "kind": "contains",
-      "target": "domain.entity.cli-session-buffer",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "domain.entity.cli-session-coordinator",
       "properties": {}
     },
@@ -26,6 +21,16 @@
     {
       "kind": "contains",
       "target": "domain.service.cli-session-routing",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.pending-node-change",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.session-durability",
       "properties": {}
     }
   ],

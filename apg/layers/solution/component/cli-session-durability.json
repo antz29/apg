@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-durability",
-  "body": "The session durability path: a save writes the buffered node files under the layers directory in one atomic pass, then makes exactly one commit and re-anchors the scan metadata.",
+  "body": "The session durability path: a save serialises the dirty rows and pending removals into node files under the layers directory in one atomic pass, then makes exactly one commit and re-anchors the scan metadata.",
   "properties": {},
   "out": [
     {
@@ -23,6 +23,11 @@
     {
       "kind": "realises",
       "target": "domain.service.cli-session-routing",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.session-durability",
       "properties": {}
     }
   ],

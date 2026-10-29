@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-write-through-to-the-database",
+  "body": "Each durable mutation admitted by a live session lands in the worktree database at admission, so a session read observes it at once while the node files and git stay at the last saved state.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cli-session-routing",
+      "properties": {}
+    }
+  ]
+}

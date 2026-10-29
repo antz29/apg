@@ -31,11 +31,6 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "rust.apg.load.export.write_graph_jsonl",
-      "properties": {}
-    },
-    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}

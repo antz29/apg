@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-save-serialises-pending-rows",
+  "body": "A session save writes every dirty row to its node file, removes each pending-deletion file, lands the set in one atomic write and one commit, then clears the marks; a clean session writes nothing.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
+      "properties": {}
+    }
+  ]
+}

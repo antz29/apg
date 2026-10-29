@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-pending-state-never-fresh",
+  "body": "A database carrying a dirty row or a pending deletion while its session is gone reads as stale and is discarded and rebuilt, so unsaved work is lost by design and stays unserved as durable.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

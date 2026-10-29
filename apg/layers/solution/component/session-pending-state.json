@@ -1,0 +1,40 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "session-pending-state",
+  "body": "The pending state a live session keeps in the database: the dirty mark on each changed node row, the identity awaiting removal, and the write set a save serialises.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.session-durability",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.session.Coordinator.save",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.artifacts.db.ArtifactDb.node_files_from_db",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.artifacts.db.ArtifactDb.incident_edge_records_from_db",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.write.write_through_with_deletes",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

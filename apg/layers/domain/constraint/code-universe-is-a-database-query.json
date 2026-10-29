@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "code-universe-is-a-database-query",
+  "body": "The code universe a spec check resolves against is a query over the derived database together with the plan store's declarations, and every other code-identity source is off-model.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

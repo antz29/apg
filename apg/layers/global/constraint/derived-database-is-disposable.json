@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "derived-database-is-disposable",
+  "body": "The derived database is disposable: doubt about its content is resolved by deleting it and rescanning from the node files and the scanned code, and every correctness argument rests on those sources alone.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

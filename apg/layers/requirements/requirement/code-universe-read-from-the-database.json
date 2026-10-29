@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "code-universe-read-from-the-database",
+  "body": "Every consumer of the scanned and planned code universe reads it from the worktree database together with the plan store's declarations, and the database is the one code-identity source.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

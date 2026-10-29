@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-freshness-guard",
-  "body": "The scan-freshness surface: it reads the scan identity the export carries and the database's own scan row, holds the fast path when the two agree and the authored digests match, and re-anchors on a durable commit.",
+  "body": "The scan-freshness surface: it reads the database's own scan row, holds the fast path when that row matches the current tree and the pending set is empty, and re-anchors on a durable commit.",
   "properties": {},
   "out": [
     {
@@ -33,6 +33,11 @@
     {
       "kind": "realises",
       "target": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-materialization",
       "properties": {}
     }
   ],

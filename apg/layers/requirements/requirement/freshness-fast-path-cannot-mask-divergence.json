@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "freshness-fast-path-cannot-mask-divergence",
-  "body": "The recorded scan and the freshness fast path declare fresh only a database that agrees with the graph export recorded alongside it, and a published divergence recovers at the next scan.",
+  "body": "The freshness fast path declares fresh only a database whose own recorded scan matches the current tree and which carries an empty pending set, and any divergence recovers at the next scan.",
   "properties": {
     "feature": "splice-equivalence"
   },

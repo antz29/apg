@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-caller-controlled-durability",
-  "body": "The session save is the single durability point, making everything buffered since the previous save durable in one atomic node-file write and one commit.",
+  "body": "The session save is the single durability point, making every change admitted since the previous save durable in one atomic node-file write and exactly one commit.",
   "properties": {
     "feature": "cli-session-substrate"
   },

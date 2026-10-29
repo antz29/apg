@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-substrate",
-  "body": "Durable spec mutations flow through a caller-controlled-durability session that owns the worktree database and buffer, makes the buffered set durable at a save, and treats the node files as the system of record.",
+  "body": "Durable spec mutations flow through a caller-controlled-durability session that owns the worktree database, applies each mutation to it, makes the pending set durable at a save, and treats the node files as the system of record.",
   "properties": {
     "feature": "cli-session-substrate"
   },
@@ -46,19 +46,9 @@
       "kind": "contains",
       "target": "requirements.requirement.cli-session-warning-visibility",
       "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cli-session-write-back-buffer",
-      "properties": {}
     }
   ],
   "in": [
-    {
-      "kind": "requires",
-      "source": "requirements.user.cli-session-operator",
-      "properties": {}
-    },
     {
       "kind": "driven-by",
       "source": "domain.service.cli-session-routing",

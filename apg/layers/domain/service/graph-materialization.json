@@ -1,0 +1,76 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "graph-materialization",
+  "body": "The capability that materialises the program graph as one derived database from the durable node files and the scanned code, and rebuilds it from scratch whenever its content is in doubt.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.graph-has-two-representations",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-start-recovers-an-unclean-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.session-pending-state-never-fresh",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.graph-export-removed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.merge-validates-against-the-branch-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-reads-the-previous-database-first",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.code-universe-read-from-the-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.database-shape-change-discards-rather-than-migrates",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.code-universe-read",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.forced-scan-discard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-freshness-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.splice-eligibility-guard",
+      "properties": {}
+    }
+  ]
+}

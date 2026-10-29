@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "graph-stores-relative-only",
-  "body": "The persisted graph and its export carry only repo-relative identities, never an absolute filesystem path, with absolute-path resolution confined to the suite-tool boundary against the caller's project directory.",
+  "body": "The persisted graph carries only repo-relative identities, never an absolute filesystem path, with absolute-path resolution confined to the suite-tool boundary against the caller's project directory.",
   "properties": {},
   "out": [],
   "in": []

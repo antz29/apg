@@ -14,6 +14,51 @@
       "kind": "requires",
       "target": "requirements.requirement.session-start-requires-project-context",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-dirty-mark-covers-every-changed-file",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-save-serialises-pending-rows",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-delete-removes-the-node-at-once",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-write-through-to-the-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-pending-state-never-fresh",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-save-serialisation-is-lossless",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-save-validates-what-it-writes",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-start-recovers-an-unclean-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.admission-checks-the-model-not-persistence",
+      "properties": {}
     }
   ],
   "in": []

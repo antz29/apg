@@ -6,13 +6,8 @@
   "properties": {},
   "out": [
     {
-      "kind": "realises",
-      "target": "domain.service.scan-rebuild-control",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "target": "solution.role.scan-module",
+      "kind": "implemented-by",
+      "target": "rust.apg.session.Coordinator.force_full_scan",
       "properties": {}
     },
     {
@@ -21,8 +16,18 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.force_full_scan",
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.scan-rebuild-control",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-materialization",
       "properties": {}
     }
   ],

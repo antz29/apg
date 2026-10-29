@@ -39,6 +39,11 @@
       "kind": "realises",
       "target": "domain.service.splice-eligibility",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-materialization",
+      "properties": {}
     }
   ],
   "in": [

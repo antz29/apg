@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-save-validates-what-it-writes",
+  "body": "A session save validates the structure of every dirty row and the pair validity of every edge it writes, refusing ahead of the write and leaving the pending state intact.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
+      "properties": {}
+    }
+  ]
+}
