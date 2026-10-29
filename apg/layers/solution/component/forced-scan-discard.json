@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "forced-scan-discard",
-  "body": "The forced-rebuild discard: one shared helper that removes `db.lbug` with its `wal` and `shm` sidecars and `graph.jsonl` for the force flag, the crash-recovery rebuild, the stale-socket reclaim, and the full-load branch.",
+  "body": "The forced-rebuild discard: one shared helper that removes the derived database `db.lbug` with its `wal` and `shm` sidecars for the force flag, the crash-recovery rebuild, the stale-socket reclaim, and the full-load branch.",
   "properties": {},
   "out": [
     {
@@ -22,12 +22,12 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.scan-rebuild-control",
+      "target": "domain.service.graph-materialization",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.graph-materialization",
+      "target": "domain.service.scan-rebuild-control",
       "properties": {}
     }
   ],
