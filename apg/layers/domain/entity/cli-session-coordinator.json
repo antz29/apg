@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "cli-session-coordinator",
-  "body": "The live server that owns the worktree database and lock for its life, binds the session socket, and admits durable mutations in receive order, holding pending node-file changes until a save.",
+  "body": "The live server that owns the worktree database and session socket, admitting mutations in receive order, writing them through to the database, marking each node identity pending, and serialising the pending set to `apg/layers/**` at a save.",
   "properties": {
     "kind": "entity"
   },
