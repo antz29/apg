@@ -559,26 +559,43 @@ impl Coordinator {
         Ok(())
     }
 
-    /// Render the buffered-but-unsaved changes for a refused `end`: the count
-    /// plus one `<write|delete> <layer>.<type>.<name>` line per pending change.
-    /// These changes live only in memory (their projection is in the held DB,
-    /// their node files are not written), so [`end`](Self::end) refuses to
-    /// release the session over them.
+    /// Render the held database's pending state for a refused `end`: the count
+    /// — its dirty rows
+    /// ([`crate::artifacts::ArtifactDb::dirty_node_files_from_db`]) plus its
+    /// pending-removal ledger identities
+    /// ([`crate::artifacts::ArtifactDb::pending_removals`]) — then one
+    /// `write <layer>.<type>.<name>` line per dirty row and one
+    /// `delete <layer>.<type>.<name>` line per ledger identity, each block in
+    /// the order its read yields (dirty rows by `(layer, node_type, name)`,
+    /// ledger identities by `fqn`). That state is projected into the database
+    /// while no `apg/layers/**` node file backs it, so [`end`](Self::end)
+    /// refuses to release the session over it. A database whose pending state
+    /// cannot be read is still a refusal — the message then carries the read
+    /// error.
     fn pending_changes_message(&self) -> String {
+        let (writes, deletes) = match (
+            self.db.dirty_node_files_from_db(),
+            self.db.pending_removals(),
+        ) {
+            (Ok(writes), Ok(deletes)) => (writes, deletes),
+            (Err(e), _) | (_, Err(e)) => {
+                return format!(
+                    "session end refused: the database's pending state could not be read: {e:#}"
+                );
+            }
+        };
         let mut msg = format!(
             "session end refused: {} pending change(s) are not durable — run `apg session save` to make them durable, or `apg session abort` to discard them",
-            self.buffer.len()
+            writes.len() + deletes.len()
         );
-        for change in &self.buffer {
-            let kind = if change.content.is_some() {
-                "write"
-            } else {
-                "delete"
-            };
+        for node in &writes {
             msg.push_str(&format!(
-                "\n  {kind} {}.{}.{}",
-                change.layer, change.node_type, change.name
+                "\n  write {}.{}.{}",
+                node.layer, node.node_type, node.name
             ));
+        }
+        for removal in &deletes {
+            msg.push_str(&format!("\n  delete {}", removal.fqn));
         }
         msg
     }
