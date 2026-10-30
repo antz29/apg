@@ -10,7 +10,7 @@ use apg::specs;
 use apg::testutil::{self, Repo};
 use common::wt_commit_paths;
 use lbug::{Connection, Database};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// A real project context (R4): a git repo whose worktree `foo` on branch
@@ -3060,17 +3060,19 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-4: `apg session save` is the as-is single durability point
-    /// over the WHOLE buffered set — a mix of accepted writes plus an accepted
-    /// delete of a durable node — with NO reconstruction.
+    /// Phase-02 task-15: `apg session save` is the database delta contract over
+    /// the held `db.lbug`. Each admission applies its projection to the worktree
+    /// database at once, marks exactly the node rows it changed dirty, and
+    /// records each removed identity on the pending-removal ledger — while
+    /// `apg/layers/**` and git stay at the last saved state. One
+    /// `apg session save` then:
+    ///   * writes exactly the marked rows at their `apg/layers` node-file paths;
+    ///   * removes exactly the ledger identity's node file;
+    ///   * leaves every untouched node file byte-identical; and
+    ///   * lands the whole set in exactly ONE git commit,
     ///
-    /// A live session admits every routed mutation into its write-back buffer
-    /// and projects it into the held DB, but `apg/layers/**` and git stay at the
-    /// last saved state. One `apg session save` then:
-    ///   * writes each buffered node file EXACTLY as staged (byte-identical to
-    ///     the admitted `PendingChange` content, not rebuilt from the DB);
-    ///   * removes the deleted durable node's file; and
-    ///   * lands exactly ONE new git commit for the whole set.
+    /// then drains the pending state — no marked row and no ledger identity —
+    /// so the database a following save reads is clean.
     ///
     /// A routed read afterwards agrees: the held DB reports the same admitted
     /// bodies and the deleted node is gone, so disk and DB converge.
@@ -3094,28 +3096,43 @@ mod e2e {
             );
         };
 
-        // A durable baseline: `survivor` (a later RMW target) and `doomed` (a
-        // later accepted-delete target) added through the session and saved.
-        // Lone `global.constraint` anchors keep the model whole-model-valid (SPEC
-        // §8.1): the Constraint type carries no cardinality minimums.
-        run(&[
-            "node",
-            "add",
-            "global",
-            "constraint",
-            "survivor",
-            "--body",
-            "survivor baseline",
-        ]);
-        run(&[
-            "node",
-            "add",
-            "global",
-            "constraint",
-            "doomed",
-            "--body",
-            "doomed baseline",
-        ]);
+        // Reads a routed query's data rows through the live session (the CSV
+        // header dropped, sorted so the comparison is order-independent).
+        let routed_rows = |cypher: &str| -> Vec<String> {
+            let out = testutil::spawn_apg(&["query", cypher], &wt);
+            assert!(
+                out.status.success(),
+                "routed read `{cypher}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let mut rows: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .skip(1)
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect();
+            rows.sort();
+            rows
+        };
+
+        // A durable baseline: `survivor` (a later update target), `doomed` (a
+        // later delete target) and `bystander` (which the run never touches, so
+        // the save must leave its node file byte-identical), added through the
+        // session and saved. Lone `global.constraint` anchors keep the model
+        // whole-model-valid (SPEC §8.1): the Constraint type carries no
+        // cardinality minimums.
+        for name in ["survivor", "doomed", "bystander"] {
+            run(&[
+                "node",
+                "add",
+                "global",
+                "constraint",
+                name,
+                "--body",
+                &format!("{name} baseline"),
+            ]);
+        }
         let seed_save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             seed_save.status.success(),
@@ -3123,14 +3140,38 @@ mod e2e {
             String::from_utf8_lossy(&seed_save.stderr)
         );
 
-        let path = |name: &str| layers::node_file_path(&wt_apg, Layer::Global, "constraint", name);
-        assert!(path("survivor").exists() && path("doomed").exists());
-
+        // The save is measured against the saved base: a node file's path
+        // relative to `apg/layers/` (the snapshot key, and the same path the
+        // save commit records), the base's bytes, commit count and HEAD.
+        let layers_root = wt_apg.join(layers::LAYERS_DIR);
+        let layer_path = |name: &str| -> String {
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", name)
+                .strip_prefix(&layers_root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let snap =
+            |root: &Path| -> BTreeMap<String, Vec<u8>> { snapshot(root).into_iter().collect() };
+        let saved = snap(&layers_root);
+        assert_eq!(
+            saved.len(),
+            3,
+            "the three-node base must be on disk before the run: {saved:?}"
+        );
         let commits_before = testutil::commit_count(&wt);
+        let saved_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
 
-        // The buffered mix: three accepted writes (two adds and an update over
-        // a durable node) plus an accepted delete of a durable node. The
-        // expected node files are exactly the content asserted at admission.
+        // The run's write set — two adds and an update over a durable node —
+        // plus an accepted delete of a durable node. The expected node files are
+        // the rows the database holds once admission has projected them.
         let bare = |name: &str, body: &str| layers::NodeFile {
             layer: "global".to_string(),
             node_type: "constraint".to_string(),
@@ -3142,7 +3183,7 @@ mod e2e {
         };
         let kept_a = bare("kept-a", "kept a");
         let kept_b = bare("kept-b", "kept b");
-        let updated_survivor = bare("survivor", "survivor buffered");
+        let updated_survivor = bare("survivor", "survivor updated");
 
         run(&[
             "node",
@@ -3169,72 +3210,108 @@ mod e2e {
             "constraint",
             "survivor",
             "--body",
-            "survivor buffered",
+            "survivor updated",
         ]);
         run(&["node", "rm", "global", "constraint", "doomed"]);
 
-        // Before save nothing is durable: the new node files are absent, the
-        // update/delete have not touched `apg/layers/**`, and no commit landed.
-        assert!(
-            !path("kept-a").exists() && !path("kept-b").exists(),
-            "a buffered write must not write apg/layers/** before save"
-        );
-        assert!(
-            path("doomed").exists(),
-            "a buffered delete must not touch apg/layers/** before save"
-        );
+        // Before save nothing is durable: `apg/layers/**` is still the saved
+        // base and no commit landed.
         assert_eq!(
-            layers::read_node_file(&wt_apg, Layer::Global, "constraint", "survivor")
-                .unwrap()
-                .body,
-            "survivor baseline",
-            "a buffered update must not touch apg/layers/** before save"
+            snap(&layers_root),
+            saved,
+            "an admission must not write a node file before save"
         );
         assert_eq!(
             testutil::commit_count(&wt),
             commits_before,
-            "a buffered write/delete must not create a commit before save"
+            "an admission must not create a commit before save"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            saved_head,
+            "git history must stay at the last saved state until save"
         );
 
-        // The single durability point: the whole buffered set in ONE commit.
+        // The held database's pending state IS save's write and delete set: the
+        // run marked exactly the three rows it changed, and left exactly the
+        // removed identity on the pending-removal ledger.
+        assert_eq!(
+            routed_rows("MATCH (n:Constraint) WHERE n.updated = 1 RETURN n.fqn"),
+            vec![
+                "global.constraint.kept-a",
+                "global.constraint.kept-b",
+                "global.constraint.survivor",
+            ],
+            "the run must mark exactly the rows it changed"
+        );
+        assert_eq!(
+            routed_rows("MATCH (n:PendingRemoval) RETURN n.fqn"),
+            vec!["global.constraint.doomed"],
+            "the delete must leave exactly the removed identity on the ledger"
+        );
+
+        // The single durability point: exactly the marked rows at their
+        // `apg/layers` paths plus the ledger identity's file, in ONE commit.
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
             "{}",
             String::from_utf8_lossy(&save.stderr)
         );
+
+        // EXACTLY the marked rows were written: the tree differs from the saved
+        // base at those paths alone, so every untouched node file is still
+        // byte-identical and no file appeared for an untouched identity.
+        let after = snap(&layers_root);
+        let marked: BTreeSet<String> = ["kept-a", "kept-b", "survivor"]
+            .iter()
+            .map(|name| layer_path(name))
+            .collect();
+        let changed: BTreeSet<String> = after
+            .iter()
+            .filter(|(node_path, bytes)| saved.get(*node_path) != Some(*bytes))
+            .map(|(node_path, _)| node_path.to_string())
+            .collect();
         assert_eq!(
-            testutil::commit_count(&wt),
-            commits_before + 1,
-            "the whole buffered set must land in exactly one commit"
+            changed, marked,
+            "save must write exactly the marked rows at their apg/layers paths"
         );
 
-        // Every written node file equals its buffered admitted content,
-        // byte-for-byte: save flushes the staged `PendingChange` as-is (no
-        // reconstruction).
+        // … and the ledger identity's file alone was removed.
+        let removed: BTreeSet<String> = saved
+            .keys()
+            .filter(|node_path| !after.contains_key(*node_path))
+            .cloned()
+            .collect();
+        assert_eq!(
+            removed,
+            BTreeSet::from([layer_path("doomed")]),
+            "save must remove exactly the ledger identity's node file"
+        );
+        assert_eq!(
+            after.get(&layer_path("bystander")),
+            saved.get(&layer_path("bystander")),
+            "every untouched node file must stay byte-identical"
+        );
+
+        // Each written node file is the row save serialised: the admitted body
+        // lands at its path verbatim.
         for expected in [&kept_a, &kept_b, &updated_survivor] {
-            let node_path = path(&expected.name);
-            assert!(node_path.exists(), "save must write `{}`", expected.name);
             assert_eq!(
                 layers::read_node_file(&wt_apg, Layer::Global, "constraint", &expected.name)
                     .unwrap(),
                 *expected,
-                "the on-disk node file for `{}` must equal the admitted content",
-                expected.name
-            );
-            assert_eq!(
-                std::fs::read_to_string(&node_path).unwrap(),
-                serde_json::to_string_pretty(expected).unwrap(),
-                "save must flush `{}` as the exact staged bytes",
+                "the on-disk node file for `{}` must be its database row",
                 expected.name
             );
         }
-
-        // The deleted durable node's file is gone.
-        assert!(
-            !path("doomed").exists(),
-            "save must remove the deleted durable node's file"
-        );
 
         // The held DB agrees with disk: routed reads report the admitted bodies
         // and the deleted node is gone.
@@ -3259,7 +3336,7 @@ mod e2e {
         };
         assert_body("global.constraint.kept-a", "kept a");
         assert_body("global.constraint.kept-b", "kept b");
-        assert_body("global.constraint.survivor", "survivor buffered");
+        assert_body("global.constraint.survivor", "survivor updated");
 
         let gone = testutil::spawn_apg(
             &[
@@ -3282,23 +3359,51 @@ mod e2e {
             "the held DB must agree the deleted node is gone"
         );
 
-        // The durable node-file store matches disk: the three writes are present
-        // and the deleted node is absent.
-        let nodes = layers::read_existing_nodes(&wt_apg).unwrap();
-        for name in ["kept-a", "kept-b", "survivor"] {
-            assert!(
-                nodes
-                    .iter()
-                    .any(|n| n.node_type == "constraint" && n.name == name),
-                "the durable store must contain `{name}`"
-            );
-        }
-        assert!(
-            !nodes.iter().any(|n| n.name == "doomed"),
-            "the durable store must no longer contain `doomed`"
+        // The whole pending set landed in ONE commit: exactly one new
+        // single-parent commit whose delta is the marked rows plus the removed
+        // file — nothing else.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the whole pending set must land in exactly one commit"
+        );
+        let head_repo = git2::Repository::open(&wt).unwrap();
+        let head = head_repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            head.parent_count(),
+            1,
+            "the save commit is a normal single-parent commit"
+        );
+        let parent = head.parent(0).unwrap();
+        assert_eq!(
+            parent.id().to_string(),
+            saved_head,
+            "the save commit's parent must be the last saved state"
+        );
+        let layers_prefix = format!("{}/{}", specs::LAYOUT, layers::LAYERS_DIR);
+        let committed: BTreeSet<String> = head_repo
+            .diff_tree_to_tree(
+                Some(&parent.tree().unwrap()),
+                Some(&head.tree().unwrap()),
+                None,
+            )
+            .unwrap()
+            .deltas()
+            .filter_map(|delta| {
+                let path = delta.new_file().path()?;
+                let rel = path.strip_prefix(&layers_prefix).ok()?;
+                Some(rel.to_string_lossy().into_owned())
+            })
+            .collect();
+        let mut expected_commit = marked.clone();
+        expected_commit.insert(layer_path("doomed"));
+        assert_eq!(
+            committed, expected_commit,
+            "the one save commit must carry exactly the marked rows and the removed file"
         );
 
-        // Clean release: save cleared the buffer (a dirty `end` would refuse).
+        // Clean release: save drained the pending state (a pending `end` would
+        // refuse).
         let end = testutil::spawn_apg(&["session", "end"], &wt);
         assert!(
             end.status.success(),
@@ -3311,6 +3416,20 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+
+        // The database's pending state is empty afterwards: both the dirty
+        // marks and the pending-removal ledger, read back through the same two
+        // reads save consumes.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        assert!(
+            db.dirty_node_files_from_db().unwrap().is_empty(),
+            "save must clear every dirty mark"
+        );
+        assert!(
+            db.pending_removals().unwrap().is_empty(),
+            "save must empty the pending-removal ledger"
+        );
+        drop(db);
 
         testutil::remove(&repo);
     }
