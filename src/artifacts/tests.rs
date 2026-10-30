@@ -176,4 +176,73 @@ mod unit {
         assert!(has_node("domain.service.b"));
         assert!(has_edge("foo/note-1", "solution.component.portal"));
     }
+
+    /// [`pending_state_present`] walks exactly the durable node-table roster in
+    /// its declared order, with the pending-removal ledger as its other input:
+    /// a fake row source records every label the rule asks about, so a table
+    /// added to (or dropped from) that roster fails this test loudly instead of
+    /// silently escaping the predicate. The roster is written out here because
+    /// `DURABLE_NODE_TABLES` is private to `db`.
+    #[test]
+    fn pending_state_rule_reads_the_durable_roster_and_the_ledger() {
+        const ROSTER: [&str; 15] = [
+            "Requirement",
+            "Stakeholder",
+            "User",
+            "Note",
+            "Constraint",
+            "DomainGroup",
+            "Entity",
+            "Value",
+            "Service",
+            "System",
+            "Container",
+            "Component",
+            "Person",
+            "Actor",
+            "Role",
+        ];
+
+        // All-clean rows + empty ledger: not pending, and the walk visits the
+        // whole roster in declared order.
+        let mut visited = Vec::new();
+        assert!(!pending_state_present(
+            |table| {
+                visited.push(table.to_string());
+                false
+            },
+            &[],
+        ));
+        assert_eq!(visited, ROSTER.map(String::from));
+
+        // One dirty table + empty ledger: pending, and the walk stops at the
+        // first dirty label.
+        let mut visited = Vec::new();
+        assert!(pending_state_present(
+            |table| {
+                visited.push(table.to_string());
+                table == "Entity"
+            },
+            &[],
+        ));
+        assert_eq!(visited.len(), 7);
+        assert_eq!(visited.last().map(String::as_str), Some("Entity"));
+
+        // All-clean rows + one ledger identity: pending, because the ledger is
+        // consulted before any table.
+        let mut visited = Vec::new();
+        assert!(pending_state_present(
+            |table| {
+                visited.push(table.to_string());
+                false
+            },
+            &[PendingRemoval {
+                fqn: "requirements.requirement.r".into(),
+            }],
+        ));
+        assert!(
+            visited.is_empty(),
+            "the ledger alone is pending state, without a table probe"
+        );
+    }
 }
