@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "node-files-from-db-ledger-query-cost",
+  "body": "`node_files_from_db` now costs one extra ledger query per call: it reads `pending_removals` (one connection open plus one `MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`) and builds a `BTreeSet` before filtering the reconstructed rows. On a clean handle the ledger is empty, so the steady-state cost is one cheap statement; upgrade to a single projection joined against the ledger if reconstruction becomes hot — for instance a per-mutation admission over a large durable spec.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.node_files_from_db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
