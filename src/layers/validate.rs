@@ -624,23 +624,21 @@ pub(crate) fn validate_assembled_rules(
 /// presence of a Component's `implemented-by` claim (SPEC §8.2, the sole
 /// deferred obligation).
 ///
-/// - [`Context::Save`] and [`Context::Lint`]: a missing claim is permitted; a
-///   present one must be at most one and its target must be real scanned code
-///   (the target check is [`validate_code_refs`]'s, not this enum's).
+/// - [`Context::Lint`]: a missing claim is permitted; a present one must be at
+///   most one and its target must be real scanned code (the target check is
+///   [`validate_code_refs`]'s, not this enum's).
 /// - [`Context::MergeStrength`]: a missing claim is the error — merge requires
 ///   at least one real scanned-code target per Component; the
 ///   at-most-one-Component-per-code-node exclusivity stays
 ///   [`validate_cardinalities`]'s rule.
 ///
-/// Lint uses `Lint`; the save boundary uses `Save`; the merge act
-/// (`project_merge_at`) uses `MergeStrength`. Target realness itself stays
-/// [`validate_code_refs`]'s job. Scope is the caller's tier filter
-/// ([`validate_cardinalities`]'s `scope` argument), never a context.
+/// Lint uses `Lint`; the merge act (`project_merge_at`) uses `MergeStrength`.
+/// The save boundary runs no whole-model cardinality pass, so it names no
+/// context. Target realness itself stays [`validate_code_refs`]'s job. Scope is
+/// the caller's tier filter ([`validate_cardinalities`]'s `scope` argument),
+/// never a context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Context {
-    /// Wired by the whole-model save boundary (SPEC §8.1): intermediate
-    /// session state is incomplete, so save validates the buffered model.
-    Save,
     Lint,
     /// Wired by the merge act (`project_merge_at`, SPEC §8.2/§9.2): the
     /// deferral of a Component's `implemented-by` presence ends here.
@@ -660,8 +658,8 @@ pub(crate) enum Context {
 /// structure without demanding that unrelated tiers are complete.
 ///
 /// **Context** ([`Context`]): only the Component `implemented-by` presence rule
-/// depends on it (SPEC §8.2) — missing permitted under `Save`/`Lint` and an
-/// error under `MergeStrength`.
+/// depends on it (SPEC §8.2) — missing permitted under `Lint` and an error
+/// under `MergeStrength`.
 ///
 /// Enforced:
 /// - every Service and Entity has exactly one `contains` owner (a Group); every
@@ -689,7 +687,7 @@ pub(crate) enum Context {
 ///   contains at least one Component;
 /// - exactly one Component claims each code node (`implemented-by`, no shared
 ///   claims); under [`Context::MergeStrength`] every Component claims at least
-///   one (presence itself is deferred to merge under `Save`/`Lint`, SPEC §8.2);
+///   one (presence itself is deferred to merge under `Lint`, SPEC §8.2);
 /// - `contains` is acyclic (delegated to [`validate_trees_acyclic`]).
 pub(crate) fn validate_cardinalities(
     assembled: &BTreeMap<String, &NodeFile>,
