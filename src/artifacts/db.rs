@@ -1234,6 +1234,63 @@ where
         .any(|&(table, _, _, _)| row_present(table))
 }
 
+/// Answer whether the database under an `apg/` layout root carries **pending
+/// state** — the same question [`ArtifactDb::has_pending_state`] answers from a
+/// held handle — for every reader that holds none: `is_fresh`, the scan,
+/// `session start` and `apg query`.
+///
+/// An **absent** `db.lbug` is **not** pending: there is nothing to discard, so
+/// the answer is `false` — not an error, and not a reason to refuse a scan or a
+/// session start. Otherwise the database is opened **exactly once**, **read-only**
+/// ([`SystemConfig::default`] with `read_only(true)`), one connection is taken
+/// from it, the pending-removal ledger is read once
+/// (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`), and the per-table
+/// row answers fold through the shared pure rule [`pending_state_present`] — the
+/// same roster walk that rule drives for the handle-backed sibling, never a
+/// second independent probe.
+///
+/// **Fails closed.** An unopenable or unreadable database is `true`, as is a
+/// refused connection, a refused ledger read, and every per-table probe error
+/// (including a table whose `updated` column is absent): an unreadable database
+/// is never reported clean. Dirty means exactly `updated = 1`; a row whose
+/// `updated` is NULL is not pending. Opens no write handle and touches no
+/// `apg/layers/**` file.
+pub fn db_has_pending_state(apg_root: &Path) -> bool {
+    let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+    if !db_path.exists() {
+        return false;
+    }
+    let db = match Database::new(&db_path, SystemConfig::default().read_only(true)) {
+        Ok(db) => db,
+        Err(_) => return true,
+    };
+    let conn = match Connection::new(&db) {
+        Ok(conn) => conn,
+        Err(_) => return true,
+    };
+    let ledger: Vec<PendingRemoval> = match query_rows(
+        &conn,
+        "MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn",
+    ) {
+        Ok((_, rows)) => rows
+            .into_iter()
+            .map(|row| PendingRemoval { fqn: cell(&row, 0) })
+            .collect(),
+        Err(_) => return true,
+    };
+    pending_state_present(
+        |table| {
+            query_rows(
+                &conn,
+                &format!("MATCH (n:{table}) WHERE n.updated = 1 RETURN count(*)"),
+            )
+            .map(|(_, rows)| rows.first().is_none_or(|row| cell(row, 0) != "0"))
+            .unwrap_or(true)
+        },
+        &ledger,
+    )
+}
+
 /// Read one durable node table into `nodes`, keyed by its FQN: identity from
 /// the FQN segments, `body` from `body_col`, the serialized-properties column
 /// decoded into the full `properties` map, and each metadata column merged back
