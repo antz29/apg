@@ -199,22 +199,23 @@ and the user **restarts opencode** and reconnects (to load the new agents and th
 implementation continues.
 ### Caller-owned sessions (a durable mutation needs a live session)
 A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is **admitted only through a live
-session**: it stages into the session's in-memory write-back buffer (projected into the worktree's `db.lbug` at
-admission, so routed reads see it) and is **not durable until saved**.
+session**: a routed mutation applies to the worktree's `db.lbug` at admission — projected so routed reads see it,
+the changed node files marked dirty — while `apg/layers/**` and git stay at the last saved state, so it is **not
+durable until saved**.
 With no live session the mutation refuses and names `apg session start`.
 
 The **caller owns the lifecycle** — the agent performing the durable work opens the session for the worktree,
 decides when to persist, and releases it; it never outlives the call chain that owns it:
 - **start** — `apg_session` (`action: start`, the default) launches the single-writer coordinator, which owns
   the worktree's `db.lbug` and the extended `specs.lock` flock and serves routed mutations/reads in receive order.
-- **save** — `apg_session` `action: save` makes the whole buffered node-file set durable (one atomic write into
-  `apg/layers/**` + exactly one commit), then clears the buffer.
-- **end** — `apg_session` `action: end` releases the database, flock and socket; it **refuses while the buffer is
-  dirty** (save or abort first).
-- **abort** — `apg_session` `action: abort` discards the buffer and releases the session.
+- **save** — `apg_session` `action: save` makes the marked node-file set durable in one atomic write into
+  `apg/layers/**` + exactly one commit, then clears the marks.
+- **end** — `apg_session` `action: end` releases the database, flock and socket; it **refuses while the database
+  carries pending state** (save or abort first).
+- **abort** — `apg_session` `action: abort` discards the pending set and releases the session.
 
 The whole lifecycle runs through the `apg_session` tool (worktree as `directory`), never through `shell`.
-`apg_query` routes through the live session (seeing unsaved buffered changes); `apg scan` and `apg project merge`
+`apg_query` routes through the live session (seeing unsaved pending changes); `apg scan` and `apg project merge`
 refuse while a session is live — save and end first. This is the session side of the guarded-mutation scoping
 above: a durable node/edge mutation is a session act.
 ### Non-negotiable constraints
