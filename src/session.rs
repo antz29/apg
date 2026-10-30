@@ -18,15 +18,19 @@
 //!
 //! Amortization is of the DB **open**, never of visibility: the DB is opened
 //! once for the session's life ([`Coordinator`]'s owned handle) and every routed
-//! durable mutation is admitted into an in-memory write-back buffer of
-//! node-file writes/deletes whose exact projection delta is applied
-//! synchronously through that handle AT ADMISSION — `apg/layers/**` and git
-//! stay at the last saved state until [`Coordinator::save`], so a routed read
-//! observes the buffered intention while a direct read observes the last saved
-//! state. Forwarded mutations carry a client-generated id; the coordinator
-//! records applied ids so a replay is at-most-once, and a failed forward is
-//! reported — the client never silently falls back to the direct path
-//! mid-flight.
+//! durable mutation is applied to that database working state AT ADMISSION —
+//! its row written, its edge halves projected — through the same handle, with
+//! exactly the node files it changes marked dirty and a deleted node's row
+//! detached as its identity enters the pending-removal ledger, while
+//! `apg/layers/**` and git stay at the last saved state until
+//! [`Coordinator::save`], so a routed read observes the admission while a direct
+//! read observes the last saved state. Beside those marks the session keeps its
+//! buffer, a pending-identity list of the identities the held database cannot
+//! answer for alone — the node files this run created and the removals the
+//! ledger holds — and never node-file content. Forwarded mutations carry a
+//! client-generated id; the coordinator records applied ids so a replay is
+//! at-most-once, and a failed forward is reported — the client never silently
+//! falls back to the direct path mid-flight.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -40,7 +44,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::artifacts::{ArtifactDb, SpecLockGuard, acquire_spec_lock};
-use crate::layers::{self, Layer, NodeFile};
+use crate::layers::{self, Layer};
 use crate::specs;
 
 /// The session socket file name under `apg/.trans/`.
@@ -119,16 +123,16 @@ pub(crate) enum Request {
     /// A routed read: the Cypher text (already `;`-terminated) plus the output
     /// format. Served against the session-held `db.lbug`.
     Query { query: String, json: bool },
-    /// The client asks the coordinator to make the whole buffered set durable:
-    /// flush the buffered node-file writes/deletes, make exactly one commit,
-    /// re-anchor `scan_meta`, then clear the buffer — the protocol counterpart
-    /// of [`Coordinator::save`].
+    /// The client asks the coordinator to make the held database's pending state
+    /// durable: write its dirty rows, remove each pending-removal identity's
+    /// node file, make exactly one commit, re-anchor `scan_meta`, then clear the
+    /// marks — the protocol counterpart of [`Coordinator::save`].
     Save,
-    /// Client-initiated abort: discard the whole buffered set and abandon the
-    /// session without making it durable — the protocol counterpart of the
-    /// phase-02 abort lifecycle (discard the buffer, release the session, force
-    /// a full scan when the run was dirty). Declared here so the wire protocol
-    /// carries the request; the server arm is wired with that lifecycle.
+    /// Client-initiated abort: discard the database's pending state and abandon
+    /// the session without making it durable — the protocol counterpart of the
+    /// phase-02 abort lifecycle (discard the pending set, release the session,
+    /// force a full scan when the run was dirty). Declared here so the wire
+    /// protocol carries the request; the server arm is wired with that lifecycle.
     Abort,
 }
 
@@ -289,25 +293,20 @@ pub fn forward_query(apg_root: &Path, query: &str, json: bool) -> anyhow::Result
 }
 
 // ---------------------------------------------------------------------------
-// The write-back buffer (phase-01)
+// The pending-identity list
 // ---------------------------------------------------------------------------
 
-/// The in-memory write-back buffer entry for ONE buffered durable node-file
-/// write or delete.
+/// One pending node-file identity: the node file's layer dir, node type, name,
+/// and the destination node file under `apg/layers/`.
 ///
-/// A live session admits each routed durable `apg node`/`apg edge` mutation
-/// into a buffer of these records instead of rewriting the on-disk
-/// `apg/layers/**` tree; the whole buffered set is flushed to disk (and
-/// committed) at `apg session save` (`Coordinator::save`, phase-01 task-2, via
-/// the buffered write surface in `layers::write`, task-9). Each record carries
-/// the target node file's identity — layer dir, node type, name, and destination
-/// path — so the buffer keys by identity and keeps only the last mutation for a
-/// node (a later write/delete for an identity wins), and it carries the full
-/// pending [`NodeFile`] content so a later mutation composes against the state
-/// already buffered for that node. [`content`](Self::content) is `Some` for a
-/// staged write and `None` for the delete marker (the node file is to be
-/// removed). Plain data — no behavior; the buffer/save machinery that consumes
-/// it is built by the later phase-01 tasks.
+/// A live session's list carries the identities the held database cannot decide
+/// on its own: a node file this run created (no durable file backs its row) and a
+/// pending removal the pending-removal ledger holds. Admission keys the list by
+/// identity and keeps at most one entry per node, so a delete of a never-durable
+/// identity drops its entry while a delete of a durable one records the pending
+/// removal. The pending set itself is the held database's dirty rows plus its
+/// pending-removal ledger, so this record carries no node content: the database
+/// is the working state. Plain data — no behavior.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingChange {
     /// The node file's layer dir name (e.g. `requirements`) — the first
@@ -322,21 +321,6 @@ pub struct PendingChange {
     /// The destination node file under
     /// `apg/layers/<layer>/<node_type>/<name>.json`.
     pub path: PathBuf,
-    /// The pending node-file content to stage (`Some`), or the delete marker
-    /// (`None`) when this identity's file is to be removed.
-    pub content: Option<NodeFile>,
-    /// Whether this identity was backed by a durable (already-saved) node file
-    /// when it FIRST entered the buffer — NOT whether its file exists now
-    /// (the held DB carries the session's projected buffer too). Set once, at
-    /// first admission, from the DB-reconstructed durable base before this
-    /// identity ever appeared in the buffer, and preserved across later
-    /// updates to the same entry. It is what decides whether a `rm` keeps a
-    /// delete marker: deleting a node that was durable keeps the marker (its
-    /// file must be removed at save), while removing a node created earlier in
-    /// this unsaved run leaves no marker (no file was ever written). Without
-    /// it, a durable node that was first updated (buffering it) and then
-    /// removed would lose its delete marker and its file would survive save.
-    pub durable_before: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -374,11 +358,12 @@ pub struct Coordinator {
     /// The receive-order queue of accepted requests (FIFO — the single writer
     /// applies mutations in the order it receives them).
     queue: VecDeque<Request>,
-    /// The in-memory write-back buffer of admitted-but-unsaved durable
-    /// node-file changes (phase-01): each routed durable mutation stages its
-    /// [`PendingChange`] here instead of touching `apg/layers/**`; the whole
-    /// buffered set becomes durable — atomically, in one commit — at
-    /// [`save`](Self::save). Populated by admission/routing (phase-01 task-4).
+    /// The session's pending-identity list: the node files this run created and
+    /// the pending removals the ledger holds. Admission keeps it current so a
+    /// delete can tell a never-durable identity (drop) from a durable one
+    /// (record the pending removal); it carries no node content, because the held
+    /// database is the working state. [`save`](Self::save) and
+    /// [`abort`](Self::abort) clear it at the durability boundary.
     buffer: Vec<PendingChange>,
 }
 
@@ -388,7 +373,8 @@ enum ConnOutcome {
     Continue,
     /// The peer asked for a clean `end`; the caller releases the session.
     End,
-    /// The peer asked for `abort`; the caller discards the buffer and rebuilds.
+    /// The peer asked for `abort`; the caller discards the pending set and
+    /// rebuilds.
     Abort,
 }
 
@@ -436,7 +422,7 @@ impl Coordinator {
         let lock = acquire_spec_lock(&apg_root)?;
 
         // Own the DB exclusively, opened ONCE (the amortized open). The session
-        // always holds a database — there is no buffer-only path: an absent
+        // always holds a database — there is no in-memory-only path: an absent
         // `db.lbug` refuses here, naming `apg scan`, before the socket is
         // bound, and `apg/layers/**` is never used as a DB-less fallback.
         let db = Self::open_owned_db(&apg_root)?;
@@ -692,12 +678,12 @@ impl Coordinator {
             }
         }
 
-        // Clear the in-memory admission list in step with the drained database:
-        // it is where a later admission reads an identity's first-admission
-        // durability from, so an identity saved in this run must fall back to
-        // its now-durable held DB row. Without the clear a later `rm` of it
-        // reads the stale `durable_before = false`, nets to nothing, and loses
-        // the deletion of a file this save just made durable.
+        // Clear the pending-identity list in step with the drained database: an
+        // identity this run created leaves the list as its node file becomes
+        // durable here, so a later `rm` of it reads the durable held DB row
+        // (which now carries it) rather than the stale created-this-run entry.
+        // Without the clear that later `rm` would drop its entry as never
+        // durable and lose the deletion of a file this save just made durable.
         let saved = writes.len() + deletes.len();
         self.buffer.clear();
         println!("Session saved: {saved} change(s) in one commit");
@@ -741,8 +727,8 @@ impl Coordinator {
         // Decide from the held DB BEFORE releasing it: a dirty row or a ledger
         // identity is an admission's projection that no node file backs, so an
         // aborted run carrying either owes a discard-and-rebuild. Nothing was
-        // written to `apg/layers/**` or committed, so dropping the in-memory
-        // admission list is all abort discards itself.
+        // written to `apg/layers/**` or committed, so clearing the
+        // pending-identity list is all abort discards itself.
         let pending = !self.db.dirty_node_files_from_db()?.is_empty()
             || !self.db.pending_removals()?.is_empty();
         self.buffer.clear();
@@ -821,8 +807,8 @@ impl Coordinator {
     /// broken pipe on the reply write; that error is confined to that
     /// connection, and the accept loop keeps serving. A transient `accept`
     /// error is likewise retried or reported, never fatal. Only an explicit
-    /// `end` (clean buffer) or `abort` request returns, so a routine probe can
-    /// never orphan a healthy session.
+    /// `end` (clean pending set) or `abort` request returns, so a routine probe
+    /// can never orphan a healthy session.
     pub fn serve(mut self) -> anyhow::Result<()> {
         let listener = self
             .listener
@@ -885,7 +871,7 @@ impl Coordinator {
                 }
                 Request::End => {
                     // The HELD DATABASE's own pending state decides — never the
-                    // in-memory admission list: a dirty row
+                    // pending-identity list: a dirty row
                     // ([`crate::artifacts::ArtifactDb::dirty_node_files_from_db`])
                     // or a pending-removal ledger identity
                     // ([`crate::artifacts::ArtifactDb::pending_removals`]) is an
@@ -937,7 +923,7 @@ impl Coordinator {
                 }
                 Request::Abort => {
                     // Reply BEFORE the caller releases the session and runs the
-                    // dirty-buffer forced rebuild (which can take a full scan):
+                    // pending-state forced rebuild (which can take a full scan):
                     // the peer has already been answered, so the rebuild can
                     // never race a client read timeout into a broken pipe.
                     let _ = write_msg(
@@ -974,11 +960,11 @@ impl Coordinator {
         ConnOutcome::Continue
     }
 
-    /// Admit one routed durable mutation into the buffer and project it into
-    /// the live DB. Crate-private: it is driven only by [`serve`](Self::serve)
-    /// over the wire, and its `Reply` wire type stays internal. Integration
-    /// crates reach the session through the public `forward_*`/`signal_end`/
-    /// `socket_path` surface.
+    /// Admit one routed durable mutation into the database working state and
+    /// project it into the live DB. Crate-private: it is driven only by
+    /// [`serve`](Self::serve) over the wire, and its `Reply` wire type stays
+    /// internal. Integration crates reach the session through the public
+    /// `forward_*`/`signal_end`/`socket_path` surface.
     pub(crate) fn handle_mutation(&mut self, kind: &str, args: &[String]) -> Reply {
         match self.apply_mutation(kind, args) {
             // The change's write-time warnings ride alongside the output so the
@@ -1039,21 +1025,21 @@ impl Coordinator {
     ///    the pending-removal row of every identity that projection wrote back,
     ///    so the ledger agrees with the dirty mark this same admission set: the
     ///    next save writes the marked rows and deletes only the ledger's files.
-    /// 5. Commit the change to `self.buffer` (last write/delete for an
-    ///    identity wins). A failure at any earlier step leaves `self.buffer`
-    ///    unchanged and the DB un-projected.
+    /// 5. Bring `self.buffer`, the pending-identity list, in step: an identity
+    ///    this run created (no durable node file backs its row) enters the list,
+    ///    while a durable one leaves it — its dirty mark carries the write — and
+    ///    a durable delete adds its removal entry. A failure at any earlier step
+    ///    leaves `self.buffer` unchanged and the DB un-projected.
     ///
-    /// A delete of an identity that was DURABLE when it first entered the
-    /// buffer keeps a delete marker (and an entry on the pending-removal
-    /// ledger), so the next save removes its node file —
-    /// even when the same unsaved run already buffered an update to it (the
-    /// marker decision uses the entry's own `durable_before` flag, never the
-    /// held DB, which carries the session's projection). A delete of an
-    /// identity created earlier in this unsaved run (never durable) drops the
-    /// pending write instead: no file was ever written, so it nets to nothing
-    /// on disk. A re-add of an identity this run recorded as pending clears
-    /// that ledger row at admission, so the next save writes the re-added file
-    /// rather than deleting it.
+    /// A delete of an identity that is durable — its row is the held DB's, and
+    /// no created-this-run entry and no ledger row marks it otherwise — records
+    /// the pending removal (and keeps the identity on the list), so the next save
+    /// removes its node file even when the same unsaved run already updated it.
+    /// A delete of an identity created earlier in this unsaved run drops its list
+    /// entry and records nothing: no file was ever written, so it nets to nothing
+    /// on disk. A re-add of an identity this run recorded as pending leaves the
+    /// list and clears that ledger row at admission, so the next save writes the
+    /// re-added file rather than deleting it.
     ///
     /// Returns the change's human message and its write-time warnings, so the
     /// caller can carry the warnings into the reply without them ever blocking
@@ -1068,6 +1054,18 @@ impl Coordinator {
         //     and omits every ledger-held identity, so no overlay is folded in.
         //     No `apg/layers/**` node file is read.
         let db_nodes = self.db.node_files_from_db()?;
+
+        // The pending-removal ledger as this admission found it. An identity on
+        // it is a durable node file a save still owes a delete, so it is never a
+        // never-durable create — the distinction the pending-identity list and
+        // the delete decision below turn on. Read once, before this admission
+        // clears the row of every identity it writes back.
+        let held: BTreeSet<String> = self
+            .db
+            .pending_removals()?
+            .into_iter()
+            .map(|removal| removal.fqn)
+            .collect();
 
         // (2) Build the change over that base alone, so existence checks and
         //     read-modify-write resolve against the database working state
@@ -1104,7 +1102,7 @@ impl Coordinator {
         )?;
 
         // Resolve every identity this change touches BEFORE projecting, so the
-        // projection and the buffer commit cannot disagree on identity.
+        // projection and the pending-identity list cannot disagree on identity.
         let mut write_ids: Vec<(Layer, String, String)> = Vec::with_capacity(change.writes.len());
         for w in &change.writes {
             write_ids.push((
@@ -1121,7 +1119,7 @@ impl Coordinator {
         }
 
         // (4) The exact identity FQN set this mutation touched: every written
-        //     identity ∪ every deleted identity. Never the cumulative buffer.
+        //     identity ∪ every deleted identity. Never the cumulative pending set.
         let mut touched: BTreeSet<String> = BTreeSet::new();
         for (layer, node_type, name) in &write_ids {
             touched.insert(layers::node_file::fqn(*layer, node_type, name));
@@ -1151,11 +1149,11 @@ impl Coordinator {
         //     a delete the authored neighbours whose edge halves it rewrote.
         self.db.mark_dirty(&change.writes)?;
 
-        // (6b) The ledger agrees with that dirty mark: every identity this
-        //      projection just wrote back is no longer pending, so a node
-        //      removed and then re-added in one session is not left ledger-held
-        //      and the next save writes its file instead of deleting it. A
-        //      DELETE matches nothing for an identity that was never pending.
+        // (7) The ledger agrees with the dirty marks: every identity this
+        //     projection just wrote back is no longer pending, so a node removed
+        //     and then re-added in one session is not left ledger-held and the
+        //     next save writes its file instead of deleting it. A DELETE matches
+        //     nothing for an identity that was never pending.
         {
             let conn = self.db.conn()?;
             for (layer, node_type, name) in &write_ids {
@@ -1166,90 +1164,76 @@ impl Coordinator {
             }
         }
 
-        // (7) Commit the change to the buffer — last write/delete for an
-        //     identity wins — and, for each removed durable identity, record it
-        //     on the pending-removal ledger.
-        for (w, (layer, node_type, name)) in change.writes.iter().zip(&write_ids) {
-            // Record durability at FIRST admission only: an identity that has
-            // never been buffered is durable exactly when the held DB carries
-            // it (before this identity was ever projected, its DB row is the
-            // durable one). `upsert_buffer` preserves an existing entry's flag
-            // on a later write, so this computed value only seeds a new entry.
-            let durable_before = db_nodes.iter().any(|n| {
-                n.layer == layer.layer_dir() && n.node_type == *node_type && n.name == *name
+        // (8) Bring the pending-identity list in step with that admission.
+        for (layer, node_type, name) in &write_ids {
+            let fqn = layers::node_file::fqn(*layer, node_type, name);
+            let listed = self.buffer.iter().any(|c| {
+                c.layer == layer.layer_dir() && c.node_type == *node_type && c.name == *name
             });
-            self.upsert_buffer(*layer, node_type, name, Some(w.clone()), durable_before);
+            // Durability at FIRST admission: a listed identity is one this run
+            // created unless the ledger held it (a removal a re-add wrote back),
+            // and an unlisted one is durable exactly when the pre-projection DB
+            // carried its row. A durable write leaves the list to its dirty mark.
+            let durable = held.contains(&fqn)
+                || (!listed
+                    && db_nodes.iter().any(|n| {
+                        n.layer == layer.layer_dir() && n.node_type == *node_type && n.name == *name
+                    }));
+            if durable {
+                self.remove_buffer_entry(*layer, node_type, name);
+            } else if !listed {
+                self.upsert_buffer(*layer, node_type, name);
+            }
         }
         for (layer, node_type, name, _path) in &delete_ids {
-            // "Already saved": whether the identity was durable when it FIRST
-            // entered the buffer — its own buffered flag if it is already
-            // buffered (even as a write from an earlier update in this run),
-            // else its presence in the pre-projection DB snapshot `db_nodes`
-            // (it has never been buffered, so that row is the durable one; the
-            // projection has since detached it, so the held DB cannot answer).
-            // A delete marker — and its pending-removal ledger entry — is kept
-            // exactly when the node was durable before; a node created earlier
-            // in this unsaved run and then removed leaves neither (nets to
-            // nothing on disk).
-            let durable_before = self
-                .buffer
-                .iter()
-                .find(|c| {
+            let fqn = layers::node_file::fqn(*layer, node_type, name);
+            // A listed identity the ledger does not hold was created in this
+            // unsaved run: no node file was ever written for it, so its removal
+            // nets to nothing on disk and its entry is dropped. Every other
+            // identity is durable — the held DB carried its row, or the ledger
+            // already held its removal — so the ledger records the removal the
+            // next save owes and the identity stays listed.
+            let created_this_run = !held.contains(&fqn)
+                && self.buffer.iter().any(|c| {
                     c.layer == layer.layer_dir() && c.node_type == *node_type && c.name == *name
-                })
-                .map(|c| c.durable_before)
-                .unwrap_or_else(|| {
-                    db_nodes.iter().any(|n| {
-                        n.layer == layer.layer_dir() && n.node_type == *node_type && n.name == *name
-                    })
                 });
-            if durable_before {
-                self.db
-                    .record_pending_removal(&layers::node_file::fqn(*layer, node_type, name))?;
-                self.upsert_buffer(*layer, node_type, name, None, true);
-            } else {
+            if created_this_run {
                 self.remove_buffer_entry(*layer, node_type, name);
+            } else {
+                self.db.record_pending_removal(&fqn)?;
+                self.upsert_buffer(*layer, node_type, name);
             }
         }
 
         Ok((change.message, change.warnings))
     }
 
-    /// Replace the buffered state for one identity (last write wins), or append
-    /// a new [`PendingChange`]. A replaced entry keeps its original position AND
-    /// its original [`PendingChange::durable_before`] — durability at first
-    /// admission never changes mid-run, so `durable_before` only seeds a newly
-    /// created entry.
-    fn upsert_buffer(
-        &mut self,
-        layer: Layer,
-        node_type: &str,
-        name: &str,
-        content: Option<NodeFile>,
-        durable_before: bool,
-    ) {
+    /// Record one identity on the pending-identity list, if it is not already
+    /// there. It carries no node content — the held database is the working
+    /// state — so its only job is the identity and destination path a later
+    /// delete reads to tell a never-durable node from a durable one. A listed
+    /// identity keeps its original position.
+    fn upsert_buffer(&mut self, layer: Layer, node_type: &str, name: &str) {
         let layer_dir = layer.layer_dir();
-        if let Some(entry) = self
+        if self
             .buffer
-            .iter_mut()
-            .find(|c| c.layer == layer_dir && c.node_type == node_type && c.name == name)
+            .iter()
+            .any(|c| c.layer == layer_dir && c.node_type == node_type && c.name == name)
         {
-            entry.content = content;
-        } else {
-            let path = layers::node_file_path(&self.apg_root, layer, node_type, name);
-            self.buffer.push(PendingChange {
-                layer: layer_dir.to_string(),
-                node_type: node_type.to_string(),
-                name: name.to_string(),
-                path,
-                content,
-                durable_before,
-            });
+            return;
         }
+        let path = layers::node_file_path(&self.apg_root, layer, node_type, name);
+        self.buffer.push(PendingChange {
+            layer: layer_dir.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            path,
+        });
     }
 
-    /// Drop any buffered entry for one identity (an add-then-rm that nets to
-    /// nothing on disk).
+    /// Drop the entry for one identity from the pending-identity list: an
+    /// add-then-rm that nets to nothing on disk, or a re-added identity that is
+    /// durable again.
     fn remove_buffer_entry(&mut self, layer: Layer, node_type: &str, name: &str) {
         let layer_dir = layer.layer_dir();
         self.buffer
@@ -1258,7 +1242,7 @@ impl Coordinator {
 
     /// Derive the `(layer, type, name)` identity of a node-file path under
     /// `apg/layers/` — the inverse of [`layers::node_file_path`], keying a
-    /// change's `deletes` back to their buffer identity.
+    /// change's `deletes` back to their pending identity.
     fn identity_of_node_path(&self, path: &Path) -> anyhow::Result<(Layer, String, String)> {
         let rel = path
             .strip_prefix(self.apg_root.join(layers::LAYERS_DIR))
@@ -1318,8 +1302,8 @@ impl Coordinator {
         match result {
             Ok(reply) => {
                 // Print the coordinator's reply: a clean `end` reports the
-                // release, a dirty buffer comes back as an Err naming the
-                // pending changes (the session stays live).
+                // release, a database carrying pending state comes back as an Err
+                // naming the pending changes (the session stays live).
                 println!("{}", expect_ok(reply)?);
                 // The server writes its reply BEFORE it releases the socket, so
                 // wait (bounded) for the unlink: a present-but-dead socket is
@@ -1349,8 +1333,8 @@ impl Coordinator {
         }
     }
 
-    /// `apg session save` (client side): ask the live session to make its whole
-    /// buffered node-file set durable. Idempotent — a missing/stale socket is
+    /// `apg session save` (client side): ask the live session to make the held
+    /// database's pending state durable. Idempotent — a missing/stale socket is
     /// reclaimed and reported as no live session. A present-but-unreachable
     /// (stale) socket is an unclean exit: [`reclaim_stale_socket`] rebuilds the
     /// derived index from the durable node files exactly as a `start`
@@ -1388,8 +1372,8 @@ impl Coordinator {
         }
     }
 
-    /// `apg session abort` (client side): ask the live session to discard its
-    /// buffered node-file set and release the session. Idempotent — a
+    /// `apg session abort` (client side): ask the live session to discard the
+    /// held database's pending state and release the session. Idempotent — a
     /// missing/stale socket is reclaimed and reported as no live session. The
     /// client never releases a DB or node file it does not own; it only carries
     /// the request and prints the coordinator's reply output. Like
