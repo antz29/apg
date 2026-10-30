@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "validate-compatible-err-shape-undistinguished",
+  "body": "`validate_compatible` returns `Result<(), SeedFallback>` with no availability gate, so the freshness and recovery callers fold every `Err` to \"not fresh\" and cannot distinguish an unreadable database from a shape mismatch — sufficient because the discard response is the same rebuild. The crate-visibility promotion is also unexercised until those callers land (phase-4 tasks 6 and 8); upgrade by adding a distinct availability arm only if a caller ever needs to tell unreadable from shape-mismatch.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.seed.validate_compatible",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
