@@ -692,8 +692,12 @@ impl Coordinator {
             }
         }
 
-        // The session's admission list still gates `end`: clear it in step with
-        // the drained database, or a saved session could never end.
+        // Clear the in-memory admission list in step with the drained database:
+        // it is where a later admission reads an identity's first-admission
+        // durability from, so an identity saved in this run must fall back to
+        // its now-durable held DB row. Without the clear a later `rm` of it
+        // reads the stale `durable_before = false`, nets to nothing, and loses
+        // the deletion of a file this save just made durable.
         let saved = writes.len() + deletes.len();
         self.buffer.clear();
         println!("Session saved: {saved} change(s) in one commit");
