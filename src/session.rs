@@ -966,13 +966,22 @@ impl Coordinator {
     ///    — NO `apg/layers/**` write, NO commit, and NO `.trans` re-read (the
     ///    start seed in [`Coordinator::start`](Self::start) established the
     ///    DB's transient rows).
-    /// 4. Only after the projection SUCCEEDS, commit the change to
-    ///    `self.buffer` (last write/delete for an identity wins). A failure at
-    ///    any earlier step leaves `self.buffer` unchanged and the DB
-    ///    un-projected.
+    /// 4. Only after the projection SUCCEEDS, mark exactly the node files this
+    ///    change rewrote dirty on the held DB
+    ///    ([`crate::artifacts::ArtifactDb::mark_dirty`]) — `change.writes` is
+    ///    already that exact set (an authored edge contributes both endpoints,
+    ///    a code-target edge its source alone, and a delete its authored
+    ///    neighbours through `node_rm_change`) — and record each removed
+    ///    DURABLE identity on the pending-removal ledger
+    ///    ([`crate::artifacts::ArtifactDb::record_pending_removal`]), so the
+    ///    next save writes the marked rows and deletes the ledger's files.
+    /// 5. Commit the change to `self.buffer` (last write/delete for an
+    ///    identity wins). A failure at any earlier step leaves `self.buffer`
+    ///    unchanged and the DB un-projected.
     ///
     /// A delete of an identity that was DURABLE when it first entered the
-    /// buffer keeps a delete marker, so the next save removes its node file —
+    /// buffer keeps a delete marker (and an entry on the pending-removal
+    /// ledger), so the next save removes its node file —
     /// even when the same unsaved run already buffered an update to it (the
     /// marker decision uses the entry's own `durable_before` flag, never the
     /// held DB, which carries the session's projection). A delete of an
@@ -1076,8 +1085,16 @@ impl Coordinator {
             self.db.reingest_layers_on(deletes, records)
         })?;
 
-        // (6) Only after the projection SUCCEEDS, commit the change to the
-        // buffer — last write/delete for an identity wins.
+        // (6) Only after the projection SUCCEEDS, mark dirty exactly the node
+        //     files this change rewrote, so the next save serialises exactly
+        //     this write set. `change.writes` IS that set — an authored edge
+        //     dirties both endpoints, a code-target edge its source alone, and
+        //     a delete the authored neighbours whose edge halves it rewrote.
+        self.db.mark_dirty(&change.writes)?;
+
+        // (7) Commit the change to the buffer — last write/delete for an
+        //     identity wins — and, for each removed durable identity, record it
+        //     on the pending-removal ledger.
         for (w, (layer, node_type, name)) in change.writes.iter().zip(&write_ids) {
             // Record durability at FIRST admission only: an identity that has
             // never been buffered is durable exactly when the held DB carries
@@ -1093,11 +1110,13 @@ impl Coordinator {
             // "Already saved": whether the identity was durable when it FIRST
             // entered the buffer — its own buffered flag if it is already
             // buffered (even as a write from an earlier update in this run),
-            // else its presence in the held DB (it has never been buffered, so
-            // its DB row is the durable one). A delete marker is kept exactly
-            // when the node was durable before; a node created earlier in this
-            // unsaved run and then removed leaves no marker (nets to nothing on
-            // disk).
+            // else its presence in the pre-projection DB snapshot `db_nodes`
+            // (it has never been buffered, so that row is the durable one; the
+            // projection has since detached it, so the held DB cannot answer).
+            // A delete marker — and its pending-removal ledger entry — is kept
+            // exactly when the node was durable before; a node created earlier
+            // in this unsaved run and then removed leaves neither (nets to
+            // nothing on disk).
             let durable_before = self
                 .buffer
                 .iter()
@@ -1111,6 +1130,8 @@ impl Coordinator {
                     })
                 });
             if durable_before {
+                self.db
+                    .record_pending_removal(&layers::node_file::fqn(*layer, node_type, name))?;
                 self.upsert_buffer(*layer, node_type, name, None, true);
             } else {
                 self.remove_buffer_entry(*layer, node_type, name);
