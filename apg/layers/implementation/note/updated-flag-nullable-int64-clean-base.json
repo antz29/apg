@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "updated-flag-nullable-int64-clean-base",
+  "body": "The session's dirty flag is a nullable `INT64` (`updated`, 0/1) with no `DEFAULT`, because this file's DDL uses none and the low-level parquet writer emits only STRING/INT64: a load writes the clean base (0), and a row the session's Cypher MERGE creates carries NULL (read as clean) until `mark_dirty` sets 1 — so every dirty-state reader must compare `= 1`, never a boolean. Upgrade to a true BOOLEAN column (the parquet writer gains `Col::Bool` and the DDL gains `DEFAULT 0`) if a non-null invariant or a boolean predicate is ever wanted.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.load.tables.create_schema",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
