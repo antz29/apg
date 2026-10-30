@@ -3573,15 +3573,17 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 (SPEC §8.1): `apg session save` validates the ENTIRE buffered
-    /// model before it commits. A model with a Component that has no Role is
-    /// refused with the whole-model violations, nothing becomes durable, and
-    /// the buffer stays dirty; completing the model and saving again succeeds.
-    /// SPEC §8.2's sole deferral holds — the Component's missing
-    /// `implemented-by` claim is permitted at save.
+    /// Phase-02 task-13: `apg session save` is the structure-and-edge-pairing
+    /// boundary, not a whole-model one. A model with a Component that has no
+    /// Role — and no `implemented-by` claim — saves successfully: the boundary
+    /// validates the dirty rows' structure and the held set's edge pairing,
+    /// while the whole-model minimums are deferred to `apg spec lint` and the
+    /// merge strength check. The dirty set lands in exactly one commit and the
+    /// Component's absent `implemented-by` claim stays deferred.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
-    fn session_save_refuses_an_incomplete_model_and_accepts_it_once_completed() {
+    fn session_save_defers_whole_model_minimums_to_lint_and_merge_and_lands_the_dirty_set_in_one_commit()
+     {
         let (wt_apg, repo, wt) = mutation_fixture("save-whole-model");
         let home = repo.root.join("home");
 
@@ -3611,8 +3613,9 @@ mod e2e {
             layers::node_file_path(&wt_apg, Layer::Solution, "component", "refund-handler");
 
         // A new Component that is owned and realises a Service but carries NO
-        // Role: the exactly-one Role cardinality (SPEC §4.4) is a whole-model
-        // minimum. Admission accepts each mutation; only save checks the model.
+        // Role and no `implemented-by` claim. Both are whole-model minimums
+        // (SPEC §4.4) the save boundary no longer judges: admission accepts
+        // each mutation and the save below accepts the resulting set.
         run(
             &["node", "add", "solution", "component", "refund-handler"],
             "Added node solution.component.refund-handler",
@@ -3638,43 +3641,11 @@ mod e2e {
             "Added edge realises solution.component.refund-handler -> domain.service.place-order",
         );
 
-        // The whole-model boundary: the save is refused, nothing is written,
-        // no commit lands, and the session stays live with its buffer intact.
-        let refused = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            !refused.status.success(),
-            "an inconsistent buffered model must refuse the save"
-        );
-        let stderr = String::from_utf8_lossy(&refused.stderr);
-        assert!(stderr.contains("session save refused"), "{stderr}");
-        assert!(stderr.contains("`is-role` 0 Role(s)"), "{stderr}");
-        assert!(
-            !component_path.exists(),
-            "a refused save must not write apg/layers/**"
-        );
-        assert_eq!(
-            testutil::commit_count(&wt),
-            before,
-            "a refused save must not commit"
-        );
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "a refused save must leave the session live"
-        );
-
-        // Complete the model, then save again: the retained buffer (the three
-        // mutations above plus this edge) lands in one commit, and the deferred
-        // Component `implemented-by` claim is still absent and permitted.
-        run(
-            &[
-                "edge",
-                "add",
-                "is-role",
-                "solution.component.refund-handler",
-                "solution.role.application-service",
-            ],
-            "Added edge is-role solution.component.refund-handler -> solution.role.application-service",
-        );
+        // The save boundary judges the dirty rows' structure and the held
+        // set's edge pairing — nothing more — so this Component-without-Role
+        // model saves. (The retired `session save refused` / `` `is-role` 0
+        // Role(s) `` refusal assertion belonged to the whole-model pass, which
+        // lives on in `apg spec lint` and the merge strength check.)
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
@@ -3687,12 +3658,25 @@ mod e2e {
         );
         assert!(
             component_path.exists(),
-            "a completed model must save the buffered component file"
+            "the save must write the component row's node file"
         );
         assert_eq!(
             testutil::commit_count(&wt),
             before + 1,
-            "the whole buffered set must land in exactly one commit"
+            "the dirty set must land in exactly one commit"
+        );
+
+        // The deferred claim stays deferred: the saved Component carries no
+        // `implemented-by` out-edge, and the save did not require one.
+        let saved_component =
+            layers::read_node_file(&wt_apg, Layer::Solution, "component", "refund-handler")
+                .unwrap();
+        assert!(
+            saved_component
+                .out
+                .iter()
+                .all(|e| e.kind != "implemented-by"),
+            "the Component's implemented-by claim must stay deferred to lint and merge"
         );
 
         let out = end_session(&wt, session);
@@ -3700,6 +3684,14 @@ mod e2e {
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
+        );
+        // The coordinator's own report names the three marked rows the save
+        // wrote: the Component plus the two endpoint rows its two edges landed on.
+        assert!(
+            String::from_utf8_lossy(&out.stdout)
+                .contains("Session saved: 3 change(s) in one commit"),
+            "the save must report the dirty rows it wrote: {}",
+            String::from_utf8_lossy(&out.stdout)
         );
         testutil::remove(&repo);
     }
