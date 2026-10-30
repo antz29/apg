@@ -4665,10 +4665,24 @@ mod e2e {
     /// The ledger's post-save drain is `session save`'s own contract, pinned by
     /// `session_save_flushes_buffered_writes_and_delete_as_is_in_one_commit` —
     /// deliberately not asserted here.
+    ///
+    /// phase-01 task-15: the update admission's dirty mark is pinned POSITIVELY
+    /// as well — between the routed update and the remove, the held DB's own
+    /// `Constraint` row for the updated identity reads `updated = 1` while the
+    /// untouched neighbour's row still reads the clean base's `0` — so dropping
+    /// or widening `Coordinator::apply_mutation`'s `mark_dirty(&change.writes)`
+    /// fails here, not only at the direct `mark_dirty` unit proof.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_rm_of_a_saved_node_that_was_updated_leaves_no_file_and_one_commit() {
-        let (wt_apg, repo, wt) = mutation_fixture("session-rm-marker");
+        // The untouched neighbour is a durable node file written BEFORE the
+        // scan, so its row loads as the clean base (`updated = 0` — the only
+        // state an admission ever marks). A node created through the session
+        // would instead carry its own admission's mark, so it could not
+        // witness that admission marks exactly the change's write set.
+        let (wt_apg, repo, wt) = node_store_fixture("session-rm-marker");
+        layers::write_project(&wt_apg, &[node("global", "constraint", "keep")], &[]).unwrap();
+        testutil::scan_checkout(&wt).unwrap();
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
 
@@ -4705,9 +4719,9 @@ mod e2e {
                 .to_string()
         };
 
-        // A durable baseline: a node to remove and an untouched neighbour to
-        // leave alone. Two `global.constraint`s keep the baseline
-        // whole-model-valid (SPEC §8.1 — no cardinality minimums).
+        // A durable baseline: a node to remove, beside the untouched neighbour
+        // the fixture already wrote (both `global.constraint`s, so the baseline
+        // is whole-model-valid — SPEC §8.1 carries no cardinality minimums).
         run(
             &[
                 "node",
@@ -4719,18 +4733,6 @@ mod e2e {
                 "first",
             ],
             "Added node global.constraint.doomed",
-        );
-        run(
-            &[
-                "node",
-                "add",
-                "global",
-                "constraint",
-                "keep",
-                "--body",
-                "kept",
-            ],
-            "Added node global.constraint.keep",
         );
         let first_save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
@@ -4761,6 +4763,24 @@ mod e2e {
             ],
             "Updated node global.constraint.doomed",
         );
+        // The update admission's POSITIVE dirty mark, read through the session
+        // before the save: exactly the row of the identity this change rewrote
+        // carries `updated = 1`, and the untouched neighbour's row still reads
+        // the clean base's `0`. The projection alone would leave the rewritten
+        // row clean (`MERGE` re-creates it with `updated` NULL), and a widened
+        // mark would drag the neighbour in — so neither dropping nor widening
+        // `Coordinator::apply_mutation`'s `mark_dirty(&change.writes)` passes.
+        assert_eq!(
+            routed_count("MATCH (n:Constraint {fqn: 'global.constraint.doomed'}) RETURN n.updated"),
+            "1",
+            "the update admission must mark exactly the updated identity's row dirty"
+        );
+        assert_eq!(
+            routed_count("MATCH (n:Constraint {fqn: 'global.constraint.keep'}) RETURN n.updated"),
+            "0",
+            "the update admission must leave the untouched neighbour's row clean"
+        );
+
         run(
             &["node", "rm", "global", "constraint", "doomed"],
             "Removed node global.constraint.doomed",
