@@ -47,7 +47,7 @@ fn assembled_of(nodes: &[NodeFile]) -> BTreeMap<String, &NodeFile> {
 
 /// Assert the cardinality errors contain exactly the named rule fragment.
 fn assert_error(nodes: &[NodeFile], fragment: &str) {
-    let errors = validate_cardinalities(&assembled_of(nodes), None, Context::Save);
+    let errors = validate_cardinalities(&assembled_of(nodes), None, Context::Lint);
     assert!(
         errors.iter().any(|e| e.contains(fragment)),
         "expected an error containing `{fragment}`, got {errors:?}"
@@ -2118,7 +2118,7 @@ mod unit {
     #[test]
     fn valid_model_satisfies_every_cardinality() {
         let nodes = valid_model();
-        let errors = validate_cardinalities(&assembled_of(&nodes), None, Context::Save);
+        let errors = validate_cardinalities(&assembled_of(&nodes), None, Context::Lint);
         assert!(errors.is_empty(), "a complete model must pass: {errors:?}");
     }
 
@@ -2519,18 +2519,16 @@ mod unit {
     }
 
     /// The sole deferred obligation (SPEC §8.2): the same validator permits a
-    /// missing Component `implemented-by` claim under `Save`/`Lint` and refuses
+    /// missing Component `implemented-by` claim under `Lint` and refuses
     /// it under `MergeStrength`; one present claim satisfies merge strength.
     #[test]
     fn component_implementation_presence_is_context_dependent() {
         let mut nodes = valid_model();
-        for context in [Context::Save, Context::Lint] {
-            let errors = validate_cardinalities(&assembled_of(&nodes), None, context);
-            assert!(
-                errors.is_empty(),
-                "a missing claim is deferred under {context:?}: {errors:?}"
-            );
-        }
+        let errors = validate_cardinalities(&assembled_of(&nodes), None, Context::Lint);
+        assert!(
+            errors.is_empty(),
+            "a missing claim is deferred under lint: {errors:?}"
+        );
         let errors = validate_cardinalities(&assembled_of(&nodes), None, Context::MergeStrength);
         assert!(
             errors
