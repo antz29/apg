@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "freshness-four-read-only-opens",
+  "body": "`is_fresh` performs up to four separate read-only `db.lbug` opens on the no-live-session path — the pending-state probe, the schema-shape diff, `db_recorded_scan`, and the authored/transient reconciliation — each taking its own handle rather than sharing one. It is a pre-scan gate today; upgrade to a single shared read-only handle if freshness ever becomes hot, or if the probes must observe one consistent snapshot.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.is_fresh",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
