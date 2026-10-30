@@ -464,8 +464,9 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
     ]
 }
 
-/// The exact FQN delete set for `nodes` (`<layer>.<type>.<name>`) — the
-/// touched-FQN set the session's admission computes (`LayersOverlay::touched_fqns`).
+/// The exact FQN delete set for `nodes` (`<layer>.<type>.<name>`) — every
+/// node's identity rendered as its FQN, sorted and deduplicated by the
+/// `BTreeSet`.
 fn touched_fqns(nodes: &[layers::NodeFile]) -> BTreeSet<String> {
     nodes
         .iter()
