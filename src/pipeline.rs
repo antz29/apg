@@ -176,34 +176,61 @@ pub(crate) fn run_pipeline(
         );
     }
 
-    // Crash recovery (phase-02 task-8, cli-session-crash-recovery): a session
-    // socket that is present but fails a connect + `Ping` is an UNCLEAN EXIT —
-    // the killed process left the file behind while its own `db.lbug` handle
-    // closed with the unsaved buffer's phantom projections still in the index.
-    // The on-disk `db.lbug` therefore reflects only the last SAVED state plus a
-    // phantom projection, so it must never be reused. Reclaim the stale socket,
-    // discard the derived index and its export, and force the full load below to
-    // rebuild both from the assembled graph (`apg/layers/**` + the scanned
-    // code) rather than seeding the splice from the phantom rows. A live
-    // session answers `Ping` (refused above) and an absent socket is the
-    // ordinary case — the reuse fast path is unchanged for both.
+    // Crash recovery (phase-02 task-8, cli-session-crash-recovery; phase-04
+    // task-7 adds the pending-state cause): there are two UNCLEAN EXITS, and
+    // both disable the `db.lbug`-reuse (splice-seed) fast path.
     //
-    // Equivalently, a present-but-unreachable socket IS the `db.lbug`-reuse
-    // (splice-seed) fast path being disabled: `force_full_load` short-circuits
-    // the `try_splice_build` reuse branch below (which would otherwise seed the
-    // new DB from the previous `db.lbug` via `input.reuse`) and
-    // `discard_derived_index(".")` removes the index plus its `.wal`/`.shm`
-    // sidecars, so no stale seed survives to poison the rebuild.
+    // 1. A session socket that is present but fails a connect + `Ping`: the
+    //    killed process left the file behind while its own `db.lbug` handle
+    //    closed with its admitted-but-unsaved rows — the pending state — still
+    //    in the index. The on-disk `db.lbug` therefore reflects only the last
+    //    SAVED state plus that unsaved pending state, so it must never be
+    //    reused. Reclaim the stale socket.
+    //
+    // 2. With no live session holding the database (refused above), the
+    //    database itself still carries pending state — a dirty row or a
+    //    pending-removal identity (`artifacts::db::db_has_pending_state`). An
+    //    admitted but unsaved mutation likewise leaves the derived DB ahead of
+    //    the last saved state, so the same verdict applies whether or not a
+    //    socket survived.
+    //
+    // Either cause discards the derived index — `db.lbug` with its `.wal`/`.shm`
+    // sidecars and the `graph.jsonl` export — through the ONE shared
+    // `discard_derived_index(".")` below, and forces the full load to rebuild
+    // both from the assembled graph (`apg/layers/**` + the scanned code) rather
+    // than seeding the splice from the unsaved rows. A live session answers
+    // `Ping` (refused above) and a database with neither a stale socket nor
+    // pending state is the ordinary case — the reuse fast path is unchanged for
+    // both.
+    //
+    // Equivalently, either verdict IS the `db.lbug`-reuse (splice-seed) fast
+    // path being disabled: `force_full_load` short-circuits the
+    // `try_splice_build` reuse branch below (which would otherwise seed the new
+    // DB from the previous `db.lbug` via `input.reuse`) and the shared discard
+    // removes the index plus its `.wal`/`.shm` sidecars, so no stale seed
+    // survives to poison the rebuild.
     let stale_socket = apg_root.as_ref().and_then(|root| {
         let socket = session::socket_path(root);
         (socket.exists() && !session::live_session_at(&socket)).then_some(socket)
     });
-    let force_full_load = stale_socket.is_some();
+    // The second cause probes the database, so it also needs an `apg/` root —
+    // the hermetic harness has none and has nothing to probe.
+    let pending_state = apg_root
+        .as_deref()
+        .is_some_and(crate::artifacts::db::db_has_pending_state);
+    let force_full_load = stale_socket.is_some() || pending_state;
     if let Some(socket) = &stale_socket {
         log.ln(
             "[load] session socket present but unreachable (unclean exit) — reclaiming it and rebuilding db.lbug from apg/layers/**",
         );
         let _ = std::fs::remove_file(socket);
+    }
+    if pending_state {
+        log.ln(
+            "[load] database carries pending state (an admitted but unsaved mutation) — discarding it and rebuilding db.lbug from apg/layers/**",
+        );
+    }
+    if force_full_load {
         // cwd is `.trans`, so the derived index lives at ".".
         session::discard_derived_index(Path::new("."));
     }
