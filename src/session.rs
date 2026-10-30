@@ -971,10 +971,12 @@ impl Coordinator {
     ///    ([`crate::artifacts::ArtifactDb::mark_dirty`]) — `change.writes` is
     ///    already that exact set (an authored edge contributes both endpoints,
     ///    a code-target edge its source alone, and a delete its authored
-    ///    neighbours through `node_rm_change`) — and record each removed
-    ///    DURABLE identity on the pending-removal ledger
-    ///    ([`crate::artifacts::ArtifactDb::record_pending_removal`]), so the
-    ///    next save writes the marked rows and deletes the ledger's files.
+    ///    neighbours through `node_rm_change`) — record each removed DURABLE
+    ///    identity on the pending-removal ledger
+    ///    ([`crate::artifacts::ArtifactDb::record_pending_removal`]), and clear
+    ///    the pending-removal row of every identity that projection wrote back,
+    ///    so the ledger agrees with the dirty mark this same admission set: the
+    ///    next save writes the marked rows and deletes only the ledger's files.
     /// 5. Commit the change to `self.buffer` (last write/delete for an
     ///    identity wins). A failure at any earlier step leaves `self.buffer`
     ///    unchanged and the DB un-projected.
@@ -987,7 +989,9 @@ impl Coordinator {
     /// held DB, which carries the session's projection). A delete of an
     /// identity created earlier in this unsaved run (never durable) drops the
     /// pending write instead: no file was ever written, so it nets to nothing
-    /// on disk.
+    /// on disk. A re-add of an identity this run recorded as pending clears
+    /// that ledger row at admission, so the next save writes the re-added file
+    /// rather than deleting it.
     ///
     /// Returns the change's human message and its write-time warnings, so the
     /// caller can carry the warnings into the reply without them ever blocking
@@ -1091,6 +1095,21 @@ impl Coordinator {
         //     dirties both endpoints, a code-target edge its source alone, and
         //     a delete the authored neighbours whose edge halves it rewrote.
         self.db.mark_dirty(&change.writes)?;
+
+        // (6b) The ledger agrees with that dirty mark: every identity this
+        //      projection just wrote back is no longer pending, so a node
+        //      removed and then re-added in one session is not left ledger-held
+        //      and the next save writes its file instead of deleting it. A
+        //      DELETE matches nothing for an identity that was never pending.
+        {
+            let conn = self.db.conn()?;
+            for (layer, node_type, name) in &write_ids {
+                conn.query(&format!(
+                    "MATCH (n:PendingRemoval {{fqn: {}}}) DELETE n",
+                    crate::artifacts::lit(&layers::node_file::fqn(*layer, node_type, name))
+                ))?;
+            }
+        }
 
         // (7) Commit the change to the buffer — last write/delete for an
         //     identity wins — and, for each removed durable identity, record it
