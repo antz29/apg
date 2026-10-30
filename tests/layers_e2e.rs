@@ -929,6 +929,11 @@ mod e2e {
     /// deletion (`index.remove_path`), not `add_path`-ed, which stats the gone
     /// file and fails with a libgit2 NotFound (the latent bug the repo-less
     /// test could never see).
+    ///
+    /// The second arm pins the tolerant delete: a delete path that is ALREADY
+    /// ABSENT on disk is success, not a rollback — the removal is idempotent
+    /// (a replayed save, or an earlier partial write) — and the neighbour
+    /// written in the same set is still rewritten and committed.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_through_with_deletes_removes_file_and_rewrites_referencing() {
@@ -991,6 +996,71 @@ mod e2e {
             deleted,
             vec!["apg/layers/requirements/requirement/b.json"],
             "the removed node file must be staged as a deletion"
+        );
+
+        // --- Tolerant delete: the delete path is ALREADY ABSENT ---
+        // A fresh pair C --contains--> D, committed once, then D's file is
+        // removed out-of-band so the delete path is genuinely gone BEFORE the
+        // write set runs. The set that deletes the absent path and rewrites C
+        // (dropping the dangling out edge) must succeed — no NotFound, no
+        // rollback — and must still land C's rewrite.
+        let (c, d) = authored_pair("c", "d");
+        write_through(&apg_root, &[c.clone(), d.clone()]).unwrap();
+        let d_path = node_file_path(&apg_root, Layer::Requirements, "requirement", "d");
+        std::fs::remove_file(&d_path).unwrap();
+        assert!(
+            !d_path.exists(),
+            "the delete path must be absent before the write set runs"
+        );
+
+        let mut c2 = c.clone();
+        c2.out.clear();
+        let before_tolerant = wt_sha(&wt);
+        write_through_with_deletes(&apg_root, &[c2], std::slice::from_ref(&d_path))
+            .expect("an already-absent delete path is success, never a rollback");
+
+        assert!(
+            !d_path.exists(),
+            "the already-absent path must stay absent — no rollback restores it"
+        );
+        let c_read = read_node_file(&apg_root, "requirements", "requirement", "c");
+        assert!(
+            c_read.out.is_empty(),
+            "the neighbour in the same set must still be rewritten"
+        );
+        assert!(check_edge_pairing(&[c_read]).is_ok());
+
+        // Exactly one commit ahead of the pre-write HEAD: the neighbour
+        // rewrite (Modified) plus the recorded deletion of the path git still
+        // tracked (Deleted) — the absent path never aborts the set.
+        let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            head.parent(0).unwrap().id().to_string(),
+            before_tolerant,
+            "the tolerant delete must be exactly one commit ahead"
+        );
+        let diff = wt_repo
+            .diff_tree_to_tree(
+                Some(&head.parent(0).unwrap().tree().unwrap()),
+                Some(&head.tree().unwrap()),
+                None,
+            )
+            .unwrap();
+        let path_with = |status: git2::Delta| -> Vec<String> {
+            diff.deltas()
+                .filter(|d| d.status() == status)
+                .map(|d| d.old_file().path().unwrap().to_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            path_with(git2::Delta::Modified),
+            vec!["apg/layers/requirements/requirement/c.json"],
+            "the referencing neighbour must be rewritten"
+        );
+        assert_eq!(
+            path_with(git2::Delta::Deleted),
+            vec!["apg/layers/requirements/requirement/d.json"],
+            "the tracked-but-absent path must be staged as a deletion"
         );
         testutil::remove(&repo);
     }
