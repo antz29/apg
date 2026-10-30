@@ -307,6 +307,9 @@ mod e2e {
     /// `staleness_line` prints the SAME verdict `is_fresh` returns — in both
     /// directions. A recorded-dirty tree whose content digest changed at the
     /// same sha prints STALE from BOTH (never FRESH followed by a full run).
+    /// The pending-state (dirty row, pending-removal ledger) and table-shape
+    /// arms each start from an otherwise-fresh DB and flip exactly one input,
+    /// so each reads fresh if its production check is removed.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn staleness_line_agrees_with_is_fresh() {
@@ -314,8 +317,16 @@ mod e2e {
         let sha = repo.head_sha();
         let apg = repo.apg_root();
         testutil::touch_db(&apg);
-        // FRESH: a matching clean tree.
+        // FRESH baseline: an empty pending set and a matching table shape.
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(
+            is_fresh(&apg),
+            "an empty pending set and a matching shape is fresh"
+        );
+        assert!(
+            staleness_line(&apg, &git_state(&apg)).contains("→ FRESH"),
+            "the baseline line must print FRESH"
+        );
         assert_eq!(
             is_fresh(&apg),
             staleness_line(&apg, &git_state(&apg)).contains("→ FRESH")
@@ -329,6 +340,87 @@ mod e2e {
         assert!(!is_fresh(&apg), "content digest changed at the same sha");
         assert!(line.contains("→ STALE"), "printed line: {line}");
         assert!(!line.contains("→ FRESH"), "printed line: {line}");
+        assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
+        testutil::remove(&repo);
+
+        // A dirty durable row on an otherwise-fresh scanned worktree: the
+        // authored digest does not project `updated`, so the mark is the only
+        // cause of the verdict. Without the pending-state check the DB would
+        // read fresh (Scan row, content key and authored digest all agree).
+        let repo = fixture_repo("fresh-dirty-row");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
+        );
+        repo.commit_all("scan fixture");
+        // `seed_valid_model` writes through the project-context path, so the
+        // scanned worktree is a real linked worktree on its own branch.
+        let wt = repo.start_project("fresh-dirty-row");
+        let apg = wt.join(apg::specs::LAYOUT);
+        testutil::seed_valid_model(&apg);
+        testutil::scan_checkout(&wt).unwrap();
+        assert!(is_fresh(&apg), "the scanned worktree starts fresh");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query(
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.place-order'}) \
+                 SET n.updated = 1",
+            )
+            .unwrap();
+        drop(db);
+        assert!(!is_fresh(&apg), "a dirty durable row must never read fresh");
+        assert!(is_stale(&apg));
+        let line = staleness_line(&apg, &git_state(&apg));
+        assert!(line.contains("→ STALE"), "printed line: {line}");
+        assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
+        testutil::remove(&repo);
+
+        // A pending-removal ledger identity with no socket: PendingRemoval is
+        // outside the authored-digest tables, so the ledger entry alone is the
+        // cause (the Scan row and the tree digest still agree).
+        let repo = fixture_repo("fresh-ledger");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the ledger fixture starts fresh");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.record_pending_removal("requirements.requirement.refund")
+            .unwrap();
+        drop(db);
+        assert!(
+            !is_fresh(&apg),
+            "a pending-removal identity must never read fresh"
+        );
+        assert!(is_stale(&apg));
+        let line = staleness_line(&apg, &git_state(&apg));
+        assert!(line.contains("→ STALE"), "printed line: {line}");
+        assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
+        testutil::remove(&repo);
+
+        // An unrecognised table shape: an extra node table leaves the Scan row
+        // and the authored digest in agreement, so only the shape comparison
+        // can make the DB unfresh.
+        let repo = fixture_repo("fresh-shape");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the shape fixture starts fresh");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query("CREATE NODE TABLE FreshnessProbeExtra(fqn STRING, PRIMARY KEY(fqn))")
+            .unwrap();
+        drop(db);
+        assert!(
+            !is_fresh(&apg),
+            "a table shape this binary does not recognise must never read fresh"
+        );
+        assert!(is_stale(&apg));
+        let line = staleness_line(&apg, &git_state(&apg));
+        assert!(line.contains("→ STALE"), "printed line: {line}");
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
     }
