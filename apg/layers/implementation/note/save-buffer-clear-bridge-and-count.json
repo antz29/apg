@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "save-buffer-clear-bridge-and-count",
-  "body": "Two limits on the rewritten save. (1) It still clears the in-memory admission list (`self.buffer.clear()`) purely so `end` and `pending_changes_message`, which still gate on that list, can release a saved session; drop that line when phase-2 task-14 moves `end` onto the database's pending state, and again with phase-3 task-7 when the field itself goes. (2) The save's stdout count is now writes plus deletes rather than the old list length (`Session saved: N change(s) in one commit`), and no test pins the number — the client reply is the fixed `Session saved` — so re-pin it if the count ever becomes contract.",
+  "body": "Two limits. (1) `save` still calls `self.buffer.clear()`, and that call is load-bearing beyond the retired `end` gate: the in-memory admission list is where the next admission reads an identity's first-admission durability from, so clearing it at the durability boundary makes a later `rm` of an identity saved in this run read `durable_before = true` and record its ledger entry — without the clear, a node created and saved in one run and then removed would leave its now-durable file behind. Drop the call only when phase 3 removes the field itself, not when `end` stops reading the list. (2) The save's stdout count (`Session saved: N change(s) in one commit`) is pinned by two e2e tests — `save_flushes_the_buffer_in_one_commit` and `save_on_a_clean_buffer_is_a_noop` — so a reworded count must update them with it.",
   "properties": {},
   "out": [
     {
