@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "tolerant-delete-notfound-only",
+  "body": "The tolerant delete covers `ErrorKind::NotFound` only: a delete path blocked by a permission change, or replaced by a directory, still fails and rolls the whole set back. Upgrade if a save ever needs to distinguish \"already gone\" from \"cannot remove\" — for instance to report an unremovable path rather than abort the set.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.layers.write.write_through_with_deletes",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
