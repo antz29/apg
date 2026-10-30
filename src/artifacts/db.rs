@@ -542,6 +542,58 @@ impl ArtifactDb {
             .collect())
     }
 
+    /// Does the **held handle** carry **pending state** — a durable node row
+    /// flagged `updated = 1`, or at least one identity on the pending-removal
+    /// ledger? This is the read the save boundary, `end` refusal, `abort` and
+    /// freshness consult, answered over the one open connection.
+    ///
+    /// Reads the ledger (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`)
+    /// and then asks each durable node table ([`DURABLE_NODE_TABLES`], the same
+    /// `apg/layers/**` roster [`mark_dirty`](Self::mark_dirty) and
+    /// [`clear_pending_state`](Self::clear_pending_state) walk) whether a row
+    /// carries `updated = 1`; the per-table answers and the ledger fold through
+    /// the shared pure rule [`pending_state_present`], so this predicate and the
+    /// path-level `db_has_pending_state` agree by construction. Only `= 1` is
+    /// dirty: a row the session's Cypher path created holds NULL until
+    /// [`mark_dirty`](Self::mark_dirty) sets it.
+    ///
+    /// **Fails closed.** Every read error yields `true`: an unopenable
+    /// connection, a refused ledger read, or a per-table probe whose `updated`
+    /// column is absent or unreadable (the shared rule's row answer is an
+    /// infallible `bool`, so each error is folded to `true` inside the closure).
+    /// The plain-`bool` return is deliberate — a caller cannot hold an `Err` and
+    /// mistake it for a clean database, and `is_fresh` (which returns a plain
+    /// `bool`) treats any failure as not fresh. The cost is bounded: the shared
+    /// rule short-circuits on the ledger before any per-table query, and stops at
+    /// the first dirty table. No `apg/layers/**` file is touched.
+    pub fn has_pending_state(&self) -> bool {
+        let conn = match self.conn() {
+            Ok(conn) => conn,
+            Err(_) => return true,
+        };
+        let ledger: Vec<PendingRemoval> = match query_rows(
+            &conn,
+            "MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn",
+        ) {
+            Ok((_, rows)) => rows
+                .into_iter()
+                .map(|row| PendingRemoval { fqn: cell(&row, 0) })
+                .collect(),
+            Err(_) => return true,
+        };
+        pending_state_present(
+            |table| {
+                query_rows(
+                    &conn,
+                    &format!("MATCH (n:{table}) WHERE n.updated = 1 RETURN count(*)"),
+                )
+                .map(|(_, rows)| rows.first().is_none_or(|row| cell(row, 0) != "0"))
+                .unwrap_or(true)
+            },
+            &ledger,
+        )
+    }
+
     /// Flag exactly the durable node rows the named node files identify, on the
     /// **held handle**: `updated = 1` on each identity's row, so the next save
     /// serialises exactly the node files the mutation changed — and no reader
