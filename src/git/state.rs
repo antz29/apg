@@ -344,14 +344,25 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// never to a value refreshed from the DB. An error computing either digest is
 /// NOT fresh (fail closed).
 ///
+/// **Pending state and table shape** (no-live-session branch only): the DB must
+/// carry no pending state — no dirty row and no pending-removal identity
+/// ([`crate::artifacts::db::db_has_pending_state`]) — because an admitted but
+/// unsaved mutation leaves the derived DB ahead of the last saved state, which
+/// the on-disk fast path must not serve; and its tables must match this
+/// binary's schema ([`crate::splice::seed::validate_compatible`]), because a
+/// database another binary wrote cannot be reasoned about. Either verdict is
+/// NOT fresh (fail closed). Both reads sit in the no-live-session branch, so a
+/// live session short-circuits them like the other DB reads.
+///
 /// A session socket that is present but fails a connect/`Ping` is also NOT
 /// fresh: an unclean session exit leaves the socket behind while the derived
 /// DB reflects only the last saved state, so a phantom projection exists and
 /// the on-disk DB cannot be trusted until a rebuild. A LIVE session (one that
 /// answers `Ping`) owns the DB directly, so opening it here would contend with
 /// the session and see only its last saved buffer: the DB reads
-/// ([`db_recorded_scan`] and the authored/transient reconciliation) are
-/// SHORT-CIRCUITED and only the `recorded_scan`/git half is evaluated. A live
+/// ([`db_recorded_scan`], the pending-state and table-shape checks, and the
+/// authored/transient reconciliation) are SHORT-CIRCUITED and only the
+/// `recorded_scan`/git half is evaluated. A live
 /// session therefore never makes the on-disk fast path unfresh.
 ///
 /// This is deliberately not `!is_stale`: `is_stale` is N/A (false) when there
@@ -382,6 +393,18 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     // buffer. Short-circuit BOTH DB reads and evaluate the recorded_scan/git
     // half alone, so a live session never makes the on-disk fast path unfresh.
     if !live_session {
+        // Pending state (a dirty row or a pending-removal identity) is an
+        // admitted-but-unsaved mutation: the derived DB is ahead of the last
+        // saved state, so it cannot be reused as-is. Fails closed.
+        if crate::artifacts::db::db_has_pending_state(apg_root) {
+            return false;
+        }
+        // A table shape this binary does not recognise cannot be reasoned
+        // about. The scan's own seed eligibility asks the same question.
+        // Fails closed.
+        if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
+            return false;
+        }
         // The DB's own `Scan` row must exist and agree with the export exactly:
         // either half alone is not enough to reuse the DB (the DB and graph.jsonl
         // are refreshed together at every durability point, so they agree by
