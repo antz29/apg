@@ -4,11 +4,12 @@
 //! once, and re-merge the exact delta into the live DB.
 //!
 //! Durable `apg node` / `apg edge` mutations require a live session and are
-//! **not** committed per mutation: the session admits each into its write-back
-//! buffer and only `apg session save` reaches [`write_through_with_deletes`] —
-//! one atomic write of the whole buffered set plus exactly ONE git commit. The
-//! per-mutation orchestrator ([`write_project`]) remains the direct/test path
-//! for a single logical mutation.
+//! **not** committed per mutation: each admission applies to the worktree
+//! database and marks exactly the node files it changes dirty, so only
+//! `apg session save` reaches [`write_through_with_deletes`] — one atomic write
+//! of the marked rows and the pending-deletion identities plus exactly ONE git
+//! commit. The per-mutation orchestrator ([`write_project`]) remains the
+//! direct/test path for a single logical mutation.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -491,8 +492,9 @@ pub fn validate_save_model(dirty_rows: &[NodeFile], held_rows: &[NodeFile]) -> a
 /// write-only primitive, task-11) delegates here with an empty delete list.
 /// An already-absent delete path is success, not a failure (a retried save or
 /// a partial earlier write), so the removal stays idempotent.
-/// `apg session save` reaches this with the whole buffered set — one call, one
-/// commit; the direct mutation path calls it once per logical mutation.
+/// `apg session save` reaches this once with the database's marked rows and its
+/// pending-deletion identities — one call, one commit; the direct mutation path
+/// calls it once per logical mutation.
 pub fn write_through_with_deletes(
     apg_root: &Path,
     writes: &[NodeFile],

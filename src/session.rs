@@ -583,53 +583,70 @@ impl Coordinator {
         msg
     }
 
-    /// `apg session save`: make the whole buffered set durable. Before anything
-    /// is written, the ENTIRE buffered model (the durable base with the buffer
-    /// folded over it) passes the shared whole-model validator
-    /// ([`layers::write::validate_save_model`], SPEC §8.1) — an inconsistent
-    /// model refuses the save with the buffer left dirty. Otherwise the
-    /// buffered [`PendingChange`]s are collected into the node-file `writes`
-    /// (those with `content: Some(node)`) and `deletes` (those with
-    /// `content: None`, by their destination `path`), flushed ATOMICALLY to
-    /// `apg/layers/<layer>/<type>/<name>.json` with exactly ONE git commit
-    /// ([`layers::write::write_through_with_deletes`]), then the staleness
-    /// gate's recorded `scan_meta` is re-anchored ([`git::reanchor_scan_meta`],
-    /// mirroring the direct path's steps 4–5) and the buffer is cleared.
+    /// `apg session save`: make the session's pending state durable. The exact
+    /// write set is the held database's marked rows
+    /// ([`crate::artifacts::ArtifactDb::dirty_node_files_from_db`]) and the
+    /// exact delete set is its pending-removal ledger
+    /// ([`crate::artifacts::ArtifactDb::pending_removals`]), each ledger
+    /// identity (`<layer>.<type>.<name>`) mapped to the
+    /// `apg/layers/<layer>/<type>/<name>.json` node file it names.
     ///
-    /// A clean buffer writes nothing, makes no commit, and clears nothing — a
-    /// pure no-op. The DB projection is NOT run here: each mutation is
-    /// projected into the live `db.lbug` at admission (phase-01 task-4), so
-    /// save only makes the node files durable and re-anchors.
+    /// Before anything is written, the two-input save boundary
+    /// ([`layers::write::validate_save_model`], SPEC §8.1) judges the dirty rows
+    /// as its structure scope and the held DB's full row set
+    /// ([`crate::artifacts::ArtifactDb::node_files_from_db`] — the session's own
+    /// projections, with every ledger-held identity already omitted) as its
+    /// edge-pairing model: the effective post-save model itself, never an
+    /// on-disk base with a staged set folded over it. An invalid set refuses the
+    /// save BEFORE any write or commit, with the marks left pending, so the
+    /// caller can complete the model or abort. Otherwise both sets go through
+    /// [`layers::write::write_through_with_deletes`] in ONE atomic write of
+    /// `apg/layers/**` plus exactly ONE git commit, the marks are then cleared
+    /// ([`crate::artifacts::ArtifactDb::clear_pending_state`]) and the staleness
+    /// gate's recorded `scan_meta` is re-anchored ([`git::reanchor_scan_meta`],
+    /// mirroring the direct path's steps 4–5), so an immediately following save
+    /// reads an empty pending set.
+    ///
+    /// An empty pending set — no marked row and no ledger identity — writes
+    /// nothing, makes no commit, and reports no pending changes: a pure no-op.
+    /// The DB projection is NOT run here: each admission already applied its
+    /// projection to the live `db.lbug`, so save only makes the node files
+    /// durable and re-anchors.
     pub fn save(&mut self) -> anyhow::Result<()> {
-        if self.buffer.is_empty() {
+        let writes = self.db.dirty_node_files_from_db()?;
+        let pending = self.db.pending_removals()?;
+        if writes.is_empty() && pending.is_empty() {
             println!("Session saved: no pending changes");
             return Ok(());
         }
 
-        // SPEC §8.1 — the whole-model save boundary: validate the ENTIRE
-        // buffered model before anything becomes durable. The effective set is
-        // the ON-DISK base (the last saved node-file store) with the write-back
-        // buffer folded over it — exactly the set this save is about to make
-        // durable. Admission stays per-mutation, so intermediate construction
-        // is legal and only save enforces the whole-model minimums. A violation
-        // refuses the save BEFORE any write or commit and leaves the buffer
-        // dirty, so the caller can complete the model or abort.
-        let base = layers::write::read_existing_nodes(&self.apg_root)?;
-        let effective = self.overlay_from_buffer()?.apply_to_base(&base);
-        layers::write::validate_save_model(&effective)?;
+        // The held DB's full row set — this session's projections in, every
+        // ledger-held identity out — is the edge-pairing model the dirty rows
+        // are judged against.
+        let held = self.db.node_files_from_db()?;
+        layers::write::validate_save_model(&writes, &held)?;
 
-        let mut writes: Vec<NodeFile> = Vec::new();
-        let mut deletes: Vec<PathBuf> = Vec::new();
-        for change in &self.buffer {
-            match &change.content {
-                Some(node) => writes.push(node.clone()),
-                None => deletes.push(change.path.clone()),
-            }
-        }
+        // Each pending identity names the node file this save removes.
+        let deletes: Vec<PathBuf> = pending
+            .iter()
+            .map(|removal| {
+                let (layer, node_type, name) = layers::parse_fqn(&removal.fqn)?;
+                Ok(layers::node_file_path(
+                    &self.apg_root,
+                    layer,
+                    &node_type,
+                    &name,
+                ))
+            })
+            .collect::<anyhow::Result<_>>()?;
 
         // Atomic multi-file write/delete + exactly ONE commit — the single
-        // durability point for the whole buffered set.
+        // durability point for the pending set.
         layers::write::write_through_with_deletes(&self.apg_root, &writes, &deletes)?;
+
+        // Drain the marks only once their node files are durable, so the next
+        // save reads no pending state.
+        self.db.clear_pending_state()?;
 
         // Re-anchor the staleness gate AFTER the commit (mirrors the direct
         // path's write_project_with steps 4–5): graph.jsonl only, never opens
@@ -658,7 +675,9 @@ impl Coordinator {
             }
         }
 
-        let saved = self.buffer.len();
+        // The session's admission list still gates `end`: clear it in step with
+        // the drained database, or a saved session could never end.
+        let saved = writes.len() + deletes.len();
         self.buffer.clear();
         println!("Session saved: {saved} change(s) in one commit");
         Ok(())
