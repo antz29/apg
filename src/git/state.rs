@@ -359,9 +359,9 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// DB reflects only the last saved state, so a phantom projection exists and
 /// the on-disk DB cannot be trusted until a rebuild. A LIVE session (one that
 /// answers `Ping`) owns the DB directly, so opening it here would contend with
-/// the session and see only its last saved buffer: the DB reads
-/// ([`db_recorded_scan`], the pending-state and table-shape checks, and the
-/// authored/transient reconciliation) are SHORT-CIRCUITED and only the
+/// the session and see only the on-disk database's last saved state: the DB
+/// reads ([`db_recorded_scan`], the pending-state and table-shape checks, and
+/// the authored/transient reconciliation) are SHORT-CIRCUITED and only the
 /// `recorded_scan`/git half is evaluated. A live
 /// session therefore never makes the on-disk fast path unfresh.
 ///
@@ -389,9 +389,10 @@ pub fn is_fresh(apg_root: &Path) -> bool {
         return false;
     };
     // While a live session owns `db.lbug` it holds the DB exclusively; opening
-    // it here would contend with the session and observe only its last saved
-    // buffer. Short-circuit BOTH DB reads and evaluate the recorded_scan/git
-    // half alone, so a live session never makes the on-disk fast path unfresh.
+    // it here would contend with the session and observe only the on-disk
+    // database's last saved state. Short-circuit the database reads below and
+    // evaluate the recorded_scan/git half alone, so a live session never makes
+    // the on-disk fast path unfresh.
     if !live_session {
         // Pending state (a dirty row or a pending-removal identity) is an
         // admitted-but-unsaved mutation: the derived DB is ahead of the last
