@@ -5061,12 +5061,14 @@ mod e2e {
     /// feedback-18 (negative half) / phase-01 task-12: a node CREATED and then
     /// REMOVED in the same unsaved run was never durable, so it must net to
     /// nothing on the identity-only pending set — no node file, no
-    /// `PendingRemoval` ledger identity and no dirty row. The delete marker is
-    /// keyed on FIRST-admission durability, so an identity the session only ever
-    /// created is never ledger-held, and its row is detached at admission.
+    /// `PendingRemoval` ledger identity and no dirty row. The save reads its
+    /// write set from the database's dirty rows and its delete set from the
+    /// ledger, so that empty set short-circuits: nothing is written and no
+    /// commit lands. The delete marker is keyed on FIRST-admission durability,
+    /// so an identity the session only ever created is never ledger-held, and
+    /// its row is detached at admission.
     ///
-    /// A session read BEFORE and AFTER the save reports the node absent, and the
-    /// save over that empty pending set writes nothing and makes no commit.
+    /// A session read BEFORE and AFTER the save reports the node absent.
     ///
     /// phase-01 task-14: the mirror arm — a node that was SAVED, then removed
     /// and re-added in one unsaved run. The re-add clears the removed
@@ -5166,9 +5168,10 @@ mod e2e {
             "a pending mutation must not create a commit before save"
         );
 
-        // The single durability point over an empty pending set: writes nothing
-        // and commits nothing (the durable-state assertions below are its only
-        // observable).
+        // The single durability point over an empty pending set — no marked row
+        // and no ledger identity — writes nothing and commits nothing; the
+        // coordinator's own report after the run pins that it read the empty
+        // pending set rather than taking the write path.
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
@@ -5324,6 +5327,17 @@ mod e2e {
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
+        );
+        // The coordinator's reports pin the no-op: the created-then-removed
+        // identity's save read an empty pending set, never a dirty row to write
+        // or a ledger identity to delete.
+        let server_out = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            server_out
+                .matches("Session saved: no pending changes")
+                .count(),
+            1,
+            "the created-then-removed identity's save must report no pending changes: {server_out}"
         );
         testutil::remove(&repo);
     }
