@@ -579,6 +579,33 @@ impl ArtifactDb {
         Ok(())
     }
 
+    /// Clear the **held handle**'s pending state in one call: reset the session's
+    /// dirty flag (`updated = 0`) on every marked durable node row and empty the
+    /// pending-removal ledger, so a database a save has just drained carries no
+    /// pending state any more — and the read of
+    /// [`dirty_node_files_from_db`](Self::dirty_node_files_from_db) and
+    /// [`pending_removals`](Self::pending_removals) an immediately following
+    /// save makes is empty, so that save writes nothing.
+    ///
+    /// One statement per durable node table ([`DURABLE_NODE_TABLES`], the
+    /// `apg/layers/**` roster `mark_dirty` walks) matches the dirty rows alone —
+    /// a row that was never marked holds NULL (or a stale `0`) and is left
+    /// untouched — and the ledger's `DELETE` drops every pending identity.
+    /// `updated` is session state rather than node-file data, so clearing it
+    /// changes no node file, and on an already-clean database every statement
+    /// matches no row. Runs on one connection over the caller's handle and
+    /// touches no `apg/layers/**` file.
+    pub fn clear_pending_state(&self) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        for &(table, _, _, _) in DURABLE_NODE_TABLES {
+            conn.query(&format!(
+                "MATCH (n:{table}) WHERE n.updated = 1 SET n.updated = 0"
+            ))?;
+        }
+        conn.query("MATCH (n:PendingRemoval) DELETE n")?;
+        Ok(())
+    }
+
     /// Reconstruct the durable `apg/layers/**` node-file set from the **live
     /// database** — the inverse of the layers projection
     /// ([`reingest_layers_on`](Self::reingest_layers_on) / `merge_records`).
