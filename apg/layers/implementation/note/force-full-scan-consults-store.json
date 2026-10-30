@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "force-full-scan-consults-store",
-  "body": "Coordinator::force_full_scan calls cmd_scan without --force: no live session exists at that point, so only the derived-artifact discard is needed, and its scan still consults the shared fact store and may warm-reuse it. Limit: an abort whose phantom projection warm reuse would reproduce is not healed by this rebuild. Upgrade to pass --force there if a phantom projection is ever observed to survive a warm reuse after an abort.",
+  "body": "`Coordinator::force_full_scan` discards the derived index and rebuilds it by calling `cmd_scan` **without** `--force`, once the session has already released its handle, flock and socket. What it discards: `db.lbug` with its `.wal`/`.shm` sidecars and `graph.jsonl`, through the shared `discard_derived_index`, before the scan takes the spec lock. With no `db.lbug` the freshness fast path cannot fire and with no `graph.jsonl` there is no previous export to splice from, so no unsaved admission can be reused. Trigger: `abort` when the held database carried a dirty row or a pending-removal identity (the decision is read before anything is released), and `start`'s crash check. What it rebuilds: the derived index from the durable node files and freshly scanned code, through `pipeline::run_pipeline`. Limit: the rebuild still consults the shared fact store and may warm-reuse it, exactly as `apg scan` without `--force` does, so a divergence originating in the store rather than in the derived index is not healed here; upgrade by passing `--force` if a phantom projection is ever observed to survive a warm reuse after an abort.",
   "properties": {},
   "out": [
     {
