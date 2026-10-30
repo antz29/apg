@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pending-state-roster-literal-duplication",
+  "body": "The unit test writes the 15 durable node-table labels out literally because `DURABLE_NODE_TABLES` is private to `artifacts::db`, so the roster now exists in two places; a production roster change fails the test loudly, which is the intended signal. Upgrade to a crate-visible roster accessor if keeping the two copies in step ever becomes burdensome.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.tests.unit.pending_state_rule_reads_the_durable_roster_and_the_ledger",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
