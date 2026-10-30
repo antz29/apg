@@ -1932,6 +1932,17 @@ mod e2e {
     /// on both halves; the exact full-fidelity round-trip (arbitrary keys,
     /// `Entity` `kind`, the session's incremental merge path) is pinned by
     /// phase 4's own e2e task.
+    ///
+    /// The database working state the next save reads is pinned over the same
+    /// real `db.lbug`: the pending-removal ledger (`record_pending_removal` →
+    /// `pending_removals`, with the identity's durable row left in place but
+    /// omitted from the reconstruction), the `updated` dirty mark landing on
+    /// exactly the rows the real change builders name — an authored edge's two
+    /// endpoints, a code-target edge's source alone, and a delete's rewritten
+    /// authored neighbours — and the mark never projecting into a node file.
+    /// "Exactly" is measured from the database (every label's `updated = 1`
+    /// rows), never from a change's own `writes` roster, so a marking that
+    /// widened to another row fails here.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn node_files_from_db_reconstructs_the_projected_columns() {
@@ -2076,7 +2087,6 @@ mod e2e {
 
         let db = ArtifactDb::open(&wt_apg).unwrap();
         let nodes = db.node_files_from_db().unwrap();
-        drop(db);
 
         // Only the durable authored nodes are reconstructed — the scanned code
         // and the transient rows are not durable node files.
@@ -2180,6 +2190,199 @@ mod e2e {
         let details_out = out(&n, "details", "go.fixture.mod.Store");
         assert!(details_out.properties.is_empty());
 
+        // ------------------------------------------------------------------
+        // The database working state a save reads: the dirty mark and the
+        // pending-removal ledger.
+        //
+        // "Exactly the named rows" is measured from the DATABASE: every label
+        // the schema declares is asked which of its rows carries `updated = 1`,
+        // so a marking that widened to a neighbour row (or another table) fails
+        // here even when the code believed its write set was the named one.
+        // Only the durable node tables can answer that property read; a code or
+        // transient table refuses it at bind time, which is how the probe finds
+        // the roster (one connection per label, so a refusal poisons nothing).
+        let dirty_rows = |db: &ArtifactDb| -> Vec<(String, String)> {
+            let mut rows = Vec::new();
+            for label in load::node_labels() {
+                let Ok(conn) = db.conn() else { continue };
+                let Ok(result) = conn.query(&format!(
+                    "MATCH (n:{label}) WHERE n.updated = 1 RETURN n.fqn"
+                )) else {
+                    continue;
+                };
+                for row in result {
+                    rows.push((label.to_string(), row[0].to_string()));
+                }
+            }
+            rows.sort();
+            rows
+        };
+        // A mark is session state, not node-file data, so each case is measured
+        // from a clean database (the roster probe again: a table without the
+        // `updated` column refuses the SET).
+        let clear_marks = |db: &ArtifactDb| {
+            for label in load::node_labels() {
+                let Ok(conn) = db.conn() else { continue };
+                let _ = conn.query(&format!("MATCH (n:{label}) SET n.updated = 0"));
+            }
+        };
+        let named = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            let mut rows: Vec<(String, String)> = pairs
+                .iter()
+                .map(|(label, fqn)| (label.to_string(), fqn.to_string()))
+                .collect();
+            rows.sort();
+            rows
+        };
+        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // The session's own change builder, over the DB-reconstructed base: the
+        // `writes` it folds are exactly the node files `apply_mutation` marks.
+        let change = |base: &[layers::NodeFile], kind: &str, argv: &[&str]| {
+            apg::node_cmd::build_change_over(
+                base,
+                &[],
+                &wt_apg,
+                kind,
+                &args(argv),
+                &layers::LayersOverlay::new(),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            dirty_rows(&db),
+            named(&[]),
+            "no row carries `updated = 1` before an admission marks one"
+        );
+
+        // A code-target write (`implemented-by` → a scanned code identity)
+        // rewrites the source's node file alone: the code endpoint has no node
+        // file, so exactly the source row is marked and no code row ever is.
+        let code_target = change(
+            &nodes,
+            "edge",
+            &[
+                "add",
+                "implemented-by",
+                "solution.component.worker",
+                "go.fixture.mod",
+            ],
+        );
+        db.mark_dirty(&code_target.writes).unwrap();
+        assert_eq!(
+            dirty_rows(&db),
+            named(&[("Component", "solution.component.worker")]),
+            "a code-target write marks its source alone"
+        );
+
+        // The flag never leaks into the reconstruction: the mark is database
+        // working state, so the node files are identical and no properties map
+        // carries an `updated` key.
+        let marked = db.node_files_from_db().unwrap();
+        assert_eq!(
+            marked, nodes,
+            "a dirty mark must not change what the node files reconstruct to"
+        );
+        assert!(
+            marked.iter().all(|n| !n.properties.contains_key("updated")),
+            "the session's `updated` flag must never project into a node file"
+        );
+        clear_marks(&db);
+        assert_eq!(dirty_rows(&db), named(&[]), "the marks clear");
+
+        // An authored-edge write (`realises` Component → Service) rewrites BOTH
+        // endpoint node files, so exactly both endpoint rows are marked.
+        let authored_edge = change(
+            &nodes,
+            "edge",
+            &[
+                "add",
+                "realises",
+                "solution.component.worker",
+                "domain.service.billing",
+            ],
+        );
+        db.mark_dirty(&authored_edge.writes).unwrap();
+        assert_eq!(
+            dirty_rows(&db),
+            named(&[
+                ("Component", "solution.component.worker"),
+                ("Service", "domain.service.billing"),
+            ]),
+            "an authored edge marks both endpoints and nothing else"
+        );
+        clear_marks(&db);
+
+        // A delete marks every authored neighbour `node_rm_change` folds into
+        // `writes` — the nodes whose edge halves name the removed identity —
+        // and the removed identity's own row is not marked (its file is
+        // deleted, so there is nothing to write).
+        let delete = change(
+            &nodes,
+            "node",
+            &["rm", "requirements", "requirement", "checkout"],
+        );
+        db.mark_dirty(&delete.writes).unwrap();
+        assert_eq!(
+            dirty_rows(&db),
+            named(&[
+                ("Stakeholder", "requirements.stakeholder.customer"),
+                ("Service", "domain.service.billing"),
+            ]),
+            "a delete marks exactly its rewritten authored neighbours"
+        );
+        clear_marks(&db);
+        assert_eq!(dirty_rows(&db), named(&[]), "no mark survives the reset");
+
+        // Record-then-read: the ledger holds one removed identity, idempotently,
+        // and `node_files_from_db` omits that identity's node file from the base
+        // while the durable row itself is untouched (the omission is the
+        // ledger's, not a delete), so the neighbour keeps the edge half the save
+        // boundary's pairing check has to refuse.
+        assert!(
+            db.pending_removals().unwrap().is_empty(),
+            "the ledger starts empty"
+        );
+        db.record_pending_removal("requirements.stakeholder.customer")
+            .unwrap();
+        db.record_pending_removal("requirements.stakeholder.customer")
+            .unwrap();
+        assert_eq!(
+            db.pending_removals().unwrap(),
+            vec![PendingRemoval {
+                fqn: "requirements.stakeholder.customer".to_string()
+            }],
+            "the ledger holds the identity exactly once"
+        );
+        assert!(
+            db.has_node("requirements.stakeholder.customer"),
+            "the ledger omits the node file; the durable row stays"
+        );
+        let held = db.node_files_from_db().unwrap();
+        assert_eq!(
+            held.len(),
+            nodes.len() - 1,
+            "the ledger-held identity is gone from the reconstruction: {held:#?}"
+        );
+        assert!(
+            !held.iter().any(|n| n.layer == "requirements"
+                && n.node_type == "stakeholder"
+                && n.name == "customer"),
+            "a ledger-held identity never reconstructs into the base"
+        );
+        let held_requirement = held
+            .iter()
+            .find(|n| n.layer == "requirements" && n.node_type == "requirement")
+            .unwrap();
+        assert!(
+            held_requirement
+                .in_edges
+                .iter()
+                .any(|e| e.kind == "requires" && e.source == "requirements.stakeholder.customer"),
+            "the omission drops the node file alone: the neighbour keeps its half"
+        );
+
+        drop(db);
         testutil::remove(&repo);
     }
 
