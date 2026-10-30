@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "query-reclaim-read-cost",
+  "body": "Every direct `apg query` with no live session runs the shared reclaim classification before its own read, adding two read-only opens (the pending-state probe and the schema-shape diff) to every query; the classification is the gate that keeps an unsaved row from being served, so it stays until a direct-read latency budget says otherwise. Upgrade by sharing one read-only handle across the probes, or by skipping the shape probe when the scan row already agrees, only if direct-read latency becomes a measured concern.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.query.cmd_query",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
