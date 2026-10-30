@@ -289,25 +289,25 @@ pub fn validate_change(
 /// base node set** instead of re-reading `apg/layers/**`. `base` is the
 /// cumulative state the proposed `writes`/`deletes` apply over: the direct path
 /// ([`validate_change`]) passes `read_existing_nodes(apg_root)`, while the
-/// session's write-back buffer passes the overlay's `apply_to_base` (the
-/// buffered writes staged over the on-disk store). `scanned`/`planned` are the
-/// two code-FQN universes the `implemented-by` drift check resolves against,
-/// supplied by the caller so this entry point performs no file I/O: the direct
-/// path ([`validate_change`]) passes
+/// session passes the effective base it reconstructs from the held database.
+/// `scanned`/`planned` are the two code-FQN universes the `implemented-by`
+/// drift check resolves against, supplied by the caller so this entry point
+/// performs no file I/O: the direct path ([`validate_change`]) passes
 /// [`code_universes_from_export`](crate::artifacts::code_universes_from_export)
 /// (the `graph.jsonl` export), while the session's admission passes the held
 /// database's
 /// [`code_universes_from_db`](crate::artifacts::ArtifactDb::code_universes_from_db)
 /// — neither opens a second handle nor reads `apg/.trans/graph.jsonl`. Every
 /// check is otherwise identical to [`validate_change`] — per-node uniqueness,
-/// the out-edge matrix
-/// ([`validate_edges`]), the assembled §4 rules ([`validate_assembled_rules`]),
-/// the `implemented-by` code-ref drift check ([`validate_code_refs`]), the
-/// constraint structure rules ([`eval_constraint`]), and edge
-/// pairing ([`check_edge_pairing`]) — so a buffered mutation validates against
-/// the state an earlier unsaved mutation produced: an edge to a node added
-/// earlier in the same run is accepted rather than rejected because it is absent
-/// on disk. Pure read — no write.
+/// the out-edge matrix ([`validate_edges`]), the assembled §4 rules
+/// ([`validate_assembled_rules`]), the `implemented-by` code-ref drift check
+/// ([`validate_code_refs`]), and the constraint structure rules
+/// ([`eval_constraint`]) — so a change validates against the state an earlier
+/// unsaved mutation produced: an edge to a node added earlier in the same run
+/// is accepted rather than rejected because it is absent on disk. Edge pairing
+/// is NOT checked here: it is enforced at the save boundary alone
+/// ([`validate_save_model`]), so an edge whose matching half lands in a later
+/// mutation is admitted. Pure read — no write.
 pub fn validate_change_over(
     apg_root: &Path,
     base: &[NodeFile],
@@ -410,10 +410,6 @@ pub fn validate_change_over(
         eval_constraint(layer, &n.name, &n.properties, &own_universe)?;
     }
 
-    // Pairwise symmetry over the assembled post-mutation set.
-    let mut merged: Vec<NodeFile> = existing.into_values().collect();
-    merged.extend(writes.iter().cloned());
-    check_edge_pairing(&merged)?;
     Ok(())
 }
 
