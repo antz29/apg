@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "direct-write-path-pairs-after-commit",
+  "body": "Admission no longer pre-flights edge pairing on the direct `write_project`/`apply_change` path either, because that path routes through `validate_change` → `validate_change_over`: an unpaired direct mutation is now caught only by `ingest_nodes`' full-set check after the durable commit, not before it. Upgrade by giving the direct path its own save-boundary call if a non-session writer is ever reintroduced; the session path is unaffected because `Coordinator::save` pairs the held set before writing.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.layers.write.validate_change_over",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
