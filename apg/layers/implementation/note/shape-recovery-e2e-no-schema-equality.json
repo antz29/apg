@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "shape-recovery-e2e-no-schema-equality",
+  "body": "The scan/query recovery e2e proves shape-change recovery through the injected extra table's binder-error probe and the full-load log rather than a schema-fingerprint equality, because `splice::seed::validate_compatible` and `extract_schema` are `pub(crate)` and the test crate cannot call them. Upgrade by exposing a read-only schema probe publicly if the e2e tier ever needs the structural equality itself.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.scan_and_query_recover_a_pending_state_or_shape_changed_database",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
