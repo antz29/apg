@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "dirty-mark-primitive-limits",
+  "body": "Three limits on the dirty-marking primitive. (1) `mark_dirty` issues one `SET n.updated = 1` per durable node table — 15 statements per identity — because no crate-visible node-file-type-to-table-label mapping exists; upgrade to a single `(label, fqn)` UPDATE if such a shared mapping is ever extracted, then drop the roster walk. (2) Its statements share one connection with no explicit `BEGIN`/`COMMIT`, so a mid-run failure leaves later identities unmarked (never a wrong row) and propagates as `Err`; making the projection and its marks atomic together is `apply_mutation`'s ordering concern, not this primitive's. (3) Marking an identity whose row is absent is a silent no-op — there is no affected-row check; upgrade to a zero-match error if a caller ever marks without having projected first.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.mark_dirty",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
