@@ -699,6 +699,17 @@ impl ArtifactDb {
     /// order, then the transient tables, each table's rows sorted by
     /// `(from, to)`.
     ///
+    /// **Ledger-held endpoints are omitted.** An identity on the pending-removal
+    /// ledger ([`pending_removals`](Self::pending_removals)) is a node an
+    /// admission detached whose node file a save still owes deleting, so
+    /// [`node_files_from_db`](Self::node_files_from_db) omits it from the
+    /// reconstructed durable base — and an in-edge naming it would be a half
+    /// whose endpoint has no node file, refused by the save boundary's
+    /// edge-pairing check. Neither an in-edge row whose source nor one whose
+    /// target is ledger-held is restored; the surviving rows keep their
+    /// `(from, to)` order. A call with no FQNs restores nothing and reads no
+    /// ledger.
+    ///
     /// This reads the **held DB** and performs no `.trans` read; it is **not**
     /// authoring-mutation-specific — the future core-scan-into-session work
     /// reuses it.
@@ -709,6 +720,13 @@ impl ArtifactDb {
         if fqns.is_empty() {
             return Ok(Vec::new());
         }
+        // Read the pending-removal ledger before the rows: an in-edge naming a
+        // ledger-held identity must not be restored.
+        let held: BTreeSet<String> = self
+            .pending_removals()?
+            .into_iter()
+            .map(|pending| pending.fqn)
+            .collect();
         let conn = self.conn()?;
         // The FQN set as a Cypher list literal; `lit` escapes each identity.
         let list = fqns.iter().map(|f| lit(f)).collect::<Vec<_>>().join(", ");
@@ -725,6 +743,9 @@ impl ArtifactDb {
             for row in rows {
                 let from = cell(&row, 0);
                 let to = cell(&row, 1);
+                if held.contains(&from) || held.contains(&to) {
+                    continue;
+                }
                 let properties = properties_from_json(&cell(&row, 2))
                     .map_err(|e| anyhow::anyhow!("{table} `{from}` -> `{to}`: {e}"))?;
                 records.push(durable_edge_record(table, from, to, properties));
@@ -740,7 +761,12 @@ impl ArtifactDb {
             )?;
             rows.sort_by_key(|row| (cell(row, 0), cell(row, 1)));
             for row in rows {
-                records.push(transient_edge_record(table, cell(&row, 0), cell(&row, 1)));
+                let from = cell(&row, 0);
+                let to = cell(&row, 1);
+                if held.contains(&from) || held.contains(&to) {
+                    continue;
+                }
+                records.push(transient_edge_record(table, from, to));
             }
         }
 
