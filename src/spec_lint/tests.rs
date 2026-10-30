@@ -534,18 +534,17 @@ mod unit {
     }
 
     /// The sole deferred obligation (SPEC §8.2/§9.2): a Component's missing
-    /// `implemented-by` claim is permitted in the `Save` and `Lint` contexts
-    /// and is an error under `MergeStrength`; one present claim satisfies
-    /// merge strength, and more than one is an error in every context.
+    /// `implemented-by` claim is permitted under `Lint` and is an error under
+    /// `MergeStrength`; one present claim satisfies merge strength, and a
+    /// Component may claim more than one code node.
     #[test]
     fn implemented_by_presence_depends_on_context_not_scope() {
         let model = valid_model();
-        for context in [Context::Save, Context::Lint] {
-            assert!(
-                model_errors(&model, None, context).is_empty(),
-                "a missing Component claim is deferred under {context:?}"
-            );
-        }
+        let errors = model_errors(&model, None, Context::Lint);
+        assert!(
+            errors.is_empty(),
+            "a missing Component claim is deferred under lint: {errors:?}"
+        );
         assert!(
             model_errors(&model, Some(Layer::Solution), Context::MergeStrength)
                 .iter()
