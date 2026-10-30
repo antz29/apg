@@ -4844,6 +4844,12 @@ mod e2e {
     ///
     /// A session read BEFORE and AFTER the save reports the node absent, and the
     /// save over that empty pending set writes nothing and makes no commit.
+    ///
+    /// phase-01 task-14: the mirror arm — a node that was SAVED, then removed
+    /// and re-added in one unsaved run. The re-add clears the removed
+    /// identity's ledger row at admission, so the pending set is the re-added
+    /// write alone: the save writes the re-added file (last admitted content)
+    /// instead of deleting the durable file the ledger held.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_rm_of_a_node_created_in_the_same_run_leaves_no_file() {
@@ -4976,6 +4982,118 @@ mod e2e {
             testutil::commit_count(&wt),
             commits_before,
             "a no-op save must create no commit"
+        );
+
+        // The mirror arm: a DURABLE baseline node (`global.constraint` carries
+        // no cardinality minimums, so the baseline model is whole-model-valid),
+        // saved once, then removed and re-added in one unsaved run.
+        run(
+            &[
+                "node",
+                "add",
+                "global",
+                "constraint",
+                "reborn",
+                "--body",
+                "first",
+            ],
+            "Added node global.constraint.reborn",
+        );
+        let reborn_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "reborn");
+        let baseline_save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            baseline_save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&baseline_save.stderr)
+        );
+        assert!(
+            reborn_path.exists(),
+            "the baseline save must write the `reborn` node file"
+        );
+        let saved_commits = testutil::commit_count(&wt);
+
+        run(
+            &["node", "rm", "global", "constraint", "reborn"],
+            "Removed node global.constraint.reborn",
+        );
+        run(
+            &[
+                "node",
+                "add",
+                "global",
+                "constraint",
+                "reborn",
+                "--body",
+                "second",
+            ],
+            "Added node global.constraint.reborn",
+        );
+
+        // BEFORE the save: the re-add cleared the removed identity's ledger row
+        // at admission, so the identity is not pending, an ordinary session read
+        // reports it present again, and `apg/layers/**` still carries the last
+        // SAVED content — the re-add is durable only at the save.
+        assert_eq!(
+            routed_count(
+                "MATCH (n:PendingRemoval {fqn: 'global.constraint.reborn'}) RETURN count(*)"
+            ),
+            "0",
+            "a removed-then-re-added identity must not stay ledger-held"
+        );
+        assert_eq!(
+            routed_count("MATCH (n:Constraint {fqn: 'global.constraint.reborn'}) RETURN count(*)"),
+            "1",
+            "the session read before the save must report the re-added node present"
+        );
+        assert_eq!(
+            layers::read_node_file(&wt_apg, Layer::Global, "constraint", "reborn")
+                .unwrap()
+                .body,
+            "first",
+            "a pending re-add must not touch `apg/layers/**` before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            saved_commits,
+            "a pending re-add must not create a commit before save"
+        );
+
+        // AFTER the save: the file is present with the LAST ADMITTED content
+        // rather than deleted, in exactly one commit, and the session read
+        // still reports the node present.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            reborn_path.exists(),
+            "save must write the re-added node file, never delete it"
+        );
+        assert_eq!(
+            layers::read_node_file(&wt_apg, Layer::Global, "constraint", "reborn")
+                .unwrap()
+                .body,
+            "second",
+            "save must write the last admitted content"
+        );
+        assert_eq!(
+            routed_count(
+                "MATCH (n:PendingRemoval {fqn: 'global.constraint.reborn'}) RETURN count(*)"
+            ),
+            "0",
+            "save must leave no ledger identity for the re-added node"
+        );
+        assert_eq!(
+            routed_count("MATCH (n:Constraint {fqn: 'global.constraint.reborn'}) RETURN count(*)"),
+            "1",
+            "the session read after the save must still report the node present"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            saved_commits + 1,
+            "the re-add save must land exactly one new commit"
         );
 
         let out = end_session(&wt, session);
