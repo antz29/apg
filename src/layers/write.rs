@@ -848,9 +848,9 @@ pub fn write_project_with(
     Ok(())
 }
 
-/// The projection-only half of [`write_project_with`]'s step 6 — the general
-/// **partial-delta projection seam** the session's write-back buffer projects
-/// through at admission.
+/// The projection-only half of [`write_project_with`]'s step 6 — the seam
+/// [`Coordinator::apply_mutation`](crate::session::Coordinator::apply_mutation)
+/// projects each admitted mutation's delta through.
 ///
 /// Callers supply `records` — a **partial** record set: the changed identities'
 /// node+out-edge records (via
