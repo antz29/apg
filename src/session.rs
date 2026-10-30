@@ -683,15 +683,21 @@ impl Coordinator {
         Ok(())
     }
 
-    /// `apg session abort`: abandon the session, discarding every buffered
-    /// change without ever making it durable. Over a DIRTY run (a non-empty
-    /// buffer — admission projected the buffered changes into the live
-    /// `db.lbug`, so the index carries phantom projections the durable
-    /// `apg/layers/**` node files do not) it releases the session and forces a
-    /// FULL scan that discards and rebuilds `db.lbug` from those node files, so
-    /// the phantom projection is never served. Over a CLEAN run it simply
-    /// releases the session — nothing was projected, so there is no phantom to
-    /// discard and no rebuild is needed.
+    /// `apg session abort`: abandon the session without ever making its pending
+    /// state durable. The discard decision is read from the **held database**
+    /// BEFORE anything is released: a database carrying a dirty row
+    /// ([`crate::artifacts::ArtifactDb::dirty_node_files_from_db`]) or a
+    /// pending-removal ledger identity
+    /// ([`crate::artifacts::ArtifactDb::pending_removals`]) holds an
+    /// admission's projection that no `apg/layers/**` node file backs, so over
+    /// that PENDING run it releases the session and then
+    /// [`force_full_scan`](Self::force_full_scan) discards the derived index
+    /// and rebuilds it from the durable node files — the unsaved projection is
+    /// never served.
+    ///
+    /// A database carrying no pending state (no dirty row AND no ledger
+    /// identity) has nothing unsaved projected into it, so the run simply
+    /// releases the session: no discard and no rebuild.
     ///
     /// Consumes the coordinator, dropping the non-optional held DB handle as
     /// it releases the extended flock and removes the socket. The release is
@@ -707,13 +713,17 @@ impl Coordinator {
     /// never reimplemented here. The derived index (`db.lbug` and its
     /// `graph.jsonl` export) is discarded FIRST so the scan cannot take its
     /// content-identity freshness fast path (or an incremental splice seeded
-    /// from the phantom-projected DB) and reuse the phantom state; a genuine
-    /// full scan then rebuilds both from the durable node files and the
-    /// scanned code.
+    /// from a database whose pending rows no node file backs) and reuse the
+    /// unsaved state; a genuine full scan then rebuilds both from the durable
+    /// node files and the scanned code.
     pub fn abort(mut self) -> anyhow::Result<()> {
-        // Discard the whole buffered set before anything else: an aborted
-        // change is never written to `apg/layers/**` and never committed.
-        let dirty = !self.buffer.is_empty();
+        // Decide from the held DB BEFORE releasing it: a dirty row or a ledger
+        // identity is an admission's projection that no node file backs, so an
+        // aborted run carrying either owes a discard-and-rebuild. Nothing was
+        // written to `apg/layers/**` or committed, so dropping the in-memory
+        // admission list is all abort discards itself.
+        let pending = !self.db.dirty_node_files_from_db()?.is_empty()
+            || !self.db.pending_removals()?.is_empty();
         self.buffer.clear();
 
         // Release exactly as `end` does, BEFORE the forced scan opens its own
@@ -725,7 +735,7 @@ impl Coordinator {
         self._lock = None;
         let _ = std::fs::remove_file(&self.socket_path);
 
-        if dirty {
+        if pending {
             Self::force_full_scan(&self.apg_root)?;
         }
 
@@ -737,13 +747,15 @@ impl Coordinator {
     /// discards the derived index and rebuilds it from the durable node files.
     ///
     /// The caller has already released (or not yet acquired) the session's DB
-    /// handle, flock and socket ([`abort`](Self::abort) releases them, the
-    /// start crash-check has not bound them yet); this only discards the
-    /// derived `db.lbug` + `graph.jsonl` so the scan cannot take a reuse fast
-    /// path over the phantom projection, then runs the scan from the project
-    /// root (the session owns the layout root, whose parent is the project
-    /// dir). The scan's process-global `chdir` into `.trans` is restored so the
-    /// serve loop's remaining lifetime is unaffected.
+    /// handle, flock and socket — [`abort`](Self::abort) releases them once the
+    /// held database's own pending state (a dirty row or a pending-removal
+    /// identity) decided the discard, and the start crash-check has not bound
+    /// them yet. All this does is discard the derived `db.lbug` +
+    /// `graph.jsonl`, so the scan cannot take a reuse fast path over the
+    /// unsaved projection that database carried, then run the scan from the
+    /// project root (the session owns the layout root, whose parent is the
+    /// project dir). The scan's process-global `chdir` into `.trans` is
+    /// restored so the serve loop's remaining lifetime is unaffected.
     ///
     /// The discard runs here, BEFORE [`crate::cmd_scan`] takes the spec lock —
     /// no live session exists at this point, so this path may delete without
@@ -751,7 +763,9 @@ impl Coordinator {
     /// consults the shared fact store for the reuse decision (the warm probe is
     /// on) and may warm-reuse recorded facts, whereas `apg scan --force` never
     /// consults the store for that decision. Both paths leave the store itself
-    /// in place; only the derived `.trans` artifacts are discarded.
+    /// in place and never touch `apg/layers/**`; only the derived `.trans`
+    /// artifacts are discarded, so the rebuild sources the authored graph from
+    /// the node files, never from the discarded database.
     fn force_full_scan(apg_root: &Path) -> anyhow::Result<()> {
         // Discard the derived index and its export: with no `db.lbug` the scan
         // freshness fast path cannot fire, and with no `graph.jsonl` there is
