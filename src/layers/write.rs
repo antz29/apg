@@ -454,6 +454,8 @@ pub fn validate_save_model(nodes: &[NodeFile]) -> anyhow::Result<()> {
 /// the writes, remove the deletes, and on any failure restore every path —
 /// never leave mismatched endpoint files. Commits once. `write_through` (the
 /// write-only primitive, task-11) delegates here with an empty delete list.
+/// An already-absent delete path is success, not a failure (a retried save or
+/// a partial earlier write), so the removal stays idempotent.
 /// `apg session save` reaches this with the whole buffered set — one call, one
 /// commit; the direct mutation path calls it once per logical mutation.
 pub fn write_through_with_deletes(
@@ -537,9 +539,16 @@ pub fn write_through_with_deletes(
         }
     }
     for path in deletes {
-        if let Err(e) = std::fs::remove_file(path) {
-            rollback(&paths, &prior);
-            return Err(anyhow::anyhow!("delete {} failed: {e}", path.display()));
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            // Already gone: a replayed save, or an earlier partial write
+            // removed it. The prior snapshot recorded `None`, so rollback of
+            // this path stays a no-op.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                rollback(&paths, &prior);
+                return Err(anyhow::anyhow!("delete {} failed: {e}", path.display()));
+            }
         }
     }
 
