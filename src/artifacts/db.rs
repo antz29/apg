@@ -277,6 +277,17 @@ pub struct ArtifactDb {
     pub db: Database,
 }
 
+/// One **removed durable identity** on the pending-removal ledger: the FQN of an
+/// `apg/layers/**` node whose row a session admission detached and whose node
+/// file the save after it must delete. The DB table is `PendingRemoval`, keyed
+/// on `fqn` alone; it is a node table but deliberately NOT a node label
+/// (`load::tables::node_labels` omits it), so a detach delete never drops a
+/// pending identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRemoval {
+    pub fqn: String,
+}
+
 /// True when `fqn` resolves to a node in the live graph (any kind). Used by
 /// the test suite and the tool surface; `#[allow(dead_code)]` because the
 /// shipping CLI paths test existence via label queries.
@@ -493,6 +504,20 @@ impl ArtifactDb {
             lit(content_key.unwrap_or("")),
             lit(&scanned_at),
         ))?;
+        Ok(())
+    }
+
+    /// Insert-or-replace one removed durable identity on the **held handle**'s
+    /// pending-removal ledger: `MERGE (n:PendingRemoval {fqn})`, keyed on the
+    /// table's primary key, so recording the same identity twice is idempotent
+    /// and never duplicates a row. The ledger row outlives the detached node row
+    /// until the save that deletes that identity's node file drains it.
+    ///
+    /// Runs on a fresh connection over the caller's handle (the session
+    /// amortizes ONE `db.lbug` open) and touches no `apg/layers/**` file.
+    pub fn record_pending_removal(&self, fqn: &str) -> anyhow::Result<()> {
+        self.conn()?
+            .query(&format!("MERGE (n:PendingRemoval {{fqn: {}}})", lit(fqn)))?;
         Ok(())
     }
 
