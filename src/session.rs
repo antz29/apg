@@ -501,37 +501,87 @@ impl Coordinator {
         Ok(db)
     }
 
-    /// Classify a leftover session socket and recover from an unclean exit.
+    /// Classify a leftover session socket and the database `start` is about to
+    /// own, and recover from an unclean exit.
     ///
-    /// * absent — nothing to reclaim;
-    /// * a live session answers a connect + `Ping` — a hard refusal (one session
-    ///   per worktree DB);
-    /// * present but fails connect + `Ping` — an UNCLEAN EXIT (a crash/SIGKILL
-    ///   leaves the file but no listener): reclaim the stale socket, then
-    ///   discard and rebuild the derived `db.lbug` from the durable
-    ///   `apg/layers/**` node files via
-    ///   [`force_full_scan`](Self::force_full_scan) — the same recovery
-    ///   [`abort`](Self::abort) drives — so a killed run's phantom projection
-    ///   (admitted into the index but never made durable) is never served.
+    /// * a socket is present and a live session answers a connect + `Ping` — a
+    ///   hard refusal (one session per worktree DB);
+    /// * a socket is present but fails connect + `Ping` — an UNCLEAN EXIT (a
+    ///   crash/SIGKILL leaves the file but no listener): reclaim the stale
+    ///   socket;
+    /// * no socket, but the existing `db.lbug` carries **pending state** (a
+    ///   dirty row or a pending-removal identity,
+    ///   [`crate::artifacts::db::db_has_pending_state`]) or a **table shape
+    ///   this binary does not recognise**
+    ///   ([`crate::splice::seed::validate_compatible`], the same
+    ///   `expected_schema`-versus-`extract_schema` comparison the splice seed
+    ///   and the scan's freshness check ask) — an UNCLEAN EXIT too: the
+    ///   database is ahead of the last saved state or belongs to another
+    ///   binary, so it cannot be served.
+    ///
+    /// Every unclean verdict is this same classification the scan and query
+    /// surfaces drive, and discards and rebuilds the derived `db.lbug` from the
+    /// durable `apg/layers/**` node files via
+    /// [`force_full_scan`](Self::force_full_scan) — the same recovery
+    /// [`abort`](Self::abort) drives — so a killed run's phantom projection
+    /// (admitted into the index but never made durable) is never served. A
+    /// present, clean, shape-compatible database with no socket starts without
+    /// a scan.
+    ///
+    /// An **absent** `db.lbug` is deliberately left to the caller's refusal:
+    /// it is nothing to recover (and
+    /// [`crate::splice::seed::validate_compatible`] would call it
+    /// `Unreadable`), and `start` ([`open_owned_db`](Self::open_owned_db)) and
+    /// `apg query` each raise their own hard refusal naming `apg scan`.
     pub fn reclaim_stale_socket(apg_root: &Path) -> anyhow::Result<()> {
         let socket = socket_path(apg_root);
-        if !socket.exists() {
-            return Ok(());
-        }
-        if live_session_at(&socket) {
+        let socket_present = socket.exists();
+        if socket_present && live_session_at(&socket) {
             anyhow::bail!(
                 "a session is already live on {} — only one session may own the worktree DB; stop it with `apg session end`",
                 socket.display()
             );
         }
-        std::fs::remove_file(&socket).map_err(|e| {
-            anyhow::anyhow!(
-                "could not reclaim stale session socket {}: {e}",
-                socket.display()
-            )
-        })?;
-        eprintln!("apg session: reclaimed stale socket {}", socket.display());
-        Self::force_full_scan(apg_root)
+        if socket_present {
+            std::fs::remove_file(&socket).map_err(|e| {
+                anyhow::anyhow!(
+                    "could not reclaim stale session socket {}: {e}",
+                    socket.display()
+                )
+            })?;
+            eprintln!("apg session: reclaimed stale socket {}", socket.display());
+        }
+
+        let unclean = if socket_present {
+            true
+        } else {
+            let db = crate::splice::seed::db_path(apg_root);
+            if !db.exists() {
+                // Not classified: an absent database is the caller's refusal, not
+                // an unclean exit. Probing it would call it `Unreadable` and
+                // rebuild one behind that refusal.
+                false
+            } else if crate::artifacts::db::db_has_pending_state(apg_root) {
+                eprintln!(
+                    "apg session: {} carries pending state — rebuilding it from apg/layers/**",
+                    db.display()
+                );
+                true
+            } else if crate::splice::seed::validate_compatible(&db).is_err() {
+                eprintln!(
+                    "apg session: {} has an unrecognised table shape — rebuilding it from apg/layers/**",
+                    db.display()
+                );
+                true
+            } else {
+                false
+            }
+        };
+        if unclean {
+            Self::force_full_scan(apg_root)
+        } else {
+            Ok(())
+        }
     }
 
     /// Server-side shutdown: consume the coordinator, dropping the
