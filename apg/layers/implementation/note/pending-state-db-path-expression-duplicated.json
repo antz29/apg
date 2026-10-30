@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pending-state-db-path-expression-duplicated",
+  "body": "`db_has_pending_state` derives the database path inline (`apg_root.join(specs::TRANS).join(\"db.lbug\")`), exactly as `ArtifactDb::open` in the same file does, rather than calling the public `splice::seed::db_path`, so the expression lives in two places. Upgrade to the shared helper if the two ever diverge or the `apg/` layout's database location changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.db_has_pending_state",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
