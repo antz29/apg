@@ -4835,10 +4835,15 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// feedback-18 (negative half): a node CREATED and REMOVED in the same
-    /// unsaved run was never durable, so it leaves no delete marker. A save over
-    /// the resulting empty buffer succeeds (a no-op), writes no node file, and
-    /// creates no commit — the add-then-rm nets to nothing on disk.
+    /// feedback-18 (negative half) / phase-01 task-12: a node CREATED and then
+    /// REMOVED in the same unsaved run was never durable, so it must net to
+    /// nothing on the identity-only pending set — no node file, no
+    /// `PendingRemoval` ledger identity and no dirty row. The delete marker is
+    /// keyed on FIRST-admission durability, so an identity the session only ever
+    /// created is never ledger-held, and its row is detached at admission.
+    ///
+    /// A session read BEFORE and AFTER the save reports the node absent, and the
+    /// save over that empty pending set writes nothing and makes no commit.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_rm_of_a_node_created_in_the_same_run_leaves_no_file() {
@@ -4863,6 +4868,22 @@ mod e2e {
                 "apg {args:?}"
             );
         };
+        // Reads the held database through the live session and returns the
+        // single scalar the query projects.
+        let routed_count = |query: &str| -> String {
+            let out = testutil::spawn_apg(&["query", query], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{query}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
 
         run(
             &[
@@ -4883,48 +4904,78 @@ mod e2e {
 
         let node_path =
             layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "ephemeral");
+
+        // BEFORE the save: the never-durable identity is neither on the ledger
+        // nor dirty, and an ordinary session read reports it absent (admission
+        // detached the row at once).
+        assert_eq!(
+            routed_count(
+                "MATCH (n:PendingRemoval {fqn: 'requirements.requirement.ephemeral'}) RETURN count(*)"
+            ),
+            "0",
+            "a created-then-removed identity must never be ledger-held"
+        );
+        assert_eq!(
+            routed_count("MATCH (n:Requirement) WHERE n.updated = 1 RETURN count(*)"),
+            "0",
+            "a created-then-removed identity must leave no dirty row"
+        );
+        assert_eq!(
+            routed_count(
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.ephemeral'}) RETURN count(*)"
+            ),
+            "0",
+            "an ordinary session read must report the removed node absent before the save"
+        );
         assert!(
             !node_path.exists(),
             "an add-then-rm must never write a node file"
         );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before,
+            "a pending mutation must not create a commit before save"
+        );
 
-        // The buffer nets to nothing: save is a no-op that still succeeds.
+        // The single durability point over an empty pending set: writes nothing
+        // and commits nothing (the durable-state assertions below are its only
+        // observable).
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
             "{}",
             String::from_utf8_lossy(&save.stderr)
         );
+
+        // AFTER the save: still no file, no ledger identity, no dirty row, no
+        // commit — and the session read still reports the node absent.
         assert!(
             !node_path.exists(),
-            "save must not materialize the removed ephemeral node"
+            "save must not materialize the created-then-removed node"
+        );
+        assert_eq!(
+            routed_count(
+                "MATCH (n:PendingRemoval {fqn: 'requirements.requirement.ephemeral'}) RETURN count(*)"
+            ),
+            "0",
+            "save must leave no ledger identity for the created-then-removed node"
+        );
+        assert_eq!(
+            routed_count("MATCH (n:Requirement) WHERE n.updated = 1 RETURN count(*)"),
+            "0",
+            "save must leave no dirty row for the created-then-removed node"
+        );
+        assert_eq!(
+            routed_count(
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.ephemeral'}) RETURN count(*)"
+            ),
+            "0",
+            "the session read after the save must still report the node absent"
         );
         assert_eq!(
             testutil::commit_count(&wt),
             commits_before,
             "a no-op save must create no commit"
-        );
-
-        // The DB agrees: the added-then-removed node is absent.
-        let count = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.ephemeral'}) RETURN count(*)",
-            ],
-            &wt,
-        );
-        assert!(
-            count.status.success(),
-            "routed query: {}",
-            String::from_utf8_lossy(&count.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&count.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("0"),
-            "the DB must agree the created-then-removed node is gone"
         );
 
         let out = end_session(&wt, session);
