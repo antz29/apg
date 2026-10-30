@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.load.tables.create_schema",
+      "target": "rust.apg.load.tables.build_load_files",
       "properties": {}
     }
   ],
