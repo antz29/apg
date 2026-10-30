@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "reclaim-cause-attribution-collapsed",
+  "body": "`reclaim_stale_socket` classifies pending state first and reaches the shape probe only when that is false, so an unreadable database is logged as \"carries pending state\" rather than as unreadable or shape-mismatched; the rebuild is identical and fail-closed either way. Upgrade to a finer cause split if operators need the log to distinguish an unreadable database from a dirty one.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.reclaim_stale_socket",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
