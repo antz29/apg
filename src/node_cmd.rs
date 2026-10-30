@@ -80,6 +80,16 @@ pub fn resolve_layer(dir: &str) -> anyhow::Result<Layer> {
         .ok_or_else(|| anyhow::anyhow!("unknown layer `{dir}`"))
 }
 
+/// The supplied base's node for one identity. The caller's node set is the only
+/// source (the session's `ArtifactDb::node_files_from_db`-reconstructed database
+/// working state, or the direct path's on-disk node set) — pure list logic with
+/// no `apg/layers/**` read and no `node_file_path` probe.
+fn base_node(base: &[NodeFile], layer: Layer, node_type: &str, name: &str) -> Option<NodeFile> {
+    base.iter()
+        .find(|n| n.layer == layer.layer_dir() && n.node_type == node_type && n.name == name)
+        .cloned()
+}
+
 pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
     let Some(_sub) = args.first().map(|s| s.as_str()) else {
         anyhow::bail!("usage: apg node <add|update|rm> …");
@@ -94,12 +104,13 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
     // Durable mutations are mandatory-session (spec
     // `requirements.requirement.cli-session-required-for-durable-mutations` /
     // `requirements.constraint.cli-session-mandatory`): when a session is live
-    // it owns the DB AND the write-back buffer, and performs the whole durable
-    // write in receive order, so the mutation is forwarded and the flock is
-    // never acquired here (the session holds it for its life). A failed forward
-    // is an ERROR — there is no silent mid-flight fallback, which could
-    // double-apply a mutation that already landed. With no live session we
-    // REFUSE: the direct path is gone, and the caller must open a session.
+    // it owns the DB and the database working state it admits mutations into,
+    // and performs the whole durable write in receive order, so the mutation is
+    // forwarded and the flock is never acquired here (the session holds it for
+    // its life). A failed forward is an ERROR — there is no silent mid-flight
+    // fallback, which could double-apply a mutation that already landed. With no
+    // live session we REFUSE: the direct path is gone, and the caller must open
+    // a session.
     if !session::live_session(&apg_root) {
         anyhow::bail!(
             "a live session is required for durable mutations — run `apg session start` first"
@@ -131,12 +142,13 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
     // Durable mutations are mandatory-session (spec
     // `requirements.requirement.cli-session-required-for-durable-mutations` /
     // `requirements.constraint.cli-session-mandatory`): when a session is live
-    // it owns the DB AND the write-back buffer, and performs the whole durable
-    // write in receive order, so the mutation is forwarded and the flock is
-    // never acquired here (the session holds it for its life). A failed forward
-    // is an ERROR — there is no silent mid-flight fallback, which could
-    // double-apply a mutation that already landed. With no live session we
-    // REFUSE: the direct path is gone, and the caller must open a session.
+    // it owns the DB and the database working state it admits mutations into,
+    // and performs the whole durable write in receive order, so the mutation is
+    // forwarded and the flock is never acquired here (the session holds it for
+    // its life). A failed forward is an ERROR — there is no silent mid-flight
+    // fallback, which could double-apply a mutation that already landed. With no
+    // live session we REFUSE: the direct path is gone, and the caller must open
+    // a session.
     if !session::live_session(&apg_root) {
         anyhow::bail!(
             "a live session is required for durable mutations — run `apg session start` first"
@@ -175,8 +187,8 @@ pub struct Change {
 /// Build the complete change for one `node`/`edge` mutation (the shared
 /// read-modify-write the direct command and the session coordinator both run).
 /// The direct path supplies `build_change_over` the on-disk node set as its base
-/// ([`layers::read_existing_nodes`]) with an empty overlay, preserving the
-/// direct path's existence checks and read-modify-write over `apg/layers/**`.
+/// ([`layers::read_existing_nodes`]), preserving the direct path's existence
+/// checks and read-modify-write over `apg/layers/**`.
 ///
 /// The direct path's `node rm` outstanding-feedback warning sources its records
 /// from the worktree's `.trans` feedback mirrors (the git branch names the
@@ -205,32 +217,22 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
     } else {
         Vec::new()
     };
-    build_change_over(
-        &base,
-        &feedback,
-        apg_root,
-        kind,
-        args,
-        &layers::LayersOverlay::new(),
-    )
+    build_change_over(&base, &feedback, apg_root, kind, args)
 }
 
-/// Buffer-aware twin of [`build_change`]: the same dispatch, but every arm
-/// threads the caller-supplied `base` node set (the effective node set — the
-/// session's `ArtifactDb::node_files_from_db`-reconstructed durable universe)
-/// and a caller-supplied [`layers::LayersOverlay`] to its change builder, so a
-/// mutation's existence checks and read-modify-write resolve against the base
-/// with the cumulative buffered state folded in (an update/rm of an
-/// earlier-buffered node applies over its buffered content) rather than against
-/// unstaged identities read from `apg/layers/**` on disk. The session
-/// coordinator calls this with the overlay it builds from its write-back buffer
-/// and the DB-reconstructed base; the direct path ([`build_change`]) passes the
-/// on-disk node set and an empty overlay.
+/// Base-supplied twin of [`build_change`]: the same dispatch, but every arm
+/// threads the caller-supplied `base` node set — the session's
+/// `ArtifactDb::node_files_from_db`-reconstructed database working state — to
+/// its change builder, so a mutation's existence checks and read-modify-write
+/// resolve against that base directly, with no overlay folded in, rather than
+/// against `apg/layers/**` on disk. The session coordinator calls this with the
+/// base it reconstructs from the held database; the direct path
+/// ([`build_change`]) passes the on-disk node set.
 ///
-/// The caller-supplied effective `feedback` record set is threaded only to the
-/// `node rm` arm (its outstanding-feedback warning); every other arm ignores
-/// it. The builder itself performs no `.trans` read — each caller supplies its
-/// own source: [`build_change`] from `.trans`, the session's
+/// The caller-supplied `feedback` record set is threaded only to the `node rm`
+/// arm (its outstanding-feedback warning); every other arm ignores it. The
+/// builder itself performs no `.trans` read — each caller supplies its own
+/// source: [`build_change`] from `.trans`, the session's
 /// `Coordinator::apply_mutation` from the held DB.
 pub fn build_change_over(
     base: &[NodeFile],
@@ -238,19 +240,18 @@ pub fn build_change_over(
     apg_root: &Path,
     kind: &str,
     args: &[String],
-    overlay: &layers::LayersOverlay,
 ) -> anyhow::Result<Change> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
         anyhow::bail!("usage: apg {kind} <add|update|rm> …");
     };
     let rest = &args[1..];
     match (kind, sub) {
-        ("node", "add") => node_add_change(base, rest, overlay),
-        ("node", "update") => node_update_change(base, rest, overlay),
-        ("node", "rm") => node_rm_change(base, feedback, apg_root, rest, overlay),
-        ("edge", "add") => edge_add_change(base, rest, overlay),
-        ("edge", "update") => edge_update_change(base, rest, overlay),
-        ("edge", "rm") => edge_rm_change(base, rest, overlay),
+        ("node", "add") => node_add_change(base, rest),
+        ("node", "update") => node_update_change(base, rest),
+        ("node", "rm") => node_rm_change(base, feedback, apg_root, rest),
+        ("edge", "add") => edge_add_change(base, rest),
+        ("edge", "update") => edge_update_change(base, rest),
+        ("edge", "rm") => edge_rm_change(base, rest),
         (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
     }
 }
@@ -265,18 +266,13 @@ fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
 /// `apg node add <layer> <type> <name> [--body B] [--property k=v]*` — refuses
 /// when the FQN already exists (existence is never an implicit upsert; a
 /// re-add full-replaces the file and drops its edges). Existence resolves
-/// through `overlay` against the caller-supplied `base` node set (the session's
-/// `ArtifactDb::node_files_from_db`-reconstructed durable universe) via
-/// [`layers::LayersOverlay::over_base`]: a staged write is present, a staged
-/// delete marker is absent, and an unstaged identity is present exactly when the
-/// base carries it. Pure map/list logic — it never reads `apg/layers/**` and
-/// never probes `node_file_path`, so it cannot observe a node file the caller's
-/// base does not carry.
-fn node_add_change(
-    base: &[NodeFile],
-    args: &[String],
-    overlay: &layers::LayersOverlay,
-) -> anyhow::Result<Change> {
+/// against the caller-supplied `base` node set alone (the session's
+/// `ArtifactDb::node_files_from_db`-reconstructed database working state, or the
+/// direct path's on-disk node set): an identity is present exactly when the base
+/// carries it. Pure list logic — it never reads `apg/layers/**` and never probes
+/// `node_file_path`, so it cannot observe a node file the caller's base does not
+/// carry.
+fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -288,7 +284,7 @@ fn node_add_change(
     // by `cmd_node` (the single acquisition site) — no internal acquire, so the
     // read-modify-write is serialized and `node add` never double-locks.
     layers::refuse_if_present(
-        overlay.over_base(base, layer, &pos[1], &pos[2]).is_some(),
+        base_node(base, layer, &pos[1], &pos[2]).is_some(),
         &f,
         "apg node update",
         "apg node rm",
@@ -327,21 +323,15 @@ fn node_add_change(
 /// identity (`layer`/`type`/`name`) and every out/in edge are immutable;
 /// properties MERGE with an explicit unset. Refuses an absent node.
 ///
-/// The node's existence and base content resolve through `overlay` against the
-/// caller-supplied `base` node set (the session's
-/// `ArtifactDb::node_files_from_db`-reconstructed durable universe) via
-/// [`layers::LayersOverlay::over_base`]: a staged write yields its buffered
-/// content (its edges are kept), a staged delete marker reads as absent, and an
-/// unstaged identity yields the matching base node (or nothing when the base
-/// holds none). Pure map/list logic — it never reads `apg/layers/**` and never
-/// probes `node_file_path`, so it cannot observe a node file the caller's base
-/// does not carry. The refusal and the edge-preserving body/properties merge are
-/// applied over the resolved base rather than a fresh disk read.
-fn node_update_change(
-    base: &[NodeFile],
-    args: &[String],
-    overlay: &layers::LayersOverlay,
-) -> anyhow::Result<Change> {
+/// The node's existence and base content resolve against the caller-supplied
+/// `base` node set alone (the session's
+/// `ArtifactDb::node_files_from_db`-reconstructed database working state, or the
+/// direct path's on-disk node set): an identity is present exactly when the base
+/// carries it, and the refusal and the edge-preserving body/properties merge are
+/// applied over that node rather than a fresh disk read. Pure list logic — it
+/// never reads `apg/layers/**` and never probes `node_file_path`, so it cannot
+/// observe a node file the caller's base does not carry.
+fn node_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -352,14 +342,11 @@ fn node_update_change(
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
     let body = p.get("body");
-    // Resolve the node's existence and base content through the overlay against
-    // the caller-supplied base (task-13): a node written earlier in the same
-    // unsaved run is the base (its buffered content and edges are kept), a
-    // staged delete marker means it is absent, and an unstaged identity yields
-    // the matching base node (or nothing when the base holds none). The refusal
-    // and the edge-preserving body/properties merge are applied over the resolved
-    // base rather than a fresh disk read.
-    let Some(mut updated) = overlay.over_base(base, layer, &pos[1], &pos[2]) else {
+    // Resolve the node's existence and base content from the caller-supplied base
+    // alone: the identity is present exactly when the base carries it, and the
+    // refusal and the edge-preserving body/properties merge are applied over that
+    // node rather than a fresh disk read.
+    let Some(mut updated) = base_node(base, layer, &pos[1], &pos[2]) else {
         anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
     };
     if let Some(body) = body.as_deref() {
@@ -391,28 +378,23 @@ fn node_update_change(
 /// `apg node rm <layer> <type> <name>` — remove the node file and rewrite every
 /// file that references it (drop the incident edges), one atomic mutation.
 ///
-/// The node's existence resolves through `overlay` against the caller-supplied
-/// `base` node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
-/// durable universe) via [`layers::LayersOverlay::over_base`]: a staged write is
-/// present, a staged delete marker is absent, and an unstaged identity is present
-/// exactly when the base carries it. The incident-edge rewrite iterates the
-/// EFFECTIVE node set — the caller-supplied base with the overlay folded in
-/// ([`layers::LayersOverlay::apply_to_base`]) — so a removal drops the edges a
-/// node staged earlier in the same unsaved run. Both resolve purely over the
-/// caller-supplied base and the overlay: the builder never reads
-/// `apg/layers/**` and never probes `node_file_path`, so it cannot observe a
-/// node file the caller's base does not carry.
+/// The node's existence resolves against the caller-supplied `base` node set
+/// alone (the session's `ArtifactDb::node_files_from_db`-reconstructed database
+/// working state, or the direct path's on-disk node set): an identity is present
+/// exactly when the base carries it. The incident-edge rewrite iterates that same
+/// base, so the removal drops every edge half the base records. The builder never
+/// reads `apg/layers/**` and never probes `node_file_path`, so it cannot observe
+/// a node file the caller's base does not carry.
 ///
 /// The outstanding-feedback warning sources its records from the caller-supplied
-/// effective `feedback` set — the caller supplies its own source (the direct path
-/// from `.trans`, the session from the held DB) — so this builder performs no
+/// `feedback` set — the caller supplies its own source (the direct path from
+/// `.trans`, the session from the held DB) — so this builder performs no
 /// disk/git I/O. `apg_root` is still needed to compute the deleted file's path.
 fn node_rm_change(
     base: &[NodeFile],
     feedback: &[Record],
     apg_root: &Path,
     args: &[String],
-    overlay: &layers::LayersOverlay,
 ) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
@@ -461,22 +443,18 @@ fn node_rm_change(
         ));
     }
 
-    // Refuse an absent identity through the overlay against the caller-supplied
-    // base (task-14), mirroring `node_update_change`: a node written earlier in
-    // the same unsaved run is present (rm succeeds), a staged delete marker is
-    // absent, and an unstaged identity is present exactly when the base carries
-    // it.
-    if overlay.over_base(base, layer, &pos[1], &pos[2]).is_none() {
+    // Refuse an absent identity against the caller-supplied base alone,
+    // mirroring `node_update_change`: the identity is present exactly when the
+    // base carries it.
+    if base_node(base, layer, &pos[1], &pos[2]).is_none() {
         anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
     }
 
     let mut deletes = vec![layers::node_file_path(apg_root, layer, &pos[1], &pos[2])];
     let mut writes: Vec<NodeFile> = Vec::new();
-    // Rewrite incident edges over the EFFECTIVE node set: the caller-supplied
-    // base with the overlay folded in, so a removal sees and drops the edges a
-    // node staged earlier in the same unsaved run — not just the edges in the
-    // base. Delete-marked identities are already absent from the effective set.
-    for node in overlay.apply_to_base(base) {
+    // Rewrite incident edges over the caller-supplied base: every edge half the
+    // base records is dropped. The deleted identity's own node is skipped.
+    for node in base {
         let node_fqn = fqn(resolve_layer(&node.layer)?, &node.node_type, &node.name);
         if node_fqn == f {
             continue; // the deleted node itself — dropped, not rewritten.
@@ -509,17 +487,16 @@ fn node_rm_change(
 
 /// Read an edge endpoint: an authored node (`<layer>.<type>.<name>`) or, when it
 /// does not parse, a code FQN (`implemented-by`/`details` targets). An authored
-/// endpoint resolves through `overlay` against the caller-supplied `base` node
-/// set (the session's `ArtifactDb::node_files_from_db`-reconstructed durable
-/// universe) via [`layers::LayersOverlay::over_base`]: a staged write yields its
-/// buffered content, a staged delete marker yields absent, and an unstaged
-/// identity yields the matching base node (or nothing when the base holds none).
-/// This is pure map/list logic — it never reads `apg/layers/**` and never probes
-/// `node_file_path`, so it cannot observe a node file the caller's base does not
-/// carry. A code FQN resolves to no node file. Infallible.
-fn read_endpoint(base: &[NodeFile], overlay: &layers::LayersOverlay, f: &str) -> Option<NodeFile> {
+/// endpoint resolves against the caller-supplied `base` node set alone (the
+/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
+/// state, or the direct path's on-disk node set): an identity is present exactly
+/// when the base carries it. This is pure list logic — it never reads
+/// `apg/layers/**` and never probes `node_file_path`, so it cannot observe a node
+/// file the caller's base does not carry. A code FQN resolves to no node file.
+/// Infallible.
+fn read_endpoint(base: &[NodeFile], f: &str) -> Option<NodeFile> {
     match layers::parse_fqn(f) {
-        Ok((layer, node_type, name)) => overlay.over_base(base, layer, &node_type, &name),
+        Ok((layer, node_type, name)) => base_node(base, layer, &node_type, &name),
         Err(_) => None, // code FQN — no node file.
     }
 }
@@ -529,22 +506,14 @@ fn read_endpoint(base: &[NodeFile], overlay: &layers::LayersOverlay, f: &str) ->
 /// Refuses a duplicate `(kind, from, to)` on the source's out-half (the edge is
 /// identified by that triple; re-adding duplicates both halves).
 ///
-/// Both endpoints resolve through `overlay` against the caller-supplied `base`
-/// node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
-/// durable universe) via [`layers::LayersOverlay::over_base`] and
-/// [`read_endpoint`]: the source out-half is read from the staged content first
-/// (so an endpoint created or modified earlier in the same unsaved run
-/// composes), a staged delete marker reads as absent, and an unstaged identity
-/// yields the matching base node (or nothing when the base holds none). Pure
-/// map/list logic — it never reads `apg/layers/**` and never probes
-/// `node_file_path`, so it cannot observe a node file the caller's base does not
-/// carry. The duplicate-triple refusal is evaluated on the resolved (buffered)
-/// out-half.
-fn edge_add_change(
-    base: &[NodeFile],
-    args: &[String],
-    overlay: &layers::LayersOverlay,
-) -> anyhow::Result<Change> {
+/// Both endpoints resolve against the caller-supplied `base` node set alone (the
+/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
+/// state, or the direct path's on-disk node set) via [`read_endpoint`]: an
+/// identity is present exactly when the base carries it. Pure list logic — it
+/// never reads `apg/layers/**` and never probes `node_file_path`, so it cannot
+/// observe a node file the caller's base does not carry. The duplicate-triple
+/// refusal is evaluated on the source's resolved out-half.
+fn edge_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -557,17 +526,13 @@ fn edge_add_change(
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
     // This source-file read-push-write RMW (and the target in-half write below)
-    // runs inside the whole-durable-sequence flock held by `cmd_edge` (the
-    // single acquisition site) — no internal acquire, so no double-lock and the
-    // shared endpoint file is never read outside the serialization scope. The
-    // read resolves through `overlay` against the caller-supplied `base`, so a
-    // source staged earlier in the same unsaved run is the base; a staged
-    // delete, or an identity the base does not carry, refuses.
-    let mut source = overlay
-        .over_base(base, src_layer, &src_type, &src_name)
-        .ok_or_else(|| {
-            anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
-        })?;
+    // runs inside the session's serialization of the whole durable sequence, so
+    // the shared endpoint file is never read outside that scope. The read
+    // resolves against the caller-supplied `base`; an identity the base does not
+    // carry refuses.
+    let mut source = base_node(base, src_layer, &src_type, &src_name).ok_or_else(|| {
+        anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
+    })?;
     layers::refuse_if_present(
         source
             .out
@@ -584,7 +549,7 @@ fn edge_add_change(
     });
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(base, overlay, to) {
+    if let Some(mut target) = read_endpoint(base, to) {
         target.in_edges.push(InEdge {
             kind: kind.to_string(),
             source: from.to_string(),
@@ -606,21 +571,15 @@ fn edge_add_change(
 /// source out-half and the target in-half to the same MERGEd property map in
 /// one atomic mutation. Refuses an absent edge.
 ///
-/// Both endpoints resolve through `overlay` against the caller-supplied `base`
-/// node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
-/// durable universe) via [`layers::LayersOverlay::over_base`] and
-/// [`read_endpoint`]: the source out-half is read from the staged content first
-/// (so an edge added earlier in the same unsaved run is found and its
-/// properties merge on the buffered state), a staged delete marker reads as
-/// absent, and an unstaged identity yields the matching base node (or nothing
-/// when the base holds none). Pure map/list logic — it never reads
-/// `apg/layers/**` and never probes `node_file_path`, so it cannot observe a
-/// node file the caller's base does not carry.
-fn edge_update_change(
-    base: &[NodeFile],
-    args: &[String],
-    overlay: &layers::LayersOverlay,
-) -> anyhow::Result<Change> {
+/// Both endpoints resolve against the caller-supplied `base` node set alone (the
+/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
+/// state, or the direct path's on-disk node set) via [`read_endpoint`]: the
+/// source out-half is read from that base (so an edge the base records is found
+/// and its properties merge there), and an identity the base does not carry
+/// yields nothing. Pure list logic — it never reads `apg/layers/**` and never
+/// probes `node_file_path`, so it cannot observe a node file the caller's base
+/// does not carry.
+fn edge_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -633,11 +592,9 @@ fn edge_update_change(
     let to = pos[2].as_str();
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
-    let mut source = overlay
-        .over_base(base, src_layer, &src_type, &src_name)
-        .ok_or_else(|| {
-            anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
-        })?;
+    let mut source = base_node(base, src_layer, &src_type, &src_name).ok_or_else(|| {
+        anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
+    })?;
     let idx = source
         .out
         .iter()
@@ -653,7 +610,7 @@ fn edge_update_change(
     source.out[idx].properties = merged.clone();
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(base, overlay, to) {
+    if let Some(mut target) = read_endpoint(base, to) {
         let Some(in_edge) = target
             .in_edges
             .iter_mut()
@@ -678,21 +635,15 @@ fn edge_update_change(
 /// `apg edge rm <kind> <from> <to>` — drop the out-edge from the source and the
 /// in-edge from the target, one atomic mutation.
 ///
-/// Both endpoints resolve through `overlay` against the caller-supplied `base`
-/// node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
-/// durable universe) via [`layers::LayersOverlay::over_base`] and
-/// [`read_endpoint`]: the source out-half is read from the staged content first
-/// (so an edge added earlier in the same unsaved run is found and dropped from
-/// the buffered state), a staged delete marker reads as absent, and an
-/// unstaged identity yields the matching base node (or nothing when the base
-/// holds none). Pure map/list logic — it never reads `apg/layers/**` and never
-/// probes `node_file_path`, so it cannot observe a node file the caller's base
-/// does not carry.
-fn edge_rm_change(
-    base: &[NodeFile],
-    args: &[String],
-    overlay: &layers::LayersOverlay,
-) -> anyhow::Result<Change> {
+/// Both endpoints resolve against the caller-supplied `base` node set alone (the
+/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
+/// state, or the direct path's on-disk node set) via [`read_endpoint`]: the
+/// source out-half is read from that base (so an edge the base records is found
+/// and dropped from it), and an identity the base does not carry yields nothing.
+/// Pure list logic — it never reads `apg/layers/**` and never probes
+/// `node_file_path`, so it cannot observe a node file the caller's base does not
+/// carry.
+fn edge_rm_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -703,17 +654,15 @@ fn edge_rm_change(
     let to = pos[2].as_str();
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
-    let mut source = overlay
-        .over_base(base, src_layer, &src_type, &src_name)
-        .ok_or_else(|| {
-            anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
-        })?;
+    let mut source = base_node(base, src_layer, &src_type, &src_name).ok_or_else(|| {
+        anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
+    })?;
     source
         .out
         .retain(|oe| !(oe.kind == kind && oe.target == to));
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(base, overlay, to) {
+    if let Some(mut target) = read_endpoint(base, to) {
         target
             .in_edges
             .retain(|ie| !(ie.kind == kind && ie.source == from));
@@ -741,44 +690,28 @@ fn edge_rm_change(
 pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        node_add_change(
-            &layers::read_existing_nodes(apg_root)?,
-            args,
-            &layers::LayersOverlay::new(),
-        )?,
+        node_add_change(&layers::read_existing_nodes(apg_root)?, args)?,
     )
 }
 
 pub fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        node_update_change(
-            &layers::read_existing_nodes(apg_root)?,
-            args,
-            &layers::LayersOverlay::new(),
-        )?,
+        node_update_change(&layers::read_existing_nodes(apg_root)?, args)?,
     )
 }
 
 pub fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        edge_add_change(
-            &layers::read_existing_nodes(apg_root)?,
-            args,
-            &layers::LayersOverlay::new(),
-        )?,
+        edge_add_change(&layers::read_existing_nodes(apg_root)?, args)?,
     )
 }
 
 pub fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        edge_update_change(
-            &layers::read_existing_nodes(apg_root)?,
-            args,
-            &layers::LayersOverlay::new(),
-        )?,
+        edge_update_change(&layers::read_existing_nodes(apg_root)?, args)?,
     )
 }
 

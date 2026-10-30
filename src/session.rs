@@ -992,30 +992,25 @@ impl Coordinator {
         }
     }
 
-    /// Admit one routed durable mutation as a write-back change (phase-01
-    /// task-4, phase-02 task-1: DB-only admission, SPEC
-    /// `cli-session-write-back-buffer`).
+    /// Admit one routed durable mutation and project it into the live DB
+    /// (phase-01 task-4, phase-02 task-1: DB-only admission).
     ///
-    /// The sequence runs ENTIRELY over the session's ONE owned DB handle plus
-    /// its in-memory write-back buffer: it reads NO `apg/layers/**` node file
-    /// and NO `apg/.trans/graph.jsonl`.
+    /// The sequence runs ENTIRELY over the session's ONE owned DB handle: it
+    /// reads NO `apg/layers/**` node file and NO `apg/.trans/graph.jsonl`.
     ///
-    /// 1. Reconstruct the durable node universe from the held DB
-    ///    ([`crate::artifacts::ArtifactDb::node_files_from_db`]) and fold the
-    ///    cumulative buffer over it
-    ///    ([`layers::LayersOverlay::apply_to_base`]) to get the effective node
-    ///    set. Build the change with
+    /// 1. Reconstruct the database working state from the held DB
+    ///    ([`crate::artifacts::ArtifactDb::node_files_from_db`], which already
+    ///    carries this session's own projections and omits every ledger-held
+    ///    identity). Build the change with
     ///    [`node_cmd::build_change_over`](crate::node_cmd::build_change_over)
-    ///    over that base + overlay, so its existence checks and
-    ///    read-modify-write resolve against the CUMULATIVE buffered state (an
-    ///    update/rm of a node written earlier in the same unsaved run applies
-    ///    over its buffered content). A routed `node rm`'s outstanding-feedback
-    ///    warning is built from the held DB's transient feedback set, scoped to
-    ///    the coordinator's resolved `project`
+    ///    over that base alone — no overlay folded in — so its existence checks
+    ///    and read-modify-write resolve against the base directly. A routed
+    ///    `node rm`'s outstanding-feedback warning is built from the held DB's
+    ///    transient feedback set, scoped to the coordinator's resolved `project`
     ///    ([`crate::artifacts::ArtifactDb::feedback_records_from_db`]), never a
     ///    `.trans` read; a `None` project (detached HEAD / non-git) supplies an
     ///    empty set, so a routed rm warns on nothing — matching the direct path.
-    /// 2. Validate the change against that cumulative base via
+    /// 2. Validate the change against the same base via
     ///    [`layers::write::validate_change_over`] — NOT the disk-only
     ///    [`layers::write::validate_change`]. The two code-FQN universes come
     ///    from the same held DB
@@ -1068,17 +1063,16 @@ impl Coordinator {
         kind: &str,
         args: &[String],
     ) -> anyhow::Result<(String, Vec<String>)> {
-        // (1) The durable node universe, reconstructed from the DB the session
-        //     already holds, plus the cumulative buffered state as an overlay.
+        // (1) The database working state, reconstructed from the DB the session
+        //     already holds: it already carries this session's own projections
+        //     and omits every ledger-held identity, so no overlay is folded in.
         //     No `apg/layers/**` node file is read.
         let db_nodes = self.db.node_files_from_db()?;
-        let overlay = self.overlay_from_buffer()?;
 
-        // (2) The CUMULATIVE effective node set: the DB-reconstructed durable
-        //     universe with the buffered writes/delete markers folded in. Build
-        //     the change over it so existence checks and read-modify-write
-        //     resolve against buffered content.
-        let base = overlay.apply_to_base(&db_nodes);
+        // (2) Build the change over that base alone, so existence checks and
+        //     read-modify-write resolve against the database working state
+        //     directly.
+        let base = &db_nodes;
 
         // The held DB's transient feedback set, scoped to this session's own
         // project, is the node-rm warning's source — admission reads no `.trans`.
@@ -1094,21 +1088,15 @@ impl Coordinator {
                 Vec::new()
             };
 
-        let change = crate::node_cmd::build_change_over(
-            &base,
-            &feedback,
-            &self.apg_root,
-            kind,
-            args,
-            &overlay,
-        )?;
+        let change =
+            crate::node_cmd::build_change_over(base, &feedback, &self.apg_root, kind, args)?;
 
         // (3) The two code-reference universes from the same held DB handle —
         //     validate against them, NOT a `graph.jsonl` export.
         let (scanned, planned) = self.db.code_universes_from_db()?;
         layers::write::validate_change_over(
             &self.apg_root,
-            &base,
+            base,
             &change.writes,
             &change.deletes,
             &scanned,
@@ -1225,30 +1213,6 @@ impl Coordinator {
         }
 
         Ok((change.message, change.warnings))
-    }
-
-    /// Build the cumulative buffered state as a [`layers::LayersOverlay`]: each
-    /// buffered write is a staged write, each buffered delete marker a staged
-    /// delete. The overlay carries ONLY those buffered writes and delete
-    /// markers, so an identity no buffered change touches resolves to the held
-    /// DB base reconstructed by
-    /// [`crate::artifacts::ArtifactDb::node_files_from_db`] — the session's
-    /// admission base — and NEVER to `apg/layers/**` on disk.
-    /// [`layers::LayersOverlay::apply_to_base`] folds the buffer over that
-    /// DB-reconstructed base, so with an empty buffer every identity resolves
-    /// to the held DB base.
-    fn overlay_from_buffer(&self) -> anyhow::Result<layers::LayersOverlay> {
-        let mut overlay = layers::LayersOverlay::new();
-        for change in &self.buffer {
-            match &change.content {
-                Some(node) => overlay.stage_write(node.clone())?,
-                None => {
-                    let layer = crate::node_cmd::resolve_layer(&change.layer)?;
-                    overlay.stage_delete(layer, &change.node_type, &change.name);
-                }
-            }
-        }
-        Ok(overlay)
     }
 
     /// Replace the buffered state for one identity (last write wins), or append
