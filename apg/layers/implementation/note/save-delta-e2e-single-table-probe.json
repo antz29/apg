@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "save-delta-e2e-single-table-probe",
+  "body": "The pre-save mark set is read from the `Constraint` table alone — the fixture's only durable node table — while the post-save drain is measured through `dirty_node_files_from_db`, which walks the full 15-table roster; add a multi-table fixture if a per-table pre-save mark probe is ever wanted. The drain assertion also has to release the session first (`ArtifactDb::open` after `session end`) because the session holds the database flock, so the two halves are observed through different handles by design.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.session_save_flushes_buffered_writes_and_delete_as_is_in_one_commit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

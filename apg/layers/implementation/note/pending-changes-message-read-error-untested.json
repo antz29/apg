@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pending-changes-message-read-error-untested",
+  "body": "The message's pending-state read-error fallback — refusing with the read error instead of printing a listing — has no direct test, because `ArtifactDb` exposes no fake seam to make those reads fail. Upgrade it if a database trait or seam lands, or when phase 4's `has_pending_state` folds this gate, which is the first caller that can fail closed on the same reads.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.pending_changes_message",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

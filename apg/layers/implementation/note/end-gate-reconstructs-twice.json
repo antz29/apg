@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "end-gate-reconstructs-twice",
+  "body": "Two limits on the End gate. (1) It reads `dirty_node_files_from_db`'s full dirty-node reconstruction for a yes/no decision, and `pending_changes_message` re-reads it on a refusal, so refusing over a very large dirty set reconstructs twice; upgrade to a COUNT-only probe on `ArtifactDb` if session-end refusal latency ever matters. (2) The gate trusts the admission path to mark dirty rows: an admission that projected without marking would let `end` release silently — an invariant that lives in `apply_mutation` and is pinned by the routed positive mark assertions in the session e2e, not here.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.handle_connection",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

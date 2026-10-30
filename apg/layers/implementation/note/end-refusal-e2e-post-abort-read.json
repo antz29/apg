@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "end-refusal-e2e-post-abort-read",
+  "body": "Two limits. (1) The post-abort visibility arm reads the rebuilt index through `apg query` with no live session, which is only distinguishable from a query-side rebuild because the `apg session: aborted` stderr probe already pins the abort's own rebuild succeeded; upgrade when phase 4 makes query's reclaim-and-rebuild unconditional, and re-check that a clean, shape-compatible database still takes the direct read rather than a rebuild. (2) The recall arm's one-commit count covers only the single pending row it saves; the full dirty-set delta contract belongs to the artifacts-side save test.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.end_refuses_on_a_dirty_buffer_and_abort_discards",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
