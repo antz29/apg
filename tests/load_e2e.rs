@@ -1,7 +1,9 @@
 mod common;
 
+use ::parquet::file::reader::{FileReader, SerializedFileReader};
 use apg::graph::{Graph, Location, Node, NodeKind};
 use apg::load::*;
+use apg::splice::query_rows;
 use apg::testutil::read_graph_jsonl;
 use lbug::{Connection, Database, SystemConfig};
 
@@ -112,7 +114,57 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let graph = fixture_graph();
+        // One node per durable (`apg/layers/**`) table, so the `updated` column
+        // and its clean-base value are observable after the round trip.
+        let durable = [
+            (
+                "Requirement",
+                NodeKind::Requirement,
+                "requirements.requirement.pinned",
+            ),
+            ("Note", NodeKind::Note, "implementation.note.pinned"),
+            (
+                "Stakeholder",
+                NodeKind::Stakeholder,
+                "requirements.stakeholder.pinned",
+            ),
+            ("Entity", NodeKind::Entity, "domain.entity.pinned"),
+            ("System", NodeKind::System, "solution.system.pinned"),
+            (
+                "Container",
+                NodeKind::Container,
+                "solution.container.pinned",
+            ),
+            (
+                "Component",
+                NodeKind::Component,
+                "solution.component.pinned",
+            ),
+            ("User", NodeKind::User, "requirements.user.pinned"),
+            ("DomainGroup", NodeKind::Group, "domain.group.pinned"),
+            ("Value", NodeKind::Value, "domain.value.pinned"),
+            ("Service", NodeKind::Service, "domain.service.pinned"),
+            ("Person", NodeKind::Person, "solution.person.pinned"),
+            ("Actor", NodeKind::Actor, "domain.actor.pinned"),
+            ("Role", NodeKind::Role, "solution.role.pinned"),
+            (
+                "Constraint",
+                NodeKind::Constraint,
+                "global.constraint.pinned",
+            ),
+        ];
+        let mut graph = fixture_graph();
+        for &(_, kind, fqn) in &durable {
+            graph.nodes.insert(
+                fqn.to_string(),
+                Node {
+                    kind,
+                    name: Some("pinned".to_string()),
+                    body: Some(format!("body of {fqn}")),
+                    ..Node::default()
+                },
+            );
+        }
         build_load_files(&graph, &dir).unwrap();
 
         let db = Database::in_memory(SystemConfig::default()).unwrap();
@@ -195,6 +247,43 @@ mod e2e {
             .unwrap()
             .to_string();
         assert!(out.contains("ext.Foo"), "unresolved_call: {out}");
+
+        // The durable `updated` dirty flag loads as the clean base (0) and sits
+        // LAST in every durable table's DDL: COPY maps parquet columns by
+        // position, so the trailing INT64 must line up with the trailing flag.
+        for &(label, _, fqn) in &durable {
+            let (_, cols) =
+                query_rows(&conn, &format!("CALL table_info('{label}') RETURN name")).unwrap();
+            assert_eq!(
+                cols.last().and_then(|row| row.first()).map(String::as_str),
+                Some("updated"),
+                "{label} column order: {cols:?}"
+            );
+            let out = conn
+                .query(&format!("MATCH (n:{label}) RETURN n.fqn, n.updated"))
+                .unwrap()
+                .to_string();
+            assert!(out.contains(&format!("{fqn}|0")), "{label} row: {out}");
+        }
+
+        // The pending-removal ledger table exists, loads zero rows, and its
+        // load file is emitted empty (COPY skips it on a fresh load).
+        let out = conn
+            .query("MATCH (p:PendingRemoval) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("0"),
+            "pending_removal rows: {out}"
+        );
+        let ledger = dir.join("pending_removal.parquet");
+        let reader = SerializedFileReader::new(std::fs::File::open(&ledger).unwrap()).unwrap();
+        assert_eq!(
+            reader.metadata().file_metadata().num_rows(),
+            0,
+            "pending_removal load file is not empty"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
