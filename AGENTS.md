@@ -193,9 +193,10 @@ The project builds a single `apg` binary (package `apg`):
 - `apg session <sub> …` — the session-scoped single-writer coordinator that owns
   the worktree's `apg/.trans/db.lbug`: `start` launches it (foreground; it
   requires a project context and refuses on the default branch),
-  `save` — make the buffered node-file set durable (one atomic write + commit);
-  `abort` — discard the buffered set and release the session; `end` — release
-  the DB/socket and exit (refuses while the buffer is dirty).
+  `save` — commit the database's dirty rows and pending-deletion identities
+  (one atomic write + commit); `abort` — discard them and release the session;
+  `end` — release the DB/socket and exit (refuses while the database carries
+  pending state).
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
   `apg/.trans/plans/<project>.jsonl`, branch-local): `add`
   (`add <project>` creates the plan, refusing when it exists; then
@@ -311,21 +312,28 @@ double-apply a mutation that already landed).
   worktree path exceeds the platform's Unix-socket `SUN_LEN`). Exactly one
   session may own a worktree DB — a second `start` is refused — and `apg scan` /
   `apg project merge` are refused while a session is live.
-- **Write-back buffer.** Each routed mutation is admitted into an in-memory
-  buffer of node-file writes/deletes whose exact projection delta is applied
-  synchronously **at admission**, so a routed read (`apg query` through the
-  session) sees the buffered intention immediately — but `apg/layers/**` and git
-  stay at the last saved state. Forwarded mutations carry an at-most-once client
-  id, so a replay never double-applies.
-- **`apg session save`** — the **single durability point**: make the whole
-  buffered node-file set durable in **one atomic write + one git commit**, then
-  clear the buffer. Nothing the session buffered is committed until `save`.
+- **The database is the working state.** A routed mutation is applied to the
+  worktree `apg/.trans/db.lbug` **at admission** — the row is written, both
+  halves of an edge are projected, exactly the changed node files are marked
+  dirty, and a delete's row is gone with its identity recorded in the
+  pending-removal ledger — so a routed read (`apg query` through the session)
+  sees it immediately, while `apg/layers/**` and git stay at the last saved
+  state. Forwarded mutations carry an at-most-once client id, so a replay never
+  double-applies.
+- **`apg session save`** — the **single durability point**: write exactly the
+  dirty rows at their node-file paths and delete each pending-deletion
+  identity's node file in **one atomic `apg/layers/**` write plus exactly one
+  git commit**, then clear the marks. Nothing the session admitted is committed
+  until `save`, and a session whose database carries no pending state writes
+  nothing and commits nothing.
 - **`apg session end`** — signal the live session to release the DB/socket and
-  exit. It **refuses while the buffer is dirty** (run `apg session save` to make
-  the buffer durable, or `apg session abort` to discard it); every projection
-  delta was applied at admission, so `end` performs no flush.
-- **`apg session abort`** — discard the buffered node-file set and release the
-  session; nothing buffered becomes durable.
+  exit. It **refuses while the database carries pending state** (dirty rows or
+  pending-deletion identities, which it lists; run `apg session save` to make
+  them durable, or `apg session abort` to discard them); admission already
+  applied every projection, so `end` performs no flush.
+- **`apg session abort`** — discard the database's pending state — the dirty
+  rows and the pending-deletion identities — and release the session; nothing
+  pending becomes durable.
 
 The **`apg_session`** suite tool wraps `start`: because `apg session start` is a
 blocking foreground process, the tool spawns it **detached**, waits until its
@@ -760,7 +768,7 @@ Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are ro
 The **durable spec** is a node-file store, not a JSONL: one file per node under
 `apg/layers/`, authored via `apg node add|rm` / `apg edge add|rm` (never by
 editing files by hand — the binary validates the schema, the pairings, and the
-references; each mutation is admitted into the session's write-back buffer and
+references; each mutation is applied to the worktree database at admission and
 is not committed until `apg session save`). FQN = **`<layer>.<type>.<name>`**,
 no project prefix, no `spec.<id>` vocabulary; the **file name IS the identity**
 and the node-file's `layer`/`type`/`name` fields must match the path. Both
