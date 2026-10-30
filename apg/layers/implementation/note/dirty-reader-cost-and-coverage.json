@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "dirty-reader-cost-and-coverage",
+  "body": "Two limits on the dirty reader. (1) It reads every durable rel table and filters endpoints in memory (the same shape `node_files_from_db` uses), so a save costs O(all authored edges); upgrade to a per-relation `WHERE a.fqn IN … OR b.fqn IN …` probe if the durable edge set grows large enough for save latency to matter. (2) It has no unit/int test of its own — a database reader is real I/O, so it is e2e by definition, and its declared scope was the one file — so its behaviour is pinned by phase-2 tasks 4/10/15 and shares the reconstruction the existing `node_files_from_db` e2e cases exercise; give it a dedicated case if it grows a selection beyond `updated = 1` plus the ledger filter.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.dirty_node_files_from_db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
