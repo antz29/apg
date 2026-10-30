@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pending-state-rule-infallible-row-answer",
+  "body": "`pending_state_present` takes an infallible per-table row answer (`FnMut(&str) -> bool`), so a database read error can only be folded to `true` by the caller's own closure — the fail-closed policy lives in `ArtifactDb::has_pending_state` and `db_has_pending_state`, not in the shared rule, and a read error is not distinguishable from a genuine dirty row by the rule itself. Upgrade to a fallible closure if the fail-closed policy ever needs to be centralised or the two predicates must report the read error apart from the verdict.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.pending_state_present",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
