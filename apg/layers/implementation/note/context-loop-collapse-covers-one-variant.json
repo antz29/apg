@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.spec_lint.tests.unit.implemented_by_presence_depends_on_context_not_scope",
+      "target": "rust.apg.spec_lint.tests.unit.implemented_by_presence_depends_on_context_not_scope",
       "properties": {}
     }
   ],
