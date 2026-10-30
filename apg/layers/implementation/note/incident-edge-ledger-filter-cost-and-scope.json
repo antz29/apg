@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "incident-edge-ledger-filter-cost-and-scope",
+  "body": "The ledger filter costs one extra ledger query per non-empty call: a fresh connection plus `MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`, built into a `BTreeSet` before the per-table loops (an empty-FQN call still returns before the read, and on a clean handle the ledger is empty so the steady state is one cheap statement). Upgrade to a single ledger-filtered pass if per-mutation admission over a large durable spec becomes hot. Note also that `node_files_from_db` still reconstructs both edge halves unfiltered — the residual half that the save boundary's pairing check refuses — so the ledger's containment is enforced here on the in-edge reconstruction only.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.incident_edge_records_from_db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
