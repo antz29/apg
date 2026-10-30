@@ -720,13 +720,13 @@ impl Coordinator {
     /// identity) has nothing unsaved projected into it, so the run simply
     /// releases the session: no discard and no rebuild.
     ///
-    /// Consumes the coordinator, dropping the non-optional held DB handle as
-    /// it releases the extended flock and removes the socket. The release is
-    /// exactly [`end`](Self::end)'s ordering and runs BEFORE the forced scan:
-    /// the owned DB handle, the extended flock, then the socket. The scan opens
-    /// (and locks) its own DB/socket, so holding either across it would
-    /// self-deadlock — the scan's live-session guard would see this session's
-    /// socket and refuse, and the stale handle would hold the index.
+    /// Consumes the coordinator, releasing it BEFORE the forced scan. Unlike
+    /// [`end`](Self::end), the held DB handle is dropped first, so the stale
+    /// mmap is off the index before the extended flock is released and the
+    /// socket removed — the ordering the inline comment below restates. The
+    /// scan opens (and locks) its own DB/socket, so holding either across it
+    /// would self-deadlock — the scan's live-session guard would see this
+    /// session's socket and refuse, and the stale handle would hold the index.
     ///
     /// The rebuild reuses the existing `apg scan` entry point
     /// ([`crate::cmd_scan`]), which drives the same
