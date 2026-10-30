@@ -4653,15 +4653,18 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// feedback-18: a DURABLE node that is first updated (buffering an entry)
-    /// and then removed in the same unsaved run keeps its delete marker, so
-    /// `save` removes its node file. The old rule keyed the marker off the held
-    /// DB plus "is it a pending write", and the update made it a pending write —
-    /// so `rm` dropped the buffer entry, `save` left the node file in
-    /// `apg/layers/**`, and the DB (which had already projected the deletion at
-    /// admission) disagreed with disk. The fix records durability at FIRST
-    /// admission (`PendingChange::durable_before`) and keeps the marker exactly
-    /// when the node was durable before.
+    /// feedback-18 / phase-01 task-8: a DURABLE node that is first updated and
+    /// then removed in the same unsaved run keeps its identity on the
+    /// pending-removal ledger, so `save` removes its node file. Durability is
+    /// keyed on FIRST admission — the earlier update cannot make the remove
+    /// drop the delete — and admission detaches the row at once, so BEFORE the
+    /// save a routed read reports the node absent while the ledger holds its
+    /// identity. The save then removes exactly that node file in one commit and
+    /// leaves the untouched neighbour's file alone.
+    ///
+    /// The ledger's post-save drain is `session save`'s own contract, pinned by
+    /// `session_save_flushes_buffered_writes_and_delete_as_is_in_one_commit` —
+    /// deliberately not asserted here.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_rm_of_a_saved_node_that_was_updated_leaves_no_file_and_one_commit() {
@@ -4685,10 +4688,26 @@ mod e2e {
                 "apg {args:?}"
             );
         };
+        // Reads the held database through the live session and returns the
+        // single scalar the query projects.
+        let routed_count = |query: &str| -> String {
+            let out = testutil::spawn_apg(&["query", query], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{query}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
 
-        // A durable baseline: add a node through the session and save it. A
-        // lone `global.constraint` keeps the baseline whole-model-valid (SPEC
-        // §8.1 — no cardinality minimums).
+        // A durable baseline: a node to remove and an untouched neighbour to
+        // leave alone. Two `global.constraint`s keep the baseline
+        // whole-model-valid (SPEC §8.1 — no cardinality minimums).
         run(
             &[
                 "node",
@@ -4701,17 +4720,31 @@ mod e2e {
             ],
             "Added node global.constraint.doomed",
         );
+        run(
+            &[
+                "node",
+                "add",
+                "global",
+                "constraint",
+                "keep",
+                "--body",
+                "kept",
+            ],
+            "Added node global.constraint.keep",
+        );
         let first_save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             first_save.status.success(),
             "{}",
             String::from_utf8_lossy(&first_save.stderr)
         );
-        let node_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "doomed");
+        let doomed_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "doomed");
+        let keep_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "keep");
         assert!(
-            node_path.exists(),
+            doomed_path.exists(),
             "the baseline save must have written the `doomed` node file"
         );
+        let keep_bytes = std::fs::read(&keep_path).unwrap();
         let commits_before = testutil::commit_count(&wt);
 
         // An update (buffering the durable node) followed by a remove in the
@@ -4733,19 +4766,41 @@ mod e2e {
             "Removed node global.constraint.doomed",
         );
 
-        // Before the save nothing else is durable: the last saved file is still
-        // there and no commit has landed for the update/remove.
+        // BEFORE the save, read the held database through the live session: the
+        // removed identity is ledger-held, while an ordinary read of the node's
+        // own table reports it absent (admission detached the row at once).
+        assert_eq!(
+            routed_count(
+                "MATCH (n:PendingRemoval {fqn: 'global.constraint.doomed'}) RETURN count(*)"
+            ),
+            "1",
+            "the removed durable identity must be ledger-held before the save"
+        );
+        assert_eq!(
+            routed_count("MATCH (n:Constraint {fqn: 'global.constraint.doomed'}) RETURN count(*)"),
+            "0",
+            "an ordinary session read must report the removed node absent before the save"
+        );
+
+        // Nothing durable has moved yet: the last saved file is still there,
+        // the untouched neighbour is byte-identical, and no commit has landed.
         assert!(
-            node_path.exists(),
-            "a buffered update/remove must not touch `apg/layers/**` before save"
+            doomed_path.exists(),
+            "a pending removal must not touch `apg/layers/**` before save"
+        );
+        assert_eq!(
+            std::fs::read(&keep_path).unwrap(),
+            keep_bytes,
+            "an untouched node file must stay byte-identical before save"
         );
         assert_eq!(
             testutil::commit_count(&wt),
             commits_before,
-            "a buffered update/remove must not create a commit before save"
+            "a pending removal must not create a commit before save"
         );
 
-        // save removes the file in exactly one commit.
+        // The single durability point removes exactly the ledger identity's
+        // file, in exactly one commit, and leaves the neighbour alone.
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
@@ -4753,42 +4808,22 @@ mod e2e {
             String::from_utf8_lossy(&save.stderr)
         );
         assert!(
-            !node_path.exists(),
+            !doomed_path.exists(),
             "save must remove the durable `doomed` node file"
+        );
+        assert!(
+            keep_path.exists(),
+            "save must leave the untouched `keep` node file in place"
+        );
+        assert_eq!(
+            std::fs::read(&keep_path).unwrap(),
+            keep_bytes,
+            "save must leave the untouched node file byte-identical"
         );
         assert_eq!(
             testutil::commit_count(&wt),
             commits_before + 1,
             "save must land exactly one new commit"
-        );
-        assert!(
-            !layers::read_existing_nodes(&wt_apg)
-                .unwrap()
-                .iter()
-                .any(|n| n.name == "doomed"),
-            "the durable store must no longer contain `doomed`"
-        );
-
-        // The DB agrees: no `Constraint` row for the removed FQN.
-        let count = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Constraint {fqn: 'global.constraint.doomed'}) RETURN count(*)",
-            ],
-            &wt,
-        );
-        assert!(
-            count.status.success(),
-            "routed query: {}",
-            String::from_utf8_lossy(&count.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&count.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("0"),
-            "the DB must agree that the removed node is gone"
         );
 
         let out = end_session(&wt, session);
