@@ -427,7 +427,7 @@ per node, authored with `apg node add|rm <layer> <type> <name>` and
 `apg edge add|rm <kind> <from> <to>` from a live session (see
 [Sessions](#sessions-caller-controlled-durability)); the files are never
 hand-edited — the binary validates schema, pairings, and references, and
-`apg session save` commits the buffered set.
+`apg session save` makes the session's pending changes durable.
 The FQN is **`<layer>.<type>.<name>`** — the file name IS the identity, no
 project prefix. Six layers:
 
@@ -478,25 +478,27 @@ apg: a live session is required for durable mutations — run `apg session start
 flock for its whole life, and serves routed mutations and reads in receive
 order. One session owns one worktree — a second `start` refuses.
 
-While the session is live, each `apg node`/`apg edge` mutation is admitted into
-an in-memory **write-back buffer** and projected into the live `db.lbug`
-immediately (so later mutations build on the cumulative buffered state), but
+While the session is live, the database is its working state: each
+`apg node`/`apg edge` mutation is applied to the worktree `db.lbug` at
+admission — projected so a routed read sees it, with exactly the node files it
+changes marked dirty and a deleted node's row gone at once — while
 `apg/layers/**` and git history stay at the last saved state. `apg query` also
-routes through the session and sees every unsaved buffered change; with no live
-session it opens `db.lbug` directly for the last saved state.
+routes through the session and sees the unsaved rows; with no live session it
+opens `db.lbug` directly for the last saved state.
 
-`apg session save` is the **single durability point**: it writes the whole
-buffered node-file set into `apg/layers/**` in one atomic write and makes exactly
-one git commit, then clears the buffer. A save over a clean buffer writes
-nothing and commits nothing.
+`apg session save` is the **single durability point**: it writes exactly the
+marked rows at their node-file paths and removes each pending-deletion file in
+one atomic `apg/layers/**` write and exactly one git commit, then clears the
+marks. A save over a clean session writes nothing and commits nothing.
 
 The two closing verbs:
 
 - `apg session end` — release the database, the flock, and the socket and exit.
-  It **refuses while the buffer is dirty** (save or abort first), leaving the
-  session live and the buffered changes intact.
-- `apg session abort` — **discard** the buffered node-file set and release the
-  session; `apg/layers/**` and git stay at the last saved state.
+  It **refuses while the database carries pending state** (dirty rows or
+  pending deletions, which it lists; save or abort first), leaving the session
+  live and the unsaved state intact.
+- `apg session abort` — **discard** the pending set and release the session;
+  `apg/layers/**` and git stay at the last saved state.
 
 Because the session owns the branch DB, `apg scan` and `apg project merge`
 refuse while it is live (save and end first). A session socket left behind by a
