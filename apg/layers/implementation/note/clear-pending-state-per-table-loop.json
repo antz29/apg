@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "clear-pending-state-per-table-loop",
+  "body": "`clear_pending_state` issues one clearing statement per durable node table (15 `MATCH … WHERE n.updated = 1 SET n.updated = 0`) plus one ledger `DELETE`, on a single connection. Upgrade to a single roster-wide statement if lbug gains a multi-label `SET` — and fold `mark_dirty`'s per-table walk into it at the same time, since both walk the same roster for the same reason. Coverage: the primitive ships uncalled until the save wires it (phase-2 task-4), and its first runtime proof is task-15's e2e plus task-11's clean-save no-op; there is no unit/int tier for it because a database touch is real I/O.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.clear_pending_state",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
