@@ -812,10 +812,11 @@ test.skipIf(!enabled)(
 // status message), so — like the fs-tool scenarios above — this drives the SAME
 // sequence the tool runs: spawn `apg session start` DETACHED, wait for its
 // socket to answer live, and return while the coordinator keeps running. A
-// durable `apg node` mutation then routes through the live session (buffered
-// until `apg session save`, which flushes it in one commit), and `apg session
-// end` releases the session. A second detached start while one is live, and a
-// root with no `db.lbug`, both fail cleanly rather than blocking or throwing.
+// durable `apg node` mutation then routes through the live session: it lands in
+// the worktree database at admission, so no node file appears before `apg
+// session save` writes the marked rows in one commit, and `apg session end`
+// releases the session. A second detached start while one is live, and a root
+// with no `db.lbug`, both fail cleanly rather than blocking or throwing.
 // Real I/O (scratch /tmp git repo, a scanned db.lbug, a detached process, a Unix
 // socket, git commits), so opt-in suite e2e against a candidate binary
 // (`global.constraint.no-real-project-test`).
@@ -876,11 +877,13 @@ test.skipIf(!enabled || !binary)(
       expect(existsSync(live.socket)).toBe(true)
       expect(await sessionLiveAt(live.socket)).toBe(true)
 
-      // A routed durable mutation is admitted while the session is live, and
-      // stays buffered (no node file on disk) until save. A `global` constraint
-      // carries no whole-model cardinality obligation, so `session save`'s
-      // `validate_cardinalities(Context::Save)` accepts a bare one (a lone
-      // `requirement` would be refused: it must be driven-by a Service, §3.4).
+      // A routed durable mutation is admitted while the session is live: its
+      // row lands in the worktree database at admission, and no node file
+      // appears on disk until save. The save boundary's scope is per-node
+      // structure over the dirty rows plus edge pairing over the held set — the
+      // whole-model minimums are deferred to lint and merge — so a bare
+      // `global` constraint, which carries no such obligation, is accepted
+      // there (a lone `requirement` must be driven-by a Service, §3.4).
       const nodeFile = path.join(
         worktree,
         "apg",
@@ -909,7 +912,7 @@ test.skipIf(!enabled || !binary)(
       expect(typeof second).toBe("string")
       expect(second as string).toContain("apg session start failed")
 
-      // `apg session save` flushes the whole buffer in one commit …
+      // `apg session save` writes the marked rows in one commit …
       const save = runIn(worktree, ["session", "save"])
       expect(save.exitCode).toBe(0)
       expect(save.stdout.toString().trim()).toBe("Session saved")
