@@ -3,6 +3,12 @@
 //! ([`create_schema`]), and the `COPY FROM` loader ([`copy_from`]). Also the
 //! pair/node label enumerations the schema, the loader, and the write-through
 //! merge guard share.
+//!
+//! Every durable node table (the `apg/layers/**` set) carries the `updated`
+//! dirty flag a session admission sets, and the `PendingRemoval` ledger holds a
+//! removed identity until a save. The ledger label is deliberately kept **out**
+//! of [`node_labels`], whose roster the detach delete walks: deleting every
+//! label's row for an FQN must never drop a pending identity.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -17,6 +23,11 @@ use super::parquet::{Col, lines, loc, write_parquet};
 
 /// Writes one PARQUET file per node table and one per rel-table `(from, to)`
 /// pair into `dir`. Columns match the LadybugDB table schema exactly.
+///
+/// A durable node table's load rows are the clean durable base — `updated` is
+/// 0, and only a session admission marks a row dirty — while the
+/// `pending_removal` ledger file loads with zero rows (no identity is pending
+/// in a freshly loaded database).
 pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     // --- Node tables ---
     let mut language_fqn = Vec::new();
@@ -324,6 +335,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // A durable node table's load file carries the session's `updated` dirty
+    // flag: a load writes the clean base (0), only an admission sets a row.
+    let clean = |rows: usize| Col::I64(vec![0; rows]);
+
     write_parquet(
         &dir.join("language.parquet"),
         &[("fqn", Col::Str(language_fqn))],
@@ -398,6 +413,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("code_type", Col::Str(agent_ct)),
         ],
     )?;
+    let rows = req_fqn.len();
     write_parquet(
         &dir.join("requirement.parquet"),
         &[
@@ -407,8 +423,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("body", Col::Str(req_body)),
             ("feature", Col::Str(req_feature)),
             ("properties", Col::Str(req_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = note_fqn.len();
     write_parquet(
         &dir.join("note.parquet"),
         &[
@@ -416,6 +434,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("body", Col::Str(note_body)),
             ("kind", Col::Str(note_kind)),
             ("properties", Col::Str(note_props)),
+            ("updated", clean(rows)),
         ],
     )?;
     write_parquet(
@@ -453,6 +472,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("status", Col::Str(task_status)),
         ],
     )?;
+    let rows = stakeholder_fqn.len();
     write_parquet(
         &dir.join("stakeholder.parquet"),
         &[
@@ -460,8 +480,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(stakeholder_name)),
             ("body", Col::Str(stakeholder_body)),
             ("properties", Col::Str(stakeholder_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = entity_fqn.len();
     write_parquet(
         &dir.join("entity.parquet"),
         &[
@@ -469,8 +491,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(entity_name)),
             ("body", Col::Str(entity_body)),
             ("properties", Col::Str(entity_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = system_fqn.len();
     write_parquet(
         &dir.join("system.parquet"),
         &[
@@ -478,8 +502,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(system_name)),
             ("body", Col::Str(system_body)),
             ("properties", Col::Str(system_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = container_fqn.len();
     write_parquet(
         &dir.join("container.parquet"),
         &[
@@ -488,8 +514,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("kind", Col::Str(container_kind)),
             ("body", Col::Str(container_body)),
             ("properties", Col::Str(container_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = component_fqn.len();
     write_parquet(
         &dir.join("component.parquet"),
         &[
@@ -497,8 +525,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(component_name)),
             ("body", Col::Str(component_body)),
             ("properties", Col::Str(component_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = user_fqn.len();
     write_parquet(
         &dir.join("user.parquet"),
         &[
@@ -506,8 +536,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(user_name)),
             ("body", Col::Str(user_body)),
             ("properties", Col::Str(user_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = group_fqn.len();
     write_parquet(
         &dir.join("group.parquet"),
         &[
@@ -517,8 +549,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("root", Col::Str(group_root)),
             ("body", Col::Str(group_body)),
             ("properties", Col::Str(group_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = value_fqn.len();
     write_parquet(
         &dir.join("value.parquet"),
         &[
@@ -526,8 +560,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(value_name)),
             ("body", Col::Str(value_body)),
             ("properties", Col::Str(value_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = service_fqn.len();
     write_parquet(
         &dir.join("service.parquet"),
         &[
@@ -535,8 +571,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(service_name)),
             ("body", Col::Str(service_body)),
             ("properties", Col::Str(service_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = person_fqn.len();
     write_parquet(
         &dir.join("person.parquet"),
         &[
@@ -544,8 +582,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(person_name)),
             ("body", Col::Str(person_body)),
             ("properties", Col::Str(person_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = actor_fqn.len();
     write_parquet(
         &dir.join("actor.parquet"),
         &[
@@ -553,8 +593,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(actor_name)),
             ("body", Col::Str(actor_body)),
             ("properties", Col::Str(actor_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = role_fqn.len();
     write_parquet(
         &dir.join("role.parquet"),
         &[
@@ -562,8 +604,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(role_name)),
             ("body", Col::Str(role_body)),
             ("properties", Col::Str(role_props)),
+            ("updated", clean(rows)),
         ],
     )?;
+    let rows = constraint_fqn.len();
     write_parquet(
         &dir.join("constraint.parquet"),
         &[
@@ -571,7 +615,15 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(constraint_name)),
             ("body", Col::Str(constraint_body)),
             ("properties", Col::Str(constraint_props)),
+            ("updated", clean(rows)),
         ],
+    )?;
+    // The pending-removal ledger: no identity is pending in a freshly loaded
+    // database, so its load file is emitted with zero rows (and the COPY skips
+    // it) — the table still has to exist so a session can insert into it.
+    write_parquet(
+        &dir.join("pending_removal.parquet"),
+        &[("fqn", Col::Str(Vec::new()))],
     )?;
 
     // --- Rel tables ---
@@ -1192,6 +1244,10 @@ pub fn rel_table_pairs() -> &'static [(&'static str, &'static str, &'static str)
 /// Every node-table label, in schema creation order. Used for DB label lookups
 /// (`ArtifactDb::node_label`) — the label of a `--on` target decides whether
 /// it is an allowable `Details` target.
+///
+/// `PendingRemoval` is **deliberately absent**: the detach delete walks this
+/// roster to remove every row of an FQN, and dropping a pending identity there
+/// would lose the removal a save still owes.
 pub fn node_labels() -> &'static [&'static str] {
     &[
         "Module",
@@ -1275,6 +1331,10 @@ pub fn label_of(k: NodeKind) -> &'static str {
 /// Creates the LadybugDB schema (SPEC §7, R1/R2/R20/R21): the five code node
 /// tables, the spec/plan node tables, and the rel tables (Contains extended
 /// with spec/plan pairs, plus the per-kind spec/plan rel tables).
+///
+/// Every durable (`apg/layers/**`) node table carries the `updated` dirty flag
+/// a session admission sets, and the `PendingRemoval` ledger node table holds a
+/// removed identity until the save deletes its node file.
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
     conn.query("CREATE NODE TABLE Language(fqn STRING PRIMARY KEY)")?;
@@ -1295,10 +1355,10 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE Agent(fqn STRING PRIMARY KEY, path STRING, start_line INT64, end_line INT64, code_type STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING, properties STRING)",
+        "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Note(fqn STRING PRIMARY KEY, body STRING, kind STRING, properties STRING)",
+        "CREATE NODE TABLE Note(fqn STRING PRIMARY KEY, body STRING, kind STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
         "CREATE NODE TABLE Feedback(fqn STRING PRIMARY KEY, body STRING, status STRING, disposition STRING)",
@@ -1309,44 +1369,50 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, status STRING)")?;
     conn.query(
-        "CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Container(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Container(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE User(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE User(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE DomainGroup(fqn STRING PRIMARY KEY, name STRING, attribute STRING, root STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE DomainGroup(fqn STRING PRIMARY KEY, name STRING, attribute STRING, root STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Value(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Value(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Service(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Service(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Person(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Person(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Actor(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Actor(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Role(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Role(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
+    // The pending-removal ledger: one removed durable identity, held from the
+    // admission that detached its row until the save that deletes its node
+    // file. It is a node table (so `MERGE` insert-or-replaces an identity) but
+    // it is **not** a node label ([`node_labels`] omits it) — a detach delete
+    // must never drop a pending identity.
+    conn.query("CREATE NODE TABLE PendingRemoval(fqn STRING PRIMARY KEY)")?;
     // The durable authored rel tables gain the serialized-properties column.
     // `Contains`/`Calls`/`Uses` are shared with scanned code rows; those carry
     // the empty-object value (`"{}"`). The transient plan/feedback rels
@@ -1445,7 +1511,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         conn.query(&stmt)?;
         Ok(())
     };
-    let stmts: [(&str, String); 42] = [
+    let stmts: [(&str, String); 43] = [
         (
             "module.parquet",
             format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
@@ -1560,6 +1626,15 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         (
             "constraint.parquet",
             format!(r#"COPY Constraint FROM "{}""#, p("constraint.parquet")),
+        ),
+        // The pending-removal ledger loads empty from a fresh load; the
+        // statement is here so the table and the writer can never disagree.
+        (
+            "pending_removal.parquet",
+            format!(
+                r#"COPY PendingRemoval FROM "{}""#,
+                p("pending_removal.parquet")
+            ),
         ),
         (
             "contains_mod_mod.parquet",
