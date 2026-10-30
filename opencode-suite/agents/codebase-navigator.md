@@ -428,17 +428,20 @@ gate (planned nodes realized, feedback resolved, coverage holds) — read-only; 
 merge handoff.
 ### Caller-owned sessions (a durable mutation needs a live session)
 A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is **admitted only
-through a live session**: it stages into the session's in-memory write-back buffer (projected
-into the worktree's `db.lbug` at admission, so routed reads see it) and is not durable until saved. With no live session the mutation refuses and names `apg session start`.
-The **caller owns the lifecycle** — open the session for the worktree, decide when to persist,
-release it; it never outlives the call chain that owns it:
+through a live session**: it applies to the worktree `db.lbug` at admission (projected so routed
+reads see it; the changed node files marked dirty, a delete's identity pending) while
+`apg/layers/**` and git stay at the last saved state. With no live session it refuses and names
+`apg session start`. The **caller owns the lifecycle** — open the session for the worktree,
+persist when ready, release it; it never outlives the call chain that owns it:
 - **start** — `apg_session` (`action: start`, the default) launches the single-writer
   coordinator, owning the worktree `db.lbug`, the extended `specs.lock` flock, and a socket.
 - **save** — `apg_session` `action: save` is the **single durability point**: one atomic
-  `apg/layers/**` write plus exactly one commit, then the buffer clears.
+  `apg/layers/**` write of the marked node files plus the pending-deletion files' removal, and
+  exactly one commit, then the marks clear.
 - **end** — `apg_session` `action: end` releases DB, flock and socket; it **refuses while the
-  buffer is dirty** (save or abort first).
-- **abort** — `apg_session` `action: abort` discards the buffer and releases the session.
+  database carries pending state** (save or abort first).
+- **abort** — `apg_session` `action: abort` discards the pending set, rebuilds the index and
+  releases the session.
 `apg_query` routes through the live session and sees unsaved changes; `apg_spec_lint` reads the
 durable node files, so lint after a save. `apg scan` and `apg project merge` refuse while a
 session is live — save and end first. The whole lifecycle runs through `apg_session` (pass the
