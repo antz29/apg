@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "clean-save-report-prose-pin",
+  "body": "The no-op save's report is pinned as exact coordinator stdout text (`Session saved: no pending changes`, and `Session saved: 1 change(s) in one commit` for the one real save), with the two no-ops counted by occurrence rather than merely present. Upgrade to structured reply fields when the session's save reporting becomes machine-readable instead of prose; until then a reworded report line breaks this test by design.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.save_on_a_clean_buffer_is_a_noop",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

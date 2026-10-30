@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "save-e2e-report-prose-and-hand-set",
+  "body": "Two limits. (1) The test pins the coordinator's save report as exact prose — `Session saved: N change(s) in one commit` — so a reword of that line must update the assertion with it (task-11's `no pending changes` line is contract too). (2) The expected marked set is derived by hand from the mutation run rather than read back from the database's dirty rows: a widened or narrowed admission mark fails here without naming the offending DB row, and the direct row-level probes live in the phase-1 artefacts; upgrade by reading the dirty set from the held database if this test should diagnose the mark rather than merely detect it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.save_flushes_the_buffer_in_one_commit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
