@@ -22,8 +22,7 @@ use super::code_refs::validate_code_refs;
 use super::node_file::{NodeFile, fqn};
 use super::tree::ingest_nodes;
 use super::validate::{
-    Context, check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_cardinalities,
-    validate_edges, validate_node,
+    check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges, validate_node,
 };
 use super::{layer_of, validate_assembled_rules};
 
@@ -417,35 +416,71 @@ pub fn validate_change_over(
     Ok(())
 }
 
-/// The **whole-model save boundary** (SPEC §8.1): validate the entire buffered
-/// model — the effective post-save node set, i.e. the durable base with the
-/// write-back buffer folded over it — before `apg session save` makes anything
-/// durable. Intermediate session state may be incomplete: admission's
-/// per-mutation checks ([`validate_change_over`]) stay per-mutation, and only
-/// this boundary enforces the whole-model minimums, so a caller can assemble
-/// related nodes and edges across several unsaved mutations.
+/// The **save boundary**: validate the dirty rows' structure and the held
+/// model's edge pairing — never the whole model. `dirty_rows` is the marked
+/// write set the save serialises, and the per-node structure rules (name
+/// allowlist, type-in-layer, uniqueness with `held_rows` supplying the existing
+/// universe, the out-edge matrix and the assembled §4 property rules) run over
+/// it alone: an unchanged row's pre-existing violation never refuses an
+/// unrelated save, and a save never re-judges rows it does not write.
 ///
-/// The assembled `FQN → NodeFile` map is built exactly as
-/// [`ingest_nodes`](super::tree::ingest_nodes) builds it, and the rules are
-/// [`validate_cardinalities`] — the SAME shared validator lint uses, never a
-/// fork — under `scope = None` (the whole model) and [`Context::Save`] (a
-/// Component's missing `implemented-by` claim is the sole deferred obligation,
-/// SPEC §8.2). Returns one message per violation, so the caller reports the
-/// complete set.
-pub fn validate_save_model(nodes: &[NodeFile]) -> anyhow::Result<()> {
-    let assembled: BTreeMap<String, &NodeFile> = nodes
+/// `held_rows` is the held database's full row set — the effective post-save
+/// model, whose reconstruction already omits every ledger-held identity — and
+/// [`check_edge_pairing`] runs over it, so the common cross-endpoint write (a
+/// dirty source pointing at an unchanged durable target) pairs instead of
+/// false-refusing while a residual half pointing at a pending deletion still
+/// refuses. The cardinality pass over the whole model is not here: it belongs
+/// to lint and merge. Returns one refusal message naming the failing structure
+/// or pairing.
+pub fn validate_save_model(dirty_rows: &[NodeFile], held_rows: &[NodeFile]) -> anyhow::Result<()> {
+    let written_fqns: BTreeSet<String> = dirty_rows
         .iter()
-        .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+        .map(|n| fqn(layer_of(&n.layer), &n.node_type, &n.name))
         .collect();
-    let errors = validate_cardinalities(&assembled, None, Context::Save);
-    if errors.is_empty() {
-        return Ok(());
+
+    // The held model's identity universe minus the rows this save (re)writes,
+    // so an overwrite does not trip its own uniqueness.
+    let mut universe: BTreeSet<(Layer, String, String)> = held_rows
+        .iter()
+        .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
+        .filter(|(layer, node_type, name)| !written_fqns.contains(&fqn(*layer, node_type, name)))
+        .collect();
+
+    let result = (|| {
+        // Per-node structure and the out-edge matrix over the dirty rows alone.
+        for n in dirty_rows {
+            let layer = layer_of(&n.layer);
+            validate_node(layer, &n.node_type, &n.name, &n.properties, &universe)?;
+            universe.insert((layer, n.node_type.clone(), n.name.clone()));
+        }
+        for n in dirty_rows {
+            let from = fqn(layer_of(&n.layer), &n.node_type, &n.name);
+            let edges: Vec<(&str, &str, &str)> = n
+                .out
+                .iter()
+                .map(|oe| (oe.kind.as_str(), from.as_str(), oe.target.as_str()))
+                .collect();
+            validate_edges(&edges)?;
+        }
+
+        // The assembled §4 property rules over the dirty rows, resolved against
+        // the held universe (an endpoint this save does not write still exists).
+        let assembled: BTreeMap<String, &NodeFile> = dirty_rows
+            .iter()
+            .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+            .collect();
+        validate_assembled_rules(&assembled, &universe)?;
+
+        // Pairing over the held model's full row set — the effective post-save
+        // model, with the ledger-held identities already omitted.
+        check_edge_pairing(held_rows)
+    })();
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) => anyhow::bail!(
+            "session save refused: the dirty rows are structurally invalid or the held model's edges do not pair: {err:#}"
+        ),
     }
-    anyhow::bail!(
-        "session save refused: the buffered model is inconsistent ({} whole-model violation(s)):\n  {}",
-        errors.len(),
-        errors.join("\n  ")
-    )
 }
 
 /// Write a SET of node files atomically AND delete a set of node-file paths,

@@ -2553,45 +2553,46 @@ mod unit {
         );
     }
 
-    /// SPEC §8.1: the save boundary runs the shared cardinality validator, not a
-    /// fork — every refusal message is byte-identical to
-    /// `validate_cardinalities(.., None, Context::Save)`'s. `Context::Save`
-    /// keeps SPEC §8.2's sole deferral: a Component's missing `implemented-by`
-    /// claim is permitted, while a leaf Group with no Service refuses the save.
+    /// SPEC §8.1: the save boundary enforces edge pairing over the held model
+    /// while the structure rules cover the dirty rows alone — the whole-model
+    /// cardinalities belong to lint and merge, so no cardinality verdict is
+    /// expected. A dirty source whose halves pair against unchanged held rows
+    /// is accepted; a residual half that no held file supplies is refused.
     #[test]
-    fn save_boundary_delegates_to_the_shared_cardinality_validator() {
-        // The complete new-model fixture carries a Component with NO
-        // `implemented-by` claim — the one obligation save defers (§8.2).
-        let nodes = valid_model();
-        if let Err(err) = validate_save_model(&nodes) {
-            panic!("a missing Component `implemented-by` is deferred at save: {err:#}");
+    fn save_boundary_refuses_a_pair_invalid_set_and_accepts_a_pair_valid_one() {
+        // Pair-valid cross-endpoint write: the dirty rows are the Service
+        // (whose `driven-by`/`reads`/`writes` halves pair against unchanged
+        // held targets) and a leaf Group with no Service — deliberately a
+        // whole-model cardinality violation this boundary no longer judges.
+        let mut held = valid_model();
+        held.push(node("domain", "group", "standalone"));
+        let dirty: Vec<NodeFile> = held
+            .iter()
+            .filter(|n| n.node_type == "service" || n.name == "standalone")
+            .cloned()
+            .collect();
+        if let Err(err) = validate_save_model(&dirty, &held) {
+            panic!("a pair-valid set is accepted with no cardinality verdict: {err:#}");
         }
 
-        // A leaf Group with no Service is a whole-model violation save refuses.
-        let mut broken = valid_model();
+        // Pair-invalid: the Group keeps no `contains` out half for the Service
+        // that still carries the matching in half, so the held model has a
+        // residual half the save refuses.
+        let mut pair_invalid = valid_model();
         remove_out(
-            &mut broken,
+            &mut pair_invalid,
             "domain",
             "group",
             "ordering",
             "contains",
             "domain.service.place-order",
         );
-        let expected = validate_cardinalities(&assembled_of(&broken), None, Context::Save);
+        let err = validate_save_model(&pair_invalid, &pair_invalid)
+            .unwrap_err()
+            .to_string();
         assert!(
-            !expected.is_empty(),
-            "the fixture must violate a whole-model rule"
-        );
-        let err = validate_save_model(&broken).unwrap_err().to_string();
-        for message in &expected {
-            assert!(
-                err.contains(message.as_str()),
-                "the save gate must report the shared validator's message `{message}` verbatim: {err}"
-            );
-        }
-        assert!(
-            err.contains("leaf Group `domain.group.ordering` contains no Service"),
-            "{err}"
+            err.contains("has no matching out edge"),
+            "the save boundary refuses an unmatched half: {err}"
         );
     }
 
