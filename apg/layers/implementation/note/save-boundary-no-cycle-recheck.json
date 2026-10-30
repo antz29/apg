@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "save-boundary-no-cycle-recheck",
+  "body": "The save boundary judges the assembled §4 rules over the dirty rows alone, so a `contains`/`publishes` cycle routed through unchanged held rows is not re-detected at save; lint and merge remain the whole-model check. Upgrade if a save-time cycle guard is ever required — it would have to run over the held set, not the dirty set, since the cycle can be entirely outside what this save writes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.layers.write.validate_save_model",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

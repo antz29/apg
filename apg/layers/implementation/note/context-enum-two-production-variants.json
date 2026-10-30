@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "context-enum-two-production-variants",
+  "body": "The enum doc's statement that the save boundary runs no whole-model cardinality pass, and so names no context, is true only while no save path runs a whole-model pass: restore a `Save` variant (or add a third context) if a save boundary ever regains one. Retired by phase-2 task-16 once the boundary's cardinality call left; `Lint` and `MergeStrength` are the production contexts, and `validate_cardinalities` branches only on `MergeStrength`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.layers.validate.Context",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

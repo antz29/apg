@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "save-buffer-clear-bridge-and-count",
+  "body": "Two limits on the rewritten save. (1) It still clears the in-memory admission list (`self.buffer.clear()`) purely so `end` and `pending_changes_message`, which still gate on that list, can release a saved session; drop that line when phase-2 task-14 moves `end` onto the database's pending state, and again with phase-3 task-7 when the field itself goes. (2) The save's stdout count is now writes plus deletes rather than the old list length (`Session saved: N change(s) in one commit`), and no test pins the number — the client reply is the fixed `Session saved` — so re-pin it if the count ever becomes contract.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.save",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

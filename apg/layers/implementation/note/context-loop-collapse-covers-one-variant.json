@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "context-loop-collapse-covers-one-variant",
+  "body": "Collapsing the `[Context; N]` loop to a single `Context::Lint` assertion removed the loop's automatic coverage: if a third `Context` variant is ever added, this test no longer exercises it automatically and a divergence between `Lint` and the new variant would go unnoticed here. Upgrade by restoring a per-context loop over the production variants at that point — the sibling `component_implementation_presence_is_context_dependent` carries the same shape and the same limit.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.spec_lint.tests.unit.implemented_by_presence_depends_on_context_not_scope",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
