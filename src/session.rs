@@ -51,8 +51,9 @@ use crate::specs;
 pub const SOCKET_NAME: &str = "session.sock";
 
 /// The observable per-open marker the session prints to stderr; the
-/// amortization test counts it (phase-03 task-16: an N-mutation session must
-/// open the DB materially fewer than N times).
+/// `live_session_amortizes_the_db_open_and_keeps_every_mutation_visible`
+/// test counts it (an N-mutation session must open the DB materially fewer
+/// than N times).
 pub const DB_OPEN_MARKER: &str = "apg session: db-open";
 
 /// Per-process sequence mixed into every client id so a forwarded mutation id
