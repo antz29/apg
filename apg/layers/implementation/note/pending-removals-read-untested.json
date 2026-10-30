@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pending-removals-read-untested",
+  "body": "The ledger read has no test of its own: `pending_removals` is a one-projection `MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`, and its first real exercise is the phase-1 task-10 e2e over record-then-read (the table and its reader are otherwise unpinned). Upgrade — give the read its own case — if the query grows a filter, a limit, or a second column, since the record-then-read e2e asserts only the identities it recorded.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.pending_removals",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
