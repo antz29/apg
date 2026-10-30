@@ -590,6 +590,15 @@ impl ArtifactDb {
     /// has only the source's `out` half, exactly as a node file carries it — a
     /// code node has no file to hold the in half.
     ///
+    /// **Ledger-held identities are omitted.** Every identity on the
+    /// pending-removal ledger
+    /// ([`pending_removals`](Self::pending_removals)) is a node an admission
+    /// detached whose node file a save still owes deleting, so its row must
+    /// never be resurrected into this base even if some path leaves the row
+    /// behind. The omission drops the node file alone and leaves the edge
+    /// halves untouched, so a residual half still names the pending identity
+    /// and the save boundary's pairing check refuses it.
+    ///
     /// Only the durable layers (requirements, domain, solution, implementation,
     /// global) are reconstructed; the transient `.trans` node tables (`Plan`,
     /// `PlanPhase`, `Task`, `Feedback`) are not node files and are skipped. The
@@ -603,7 +612,16 @@ impl ArtifactDb {
     /// named typed columns (kind/feature/attribute/root/…) are merged back over
     /// it — no key is duplicated or lost. Edge properties are read from the rel
     /// row and attached to **both** halves, so a node file round-trips exactly.
+    /// The session's `updated` flag is session state, not node-file data, so it
+    /// is never projected.
     pub fn node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
+        // Read the pending-removal ledger before the base: a ledger-held
+        // identity's node file is owed a delete, so it is absent from the base.
+        let held: BTreeSet<String> = self
+            .pending_removals()?
+            .into_iter()
+            .map(|pending| pending.fqn)
+            .collect();
         let conn = self.conn()?;
         let mut by_fqn: BTreeMap<String, NodeFile> = BTreeMap::new();
 
@@ -611,6 +629,7 @@ impl ArtifactDb {
         for (table, columns, body_col, props) in DURABLE_NODE_TABLES {
             collect_durable_nodes(&conn, table, columns, body_col, props, &mut by_fqn)?;
         }
+        by_fqn.retain(|fqn, _| !held.contains(fqn));
 
         // Both halves of every authored edge, read back from the rel tables. A
         // rel row whose source is not a durable node (a code pair of the shared
