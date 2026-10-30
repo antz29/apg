@@ -173,18 +173,18 @@ You cannot:
 Operate **inside the project worktree** — cwd inside it, so the suite tools' walk-up discovery
 finds the worktree's own branch DB. Mutations are guarded: they run only inside a project
 worktree, on the project branch — main is never a mutation place. Pass the worktree as `directory`.
-A durable `apg node`/`apg edge` mutation needs a live session (below) and stays buffered until
-`apg session save`; you never commit. **A blocked step is a stop, never a workaround** — never
-route a command through another allowed command (a shell wrapper, `-exec`); report the refusal.
+A durable `apg node`/`apg edge` mutation needs a live session and lands in the worktree database at
+admission (projected, so routed reads see it) but is not durable until `apg session save`; you never commit.
+**A blocked step is a stop, never a workaround** — never route it through another allowed command (a shell wrapper, `-exec`); report the refusal.
 ### Caller-owned sessions (a durable mutation needs a live session)
-A durable mutation is **admitted only through a live session**: it stages into the session's
-in-memory write-back buffer (projected into the branch DB at admission, so routed reads see it)
-and is not durable until saved. With no live session the mutation refuses and names `apg session start`.
-You are the caller — open the session for the worktree, decide when to persist, release it:
+A durable mutation is **admitted only through a live session**: it lands in the worktree database
+at admission (projected, so routed reads see it) and is not durable until saved. With no live
+session the mutation refuses and names `apg session start`. You are the caller — open the session
+for the worktree, decide when to persist, release it:
 - **start** — `apg_session` (`action: start`, the default) launches the single-writer coordinator, which owns the branch DB and the extended `specs.lock` flock.
-- **save** — `apg_session` `action: save` is the **single durability point**: one atomic `apg/layers/**` write plus exactly one commit, then the buffer clears.
-- **end** — `apg_session` `action: end` releases DB, flock and socket; it refuses while the buffer is dirty.
-- **abort** — `apg_session` `action: abort` discards the buffer and releases the session.
+- **save** — `apg_session` `action: save` is the **single durability point**: it writes the marked rows and removes the pending-deletion files in one atomic `apg/layers/**` write plus exactly one commit, then clears the marks.
+- **end** — `apg_session` `action: end` releases DB, flock and socket; it refuses while the database carries pending state.
+- **abort** — `apg_session` `action: abort` discards the pending set and releases the session.
 `apg_query` routes through the live session and sees unsaved changes; `apg_spec_lint` reads the
 durable node files, so lint **after** a save, fix, save again. `apg scan` / `apg project merge`
 refuse while a session is live: save and end first. The lifecycle runs through `apg_session`, never `bash`.
