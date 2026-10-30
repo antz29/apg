@@ -880,12 +880,25 @@ impl Coordinator {
                     let _ = write_msg(&mut stream, &Reply::Pong);
                 }
                 Request::End => {
-                    // A clean buffer: ask the caller to release the DB handle,
-                    // the extended flock and the socket. A DIRTY buffer holds
-                    // admitted-but-unsaved changes in memory only, so releasing
-                    // would silently lose them: report the pending changes and
-                    // stay live until the caller saves or aborts.
-                    if self.buffer.is_empty() {
+                    // The HELD DATABASE's own pending state decides — never the
+                    // in-memory admission list: a dirty row
+                    // ([`crate::artifacts::ArtifactDb::dirty_node_files_from_db`])
+                    // or a pending-removal ledger identity
+                    // ([`crate::artifacts::ArtifactDb::pending_removals`]) is an
+                    // admission's projection that no `apg/layers/**` node file
+                    // backs, so releasing would serve, then lose, it. Read the
+                    // decision ONCE per request and fail CLOSED: a state that
+                    // cannot be read is a refusal too. Over an empty pending set
+                    // nothing unsaved is projected, so the caller releases the DB
+                    // handle, the extended flock and the socket.
+                    let has_pending = match (
+                        self.db.dirty_node_files_from_db(),
+                        self.db.pending_removals(),
+                    ) {
+                        (Ok(writes), Ok(deletes)) => !writes.is_empty() || !deletes.is_empty(),
+                        (Err(_), _) | (_, Err(_)) => true,
+                    };
+                    if !has_pending {
                         let _ = write_msg(
                             &mut stream,
                             &Reply::Ok {
