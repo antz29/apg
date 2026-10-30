@@ -215,6 +215,7 @@ export default Plugin.define({
             if (!input.title) return { content: "Error: task requires title" }
             if (!input.assignedTo) return { content: "Error: task requires assignedTo" }
             cli.push("task", input.phaseNumber, input.taskNumber, "--title", input.title)
+            if (input.assignedTo) cli.push("--assigned-to", input.assignedTo)
             if (input.implements) cli.push("--implements", input.implements)
             const operationError = appendOperations(cli, input, false)
             if (operationError) return { content: operationError }
