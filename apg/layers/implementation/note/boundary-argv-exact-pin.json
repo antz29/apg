@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "boundary-argv-exact-pin",
-  "body": "The boundary e2e case pins the exact stub argv for the forced scan ([\"scan\", <repo>, \"--force\"]). Limit: any future scan flag inserted ahead of --force in apg_scan's spawnArgs breaks the equality assertion even though the behaviour is correct. Upgrade by relaxing the assertion to a containment check when another flag is added before --force.",
+  "body": "Two limits. (1) The boundary e2e case pins the exact stub argv for the forced scan ([\"scan\", <repo>, \"--force\"]). Limit: any future scan flag inserted ahead of --force in apg_scan's spawnArgs breaks the equality assertion even though the behaviour is correct. Upgrade by relaxing the assertion to a containment check when another flag is added before --force. (2) The session scenario's comments state that a routed mutation lands in the worktree database at admission, but the scenario proves only that no node file appears before save — it never routes a read through the session before the save to see the row. Upgrade by adding that pre-save routed-read assertion when the scenario is next touched.",
   "properties": {},
   "out": [
     {
