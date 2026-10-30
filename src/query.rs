@@ -43,20 +43,17 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Crash recovery (phase-02 task-15): a session socket that is present but
-    // fails a connect + `Ping` is an UNCLEAN EXIT — the killed process left the
-    // file behind while its unsaved buffer's phantom projections remain in the
-    // derived `db.lbug`. Never serve that stale index: reclaim the stale socket
-    // and force the full scan that discards and rebuilds `db.lbug` from the
-    // durable `apg/layers/**` node files (the same recovery `abort` drives,
-    // reusing the existing scan entry point), then fall through to the
-    // read-only open below. The guard runs BEFORE that open, so the read can
-    // never touch the phantom index. A live session (above) still routes, and
-    // an absent socket is the ordinary direct path.
-    let socket = session::socket_path(&apg_root);
-    if socket.exists() && !session::live_session_at(&socket) {
-        session::Coordinator::reclaim_stale_socket(&apg_root)?;
-    }
+    // Recovery (phase-04 task-9): with no live session, run the shared reclaim
+    // unconditionally before the read-only open. It reclaims a dead socket and
+    // classifies the database: one carrying pending state (an
+    // admitted-but-unsaved row, or a pending-removal identity) or a table shape
+    // this binary does not recognise is UNCLEAN, and is discarded and rebuilt
+    // from the durable `apg/layers/**` node files by the full scan (the same
+    // recovery `abort` drives) rather than served. A clean, shape-compatible
+    // database falls through to the direct read below with no scan, and an
+    // absent database is still refused there. A session that appears after the
+    // routing check makes the reclaim refuse — the fail-closed outcome.
+    session::Coordinator::reclaim_stale_socket(&apg_root)?;
 
     let db_path = apg_root.join(specs::TRANS).join("db.lbug");
     if !db_path.exists() {
