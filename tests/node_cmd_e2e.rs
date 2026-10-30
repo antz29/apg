@@ -3704,13 +3704,17 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-14: `apg session save` over a CLEAN buffer — a live session
-    /// that has admitted NO durable mutation — is a pure no-op. It writes no
-    /// node file, creates no commit, leaves HEAD and the whole on-disk
-    /// `apg/layers/**` tree byte-identical, reports the clean-buffer outcome
-    /// (the coordinator's `Session saved: no pending changes`), and leaves the
-    /// session live. (The dirty counterpart — one save flushes the whole buffer
-    /// in exactly one commit — is `save_flushes_the_buffer_in_one_commit`.)
+    /// Phase-02 task-11: `apg session save` reads the session's pending state
+    /// from the held database — the marked rows plus the pending-removal ledger
+    /// — never a buffer, so a session carrying none saves nothing. A live
+    /// session that has admitted NO durable mutation writes no node file,
+    /// creates no commit, leaves HEAD and the whole on-disk `apg/layers/**`
+    /// tree byte-identical, reports the coordinator's `Session saved: no
+    /// pending changes`, and stays live. The same holds for a session whose
+    /// only admitted mutation was saved already: that save cleared the marks,
+    /// so the next save reads an empty pending set and repeats the no-op. (The
+    /// dirty counterpart — one save writes the marked rows in exactly one
+    /// commit — is `save_flushes_the_buffer_in_one_commit`.)
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn save_on_a_clean_buffer_is_a_noop() {
@@ -3720,13 +3724,14 @@ mod e2e {
         // A pre-existing durable node file, committed through the direct path:
         // `apg/layers/**` is non-empty before the session starts, so "nothing
         // written or changed" is a real claim rather than a vacuous one. The
-        // base is a lone `global.constraint` — whole-model-valid (SPEC §8.1, no
-        // cardinality minimums), so a later buffered save on this base can never
-        // refuse spuriously.
+        // base is a lone `global.constraint` — no edge, no cardinality
+        // minimum — so the one save below writes the single node file its one
+        // admitted mutation adds.
         layers::write_project(&wt_apg, &[node("global", "constraint", "existing")], &[]).unwrap();
 
-        // A live session that has admitted no mutation: the write-back buffer
-        // is empty by construction.
+        // A live session that has admitted no mutation: its held database
+        // carries no dirty row and its pending-removal ledger holds no
+        // identity, by construction.
         let session = testutil::start_session_process(&wt, &home);
         assert!(
             apg::session::live_session(&wt_apg),
@@ -3734,15 +3739,18 @@ mod e2e {
         );
 
         // Baseline: commit count, HEAD, and the whole on-disk node-file tree.
+        let head = || -> String {
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string()
+        };
         let before_commits = testutil::commit_count(&wt);
-        let before_head = git2::Repository::open(&wt)
-            .unwrap()
-            .head()
-            .unwrap()
-            .peel_to_commit()
-            .unwrap()
-            .id()
-            .to_string();
+        let before_head = head();
         let snapshot = |apg_root: &Path| -> BTreeMap<String, Vec<u8>> {
             let mut out = BTreeMap::new();
             let mut stack = vec![apg_root.join(layers::LAYERS_DIR)];
@@ -3769,10 +3777,10 @@ mod e2e {
         let before_layers = snapshot(&wt_apg);
         assert!(
             before_layers.keys().any(|k| k.ends_with("existing.json")),
-            "the seeded node file must be on disk before the clean save: {before_layers:?}"
+            "the seeded node file must be on disk before the first save: {before_layers:?}"
         );
 
-        // The save over the clean buffer.
+        // (1) A session that admitted nothing: the save is a pure no-op.
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
@@ -3789,26 +3797,19 @@ mod e2e {
         assert_eq!(
             testutil::commit_count(&wt),
             before_commits,
-            "a save over the clean buffer must not create a commit"
+            "a save over the empty pending set must not create a commit"
         );
         assert_eq!(
-            git2::Repository::open(&wt)
-                .unwrap()
-                .head()
-                .unwrap()
-                .peel_to_commit()
-                .unwrap()
-                .id()
-                .to_string(),
+            head(),
             before_head,
-            "a save over the clean buffer must not move HEAD"
+            "a save over the empty pending set must not move HEAD"
         );
 
         // No node file written or changed: the whole tree is byte-identical.
         assert_eq!(
             snapshot(&wt_apg),
             before_layers,
-            "a save over the clean buffer must not write or change any apg/layers file"
+            "a save over the empty pending set must not write or change any apg/layers file"
         );
 
         // The session stays live through the no-op save.
@@ -3817,8 +3818,85 @@ mod e2e {
             "session save must not end the live session"
         );
 
-        // End cleanly; the coordinator's captured output reports the clean
-        // buffer — the no-op/clean-buffer outcome.
+        // (2) The session's ONLY admitted mutation: nothing is durable before
+        // the save (the admission projected into the held database alone), and
+        // that save clears the marks, so the save after it repeats the no-op.
+        let add = testutil::spawn_apg(&["node", "add", "global", "constraint", "added"], &wt);
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&add.stdout).trim(),
+            "Added node global.constraint.added"
+        );
+        assert_eq!(
+            snapshot(&wt_apg),
+            before_layers,
+            "an admission must not write a node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "an admission must not create a commit before save"
+        );
+
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "added").exists(),
+            "the save must write the one admitted node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the one admitted node file must land in exactly one commit"
+        );
+        let saved_head = head();
+        assert_ne!(saved_head, before_head, "the save must create a commit");
+        let saved_layers = snapshot(&wt_apg);
+
+        // The save over the now-empty pending set: the drained marks mean
+        // nothing is written, no commit lands, and HEAD stays at the save.
+        let resave = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            resave.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resave.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&resave.stdout).trim(),
+            "Session saved",
+            "the re-save's client reply"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "a save over the emptied pending set must make no commit"
+        );
+        assert_eq!(
+            head(),
+            saved_head,
+            "a save over the emptied pending set must not move HEAD"
+        );
+        assert_eq!(
+            snapshot(&wt_apg),
+            saved_layers,
+            "a save over the emptied pending set must not write or change any apg/layers file"
+        );
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
+
+        // End cleanly; the coordinator's captured output reports each save it
+        // served: the clean session's no-op, the one-commit write of the one
+        // admitted row, then the no-op the drained marks leave behind.
         let out = end_session(&wt, session);
         assert!(
             out.status.success(),
@@ -3826,9 +3904,16 @@ mod e2e {
             String::from_utf8_lossy(&out.stderr)
         );
         let server_out = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            server_out
+                .matches("Session saved: no pending changes")
+                .count(),
+            2,
+            "both saves over an empty pending set must report it: {server_out}"
+        );
         assert!(
-            server_out.contains("Session saved: no pending changes"),
-            "the clean-buffer save must report the no-op outcome: {server_out}"
+            server_out.contains("Session saved: 1 change(s) in one commit"),
+            "the admitted mutation's save must report the one row it wrote: {server_out}"
         );
 
         testutil::remove(&repo);
