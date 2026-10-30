@@ -1150,6 +1150,38 @@ const DURABLE_EDGE_TABLES: [(&str, &str); 15] = [
     ("Details", "details"),
 ];
 
+/// Decide whether a database carries **pending state** from pure inputs: one
+/// per-table row answer over the durable node tables ([`DURABLE_NODE_TABLES`],
+/// the `apg/layers/**` roster a session marks `updated = 1`, walked in its
+/// declared order so a table added to that roster is governed here by
+/// construction) plus the pending-removal ledger.
+///
+/// Pending state is present iff the ledger holds at least one identity or at
+/// least one durable node table reports a dirty row — so a save has something
+/// to write or delete exactly when this is true. The ledger is consulted
+/// first: a pending deletion is pending state even when every durable row is
+/// clean, and an empty ledger leaves the decision to the roster alone.
+///
+/// `row_present` is the caller's **per-table row answer** — the live query
+/// decides what "a dirty row is present" means for one table label, and a fake
+/// row source drives the same rule in tests — so the walk visits one label per
+/// call, stopping at the first `true`. The rule itself opens no database,
+/// touches no file and spawns no process; the handle-backed
+/// `ArtifactDb::has_pending_state` and the path-level `db_has_pending_state`
+/// both fold their row answers through it, so the two predicates agree by
+/// construction.
+pub fn pending_state_present<F>(mut row_present: F, pending_removals: &[PendingRemoval]) -> bool
+where
+    F: FnMut(&str) -> bool,
+{
+    if !pending_removals.is_empty() {
+        return true;
+    }
+    DURABLE_NODE_TABLES
+        .iter()
+        .any(|&(table, _, _, _)| row_present(table))
+}
+
 /// Read one durable node table into `nodes`, keyed by its FQN: identity from
 /// the FQN segments, `body` from `body_col`, the serialized-properties column
 /// decoded into the full `properties` map, and each metadata column merged back
