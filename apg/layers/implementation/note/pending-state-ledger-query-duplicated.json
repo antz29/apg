@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pending-state-ledger-query-duplicated",
+  "body": "`has_pending_state` inlines `pending_removals`' ledger query (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`) to keep the read on one connection instead of opening a second handle, so the query string now lives in two places in this file. Upgrade to a connection-taking ledger reader shared by both callers when `pending_removals` gains a second caller that could reuse the same connection.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.has_pending_state",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
