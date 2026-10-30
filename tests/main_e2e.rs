@@ -11750,4 +11750,283 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// Phase-04 task-11: the discard-and-rebuild oracle for BOTH recovery
+    /// surfaces, over BOTH unclean-exit causes a live-session-free database can
+    /// carry — PENDING STATE (an admitted-but-unsaved durable row and a
+    /// pending-removal ledger identity) and an UNRECOGNISED TABLE SHAPE (a node
+    /// table this binary's schema does not declare).
+    ///
+    /// * `apg scan`: the same freshness verdict that makes `is_fresh` false
+    ///   sends `run_pipeline` down `force_full_load`, so the splice-seed reuse
+    ///   is skipped, `discard_derived_index` removes `db.lbug` with its
+    ///   `.wal`/`.shm` sidecars and `graph.jsonl`, and the full load rebuilds
+    ///   both from the durable `apg/layers/**` node files.
+    /// * `apg query`: with no live session `Coordinator::reclaim_stale_socket`
+    ///   classifies the database and, for either cause, runs the same
+    ///   rebuilding full scan before the read-only open — the recovery the
+    ///   dead-socket e2e already pins, reached here without a socket.
+    ///
+    /// Each case starts from a FRESH baseline (the hermetic scan over a
+    /// committed, whole-model-valid `apg/layers/**` tree), injects exactly one
+    /// cause through a real read-write handle, drives the candidate CLI as a
+    /// separate process, and then asserts the RAW rebuilt rows: every durable
+    /// requirement is served, the injected unsaved row is absent, the
+    /// pending-removal ledger is empty, no durable table carries `updated = 1`,
+    /// and the injected extra table no longer binds. Scratch /tmp repo only
+    /// (`global.constraint.no-real-project-test`).
+    #[test]
+    #[ignore = "e2e tier: real I/O; run via cargo test-e2e"]
+    fn scan_and_query_recover_a_pending_state_or_shape_changed_database() {
+        // The 15 durable node tables (`apg/layers/**`) carrying the session's
+        // `updated` dirty flag (`artifacts::db::DURABLE_NODE_TABLES`).
+        const DURABLE_LABELS: &[&str] = &[
+            "Requirement",
+            "Stakeholder",
+            "User",
+            "Note",
+            "Constraint",
+            "DomainGroup",
+            "Entity",
+            "Value",
+            "Service",
+            "System",
+            "Container",
+            "Component",
+            "Person",
+            "Actor",
+            "Role",
+        ];
+        // The two committed requirements `testutil::valid_model` writes.
+        const LAYERS_REQUIREMENTS: [&str; 2] = [
+            "requirements.requirement.place-order",
+            "requirements.requirement.refund",
+        ];
+        // The injected unsaved row: a durable identity with NO `apg/layers/**`
+        // file behind it, flagged dirty exactly as a session admission leaves it.
+        const UNSAVED: &str = "requirements.requirement.unsaved";
+
+        let repo = testutil::Repo::new("scan-query-recovery");
+        let wt = repo.start_project("foo");
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        // The durable system of record: a committed, whole-model-valid
+        // `apg/layers/**` tree (the node files ARE the rebuild source).
+        testutil::seed_valid_model(&wt_apg);
+
+        // `scan_checkout` runs the ingest pipeline in-process and records the
+        // checkout's live git state, so the resulting DB is genuinely fresh —
+        // the injection below is then the ONLY unclean cause.
+        let reset = || {
+            testutil::scan_checkout(&wt).unwrap();
+            assert!(
+                apg::git::is_fresh(&wt_apg),
+                "the baseline DB must be fresh before the corruption is injected"
+            );
+        };
+        let last = |out: String| {
+            out.lines()
+                .last()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let inject_pending = || {
+            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            db.conn()
+                .unwrap()
+                .query(&format!(
+                    "CREATE (n:Requirement {{fqn: '{UNSAVED}', body: 'admitted-but-unsaved', updated: 1}})"
+                ))
+                .unwrap();
+            // A pending-removal ledger identity the save would have deleted.
+            db.record_pending_removal(LAYERS_REQUIREMENTS[1]).unwrap();
+            drop(db);
+            assert!(
+                apg::artifacts::db_has_pending_state(&wt_apg),
+                "the fixture must carry the injected pending state"
+            );
+            assert!(!apg::git::is_fresh(&wt_apg), "pending state is never fresh");
+        };
+        let inject_shape = || {
+            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            db.conn()
+                .unwrap()
+                .query("CREATE NODE TABLE FreshnessProbeExtra(fqn STRING, PRIMARY KEY(fqn))")
+                .unwrap();
+            drop(db);
+            assert!(
+                !apg::git::is_fresh(&wt_apg),
+                "an unrecognised table shape is never fresh"
+            );
+        };
+        let assert_rebuilt = || {
+            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert_eq!(
+                last(db.q("MATCH (n:PendingRemoval) RETURN count(*)").unwrap()),
+                "0",
+                "the rebuild must leave no pending-removal ledger identity behind"
+            );
+            for label in DURABLE_LABELS {
+                assert_eq!(
+                    last(
+                        db.q(&format!(
+                            "MATCH (n:{label}) WHERE n.updated = 1 RETURN count(*)"
+                        ))
+                        .unwrap()
+                    ),
+                    "0",
+                    "the rebuilt DB must leave no dirty `{label}` row"
+                );
+            }
+            assert_eq!(
+                last(db.q("MATCH (n:Requirement) RETURN count(*)").unwrap()),
+                "2",
+                "the rebuild must carry exactly the two durable apg/layers requirements"
+            );
+            let rows = db
+                .q("MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn")
+                .unwrap();
+            for fqn in LAYERS_REQUIREMENTS {
+                assert!(
+                    rows.contains(fqn),
+                    "the rebuilt DB must carry {fqn}: {rows}"
+                );
+            }
+            assert!(
+                !rows.contains("unsaved"),
+                "the rebuilt DB must never serve the unsaved row: {rows}"
+            );
+            drop(db);
+            assert!(
+                !apg::artifacts::db_has_pending_state(&wt_apg),
+                "the rebuilt DB must carry no pending state"
+            );
+        };
+        let assert_extra_table_gone = || {
+            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(
+                db.q("MATCH (n:FreshnessProbeExtra) RETURN count(*)")
+                    .is_err(),
+                "the rebuilt DB must no longer declare the injected extra table"
+            );
+        };
+        let csv_rows = |stdout: String| -> Vec<String> {
+            stdout
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        };
+
+        // ---- (1) PENDING STATE + scan ------------------------------------
+        reset();
+        inject_pending();
+        let scan = testutil::spawn_apg(&["scan", "."], &wt);
+        assert!(
+            scan.status.success(),
+            "the pending-state recovery scan must succeed: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&scan.stderr);
+        assert!(
+            stderr.contains("[load] database carries pending state"),
+            "the scan must classify the pending state as an unclean exit: {stderr}"
+        );
+        assert!(
+            stderr.contains("[load] writing parquet load files"),
+            "the scan must take the full-load rebuild, not the splice seed: {stderr}"
+        );
+        assert!(
+            !stderr.contains("fast-path"),
+            "pending state must defeat the freshness fast path: {stderr}"
+        );
+        assert_rebuilt();
+
+        // ---- (2) SHAPE CHANGE + scan -------------------------------------
+        reset();
+        inject_shape();
+        let scan = testutil::spawn_apg(&["scan", "."], &wt);
+        assert!(
+            scan.status.success(),
+            "the shape-changed recovery scan must succeed: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&scan.stderr);
+        assert!(
+            stderr.contains("[load] writing parquet load files"),
+            "the scan must full-load the unrecognised table shape away: {stderr}"
+        );
+        assert!(
+            !stderr.contains("fast-path"),
+            "a shape change must defeat the freshness fast path: {stderr}"
+        );
+        assert_rebuilt();
+        assert_extra_table_gone();
+
+        // ---- (3) PENDING STATE + query -----------------------------------
+        reset();
+        inject_pending();
+        let q = testutil::spawn_apg(
+            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "the pending-state recovery query must succeed: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        let qerr = String::from_utf8_lossy(&q.stderr);
+        assert!(
+            qerr.contains("carries pending state"),
+            "the query must reclaim and rebuild the pending-state DB: {qerr}"
+        );
+        let stdout = String::from_utf8_lossy(&q.stdout);
+        assert!(
+            !stdout.contains("unsaved"),
+            "the recovered query must never serve the unsaved row: {stdout}"
+        );
+        assert_eq!(
+            csv_rows(stdout.into_owned()),
+            vec![
+                "n.fqn".to_string(),
+                LAYERS_REQUIREMENTS[0].to_string(),
+                LAYERS_REQUIREMENTS[1].to_string(),
+            ],
+            "the recovered query must serve exactly the durable apg/layers requirements"
+        );
+        assert_rebuilt();
+
+        // ---- (4) SHAPE CHANGE + query ------------------------------------
+        reset();
+        inject_shape();
+        let q = testutil::spawn_apg(
+            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "the shape-changed recovery query must succeed (no binder error): {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        let qerr = String::from_utf8_lossy(&q.stderr);
+        assert!(
+            qerr.contains("unrecognised table shape"),
+            "the query must reclaim and rebuild the unrecognised-shape DB: {qerr}"
+        );
+        assert_eq!(
+            csv_rows(String::from_utf8_lossy(&q.stdout).into_owned()),
+            vec![
+                "n.fqn".to_string(),
+                LAYERS_REQUIREMENTS[0].to_string(),
+                LAYERS_REQUIREMENTS[1].to_string(),
+            ],
+            "the recovered query must serve the rebuilt apg/layers rows"
+        );
+        assert_rebuilt();
+        assert_extra_table_gone();
+
+        testutil::remove(&repo);
+    }
 }
