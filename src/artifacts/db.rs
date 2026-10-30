@@ -79,9 +79,11 @@ impl Drop for SpecLockGuard {
 ///
 /// A live session takes it exactly once at `Coordinator::start`, before any
 /// node-file read, and holds it for the session's whole life — across every
-/// admitted mutation's buffered write plus the single commit at `apg session
-/// save` and its projection. The direct plan/review authoring paths (and the
-/// JSONL funnel they write through) take the same lock for their own sequence.
+/// admitted mutation's write to the worktree database, which marks exactly the
+/// node files the mutation changes dirty, plus the single commit at `apg
+/// session save` that writes those marked rows and deletes the pending-removal
+/// files. The direct plan/review authoring paths (and the JSONL funnel they
+/// write through) take the same lock for their own sequence.
 /// That single flock is what serializes the three contended locks a parallel
 /// burst hits: the node-file read-modify-write, git's `.git/index.lock` (inside
 /// `git::commit_files`), and the read-write `db.lbug` projection apply. Because
@@ -615,6 +617,41 @@ impl ArtifactDb {
     /// The session's `updated` flag is session state, not node-file data, so it
     /// is never projected.
     pub fn node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
+        self.reconstruct_node_files(false)
+    }
+
+    /// Reconstruct exactly the durable `apg/layers/**` node files whose rows on
+    /// the **held handle** carry the session's dirty flag (`updated = 1`) — the
+    /// write set a save serialises.
+    ///
+    /// Same reconstruction as [`node_files_from_db`](Self::node_files_from_db),
+    /// restricted to the marked rows: the same lossless columns, both halves of
+    /// every authored edge incident to a marked node (a marked source's `out`
+    /// half and a marked target's `in` half, even from an unchanged source), and
+    /// the same `(layer, node_type, name)` / `(kind, endpoint)` deterministic
+    /// order — so a save writes those files alone and never rewrites an
+    /// unchanged node file.
+    ///
+    /// Only `updated = 1` is dirty: a row the session's Cypher `MERGE` path
+    /// created carries NULL until [`mark_dirty`](Self::mark_dirty) sets it, so it
+    /// is absent here. The flag is session state and is never projected into a
+    /// node file. Every ledger-held identity
+    /// ([`pending_removals`](Self::pending_removals)) is omitted exactly as the
+    /// full base omits it, so a dirty row some path leaves behind for an identity
+    /// a save owes a delete can never be resurrected.
+    ///
+    /// A session that has admitted nothing since its last save carries no mark,
+    /// so this reads an empty vector and touches no `apg/layers/**` file.
+    pub fn dirty_node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
+        self.reconstruct_node_files(true)
+    }
+
+    /// The shared reconstruction behind
+    /// [`node_files_from_db`](Self::node_files_from_db) and
+    /// [`dirty_node_files_from_db`](Self::dirty_node_files_from_db):
+    /// `dirty_only` restricts the node-table read to rows carrying the session's
+    /// `updated = 1` flag.
+    fn reconstruct_node_files(&self, dirty_only: bool) -> anyhow::Result<Vec<NodeFile>> {
         // Read the pending-removal ledger before the base: a ledger-held
         // identity's node file is owed a delete, so it is absent from the base.
         let held: BTreeSet<String> = self
@@ -627,7 +664,15 @@ impl ArtifactDb {
 
         // One durable node table per node-file type the durable tree can hold.
         for (table, columns, body_col, props) in DURABLE_NODE_TABLES {
-            collect_durable_nodes(&conn, table, columns, body_col, props, &mut by_fqn)?;
+            collect_durable_nodes(
+                &conn,
+                table,
+                columns,
+                body_col,
+                props,
+                dirty_only,
+                &mut by_fqn,
+            )?;
         }
         by_fqn.retain(|fqn, _| !held.contains(fqn));
 
@@ -1082,7 +1127,8 @@ const DURABLE_EDGE_TABLES: [(&str, &str); 15] = [
 /// the FQN segments, `body` from `body_col`, the serialized-properties column
 /// decoded into the full `properties` map, and each metadata column merged back
 /// over it when non-empty (an absent column projects to the empty string, which
-/// round-trips to absent). A malformed FQN or properties payload is a hard
+/// round-trips to absent). `dirty_only` reads the rows carrying the session's
+/// `updated = 1` flag alone. A malformed FQN or properties payload is a hard
 /// error — the projection never writes one.
 fn collect_durable_nodes(
     conn: &Connection,
@@ -1090,13 +1136,19 @@ fn collect_durable_nodes(
     columns: &[&str],
     body_col: &str,
     props: &[(&str, &str)],
+    dirty_only: bool,
     nodes: &mut BTreeMap<String, NodeFile>,
 ) -> anyhow::Result<()> {
     let projection = std::iter::once("n.fqn".to_string())
         .chain(columns.iter().map(|c| format!("n.`{c}`")))
         .collect::<Vec<_>>()
         .join(", ");
-    let (_, rows) = query_rows(conn, &format!("MATCH (n:{table}) RETURN {projection}"))?;
+    let query = if dirty_only {
+        format!("MATCH (n:{table}) WHERE n.updated = 1 RETURN {projection}")
+    } else {
+        format!("MATCH (n:{table}) RETURN {projection}")
+    };
+    let (_, rows) = query_rows(conn, &query)?;
     // Positions are positional, never header-name based: the engine names a
     // projected property `n.<col>`, so `fqn` is index 0 and `columns` follow in
     // order.
