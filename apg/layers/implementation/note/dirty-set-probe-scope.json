@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "dirty-set-probe-scope",
+  "body": "Two limits on this e2e. (1) The dirty-set probe asks each label `MATCH (n:<label>) WHERE n.updated = 1` and skips any label whose read refuses at bind time, so a durable node table that lost its `updated` column — or a newly added one — would go unmeasured by the empty-set assertions; upgrade when phase 2's `ArtifactDb::dirty_node_files_from_db` exposes the dirty roster through the production API and the per-label probe can be replaced. (2) The three write shapes are exercised through the real change builders plus `mark_dirty`, not through the private `Coordinator::apply_mutation`; the admission wiring that passes `change.writes` is pinned by the session e2e cases, so a bug confined to admission's call order is not caught here.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.node_files_from_db_reconstructs_the_projected_columns",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
