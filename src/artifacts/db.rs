@@ -540,6 +540,43 @@ impl ArtifactDb {
             .collect())
     }
 
+    /// Flag exactly the durable node rows the named node files identify, on the
+    /// **held handle**: `updated = 1` on each identity's row, so the next save
+    /// serialises exactly the node files the mutation changed — and no reader
+    /// mistakes an unchanged row for a changed one.
+    ///
+    /// A node-file identity is `(label, fqn)`, and the same FQN never spans two
+    /// tables; so each identity is marked once per durable node table
+    /// ([`DURABLE_NODE_TABLES`], the `apg/layers/**` roster), and exactly one of
+    /// those statements matches the row. The `PendingRemoval` ledger is not a
+    /// durable node table and carries no `updated` column, so it is never
+    /// walked — a pending identity's node file is deleted, not written.
+    ///
+    /// `updated` has no `DEFAULT`, so a row the session's Cypher `MERGE` path
+    /// creates carries NULL until this sets it; dirty-state readers treat only
+    /// `= 1` as dirty. Marking is idempotent — an identity named twice, or a
+    /// second mark of an already-dirty row, re-sets the same `1` on the same
+    /// row — and an empty write set issues no statement and opens no
+    /// connection. Runs on a fresh connection over the caller's handle and
+    /// touches no `apg/layers/**` file.
+    pub fn mark_dirty(&self, writes: &[NodeFile]) -> anyhow::Result<()> {
+        if writes.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn()?;
+        for node in writes {
+            let layer = crate::node_cmd::resolve_layer(&node.layer)?;
+            let fqn = crate::layers::node_file::fqn(layer, &node.node_type, &node.name);
+            for &(table, _, _, _) in DURABLE_NODE_TABLES {
+                conn.query(&format!(
+                    "MATCH (n:{table} {{fqn: {}}}) SET n.updated = 1",
+                    lit(&fqn)
+                ))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Reconstruct the durable `apg/layers/**` node-file set from the **live
     /// database** — the inverse of the layers projection
     /// ([`reingest_layers_on`](Self::reingest_layers_on) / `merge_records`).
