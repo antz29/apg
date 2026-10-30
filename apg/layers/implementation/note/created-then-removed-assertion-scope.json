@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "created-then-removed-assertion-scope",
+  "body": "Two limits. (1) The save's `no pending changes` report is written to the coordinator process's stdout while the client reply is the fixed `Session saved`, so the no-op is pinned by durable state (no node file, no commit, empty ledger, no dirty row, absent read) and not by wording; upgrade if the message itself must ever be pinned — capture the session process's stdout — but this test should stay state-based even then. (2) The \"no dirty row\" read is scoped to the `Requirement` table, the only table this fixture's mutations touch, not the whole durable roster; widen it if a later task makes this test admit mutations on more than one node table.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.session_rm_of_a_node_created_in_the_same_run_leaves_no_file",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "tolerant-delete-arm-shape",
+  "body": "Two limits on the tolerant arm. (1) It covers only the \"absent on disk but still tracked in HEAD/index\" shape — a file removed with `std::fs::remove_file` before the write set runs, relying on `commit_files`' tolerated `index.remove_path`. Add a sibling arm for an absent-and-untracked delete path (committed removal first) if that index tolerance ever becomes load-bearing rather than defensive. (2) The arm asserts the delta as exact `Modified`/`Deleted` lists, so a future third path in the same write set fails loudly; broaden the filter when the tolerant mutation legitimately grows another path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.layers_e2e.e2e.write_through_with_deletes_removes_file_and_rewrites_referencing",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
