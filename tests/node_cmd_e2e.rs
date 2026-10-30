@@ -3174,18 +3174,22 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-13: `apg session save` is the single durability point for
-    /// the whole buffered set — it atomically writes every buffered node file
-    /// under `apg/layers/**` with exactly ONE git commit, then clears the buffer
-    /// (a second save over the now-clean buffer writes nothing and makes no
-    /// commit). The session stays live throughout and ends cleanly afterwards.
+    /// Phase-02 task-10: `apg session save` is the single durability point for
+    /// the database's pending state. Each admitted mutation projects into the
+    /// held `db.lbug` and marks exactly the node rows it changes dirty, so a run
+    /// of mutations followed by one save writes EXACTLY those marked rows under
+    /// `apg/layers/**` in one atomic write plus exactly ONE git commit — every
+    /// node file no mutation touched stays byte-identical, and no file is
+    /// written for an untouched identity — and then clears the marks, so a
+    /// second save over the emptied pending set writes nothing and makes no
+    /// commit. The session stays live throughout and ends cleanly afterwards.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn save_flushes_the_buffer_in_one_commit() {
         let (wt_apg, repo, wt) = mutation_fixture("save-flush");
         let home = repo.root.join("home");
 
-        // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
+        // A cardinality-consistent base (SPEC §4): a Stakeholder requiring an
         // anchor Requirement, driven-by a Service contained by a leaf Group and
         // realised by a Component that is-role's a Role. Each added Requirement
         // below is rooted by a `requires` edge from `owner` and driven-by the
@@ -3222,11 +3226,60 @@ mod e2e {
         rl.in_edges = vec![testutil::in_edge("is-role", "solution.component.cmp")];
         layers::write_project(&wt_apg, &[owner, anchor, svc, grp, cmp, rl], &[]).unwrap();
 
+        // The baseline the save is measured against: the six-node base on disk
+        // (repo-relative keys, so it compares against the save commit's paths),
+        // the node-file path of an identity, and the base's commit count + HEAD.
+        let snapshot = |root: &Path| -> BTreeMap<String, Vec<u8>> {
+            let mut out = BTreeMap::new();
+            let mut stack = vec![root.join(specs::LAYOUT).join(layers::LAYERS_DIR)];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else {
+                        let rel = path
+                            .strip_prefix(root)
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned();
+                        out.insert(rel, std::fs::read(&path).unwrap());
+                    }
+                }
+            }
+            out
+        };
+        let layer_path = |layer: Layer, node_type: &str, name: &str| -> String {
+            layers::node_file_path(&wt_apg, layer, node_type, name)
+                .strip_prefix(&wt)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let saved_layers = snapshot(&wt);
+        assert_eq!(
+            saved_layers.len(),
+            6,
+            "the six-node base must be on disk before the run: {saved_layers:?}"
+        );
+        let saved_commits = testutil::commit_count(&wt);
+        let saved_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+
         let session = testutil::start_session_process(&wt, &home);
 
-        // A run of N durable mutations admitted through the live session: three
-        // nodes plus an edge whose endpoints are both buffered (neither is on
-        // disk yet).
+        // A run of durable mutations admitted through the live session: three
+        // new nodes, each rooted by a durable `requires` rewrite of `owner` and
+        // driven-by a rewrite of `svc`, plus one edge between two of them.
         let run = |args: &[&str], expected: &str| {
             let out = testutil::ApgCommand::new(args)
                 .cwd(&wt)
@@ -3294,7 +3347,8 @@ mod e2e {
             );
         }
         // Each added Requirement is also driven-by the seeded Service (SPEC
-        // §3.4 — every Requirement is driven-by at least one Service at save).
+        // §3.4 — every Requirement is driven-by at least one Service in the
+        // durable model).
         for name in ["alpha", "beta", "gamma"] {
             run(
                 &[
@@ -3320,24 +3374,44 @@ mod e2e {
             "Added edge contains requirements.requirement.alpha -> requirements.requirement.beta",
         );
 
-        // Before save nothing is durable: no node file, no commit.
-        let before_commits = testutil::commit_count(&wt);
-        let before_head = git2::Repository::open(&wt)
-            .unwrap()
-            .head()
-            .unwrap()
-            .peel_to_commit()
-            .unwrap()
-            .id()
-            .to_string();
-        for name in ["alpha", "beta", "gamma"] {
-            assert!(
-                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
-                "a buffered add must not write `{name}` before save"
-            );
-        }
+        // Nothing the run admitted is durable: every projection lives only in
+        // the held database, so the node-file tree is still the base's and no
+        // commit landed.
+        assert_eq!(
+            snapshot(&wt),
+            saved_layers,
+            "an admission must not write a node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            saved_commits,
+            "an admission must not create a commit before save"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            saved_head,
+            "git history must stay at the last saved state until save"
+        );
 
-        // The single durability point: one save flushes the whole buffer.
+        // The single durability point: one save writes the database's marked
+        // rows — the three new Requirements plus the two base rows the run's
+        // edges rewrote.
+        let marked: BTreeSet<String> = [
+            layer_path(Layer::Requirements, "requirement", "alpha"),
+            layer_path(Layer::Requirements, "requirement", "beta"),
+            layer_path(Layer::Requirements, "requirement", "gamma"),
+            layer_path(Layer::Requirements, "stakeholder", "owner"),
+            layer_path(Layer::Domain, "service", "svc"),
+        ]
+        .into_iter()
+        .collect();
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
@@ -3349,19 +3423,30 @@ mod e2e {
             "Session saved"
         );
 
-        // Every buffered node file now exists on disk under apg/layers/** …
+        // EXACTLY the marked rows were written: the tree differs from the saved
+        // baseline at those paths alone, so every unchanged node file is still
+        // byte-identical and no file appeared for an untouched identity.
+        let after_layers = snapshot(&wt);
+        let changed: BTreeSet<&str> = after_layers
+            .iter()
+            .filter(|(path, bytes)| saved_layers.get(*path) != Some(*bytes))
+            .map(|(path, _)| path.as_str())
+            .collect();
+        assert_eq!(
+            changed,
+            marked.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+            "save must write exactly the marked rows and leave every unchanged node file byte-identical"
+        );
+
+        // The durable store holds every added identity …
         let store = layers::read_existing_nodes(&wt_apg).unwrap();
         for name in ["alpha", "beta", "gamma"] {
-            assert!(
-                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
-                "save must write the `{name}` node file"
-            );
             assert!(
                 store.iter().any(|n| n.name.as_str() == name),
                 "the durable store must contain `{name}` after save"
             );
         }
-        // … including BOTH halves of the buffered edge.
+        // … including BOTH halves of the marked edge.
         let alpha =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "alpha").unwrap();
         let beta =
@@ -3374,7 +3459,7 @@ mod e2e {
                     && e.target.as_str() == "requirements.requirement.beta")
                 .count(),
             1,
-            "save must write the buffered out-edge"
+            "save must write the marked row's out-edge"
         );
         assert_eq!(
             beta.in_edges
@@ -3383,38 +3468,53 @@ mod e2e {
                     && e.source.as_str() == "requirements.requirement.alpha")
                 .count(),
             1,
-            "save must write the buffered edge's matching in-half"
+            "save must write the marked edge's matching in-half"
         );
 
-        // Exactly ONE new commit landed, and it moved HEAD.
+        // The whole marked set landed in ONE commit: the commit's own delta is
+        // exactly those paths, and it moved HEAD by one normal commit.
         assert_eq!(
             testutil::commit_count(&wt),
-            before_commits + 1,
-            "the whole buffered set must land in exactly one commit"
+            saved_commits + 1,
+            "the marked write set must land in exactly one commit"
         );
-        let after_head = git2::Repository::open(&wt)
-            .unwrap()
-            .head()
-            .unwrap()
-            .peel_to_commit()
-            .unwrap()
-            .id()
-            .to_string();
-        assert_ne!(after_head, before_head, "save must create a commit");
+        let git = git2::Repository::open(&wt).unwrap();
+        let after_commit = git.head().unwrap().peel_to_commit().unwrap();
+        let after_head = after_commit.id().to_string();
+        assert_ne!(after_head, saved_head, "save must create a commit");
         assert_eq!(
-            git2::Repository::open(&wt)
-                .unwrap()
-                .head()
-                .unwrap()
-                .peel_to_commit()
-                .unwrap()
-                .parent_count(),
+            after_commit.parent_count(),
             1,
             "the save commit is a normal single-parent commit"
         );
+        let before_commit = after_commit.parent(0).unwrap();
+        assert_eq!(
+            before_commit.id().to_string(),
+            saved_head,
+            "the save commit's parent must be the last saved state"
+        );
+        let committed: BTreeSet<String> = git
+            .diff_tree_to_tree(
+                Some(&before_commit.tree().unwrap()),
+                Some(&after_commit.tree().unwrap()),
+                None,
+            )
+            .unwrap()
+            .deltas()
+            .filter_map(|delta| {
+                delta
+                    .new_file()
+                    .path()
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
+            .collect();
+        assert_eq!(
+            committed, marked,
+            "the one save commit must carry exactly the marked rows"
+        );
 
-        // The buffer is cleared: a second save over the clean buffer is a no-op
-        // — no new commit, HEAD unchanged.
+        // The marks are drained: a second save over the emptied pending set
+        // writes nothing, makes no commit, and leaves the session live.
         let resave = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             resave.status.success(),
@@ -3423,8 +3523,8 @@ mod e2e {
         );
         assert_eq!(
             testutil::commit_count(&wt),
-            before_commits + 1,
-            "a save over the cleared buffer must make no commit"
+            saved_commits + 1,
+            "a save over the emptied pending set must make no commit"
         );
         assert_eq!(
             git2::Repository::open(&wt)
@@ -3436,21 +3536,39 @@ mod e2e {
                 .id()
                 .to_string(),
             after_head,
-            "a save over the cleared buffer must not move HEAD"
+            "a save over the emptied pending set must not move HEAD"
+        );
+        assert_eq!(
+            snapshot(&wt),
+            after_layers,
+            "a save over the emptied pending set must not write or change any apg/layers file"
         );
 
-        // The session stayed live through save …
+        // The session stayed live through both saves …
         assert!(
             apg::session::live_session(&wt_apg),
             "session save must not end the live session"
         );
 
-        // … and ends cleanly.
+        // … and ends cleanly, its own report naming the marked set the first
+        // save wrote and the emptied pending set the second read.
         let out = end_session(&wt, session);
         assert!(
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
+        );
+        let reported = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            reported.contains(&format!(
+                "Session saved: {} change(s) in one commit",
+                marked.len()
+            )),
+            "save must report the marked rows it wrote: {reported}"
+        );
+        assert!(
+            reported.contains("Session saved: no pending changes"),
+            "the second save must report the emptied pending set: {reported}"
         );
         testutil::remove(&repo);
     }
