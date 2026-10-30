@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "routed-ledger-read-seam",
+  "body": "The pre-save \"ledger-held\" observation is a routed Cypher read of the `PendingRemoval` label, because that table is the only seam visible from inside a live session — the coordinator's own accessors are not reachable from a test's child process. Upgrade: re-point this assertion to the new read seam if the ledger's table or label is ever renamed or folded into the durable node roster, and drop the direct label read if the session ever exposes a pending-state query.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.session_rm_of_a_saved_node_that_was_updated_leaves_no_file_and_one_commit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
