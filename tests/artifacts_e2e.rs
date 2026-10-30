@@ -2238,15 +2238,7 @@ mod e2e {
         // The session's own change builder, over the DB-reconstructed base: the
         // `writes` it folds are exactly the node files `apply_mutation` marks.
         let change = |base: &[layers::NodeFile], kind: &str, argv: &[&str]| {
-            apg::node_cmd::build_change_over(
-                base,
-                &[],
-                &wt_apg,
-                kind,
-                &args(argv),
-                &layers::LayersOverlay::new(),
-            )
-            .unwrap()
+            apg::node_cmd::build_change_over(base, &[], &wt_apg, kind, &args(argv)).unwrap()
         };
 
         assert_eq!(
