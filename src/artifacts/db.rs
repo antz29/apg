@@ -521,6 +521,25 @@ impl ArtifactDb {
         Ok(())
     }
 
+    /// Read the **held handle**'s pending-removal ledger: every durable identity
+    /// a session admission recorded as removed and the next save must delete the
+    /// node file of.
+    ///
+    /// Ordered by `fqn` in the query itself, so a save serialises and reports the
+    /// same identities in a stable order whatever order the storage returns. An
+    /// empty ledger is an empty vector. Runs on a fresh connection over the
+    /// caller's handle and touches no `apg/layers/**` file.
+    pub fn pending_removals(&self) -> anyhow::Result<Vec<PendingRemoval>> {
+        let (_, rows) = query_rows(
+            &self.conn()?,
+            "MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn",
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|row| PendingRemoval { fqn: cell(&row, 0) })
+            .collect())
+    }
+
     /// Reconstruct the durable `apg/layers/**` node-file set from the **live
     /// database** — the inverse of the layers projection
     /// ([`reingest_layers_on`](Self::reingest_layers_on) / `merge_records`).
