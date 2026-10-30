@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "admission-marks-after-projection-limits",
+  "body": "Two limits on the admission wiring. (1) An identity deleted and then re-added in the same session keeps its pending-removal ledger entry, because `record_pending_removal` is insert-only and phase 1 has no per-identity ledger clear — the save would then delete the node file the re-add wrote. Upgrade: clear the identity's ledger entry when a later admission of the same identity projects a write. (2) The marks and ledger records run after the projection, as the task orders, so a mark or ledger failure returns `Err` with the projection already landed (also cached by the at-most-once client id); upgrade when admission gains a transactional wrapper, or accept phase-4's pending-state discard-and-rebuild as the repair for a half-applied admission.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Coordinator.apply_mutation",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
