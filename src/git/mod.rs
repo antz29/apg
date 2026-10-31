@@ -13,10 +13,9 @@
 //!
 //! 1. **Scan staleness** (agent-loop hardening, pre-projects model): every
 //!    scan records the git state it ran under — HEAD sha plus tree cleanliness
-//!    — as a `scan_meta` control record on line 1 of
-//!    `apg/.trans/graph.jsonl` and as the DB's `Scan` node. A later
-//!    spec/plan/review mutation that would re-ingest into a stale DB is
-//!    refused *before* any JSONL write. All git reads here are git2-based.
+//!    — as the `Scan` row in `apg/.trans/db.lbug`. A later spec/plan/review
+//!    mutation that would re-ingest into a stale DB is refused *before* the
+//!    database is written. All git reads here are git2-based.
 //!
 //! 2. **Repo identity + membership** (R3/R4/R7): mutations may only happen
 //!    inside a project context — the project's worktree at
