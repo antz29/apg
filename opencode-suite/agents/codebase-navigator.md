@@ -647,10 +647,10 @@ judgment call). After it returns, verify the materialization: re-check the spine
 edges (no lost requirements, no cycles) via `apg_query`.
 ### CLI and tests
 `apg init [dir]` scaffolds `apg/` and installs the suite plus the nine agents; `apg scan [dir]
-[--language …] [--exclude-path …] [--module …]` rebuilds `apg/.trans/db.lbug` and
-`apg/.trans/graph.jsonl`; `apg query [--json] "<cypher>"`; `apg node`/`apg edge` are the durable
-surface; `apg session start|save|end|abort`; `apg plan …`; `apg project start|merge`; `apg
-review add|action|resolve|reject|list`; `apg --version`.
+[--language …] [--exclude-path …] [--module …]` rebuilds the one derived database,
+`apg/.trans/db.lbug` (from the `apg/layers/**` node files and the scanned code); `apg query
+[--json] "<cypher>"`; `apg node`/`apg edge` are the durable surface; `apg session
+start|save|end|abort`; `apg plan …`; `apg project start|merge`; `apg review add|action|resolve|reject|list`; `apg --version`.
 Test tiers: **unit** (one unit, pure in-memory), **int** (two or more, still pure), **e2e** (any
 real I/O — filesystem including `temp_dir()`, `db.lbug`, git, a process spawn). The four
 invocations are `cargo test` (unit+int, seconds, the default gate), `cargo test-unit`,
