@@ -416,11 +416,15 @@ mod e2e {
             .retain(|e| !(e.kind == kind && e.source == source));
     }
 
-    /// The `--tier` scope is separate from context (SPEC §9.2/§9.4): a Domain
-    /// cardinality violation is reported by domain and all-tier lint and is
-    /// invisible to requirements lint; every tier scope passes the complete
-    /// new-model fixture. The shared validator's cardinality errors surface
-    /// through the binary, and the usage errors are refused.
+    /// The `--tier` scope is separate from context (SPEC §9.2/§9.4), and each
+    /// tier-crossing coverage rule is supplied by its more concrete downstream
+    /// tier: service realisation needs Solution, so an unrealised Service is
+    /// invisible to `--tier domain` — its subject is a Domain node, but the
+    /// supplying Solution tier is out of scope — while `--tier solution` and
+    /// the all-tier run report it. Requirement coverage needs Domain, so a
+    /// dropped `driven-by` is invisible to `--tier requirements` and is
+    /// reported once Domain is in scope (`--tier domain`, `--tier solution`,
+    /// all tiers). The complete model passes every scope.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
     fn spec_lint_tier_scopes_domain_violations() {
@@ -429,19 +433,26 @@ mod e2e {
         let apg_root = wt.join(specs::LAYOUT);
         testutil::seed_valid_model(&apg_root);
 
-        // The complete model passes every single-tier scope (a missing
-        // Component implemented-by is the sole deferred obligation, §8.2).
-        for tier in ["requirements", "domain", "solution"] {
-            let out = testutil::spawn_apg(&["spec", "lint", "--tier", tier], &wt);
+        // The complete model passes every cumulative scope and the all-tier run
+        // (a missing Component implemented-by is the sole deferred obligation,
+        // §8.2).
+        for args in [
+            vec!["spec", "lint", "--tier", "requirements"],
+            vec!["spec", "lint", "--tier", "domain"],
+            vec!["spec", "lint", "--tier", "solution"],
+            vec!["spec", "lint"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
             assert!(
                 out.status.success(),
-                "the complete model must pass `--tier {tier}`: {}",
+                "the complete model must pass `{args:?}`: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
         }
 
-        // Break the domain: the Component no longer realises its Service. Both
-        // endpoint files are rewritten so pairing stays intact.
+        // Unrealised Service: the Component no longer realises it. Both
+        // endpoint files are rewritten so pairing stays intact. The rule is
+        // supplied by Solution, so scopes below Solution must not report it.
         let mut nodes = testutil::valid_model();
         drop_edge(
             &mut nodes,
@@ -460,30 +471,82 @@ mod e2e {
             .collect();
         apg::layers::write_project(&apg_root, &changed, &[]).unwrap();
 
+        for args in [
+            vec!["spec", "lint", "--tier", "requirements"],
+            vec!["spec", "lint", "--tier", "domain"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(
+                out.status.success(),
+                "`{args:?}` must not apply the Solution-supplied realisation rule: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
         let rule = "Service `domain.service.place-order` is realised by no Component";
-        let domain = testutil::spawn_apg(&["spec", "lint", "--tier", "domain"], &wt);
-        assert!(!domain.status.success());
-        assert!(
-            String::from_utf8_lossy(&domain.stderr).contains(rule),
-            "domain lint must report the domain cardinality violation: {}",
-            String::from_utf8_lossy(&domain.stderr)
+        for args in [
+            vec!["spec", "lint", "--tier", "solution"],
+            vec!["spec", "lint"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(
+                !out.status.success(),
+                "`{args:?}` must report the unrealised Service"
+            );
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains(rule),
+                "`{args:?}` must report `{rule}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        // The mirror case: restore the model, then drop the Service's
+        // `driven-by` to the Requirement. Requirement coverage is supplied by
+        // Domain, so the Requirements scope cannot see it.
+        testutil::seed_valid_model(&apg_root);
+        let mut nodes = testutil::valid_model();
+        drop_edge(
+            &mut nodes,
+            "domain",
+            "service",
+            "place-order",
+            "driven-by",
+            "requirements.requirement.place-order",
         );
+        let changed: Vec<apg::layers::NodeFile> = nodes
+            .into_iter()
+            .filter(|n| {
+                (n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
+                    || (n.layer == "requirements"
+                        && n.node_type == "requirement"
+                        && n.name == "place-order")
+            })
+            .collect();
+        apg::layers::write_project(&apg_root, &changed, &[]).unwrap();
 
         let requirements = testutil::spawn_apg(&["spec", "lint", "--tier", "requirements"], &wt);
         assert!(
             requirements.status.success(),
-            "requirements lint must not require domain completeness: {}",
+            "requirements lint must not apply the Domain-supplied coverage rule: {}",
             String::from_utf8_lossy(&requirements.stderr)
         );
-
-        // All-tier lint reports the same shared-validator error.
-        let all = testutil::spawn_apg(&["spec", "lint"], &wt);
-        assert!(!all.status.success());
-        assert!(
-            String::from_utf8_lossy(&all.stderr).contains(rule),
-            "all-tier lint must report the same error: {}",
-            String::from_utf8_lossy(&all.stderr)
-        );
+        let coverage =
+            "Requirement `requirements.requirement.place-order` is `driven-by` no Service";
+        for args in [
+            vec!["spec", "lint", "--tier", "domain"],
+            vec!["spec", "lint", "--tier", "solution"],
+            vec!["spec", "lint"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(
+                !out.status.success(),
+                "`{args:?}` must report the uncovered Requirement"
+            );
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains(coverage),
+                "`{args:?}` must report `{coverage}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
 
         testutil::remove(&repo);
     }
