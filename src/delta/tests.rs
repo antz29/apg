@@ -117,7 +117,7 @@ mod unit {
                 },
                 "cache-key-drift",
             ),
-            (FullScanReason::NoPreviousExport, "no-previous-export"),
+            (FullScanReason::NoPreviousDatabase, "no-previous-database"),
             (FullScanReason::DeltaUnavailable, "delta-unavailable"),
             (FullScanReason::Forced, "forced"),
         ];
