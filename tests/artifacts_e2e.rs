@@ -4194,4 +4194,147 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// phase-05 task-2: the pre-scan ordering regression. A fresh project
+    /// worktree seeds only the `.trans` marker and has no `db.lbug`. The
+    /// validated multi-file `write_project` refuses there (its code-identity
+    /// source is the database), while the single-file `write_node` authors
+    /// `apg/layers/**` without one — and that authored node must survive into
+    /// the cold scan's graph.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/cold scan/db.lbug/git); run via cargo test-e2e"]
+    fn pre_scan_write_node_lands_for_the_cold_scan_while_write_project_refuses() {
+        let repo = Repo::new("pre-scan-write-node");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write("main.go", "package main\n\nfunc main() {}\n");
+        repo.commit_all("source");
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(specs::LAYOUT);
+
+        // The fresh worktree is DATABASE-LESS by construction: `start_project`
+        // seeds only the `.trans` marker, so the refusal below is asserted
+        // against a checkout that never had a database.
+        let db = apg_root.join(specs::TRANS).join("db.lbug");
+        assert!(
+            !db.exists(),
+            "a fresh project worktree must have no db.lbug"
+        );
+        let head_before = testutil::commit_count(&wt);
+
+        let nf = |layer: &str, node_type: &str, name: &str, body: &str| layers::NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: body.to_string(),
+            properties: NodeProperties::default(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        };
+
+        // (1) FIRST, before any scan: a two-file validated model (a component
+        // `realises` its service, both halves paired) refuses through
+        // `write_project`'s `validate_change` → `artifacts::code_universes`
+        // database read, naming the missing database and the remedy — and lands
+        // neither node file nor commit.
+        let mut comp = nf(
+            "solution",
+            "component",
+            "pre-scan-sys",
+            "realises the service",
+        );
+        comp.out.push(layers::OutEdge {
+            kind: "realises".to_string(),
+            target: "domain.service.pre-scan-svc".to_string(),
+            properties: NodeProperties::default(),
+        });
+        let mut svc = nf(
+            "domain",
+            "service",
+            "pre-scan-svc",
+            "realised by the component",
+        );
+        svc.in_edges.push(layers::InEdge {
+            kind: "realises".to_string(),
+            source: "solution.component.pre-scan-sys".to_string(),
+            properties: NodeProperties::default(),
+        });
+
+        let err = layers::write_project(&apg_root, &[comp, svc], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("db.lbug"),
+            "the refusal must name the missing database: {msg}"
+        );
+        assert!(
+            msg.contains("run `apg scan` first"),
+            "the refusal must name the remedy: {msg}"
+        );
+        for path in [
+            layers::node_file_path(&apg_root, Layer::Solution, "component", "pre-scan-sys"),
+            layers::node_file_path(&apg_root, Layer::Domain, "service", "pre-scan-svc"),
+        ] {
+            assert!(
+                !path.exists(),
+                "a refused no-database write must not land {}",
+                path.display()
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            head_before,
+            "a refused no-database write must not commit"
+        );
+
+        // (2) THEN the single-file writer authors one valid node without a
+        // database and lands it on disk.
+        let authored = layers::write_node(
+            &apg_root,
+            &layers::NodeFile {
+                body: "authored before the cold scan".to_string(),
+                ..nf("requirements", "requirement", "pre-scan", "")
+            },
+        )
+        .unwrap();
+        assert!(
+            authored.exists(),
+            "write_node must land {} without a database",
+            authored.display()
+        );
+        assert!(
+            std::fs::read_to_string(&authored)
+                .unwrap()
+                .contains("authored before the cold scan"),
+            "the authored body must be on disk before the scan"
+        );
+
+        // (3) THEN the cold scan builds the database.
+        let out = testutil::ApgCommand::new(&["scan", "."]).cwd(&wt).output();
+        assert!(
+            out.status.success(),
+            "the cold scan failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(db.exists(), "the cold scan must produce db.lbug");
+
+        // (4) THEN the cold-built database carries the pre-scan authored node.
+        let out = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (r:Requirement {fqn: 'requirements.requirement.pre-scan'}) RETURN r.body",
+            ],
+            &wt,
+        );
+        assert!(
+            out.status.success(),
+            "query failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let rows = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            rows.contains("authored before the cold scan"),
+            "the cold-built database must carry the authored node: {rows}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
