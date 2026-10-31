@@ -1,3 +1,9 @@
+The durable spec is the git-tracked node files under `apg/layers/` — one file
+per authored node, FQN `<layer>.<type>.<name>` — the system of record at rest.
+The graph database under `apg/.trans/` is derived: a scan rebuilds it from those
+node files plus the scanned code, and there is no second derived representation
+beside it.
+
 ```mermaid
 classDiagram
 direction TB
