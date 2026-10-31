@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "plan-authoring-projects-to-branch-db",
-  "body": "Limit: the splice's pre-state depends on plan authoring projecting its record sets (planned code rows included) into the live branch DB via read-your-writes; a fixture that assumes a projected planned row misbehaves if the projection stops writing planned code rows or a plan is authored with no DB. Upgrade the fixture path to full-scan placeholder seeding if the authoring projection changes.",
+  "body": "`write_jsonl_and_reingest` writes the durable JSONL file and projects the same record set into the live branch database, re-anchoring its own `Scan` row through the auto-commit's `reanchor_scan_meta`; it performs no export step. Limit: the splice's pre-state depends on plan authoring projecting its record sets (planned code rows included) into the live branch DB via read-your-writes; a fixture that assumes a projected planned row misbehaves if the projection stops writing planned code rows or a plan is authored with no DB. Upgrade the fixture path to full-scan placeholder seeding if the authoring projection changes.",
   "properties": {},
   "out": [
     {
