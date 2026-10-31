@@ -124,10 +124,16 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
 /// mutation must be visible in the query index, and silently dropping it is
 /// what let the authoring agents believe writes had landed when they had not.
 ///
-/// This is the **central mutation funnel** (R4): every spec/plan/review/
-/// invariant mutation — and every code-note ledger write (`add_note`'s
-/// code-target branch) — routes through here, so the two gates beside each
-/// other cover them all:
+/// This is the **central mutation funnel** for the project's transient
+/// bookkeeping — the plan store (`.trans/plans/<project>.jsonl`) and the five
+/// feedback tier mirrors — plus the shared `_invariants.jsonl` ledger. Durable
+/// `apg node` / `apg edge` mutations do NOT route through here: they are
+/// node-file writes owned by
+/// [`layers::write_project`](crate::layers::write_project). The funnel is
+/// database-only — one atomic JSONL write, one commit for a durable target, one
+/// projection transaction into `db.lbug` — with no write-back buffer and no
+/// export step anywhere on the path, so the two gates beside each other cover
+/// every write that reaches it:
 ///
 /// 1. **Membership guard** (R3): writes only happen inside a project context —
 ///    the project's worktree at `<main>/apg/.worktrees/<project>`, on the
@@ -146,30 +152,27 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
 /// **Auto-commit** (R8): after the durable write lands (and before the
 /// projection), a durable target this funnel serves (anything outside the
 /// gitignored `apg/.trans/`) is committed on the project branch via git2,
-/// single-file diffs, and the staleness gate's recorded `scan_meta` is
-/// re-anchored to the new state (DB and tree in sync by construction;
-/// consecutive mutations do not each demand a rescan). Transient `.trans`
-/// writes never commit: `apg/.trans` is gitignored and transient by design.
+/// single-file diffs, and the database's own `Scan` row is re-anchored to the
+/// new state through that commit (DB and tree in sync by construction;
+/// consecutive mutations do not each demand a rescan). A live session owns the
+/// database and refreshes the row through the handle it already holds, so this
+/// never opens a second one. Transient `.trans` writes never commit:
+/// `apg/.trans` is gitignored and transient by design.
 /// An auto-commit failure degrades to a warning on stderr: the mutation already
 /// landed, and the staleness gate will demand a scan before the next one (the
 /// same degradation as a hand-committed change).
 ///
-/// Durable `apg node` / `apg edge` mutations do NOT pass through this funnel:
-/// the live session admits them into its write-back buffer and projects each at
-/// admission, and the whole buffered set becomes durable in exactly ONE commit
-/// at `apg session save`. This funnel's per-write commit is therefore not the
-/// durable-mutation contract.
-///
 /// **Commit-then-project** (phase-05 tasks 3/12): the durable/transient file
 /// write and its commit land FIRST — the system-of-record durability point —
-/// and only then is the exact projection delta applied to `db.lbug`. The delta
-/// is computed HERE, inside the funnel, from the assembled transient record set
-/// before and after this write (no per-caller threading): the delete set is
-/// exactly the removed ∪ changed FQNs plus the sources of vanished edges
-/// ([`transient_delta`]), never a `<project>/` prefix. A crash between the write
-/// and the projection is reproduced by the next rebuild as the committed state,
-/// never the uncommitted projection. The rename is still atomic (a sibling temp
-/// swapped over `path`), so a crash mid-write never leaves half a JSONL.
+/// and only then is the exact projection delta applied to `db.lbug` in one
+/// transaction. The delta is computed HERE, inside the funnel, from the
+/// assembled transient record set before and after this write (no per-caller
+/// threading): the delete set is exactly the removed ∪ changed FQNs plus the
+/// sources of vanished edges ([`transient_delta`]), never a `<project>/` prefix.
+/// A crash between the write and the projection is reproduced by the next
+/// rebuild as the committed state, never the uncommitted projection. The rename
+/// is still atomic (a sibling temp swapped over `path`), so a crash mid-write
+/// never leaves half a JSONL.
 pub fn write_jsonl_and_reingest(
     apg_root: &Path,
     path: &Path,
