@@ -651,11 +651,16 @@ pub(crate) enum Context {
 /// the complete set. Pure — no I/O.
 ///
 /// **Scope** (SPEC §9.2): `scope` is the tier whose rules are checked, or
-/// `None` for the whole model. A node outside the scope contributes no
-/// cardinality error of its own — its incoming/outgoing edges are still read,
-/// so an in-scope node's typed upstream/downstream path is resolved against the
-/// whole assembled set. A single-tier lint therefore checks that tier's local
-/// structure without demanding that unrelated tiers are complete.
+/// `None` for the whole model. Scope is cumulative — the selected tier plus
+/// every tier above it in the catalog ladder — so a Domain run also checks
+/// Requirements. A node outside the scope contributes no cardinality error of
+/// its own — its incoming/outgoing edges are still read, so an in-scope node's
+/// typed upstream/downstream path is resolved against the whole assembled set.
+/// The two tier-crossing coverage rules are supplied by their more-concrete
+/// downstream tier, so each runs only when its supplier is in scope:
+/// requirement coverage (every Requirement is `driven-by` a Service) needs
+/// Domain, and service realisation (every Service is realised by a Component)
+/// needs Solution. `None` runs every rule.
 ///
 /// **Context** ([`Context`]): only the Component `implemented-by` presence rule
 /// depends on it (SPEC §8.2) — missing permitted under `Lint` and an error
@@ -695,7 +700,12 @@ pub(crate) fn validate_cardinalities(
     context: Context,
 ) -> Vec<String> {
     let mut errors: Vec<String> = Vec::new();
-    let in_scope = |node: &NodeFile| scope.is_none_or(|tier| node.layer == tier.layer_dir());
+    let in_scope =
+        |node: &NodeFile| scope.is_none_or(|tier| crate::layers::layer_of(&node.layer) <= tier);
+    // The two tier-crossing coverage rules read data supplied by a more-concrete
+    // downstream tier, so each is gated on its supplier being in scope.
+    let domain_in_scope = scope.is_none_or(|tier| Layer::Domain <= tier);
+    let solution_in_scope = scope.is_none_or(|tier| Layer::Solution <= tier);
 
     // `kind → source` and `kind → target` adjacency, keyed by (kind, FQN).
     let mut out_edges: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
@@ -837,18 +847,20 @@ pub(crate) fn validate_cardinalities(
             ));
         }
     }
-    for (fqn, node) in assembled {
-        if node.node_type != "requirement" || !in_scope(node) {
-            continue;
-        }
-        let services = in_of(fqn, "driven-by")
-            .iter()
-            .filter(|s| is_type(s, "service"))
-            .count();
-        if services == 0 {
-            errors.push(format!(
-                "Requirement `{fqn}` is `driven-by` no Service — every Requirement is `driven-by` at least one Service (requirement coverage, SPEC §3.4)"
-            ));
+    if domain_in_scope {
+        for (fqn, node) in assembled {
+            if node.node_type != "requirement" || !in_scope(node) {
+                continue;
+            }
+            let services = in_of(fqn, "driven-by")
+                .iter()
+                .filter(|s| is_type(s, "service"))
+                .count();
+            if services == 0 {
+                errors.push(format!(
+                    "Requirement `{fqn}` is `driven-by` no Service — every Requirement is `driven-by` at least one Service (requirement coverage, SPEC §3.4)"
+                ));
+            }
         }
     }
 
@@ -919,19 +931,22 @@ pub(crate) fn validate_cardinalities(
         }
     }
 
-    // Every Service is realised by at least one Component (SPEC §6).
-    for (fqn, node) in assembled {
-        if node.node_type != "service" || !in_scope(node) {
-            continue;
-        }
-        let components = in_of(fqn, "realises")
-            .iter()
-            .filter(|s| is_type(s, "component"))
-            .count();
-        if components == 0 {
-            errors.push(format!(
-                "Service `{fqn}` is realised by no Component — every Service is realised by at least one Component"
-            ));
+    // Every Service is realised by at least one Component (SPEC §6) — supplied
+    // by Solution, so it runs only with Solution in scope.
+    if solution_in_scope {
+        for (fqn, node) in assembled {
+            if node.node_type != "service" || !in_scope(node) {
+                continue;
+            }
+            let components = in_of(fqn, "realises")
+                .iter()
+                .filter(|s| is_type(s, "component"))
+                .count();
+            if components == 0 {
+                errors.push(format!(
+                    "Service `{fqn}` is realised by no Component — every Service is realised by at least one Component"
+                ));
+            }
         }
     }
 
