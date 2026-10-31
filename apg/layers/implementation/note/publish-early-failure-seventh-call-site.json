@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "publish-early-failure-seventh-call-site",
-  "body": "The surviving publish test carries a second publish call — the folded database-only early-failure case — so tests/splice_e2e.rs has seven publish call sites rather than the six the publish-cut plan enumerates. The extra call keeps the three-argument export-era signature until the database-only cut. Upgrade: the publish cut must drop this call's export argument in the same function it already edits.",
+  "body": "The surviving publish test carries two extra publish calls — the folded database-only early-failure case and the hook-driven post-swap rollback arm — so tests/splice_e2e.rs has eight publish call sites across six functions rather than the six the publish-cut plan enumerates: wide_splice, publish_swaps_the_database_and_leaves_no_debris (three: early-failure, rollback, happy path), spliced_and_full_rebuild_agree_on_every_table_count, published_database_equals_a_full_rebuild, spliced_scan_carries_the_agent_node_set_of_a_full_rebuild and splice_heals_a_planned_seed_row_the_assembly_realizes. Every call keeps the three-argument export-era signature until the database-only cut. Upgrade: the publish cut must drop all eight export arguments in the same cut, the folded test's three included, or tests/splice_e2e.rs stops compiling against the database-only signature.",
   "properties": {},
   "out": [
     {
