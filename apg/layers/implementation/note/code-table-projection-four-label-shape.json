@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "code-table-projection-four-label-shape",
+  "body": "The cached-declaration oracle's code_table_projection distinguishes Module, File and the shared Struct/Function column shape; a fifth code table with a different column set would fall into the trailing catch-all arm and compare as a struct. It covers the four Implementation labels only. Upgrade by giving the projection an explicit per-label column list when a fifth code table is added.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.ingest_e2e.e2e.cached_declaration_supersedes_a_planned_placeholder",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "progress-graph-counts-ungrouped",
+  "body": "graph_counts issues about six read queries plus per-label scans against the scratch database rather than grouped counts, which is fine for tiny e2e fixtures. Upgrade to count-star per label and one language-attributed grouping if a fixture grows large.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.progress_e2e.graph_counts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

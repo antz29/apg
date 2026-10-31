@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-row-helper-local-to-git-e2e",
+  "body": "The re-anchor fixture reads the single Scan row through a local db_scan_row helper that opens the database read-only, because recorded_scan is export-based and slated for deletion. The helper is private to this crate. Upgrade — promote it into apg::testutil if a second e2e crate needs the scanned_at column, and remove the export reader with its last caller.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.git_e2e.e2e.reanchor_rewrites_graph_jsonl_line_one",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

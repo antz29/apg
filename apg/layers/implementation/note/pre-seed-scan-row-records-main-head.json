@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pre-seed-scan-row-records-main-head",
+  "body": "The routed-warning fixture seeds its minimal database with a Scan row at the main checkout's HEAD because the fresh worktree branch is cut at that HEAD and no worktree commit lands before the seed. The recorded sha is the branch point, not a worktree-head read. Upgrade to a worktree-head read if the fixture ever commits before seeding.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.routed_warning_reaches_the_client",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

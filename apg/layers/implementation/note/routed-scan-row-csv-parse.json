@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "routed-scan-row-csv-parse",
+  "body": "The post-save Scan-row read goes through a routed apg query and parses CSV because the live session owns the database, so the assertion depends on the CSV column order. Upgrade to a structured routed reader if the query output shape ever changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.session_save_reanchors_scan_meta_to_the_new_head",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

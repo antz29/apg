@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "publish-early-failure-seventh-call-site",
+  "body": "The surviving publish test carries a second publish call — the folded database-only early-failure case — so tests/splice_e2e.rs has seven publish call sites rather than the six the publish-cut plan enumerates. The extra call keeps the three-argument export-era signature until the database-only cut. Upgrade: the publish cut must drop this call's export argument in the same function it already edits.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.publish_swaps_both_artifacts_and_leaves_no_debris",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

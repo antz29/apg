@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "apply-gate-fixture-function-row-only",
+  "body": "The separate-crate apply-gate fixture reads realized and planned rows through a Function-label query and counts the other Implementation labels by fqn only, because Module and File carry no path property. Location assertions therefore cover functions. Upgrade if a fixture needs a planned Module or File placeholder's location.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.apply_gate_realizes_a_planned_node_in_a_separate_crate",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

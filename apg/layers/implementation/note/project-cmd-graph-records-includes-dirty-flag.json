@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-cmd-graph-records-includes-dirty-flag",
+  "body": "graph_records renders every node property, so a row's session-only updated dirty flag is part of the compared record set, and the PendingRemoval ledger is skipped by table name. A database compared mid-session with an unsaved mutation would differ only by that flag. Upgrade — strip the updated column and revisit the ledger skip if session state ever enters the comparison.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.graph_records",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

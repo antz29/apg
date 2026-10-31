@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pre-scan-db-seed-is-validation-scaffolding",
+  "body": "The pre-scan database seed writes the worktree HEAD's sha plus a fixed timestamp so the direct write path can resolve its code universes before the first scan; the seeded row is scaffolding for validation, not a claim that the seed is a scan. Upgrade — drop the write_scan_meta leg if the direct write path ever becomes database-independent.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.spec_lint_e2e.e2e.node_add_and_update_emit_advisory_wording_warning",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

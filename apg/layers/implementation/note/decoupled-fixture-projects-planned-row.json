@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "decoupled-fixture-projects-planned-row",
+  "body": "The decoupled-validation fixture's pending arm projects its plan-store declaration with artifacts::write_jsonl_and_reingest rather than a full scan, so the planned row exists without re-running the frontends; it proves the Pending universe the projection writes, not the scan's own planned-row materialisation. Upgrade to a scan-based projection if the planned-row projection path stops covering Record::PlannedNode.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.layers_e2e.e2e.write_project_decoupled_from_db_validates_export_and_records_unvalidated",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

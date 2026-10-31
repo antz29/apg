@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "code-kinds-e2e-identity-deferred-rename",
+  "body": "The test keeps the code_kinds_from_export identity while it asserts PreviousScan::capture, because the plan pins the function identity until the export accessor is deleted. The name asserts a retired accessor. Upgrade — rename it alongside the export accessor's deletion so the name follows the surviving database reader.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.code_kinds_from_export_prefers_the_recorded_planned_kind_over_the_module_fallback",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

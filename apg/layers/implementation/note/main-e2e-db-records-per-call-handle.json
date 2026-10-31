@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "main-e2e-db-records-per-call-handle",
+  "body": "The main_e2e database oracle opens one read-only handle per call and runs roughly a dozen table and edge queries, rebuilding the retired export record shape. That is acceptable at assertion volume, but a hot loop would open many handles. Upgrade to a shared single-connection reader if a test calls it repeatedly.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.planned_node_of_every_kind_realizes_on_a_full_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
