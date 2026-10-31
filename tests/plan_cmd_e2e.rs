@@ -3263,16 +3263,11 @@ mod e2e {
                 "apg.project_cmd.cmd_project",
             ),
         ] {
-            repo.write(
-                &format!("apg/layers/solution/{node_type}/{name}.json"),
-                &serde_json::to_string_pretty(&nf(
-                    "solution",
-                    node_type,
-                    name,
-                    &[("implemented-by", code)],
-                ))
-                .unwrap(),
-            );
+            layers::write_node(
+                &repo.apg_root(),
+                &nf("solution", node_type, name, &[("implemented-by", code)]),
+            )
+            .unwrap();
         }
         repo.commit_all("author pre-existing worktree-cleanup nodes");
         let wt = repo.start_project("foo");
@@ -3434,16 +3429,16 @@ mod e2e {
         let repo = Repo::new("verify-merge-base");
         // A baseline node on `main` BEFORE the branch is cut (part of the
         // merge-base, unchanged on the branch -> exempt).
-        repo.write(
-            "apg/layers/solution/component/base.json",
-            &serde_json::to_string_pretty(&nf(
+        layers::write_node(
+            &repo.apg_root(),
+            &nf(
                 "solution",
                 "component",
                 "base",
                 &[("implemented-by", "github.com/x/y.Base")],
-            ))
-            .unwrap(),
-        );
+            ),
+        )
+        .unwrap();
         repo.commit_all("author the baseline solution node");
         let wt = repo.start_project("foo");
         db_at(&wt);
@@ -3451,16 +3446,16 @@ mod e2e {
 
         // A post-cut commit on the DEFAULT branch: `main` now carries a
         // solution node the branch does NOT have.
-        repo.write(
-            "apg/layers/solution/component/main-only.json",
-            &serde_json::to_string_pretty(&nf(
+        layers::write_node(
+            &repo.apg_root(),
+            &nf(
                 "solution",
                 "component",
                 "main-only",
                 &[("implemented-by", "github.com/x/y.MainOnly")],
-            ))
-            .unwrap(),
-        );
+            ),
+        )
+        .unwrap();
         repo.commit_all("advance main after the branch cut");
 
         // The branch carries one node whose claim IS touched, so the delta is
@@ -3525,16 +3520,11 @@ mod e2e {
         let repo = Repo::new("verify-removed-claim");
         // Author the three baseline nodes on `main` BEFORE the branch is cut.
         let base = |node_type: &str, name: &str, code: &str| {
-            repo.write(
-                &format!("apg/layers/solution/{node_type}/{name}.json"),
-                &serde_json::to_string_pretty(&nf(
-                    "solution",
-                    node_type,
-                    name,
-                    &[("implemented-by", code)],
-                ))
-                .unwrap(),
-            );
+            layers::write_node(
+                &repo.apg_root(),
+                &nf("solution", node_type, name, &[("implemented-by", code)]),
+            )
+            .unwrap();
         };
         base("component", "edge-removed", "github.com/x/y.EdgeCode");
         base("component", "node-removed", "github.com/x/y.NodeCode");
@@ -4053,16 +4043,12 @@ mod e2e {
         // under a second project context (init is a per-branch act).
         let wt2 = repo.start_project("bar");
         let bar_apg = wt2.join(specs::LAYOUT);
-        let req_file = apg::layers::node_file_path(
+        layers::write_node(
             &bar_apg,
-            apg::layers::Layer::Requirements,
-            "requirement",
-            "timer",
-        );
-        std::fs::create_dir_all(req_file.parent().unwrap()).unwrap();
-        std::fs::write(
-            &req_file,
-            r#"{"name":"timer","type":"requirement","layer":"requirements","body":"x","properties":{},"out":[],"in":[]}"#,
+            &layers::NodeFile {
+                body: "x".to_string(),
+                ..nf("requirements", "requirement", "timer", &[])
+            },
         )
         .unwrap();
         let has = plan_init_at(&bar_apg, "bar", "Plan Bar", "S2").unwrap();
