@@ -11,8 +11,8 @@
 //! project's worktree at `<main>/apg/.worktrees/<project>`, on the project's
 //! branch), so every fixture here is a small real repo with a real linked
 //! worktree. The DB builders stay per-module (each test module needs its own
-//! code graph); this module provides the git half plus the graph.jsonl
-//! `scan_meta` writers every fixture needs to stay fresh.
+//! code graph); this module provides the git half plus the database `Scan`-row
+//! writers every fixture needs to stay fresh.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 use crate::graph::{Graph, Location, Node, NodeKind};
 use crate::layers::{InEdge, NodeFile, OutEdge};
 use crate::load;
-use crate::schema;
 use crate::specs;
 
 /// Process-wide lock for tests that must mutate the process cwd (layout
@@ -186,12 +185,11 @@ impl Repo {
     }
 }
 
-/// Writes a graph.jsonl whose line 1 is the scan_meta control record for a
-/// scan at `sha`/`clean` (the real export writer). When a `db.lbug` already
-/// exists, the DB's OWN `Scan` row is refreshed to the identical state, so the
-/// fixture models a real scan's **two agreeing halves** — required by
-/// [`crate::git::is_fresh`], which refuses a DB whose `Scan` row disagrees with
-/// the export.
+/// Records a fixture's scan in the worktree database's own `Scan` row for a
+/// scan at `sha`/`clean`. That row is the one recorded-state source
+/// [`crate::git::is_fresh`] reads — no `graph.jsonl` export row is written,
+/// preserved or re-anchored. An absent `db.lbug` is a legitimate fixture
+/// state: the call is then a no-op (there is no database to record into).
 ///
 /// The content-identity key is taken from the checkout's CURRENT git state, so
 /// a fixture that records the live sha/clean is genuinely fresh under the
@@ -205,60 +203,22 @@ pub fn write_scan_meta(apg_root: &Path, sha: Option<&str>, clean: bool, at: &str
 /// [`write_scan_meta`] with an explicit content-identity key (`None` models a
 /// pre-hardening record whose freshness cannot be verified).
 ///
-/// **Re-anchor, never truncate**: only line 1 (the `scan_meta` control record)
-/// is replaced; every pre-existing export row — the code universe
-/// `code_universes_from_export` reads and the authored→code edges
-/// `tree_authored_identity` keeps — is preserved verbatim. A fixture with a
-/// real code export therefore stays internally consistent across a re-anchor.
-///
-/// The DB half is written only when a `db.lbug` already exists (and opens): a
-/// `graph.jsonl` without its DB is a legitimate fixture state, and
-/// [`crate::git::is_fresh`] independently requires the live DB.
+/// One row write on the database's own `Scan` row, which is the single
+/// recorded-state source [`crate::git::is_fresh`] reads: no export row is
+/// written, preserved or re-anchored. The row is refreshed only when a
+/// `db.lbug` already exists (and opens); an absent database is a legitimate
+/// fixture state and this never creates one. `at` is kept for fixture
+/// call-site compatibility — the refreshed row preserves the database's
+/// existing `scanned_at`.
 pub fn write_scan_meta_keyed(
     apg_root: &Path,
     sha: Option<&str>,
     clean: bool,
-    at: &str,
+    _at: &str,
     content_key: Option<&str>,
 ) {
-    // Re-anchor ONLY the `scan_meta` control record on line 1, preserving every
-    // pre-existing export row byte-for-byte (the code universe
-    // `code_universes_from_export` reads, and the authored→code edges
-    // `tree_authored_identity` keeps). A scan-meta-only rewrite would empty the
-    // export's code set and silently drop those edges from the tree digest.
-    let path = apg_root.join(specs::TRANS).join("graph.jsonl");
-    let meta = serde_json::to_string(&schema::Record::ScanMeta {
-        git_sha: sha.map(str::to_string),
-        git_clean: sha.map(|_| clean),
-        content_key: content_key.map(str::to_string),
-        scanned_at: at.to_string(),
-    })
-    .unwrap();
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut body = String::with_capacity(meta.len() + existing.len() + 1);
-    body.push_str(&meta);
-    body.push('\n');
-    for (i, line) in existing.lines().enumerate() {
-        // Line 1 is the old scan_meta lead (if any) — dropped and replaced;
-        // every other line (code/spec/edge rows) is preserved verbatim.
-        if i == 0
-            && serde_json::from_str::<schema::Record>(line.trim())
-                .is_ok_and(|r| matches!(r, schema::Record::ScanMeta { .. }))
-        {
-            continue;
-        }
-        body.push_str(line);
-        body.push('\n');
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(&path, body).unwrap();
-
-    // The DB's OWN `Scan` row — the other half of the recorded scan. Refresh it
-    // to the identical state so `db_recorded_scan` and `recorded_scan` agree
-    // (a real scan writes both together; `is_fresh` refuses a DB that only has
-    // one half or whose halves disagree).
+    // The DB's OWN `Scan` row — the recorded scan `is_fresh` reads. An absent
+    // database has nothing to record into, which is a legitimate fixture state.
     if apg_root.join(specs::TRANS).join("db.lbug").exists()
         && let Ok(db) = crate::artifacts::ArtifactDb::open(apg_root)
     {
@@ -1608,9 +1568,11 @@ pub fn task_recs(
 /// checkout's `*.scan.jsonl` payloads through the real ingest pipeline, then
 /// chains the same post-code leg `cmd_scan` assembles — the durable
 /// `apg/layers` tree via `layers::ingest_tree` plus the transient `.trans/`
-/// plan store and feedback tier mirrors — writing `db.lbug` + `graph.jsonl`
-/// into the checkout's own `apg/.trans/`. The `scan_meta` records the real git
-/// state of the checkout, so staleness behaves exactly like a real scan.
+/// plan store and feedback tier mirrors — writing the derived `db.lbug` into
+/// the checkout's own `apg/.trans/`. The fixture's recorded state is that
+/// database alone: no `graph.jsonl` export enters its description. The
+/// `scan_meta` records the real git state of the checkout, so staleness
+/// behaves exactly like a real scan.
 ///
 /// `run_pipeline` writes relative to the process cwd, so every scan is
 /// serialized behind a process-wide lock: concurrent scans (tests run in
@@ -1620,7 +1582,9 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     scan_checkout_locked(project_dir)
 }
 
-/// [`scan_checkout`] for a caller that already holds [`CWD_LOCK`]. The scan
+/// [`scan_checkout`] for a caller that already holds [`CWD_LOCK`]. It likewise
+/// produces the derived database alone (`graph.jsonl` is not part of the
+/// fixture). The scan
 /// mutates the process-global cwd (`run_pipeline` chdirs into `.trans`), so the
 /// caller must guarantee exclusivity itself. A test that must run several scans
 /// folds them into ONE lock hold through this entry point, so it never
