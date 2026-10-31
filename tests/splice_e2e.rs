@@ -5,7 +5,6 @@ use apg::layers::NodeProperties;
 use apg::load;
 use apg::schema::SCAN_HEAD;
 use apg::splice::*;
-use apg::testutil::read_graph_jsonl;
 use lbug::{Connection, Database, SystemConfig};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -1069,26 +1068,6 @@ fn agent_rows(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
     out
 }
 
-/// The `agent` records of a `graph.jsonl` export, as
-/// `(fqn, path, start_line, end_line, code_type)`.
-fn agent_records(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
-    std::fs::read_to_string(path)
-        .unwrap()
-        .lines()
-        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
-        .filter(|v| v["type"] == "agent")
-        .map(|v| {
-            (
-                v["fqn"].as_str().unwrap().to_string(),
-                v["path"].as_str().unwrap().to_string(),
-                v["start_line"].as_u64().unwrap(),
-                v["end_line"].as_u64().unwrap(),
-                v["code_type"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect()
-}
-
 /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files,
 /// writes `graph.jsonl` and node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -1560,14 +1539,12 @@ mod e2e {
     /// `Scan`-row pair cannot declare a DB that dropped an authored row fresh.
     ///
     /// 1. A scratch project worktree carries an authored `Requirement` under
-    ///    `apg/layers/**`; a hermetic scan builds `db.lbug` + `graph.jsonl` in
-    ///    sync with it.
-    /// 2. A durable commit through a live-session save re-anchors the Scan
-    ///    metadata to the current state, so the DB's own `Scan` row and the
-    ///    export's recorded scan agree — the pre-fix trap.
+    ///    `apg/layers/**`; a hermetic scan builds `db.lbug` in sync with it.
+    /// 2. A durable commit through a live-session save re-anchors the DB's own
+    ///    `Scan` row to the current state — the pre-fix trap.
     /// 3. Re-anchoring done, the authored row is dropped from `db.lbug` ONLY
     ///    (the tree still carries it), producing a DB the tree contradicts while
-    ///    both Scan-row halves still name the current git state. The drop must
+    ///    the re-anchored Scan row still names the current git state. The drop must
     ///    FOLLOW the save: a routed session mutation re-projects the whole
     ///    effective node set at admission, so an earlier drop would be healed.
     /// 4. `is_fresh(apg_root)` is FALSE — the DB's ACTUAL authored digest is
@@ -1578,7 +1555,7 @@ mod e2e {
     /// `!is_fresh` assertion fails: the re-anchored, agreeing Scan-row pair made
     /// the diverged DB look fresh and it was reused.
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch repo/db.lbug/graph.jsonl/git/live-session process); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch repo/db.lbug/git/live-session process); run via cargo test-e2e"]
     fn diverged_authored_rows_are_not_fast_pathed() {
         use apg::artifacts::ArtifactDb;
         use apg::testutil::{self, Repo};
@@ -1591,8 +1568,8 @@ mod e2e {
         //    minimal whole-model-valid spine (SPEC §8.1): a Stakeholder
         //    `requires` it, a leaf Group's Service is `driven-by` it and is
         //    `realises`'d by a Component that `is-role`s a Role. Commit it so the
-        //    worktree is clean, then scan: `db.lbug` and `graph.jsonl` carry the
-        //    authored rows and the scan_meta records the clean HEAD.
+        //    worktree is clean, then scan: `db.lbug` carries the authored rows
+        //    and its `Scan` row records the clean HEAD.
         let mut owner = testutil::node("requirements", "stakeholder", "owner");
         owner.body = "the owner".to_string();
         owner.out = vec![testutil::out_edge(
@@ -1637,7 +1614,9 @@ mod e2e {
             "requirement",
             "req",
         );
-        apg::layers::write_project(&apg_root, &[owner, req, grp, svc, cmp, role], &[]).unwrap();
+        for node in [owner, req, grp, svc, cmp, role] {
+            apg::layers::write_node(&apg_root, &node).unwrap();
+        }
         testutil::wt_commit_paths(
             &wt,
             &[
@@ -1663,9 +1642,8 @@ mod e2e {
             "a scan carrying an authored row must be fresh"
         );
 
-        // 2. A durable commit through a live-session save re-anchors the Scan
-        //    metadata to the current state: the session's own `Scan` row and the
-        //    re-anchored graph.jsonl lead name the SAME (post-commit) state.
+        // 2. A durable commit through a live-session save re-anchors the DB's
+        //    own `Scan` row to the current (post-commit) state.
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
         let add =
@@ -1730,14 +1708,18 @@ mod e2e {
             "the session must have released the DB"
         );
 
-        // The re-anchor landed: the DB's own Scan row and the export's recorded
-        // scan agree on the current state — the pre-fix trap's agreeing pair.
+        // The re-anchor landed: the DB's own Scan row names the post-commit
+        // state — the pre-fix trap's fresh-looking recorded state.
         let db_scan = apg::git::db_recorded_scan(&apg_root).expect("DB Scan row");
-        let rec_scan = apg::git::recorded_scan(&apg_root).expect("recorded scan");
+        let state = apg::git::git_state(&apg_root);
         assert_eq!(
-            (db_scan.sha, db_scan.clean, db_scan.content_key),
-            (rec_scan.sha, rec_scan.clean, rec_scan.content_key),
-            "the durability commit must leave the DB and export Scan rows agreeing"
+            (
+                Some(db_scan.sha.clone()),
+                db_scan.clean,
+                db_scan.content_key.clone()
+            ),
+            (state.sha.clone(), state.clean, state.content_key.clone()),
+            "the durability commit must leave the DB Scan row re-anchored to the current state"
         );
 
         // 3. Drop the authored `req` row from `db.lbug` ONLY — the tree still
@@ -1865,16 +1847,17 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The EXPORT half of the partial-skip oracle (feedback-102): a partial
-    /// scan that spawns one language and skips another must render a
-    /// `graph.jsonl` byte-equal to a full rebuild's. The win-B assembly is the
-    /// export source, so the skipped language's global scaffolding —
+    /// The DATABASE half of the partial-skip oracle (feedback-102): the win-B
+    /// assembly a partial scan produces — one language spawned, another
+    /// skipped — must carry the skipped language's global scaffolding —
     /// pure-intermediate modules and every `Module -> Module` edge, which no
-    /// per-file fact unit carries — must be replayed from the store into that
-    /// assembly. Before the fix the assembled graph structurally could not carry
-    /// it and the export differed even though the spliced DB matched.
+    /// per-file fact unit carries — so a database built from it has the same
+    /// tables and rows as a full rebuild of the TRUE tree. The scaffolding must
+    /// be replayed from the store into that assembly. Before the fix the
+    /// assembled graph structurally could not carry it and the database
+    /// diverged.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn partial_scan_export_matches_a_full_rebuild() {
         use apg::cache::{CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey};
         use apg::ingest::{IngestOptions, Reuse, ingest_with_reuse};
@@ -1996,42 +1979,39 @@ mod e2e {
             None,
         );
 
-        // The TRUE new tree, loaded whole — the full-rebuild reference.
+        // The TRUE new tree, loaded whole — the full-rebuild database reference.
         let reference = multi_lang_new(&changed, &skipped);
-        let assembled_path = dir.join("assembled.jsonl");
-        let reference_path = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
-        load::write_graph_jsonl(&reference, &reference_path).unwrap();
-        let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
-        let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
-        // `Graph`'s node/edge maps are unordered (HashMap/HashSet), so line
-        // order is not part of the export's contract; equality is the SET of
-        // records. The `scan_meta` control record still leads line 1.
-        let canonical =
-            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+        let assembled_path = dir.join("assembled.lbug");
+        let reference_path = dir.join("reference.lbug");
+        build_db(&assembled_path, &assembled);
+        build_db(&reference_path, &reference);
+        let assembled_snap = published_snapshot(&assembled_path);
+        let reference_snap = published_snapshot(&reference_path);
         assert_eq!(
-            canonical(&assembled_jsonl),
-            canonical(&reference_jsonl),
-            "a partial scan that skips a language must export a full rebuild's graph.jsonl"
+            assembled_snap, reference_snap,
+            "a partial scan that skips a language must build a full rebuild's database"
         );
-        assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
-        assert!(reference_jsonl.starts_with("{\"type\":\"scan_meta\""));
-        // The skipped language's scaffolding is present in the export itself.
-        for needle in [
-            "\"type\":\"module\",\"fqn\":\"csharp.Apg\"",
-            "\"type\":\"module\",\"fqn\":\"csharp.Apg.CsharpFrontend\"",
-            "\"type\":\"contains\",\"from\":\"csharp.Apg\",\"to\":\"csharp.Apg.CsharpFrontend\"",
+        assert_eq!(
+            table_counts(&assembled_path),
+            table_counts(&reference_path),
+            "every table's row count must equal a full rebuild"
+        );
+        // The skipped language's scaffolding is present in the database itself.
+        for row in [
+            "Module:csharp.Apg:",
+            "Module:csharp.Apg.CsharpFrontend:",
+            "Contains:csharp.Apg->csharp.Apg.CsharpFrontend",
         ] {
             assert!(
-                assembled_jsonl.contains(needle),
-                "the export must carry the skipped language's scaffolding: {needle}"
+                assembled_snap.contains(row),
+                "the database must carry the skipped language's scaffolding: {row}"
             );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// feedback-103: a **spawned** language's global `Module -> Module`
-    /// scaffolding must reach the EXPORT even when its per-file facts are
+    /// scaffolding must reach the DATABASE even when its per-file facts are
     /// filtered to a target set. `partial_scan_export_matches_a_full_rebuild`
     /// covers the SKIPPED language (its scaffolding is replayed from the store);
     /// this covers the SPAWNED one, where `Reuse.skipped_langs` is EMPTY so pass
@@ -2041,10 +2021,10 @@ mod e2e {
     /// re-emits only `pkg.b`'s per-file facts, yet the walk covers every package.
     /// The fixed scanner emits the global package hierarchy for every walked
     /// package; before the fix it emitted only the target package's, so the
-    /// assembled export lacked `pkg -> pkg.a` while Java was not in
-    /// `skipped_langs`, and the export diverged from a full rebuild.
+    /// assembled graph lacked `pkg -> pkg.a` while Java was not in
+    /// `skipped_langs`, and the database diverged from a full rebuild.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn java_targeted_scan_scaffolding_reaches_the_export() {
         use apg::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
         use apg::ingest::{IngestOptions, Reuse, ingest_with_reuse};
@@ -2186,40 +2166,40 @@ mod e2e {
         fixed.extend(target_facts());
         let (assembled, _) = ingest_with_reuse(fixed, &opts, Some(&reuse), None);
 
-        let assembled_path = dir.join("assembled.jsonl");
-        let reference_path = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
-        load::write_graph_jsonl(&reference, &reference_path).unwrap();
-        let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
-        let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
-        let canonical =
-            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+        let assembled_path = dir.join("assembled.lbug");
+        let reference_path = dir.join("reference.lbug");
+        build_db(&assembled_path, &assembled);
+        build_db(&reference_path, &reference);
+        let assembled_snap = published_snapshot(&assembled_path);
+        let reference_snap = published_snapshot(&reference_path);
 
-        // The scaffolding is in the export itself...
+        // The scaffolding is in the database itself...
         assert!(
-            assembled_jsonl.contains("\"type\":\"module\",\"fqn\":\"java.pkg.a\""),
-            "the export must carry the unchanged package's module record"
+            assembled_snap.contains("Module:java.pkg.a:"),
+            "the database must carry the unchanged package's module row"
         );
         assert!(
-            assembled_jsonl
-                .contains("\"type\":\"contains\",\"from\":\"java.pkg\",\"to\":\"java.pkg.a\""),
-            "the export must carry the spawned stream's java.pkg -> java.pkg.a scaffolding:\n{assembled_jsonl}"
+            assembled_snap.contains("Contains:java.pkg->java.pkg.a"),
+            "the database must carry the spawned stream's java.pkg -> java.pkg.a scaffolding:\n{assembled_snap:?}"
         );
-        // ...and the whole export equals a full rebuild's.
+        // ...and the whole database equals a full rebuild's.
         assert_eq!(
-            canonical(&assembled_jsonl),
-            canonical(&reference_jsonl),
-            "a spawned targeted Java scan must export a full rebuild's graph.jsonl"
+            assembled_snap, reference_snap,
+            "a spawned targeted Java scan must build a full rebuild's database"
         );
-        assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
+        assert_eq!(
+            table_counts(&assembled_path),
+            table_counts(&reference_path),
+            "every table's row count must equal a full rebuild"
+        );
 
         // Sensitivity / non-blindness: re-assemble the stream the PRE-FIX
         // scanner emitted — the target package's hierarchy only. `skipped_langs`
         // is STILL empty (Java is spawned), so nothing can recover the missing
-        // hierarchy: the export lacks the `pkg -> pkg.a` edge even though `pkg.a`
-        // itself survives as the reused file's cached direct-parent module, and
-        // it diverges from the full rebuild. The hierarchy EDGE — not the module
-        // record — is the discriminating assertion above.
+        // hierarchy: the database lacks the `pkg -> pkg.a` edge even though
+        // `pkg.a` itself survives as the reused file's cached direct-parent
+        // module, and it diverges from the full rebuild. The hierarchy EDGE —
+        // not the module row — is the discriminating assertion above.
         let mut pre_fix: Vec<Record> = vec![scan_meta()];
         pre_fix.push(Record::Module { fqn: "pkg".into() });
         pre_fix.push(Record::Module {
@@ -2232,22 +2212,20 @@ mod e2e {
         });
         pre_fix.extend(target_facts());
         let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse), None);
-        let before_path = dir.join("before-fix.jsonl");
-        load::write_graph_jsonl(&before_fix, &before_path).unwrap();
-        let before_jsonl = std::fs::read_to_string(&before_path).unwrap();
+        let before_path = dir.join("before-fix.lbug");
+        build_db(&before_path, &before_fix);
+        let before_snap = published_snapshot(&before_path);
         assert!(
-            before_jsonl.contains("\"type\":\"module\",\"fqn\":\"java.pkg.a\""),
+            before_snap.contains("Module:java.pkg.a:"),
             "the reused file's cached direct-parent module survives even pre-fix"
         );
         assert!(
-            !before_jsonl
-                .contains("\"type\":\"contains\",\"from\":\"java.pkg\",\"to\":\"java.pkg.a\""),
-            "the pre-fix stream cannot carry java.pkg -> java.pkg.a:\n{before_jsonl}"
+            !before_snap.contains("Contains:java.pkg->java.pkg.a"),
+            "the pre-fix stream cannot carry java.pkg -> java.pkg.a:\n{before_snap:?}"
         );
         assert_ne!(
-            canonical(&before_jsonl),
-            canonical(&reference_jsonl),
-            "the pre-fix stream's export must diverge from a full rebuild"
+            before_snap, reference_snap,
+            "the pre-fix stream's database must diverge from a full rebuild"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -2306,11 +2284,12 @@ mod e2e {
     // Atomic publish + rollback (phase-03 task-3)
     // -----------------------------------------------------------------------
 
-    /// The happy path: both artifacts flip, the export is `write_graph_jsonl`'s
-    /// rendering of the in-memory graph, the DB answers the spliced snapshot,
-    /// and no temp/backup/WAL debris is left behind.
+    /// The happy path: the database flips, the published DB answers the spliced
+    /// snapshot, no temp/backup/WAL debris is left behind, and a publish that
+    /// fails before the database swap leaves the previous `db.lbug`
+    /// byte-identical.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn publish_swaps_both_artifacts_and_leaves_no_debris() {
         let dir = scratch("publish-ok");
         let prev_path = dir.join("db.lbug");
@@ -2319,20 +2298,32 @@ mod e2e {
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
         build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
+        let previous_db = std::fs::read(&prev_path).unwrap();
 
+        // A publish that fails before the database swap (its export temp cannot
+        // be written) leaves the previous `db.lbug` byte-identical and cleans up
+        // every transient it created — the database-only early-failure contract.
+        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+        let unwritable = dir.join("missing").join("graph.jsonl");
+        let err = publish(seeded, &assembled, &unwritable).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("No such file or directory"),
+            "the export-write failure must surface: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read(&prev_path).unwrap(),
+            previous_db,
+            "a failure before the database swap leaves db.lbug byte-identical"
+        );
+        assert!(
+            transient_entries(&dir).is_empty(),
+            "an early failure must clean up its temps/backups: {:?}",
+            transient_entries(&dir)
+        );
+
+        // The happy path: the database flips to the spliced graph.
         let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
         publish(seeded, &assembled, &export).unwrap();
-
-        // The export is exactly the existing writer's rendering of the graph —
-        // written from memory, never projected back out of the DB.
-        let reference = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &reference).unwrap();
-        assert_eq!(
-            std::fs::read(&export).unwrap(),
-            std::fs::read(&reference).unwrap(),
-            "the published export must be `write_graph_jsonl`'s output"
-        );
 
         let snap = published_snapshot(&prev_path);
         assert!(
@@ -2361,110 +2352,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A failure after the DB swap (the export rename) restores `db.lbug` from
-    /// its backup, so both targets return to the previous bytes and no debris
-    /// remains.
-    #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
-    fn export_rename_failure_rolls_back_and_restores_previous_bytes() {
-        let dir = scratch("publish-rollback");
-        let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
-        let prev_db = std::fs::read(&prev_path).unwrap();
-        let prev_export = std::fs::read(&export).unwrap();
-
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        install_publish_hook(PublishStage::BeforeExportRename, || {
-            Err(anyhow::anyhow!("injected export rename failure"))
-        });
-        let err = publish(seeded, &assembled, &export).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("injected export rename failure"),
-            "the original cause must surface: {err:#}"
-        );
-
-        assert_eq!(
-            std::fs::read(&prev_path).unwrap(),
-            prev_db,
-            "db.lbug must be restored byte-identical to the previous database"
-        );
-        assert_eq!(
-            std::fs::read(&export).unwrap(),
-            prev_export,
-            "graph.jsonl must still be the previous export"
-        );
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "rollback must not leak temps/backups: {:?}",
-            transient_entries(&dir)
-        );
-
-        // The restored DB is genuinely the previous graph, not the spliced one.
-        let snap = published_snapshot(&prev_path);
-        assert!(
-            !snap.contains("Function:m.A.h:"),
-            "the rollback must restore the previous graph: {snap:?}"
-        );
-        assert!(
-            snap.contains("Function:m.C.q:"),
-            "the removed unit must be back: {snap:?}"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A failure before the DB swap (the export build) leaves both targets
-    /// byte-identical — the previous DB is never replaced.
-    #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
-    fn export_build_failure_leaves_the_previous_artifacts_byte_identical() {
-        let dir = scratch("publish-early");
-        let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
-        let prev_db = std::fs::read(&prev_path).unwrap();
-        let prev_export = std::fs::read(&export).unwrap();
-
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        install_publish_hook(PublishStage::BeforeExportWrite, || {
-            Err(anyhow::anyhow!("injected export build failure"))
-        });
-        let err = publish(seeded, &assembled, &export).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("injected export build failure"),
-            "the original cause must surface: {err:#}"
-        );
-
-        assert_eq!(
-            std::fs::read(&prev_path).unwrap(),
-            prev_db,
-            "an earlier failure leaves db.lbug byte-identical"
-        );
-        assert_eq!(
-            std::fs::read(&export).unwrap(),
-            prev_export,
-            "an earlier failure leaves graph.jsonl byte-identical"
-        );
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "an earlier failure must clean up its temps: {:?}",
-            transient_entries(&dir)
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     // -----------------------------------------------------------------------
-    // Enumerated equivalence oracle + export leg (phase-03 task-8)
+    // Enumerated equivalence oracle (phase-03 task-8)
     // -----------------------------------------------------------------------
 
     /// `domain.constraint.db-splice-equivalence`, enumerated, with the authored
@@ -3025,13 +2914,11 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The EXPORT leg: the published `graph.jsonl` equals a full rebuild's
-    /// (both are the unchanged writer's rendering of the same assembled graph),
-    /// ROUND-TRIPS through the re-ingest reader (JSONL → Graph → JSONL), and its
-    /// line 1 is the `scan_meta` control record whose fields equal the spliced
-    /// DB's `Scan` row (feedback-91).
+    /// The DATABASE leg: the published `db.lbug` equals a full rebuild's (both
+    /// are the same assembled graph loaded whole), and its single `Scan` row
+    /// records the delta's `ScanRow` (feedback-91).
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn published_export_equals_a_full_rebuild_and_round_trips() {
         let dir = scratch("export-roundtrip");
         let prev_path = dir.join("db.lbug");
@@ -3040,52 +2927,29 @@ mod e2e {
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
         build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
 
         let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
         publish(seeded, &assembled, &export).unwrap();
 
-        let canonical =
-            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
-        let published = std::fs::read_to_string(&export).unwrap();
-
-        // The full-rebuild reference export: the same assembled graph, whole.
-        let reference = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &reference).unwrap();
+        // The full-rebuild reference: the same assembled graph, loaded whole.
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &assembled);
         assert_eq!(
-            canonical(&published),
-            canonical(&std::fs::read_to_string(&reference).unwrap()),
-            "the spliced export must equal a full rebuild's graph.jsonl"
+            table_counts(&prev_path),
+            table_counts(&expected_path),
+            "the published database must equal a full rebuild's table counts"
+        );
+        let published = published_snapshot(&prev_path);
+        assert_eq!(
+            published,
+            published_snapshot(&expected_path),
+            "the published database must equal a full rebuild's rows"
         );
 
-        // Round-trip through the re-ingest leg: JSONL → Graph → JSONL.
-        let back = read_graph_jsonl(&export).unwrap();
-        let again = dir.join("again.jsonl");
-        load::write_graph_jsonl(&back, &again).unwrap();
-        assert_eq!(
-            canonical(&published),
-            canonical(&std::fs::read_to_string(&again).unwrap()),
-            "graph.jsonl must round-trip through read_graph_jsonl"
-        );
-
-        // Line 1 is the scan_meta control record; its fields equal the spliced
-        // DB's Scan row (both come from the delta's ScanRow).
-        let first = published.lines().next().unwrap();
-        let v: serde_json::Value = serde_json::from_str(first).unwrap();
-        assert_eq!(
-            v["type"], "scan_meta",
-            "line 1 must lead with scan_meta: {first}"
-        );
-        assert_eq!(v["git_sha"], "newsha");
-        assert_eq!(v["git_clean"], true);
-        assert_eq!(v["content_key"], "newkey");
-        assert_eq!(v["scanned_at"], "2026-01-02T00:00:00Z");
-        let db = Database::new(&prev_path, SystemConfig::default().read_only(true)).unwrap();
-        let snap = code_snapshot(&db);
-        drop(db);
+        // The single Scan row records the delta's ScanRow.
         assert!(
-            snap.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
-            "the spliced DB's Scan row must match the export's line 1: {snap:?}"
+            published.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
+            "the published DB's Scan row must record the delta's ScanRow: {published:?}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -3255,12 +3119,11 @@ mod e2e {
     }
 
     /// schema-alignment phase-03 task-17: a spliced incremental scan carries
-    /// exactly the tier-4 Agent node set a full rebuild produces — a persisting
+    /// exactly the tier-4 `Agent` row set a full rebuild produces — a persisting
     /// definition re-emitted with a changed span, a removed definition gone, and
-    /// a new definition added — in BOTH the DB (`Agent` rows) and the published
-    /// `graph.jsonl` (`agent` records).
+    /// a new definition added — in the database's `Agent` table.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn spliced_scan_carries_the_agent_node_set_of_a_full_rebuild() {
         let dir = scratch("agent-set");
         let prev_path = dir.join("db.lbug");
@@ -3317,21 +3180,6 @@ mod e2e {
             spliced_agents,
             agent_rows(&expected_path),
             "a spliced DB must carry a full rebuild's Agent rows"
-        );
-
-        // Export half: the published `agent` records equal a full rebuild's
-        // export AND the tree's exact set.
-        let reference = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &reference).unwrap();
-        let published_agents = agent_records(&export);
-        assert_eq!(
-            published_agents, expected_agents,
-            "the published export's agent records must be exactly the tree's"
-        );
-        assert_eq!(
-            published_agents,
-            agent_records(&reference),
-            "the spliced export must carry a full rebuild's agent records"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -4061,7 +3909,7 @@ mod e2e {
     /// relation-type-agnostic patterns (so an unasserted family still breaks
     /// equality) before and after:
     ///
-    /// 1. a FULL load (the branch DB + export are removed, so the scan cannot
+    /// 1. a FULL load (the branch database is removed, so the scan cannot
     ///    splice), and
     /// 2. an incremental SPLICE that changes only `src/lib.rs` and a new
     ///    `src/realized.rs` — files unrelated to the still-planned module.
@@ -4399,21 +4247,19 @@ mod e2e {
         );
         let before = snapshot(&db_path, GHOST_MODULE);
 
-        // --- Build path 1: FULL load. Removing the branch's DB + export makes
-        // the incremental preparation unable to splice, so the whole tree is
+        // --- Build path 1: FULL load. Removing the branch database makes the
+        // incremental preparation unable to splice, so the whole tree is
         // re-emitted and re-assembled from scratch.
-        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
-            std::fs::remove_file(wt.join(rel)).unwrap();
-        }
+        std::fs::remove_file(wt.join("apg/.trans/db.lbug")).unwrap();
         let full = run(&wt, &["scan", ".", "--language", "rust,agent"]);
         let full_err = String::from_utf8_lossy(&full.stderr).into_owned();
         assert!(
             full_err.contains("[load] writing parquet load files"),
-            "the scan after removing the DB + export must FULL-load: {full_err}"
+            "the scan after removing the database must FULL-load: {full_err}"
         );
         assert!(
             !full_err.contains("[load] splice:"),
-            "the removed DB + export must force a full load, never a splice: {full_err}"
+            "the removed database must force a full load, never a splice: {full_err}"
         );
         let after_full = snapshot(&db_path, GHOST_MODULE);
         assert_eq!(
