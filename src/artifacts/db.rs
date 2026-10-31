@@ -179,7 +179,7 @@ pub fn write_jsonl_and_reingest(
     project: &str,
     records: &[Record],
 ) -> anyhow::Result<()> {
-    // Membership guard (R3/R4): every write happens inside a project context.
+    // Membership guard (R3): every write happens inside a project context.
     // Universal-scope targets (the `_invariants.jsonl` shared ledger) have no
     // project of their own — any project context satisfies the guard.
     let universal = path.file_name().is_some_and(|n| n == "_invariants.jsonl");
