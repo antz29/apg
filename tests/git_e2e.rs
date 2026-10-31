@@ -1312,8 +1312,8 @@ mod e2e {
     // Phase-09 task-4: both fail-closed freshness arms are present and cited
     // here — `dead_session_socket_makes_the_graph_unfresh` (a
     // present-but-dead `session.sock`) and
-    // `db_scan_row_diverging_from_the_export_is_unfresh` (the DB `Scan` row
-    // against the worktree git state) — neither authored anew.
+    // `db_scan_row_diverging_from_the_worktree_git_state_is_unfresh` (the DB
+    // `Scan` row against the worktree git state) — neither authored anew.
     // Retained coverage (NOT duplicated here):
     //   * `dirty_tree_at_same_sha_is_stale` — the dirty-tree arm;
     //   * `content_identity_byte_edit_invalidates` — the changed-bytes arm;
