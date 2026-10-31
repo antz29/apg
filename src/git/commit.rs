@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::schema::Record;
-
 use super::identity::repo_rel;
-use super::state::{GitState, canonical_allow_missing, discover_repo, graph_jsonl_path};
+use super::state::{GitState, canonical_allow_missing, discover_repo};
 
 // ---------------------------------------------------------------------------
 // Durable-commit helpers (R8): stage a caller-supplied change set and make
@@ -140,42 +138,34 @@ pub fn in_repo(apg_root: &Path) -> bool {
     discover_repo(apg_root).is_ok()
 }
 
-/// Re-anchors the staleness gate's recorded scan_meta after a durable commit
-/// (the JSONL funnel's per-write commit, or the session save flush): rewrites
-/// the `scan_meta` control record on line 1 of `graph.jsonl` (the record
-/// `is_stale` compares against). The code graph itself is untouched — the
-/// commit carries exactly the mutated node/JSONL content, so the scan's code
-/// content is still exactly what the projection holds (R8: DB and tree in sync
-/// by construction).
+/// Re-anchors the staleness gate's recorded scan state after a durable commit
+/// (the JSONL funnel's per-write commit, the direct write path's
+/// [`write_through`](crate::layers::write::write_through), or the session save
+/// flush): refreshes the worktree database's own `Scan` row to the post-commit
+/// git state, so every durability point lands exactly one row in the index the
+/// tree's identities live in and [`is_stale`](crate::git::is_stale) agrees with
+/// the tree by construction. The code graph itself is untouched — the commit
+/// carries exactly the mutated node/mirror content.
 ///
-/// `graph.jsonl` is the SOLE code-identity and freshness source (phase-02
-/// decoupling): this NEVER opens `db.lbug` read-write, so no exclusive DB open
-/// precedes the mutation's durable commit. The DB's derived `Scan` node is
-/// reconciled by the write-through projection / the next scan, never here.
+/// No `graph.jsonl` control line is read or rewritten. A session socket means
+/// the session owns the database — a live session's `save` refreshes the row
+/// through the handle it already holds (`Coordinator::save`), and an unclean
+/// exit's leftover socket marks the database not fresh until a scan or
+/// `session start` reclaims it — so this never opens a second handle there.
+/// (The socket presence, not a liveness ping, is the in-process-safe test: the
+/// single-threaded accept loop cannot answer its own ping while it is saving.)
+/// An absent database has nothing to re-anchor and is likewise a no-op.
 pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<()> {
-    let path = graph_jsonl_path(apg_root);
-    if !path.exists() {
+    if crate::session::socket_path(apg_root).exists() {
         return Ok(());
     }
-    let text = std::fs::read_to_string(&path)?;
-    let first_nl = text.find('\n').unwrap_or(text.len());
-    let first = text[..first_nl].trim_end();
-    let rest = &text[first_nl..];
-    if first.is_empty() {
+    let db_path = apg_root.join(crate::specs::TRANS).join("db.lbug");
+    if !db_path.exists() {
         return Ok(());
     }
-    let Ok(Record::ScanMeta { scanned_at, .. }) = serde_json::from_str::<Record>(first) else {
-        return Ok(()); // Not a scan_meta lead — nothing to re-anchor.
-    };
-    let new = serde_json::to_string(&Record::ScanMeta {
-        git_sha: state.sha.clone(),
-        git_clean: state.sha.as_ref().map(|_| state.clean),
-        // The content-identity key of the post-mutation state, so the
-        // re-anchored record keeps the fast-path's rule intact (the mutation's
-        // commit moved HEAD; the new state's key matches the new tree).
-        content_key: state.content_key.clone(),
-        scanned_at,
-    })?;
-    std::fs::write(&path, format!("{new}{rest}"))?;
-    Ok(())
+    crate::artifacts::ArtifactDb::open(apg_root)?.refresh_scan_row(
+        state.sha.as_deref(),
+        state.sha.as_ref().map(|_| state.clean),
+        state.content_key.as_deref(),
+    )
 }
