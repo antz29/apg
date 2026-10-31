@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scoped-lint-never-reaches-implementation",
+  "body": "A scoped `lint` run selects only the named tier and the more abstract tiers above it in the catalog ladder, so the implementation and global layers are never in scope and R3/R4, note confinement and the constraint body checks can only report on an unscoped run; the ladder tops out at Solution. Upgrade if a tiered run should also check notes or constraints — that needs a new `--tier` value (parse_lint_args currently refuses implementation/global as usage errors) and a ladder that reaches past Solution.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.spec_lint.lint",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
