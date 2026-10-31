@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
+use lbug::{Database, SystemConfig};
+
 use crate::schema::Record;
 use crate::specs;
 
@@ -175,33 +177,26 @@ pub fn next_free(records: &[Record], kind: &str) -> u64 {
 }
 
 /// The two code-reference universes `layers::ingest_tree` validates
-/// `implemented-by` targets against, read from the **live DB**: `scanned` =
-/// every code-node FQN the last scan produced (Module/File/Struct/Function
-/// without `status: planned`), `planned` = the planned-node FQNs still awaiting
-/// realization (`status: planned`).
+/// `implemented-by` targets against, read from `apg/.trans/db.lbug` over one
+/// **read-only** handle: `scanned` = every code-node FQN the last scan produced
+/// (Module/File/Struct/Function without `status: planned`), `planned` = the
+/// planned-node FQNs still awaiting realization (`status: planned`).
 ///
-/// This opens `apg/.trans/db.lbug` read-write, so it must NOT be used on the
-/// direct node/edge mutation path (phase-02 decoupled that path onto
-/// [`code_universes_from_export`]); its remaining callers are the flock-guarded
-/// plan paths (`plan_cmd`), where an exclusive DB read is already serialized.
+/// This is the one read-only database query for the code identity: it writes
+/// nothing, opens the database exactly once, and returns
+/// [`ArtifactDb::code_universes_from_db`]'s pair — the same identity read
+/// [`super::db::PreviousScan::capture`] uses. Its callers are the flock-guarded
+/// plan paths (`plan_cmd`) and the merge strength check.
 pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
-    let db = ArtifactDb::open(apg_root)?;
-    let conn = db.conn()?;
-    let mut scanned = BTreeSet::new();
-    let mut planned = BTreeSet::new();
-    for label in ["Module", "File", "Struct", "Function"] {
-        let result = conn.query(&format!("MATCH (n:{label}) RETURN n.fqn, n.status"))?;
-        for row in result {
-            let fqn = row.first().map(|v| v.to_string()).unwrap_or_default();
-            let status = row.get(1).map(|v| v.to_string()).unwrap_or_default();
-            if status == "planned" {
-                planned.insert(fqn);
-            } else {
-                scanned.insert(fqn);
-            }
-        }
+    let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+    if !db_path.exists() {
+        anyhow::bail!(
+            "{} does not exist — run `apg scan` first",
+            db_path.display()
+        );
     }
-    Ok((scanned, planned))
+    let db = Database::new(&db_path, SystemConfig::default().read_only(true))?;
+    ArtifactDb { db }.code_universes_from_db()
 }
 
 /// The two code-reference universes `layers::validate_change` / `ingest_tree`
