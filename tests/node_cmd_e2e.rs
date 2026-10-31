@@ -948,6 +948,16 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn reads_see_the_node_files() {
         let (wt_apg, repo, _wt) = node_store_fixture("reads");
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         let mut ent = node("domain", "entity", "customer");
         ent.properties
             .insert("kind".to_string(), "entity".to_string());
@@ -1050,6 +1060,16 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_add_refuses_existing_and_node_update_preserves_edges() {
         let (wt_apg, repo, _wt) = node_store_fixture("node-strict");
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         // Author r1 --contains--> r2 through the real CLI arms.
         node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap();
         node_add(&wt_apg, &av(&["requirements", "requirement", "r2"])).unwrap();
@@ -1121,6 +1141,16 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn edge_add_refuses_duplicate_and_edge_update_merges_both_halves() {
         let (wt_apg, repo, _wt) = node_store_fixture("edge-strict");
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap();
         node_add(&wt_apg, &av(&["requirements", "requirement", "r2"])).unwrap();
         edge_add(
@@ -1641,6 +1671,16 @@ mod e2e {
             source: "solution.component.cmp".to_string(),
             properties: BTreeMap::new(),
         }];
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         layers::write_project(&wt_apg, &[owner, r0, r1, r2, svc, grp, cmp, rl], &[]).unwrap();
         // A session always holds a database, so build one from the committed
         // baseline before opening it — the same write-then-scan pattern the
@@ -3934,6 +3974,17 @@ mod e2e {
         let (wt_apg, repo, wt) = node_store_fixture("killed-dirty-repair");
         let home = repo.root.join("home");
 
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+
         // The durable baseline: two committed node files, projected into a real
         // `db.lbug` — the LAST SAVED state the recovery must serve. The write
         // and the projection both run before any session exists, so HEAD sits
@@ -4753,16 +4804,16 @@ mod e2e {
         let (wt_apg, repo, wt) = node_store_fixture("session-no-db");
         let home = repo.root.join("home");
 
-        // A durable node gives the later scan authored content to ingest.
-        // `write_project` commits the node file but skips its projection leg
-        // when `db.lbug` is absent, so the fixture stays DB-less — the exact
-        // state under test.
-        layers::write_project(
-            &wt_apg,
-            &[node("requirements", "requirement", "seeded")],
-            &[],
-        )
-        .unwrap();
+        // A durable node gives the later scan authored content to ingest. The
+        // fixture must stay DB-less (the exact state under test), so write and
+        // commit the node file directly: the validated `write_project` path
+        // resolves its code universes from `db.lbug` and refuses an absent one.
+        layers::write_node(&wt_apg, &node("requirements", "requirement", "seeded")).unwrap();
+        wt_commit(
+            &wt,
+            &["apg/layers/requirements/requirement/seeded.json"],
+            "seed node",
+        );
 
         let db = wt_apg.join(specs::TRANS).join("db.lbug");
         let socket = apg::session::socket_path(&wt_apg);
@@ -5059,6 +5110,16 @@ mod e2e {
         // would instead carry its own admission's mark, so it could not
         // witness that admission marks exactly the change's write set.
         let (wt_apg, repo, wt) = node_store_fixture("session-rm-marker");
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         layers::write_project(&wt_apg, &[node("global", "constraint", "keep")], &[]).unwrap();
         testutil::scan_checkout(&wt).unwrap();
         let home = repo.root.join("home");
@@ -7308,6 +7369,17 @@ mod e2e {
 
         let (wt_apg, repo, wt) = node_store_fixture("session-start-pending");
         let home = repo.root.join("home");
+
+        // The direct write path validates its code refs against the worktree
+        // database and refuses an absent `db.lbug`, so seed a minimal current DB
+        // (schema + a `Scan` row at the worktree HEAD) before the write.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
 
         // The durable system of record: two committed node files, projected
         // into a genuinely fresh `db.lbug` — the rebuild's only source.
