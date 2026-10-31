@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.splice_e2e.e2e.publish_swaps_both_artifacts_and_leaves_no_debris",
+      "target": "rust.splice_e2e.e2e.publish_swaps_the_database_and_leaves_no_debris",
       "properties": {}
     }
   ],

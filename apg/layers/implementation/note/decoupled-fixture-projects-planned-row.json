@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.layers_e2e.e2e.write_project_decoupled_from_db_validates_export_and_records_unvalidated",
+      "target": "rust.layers_e2e.e2e.write_project_decoupled_from_db_records_an_unscanned_code_ref_unvalidated",
       "properties": {}
     }
   ],

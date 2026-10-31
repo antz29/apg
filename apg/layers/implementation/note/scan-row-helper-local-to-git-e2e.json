@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.git_e2e.e2e.reanchor_rewrites_graph_jsonl_line_one",
+      "target": "rust.git_e2e.e2e.reanchor_rewrites_the_database_scan_row",
       "properties": {}
     }
   ],
