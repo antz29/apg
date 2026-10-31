@@ -83,8 +83,7 @@ USAGE:
                               ~/.config/opencode/, and warn loudly about project
                               .opencode/ files that duplicate the installed
                               suite (never deletes)
-  apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
-                              apg/.trans/graph.jsonl
+  apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug
   apg query [--json] \"<cypher>\"  Run a read-only Cypher query against
                                apg/.trans/db.lbug (found by walking up from
                                cwd); CSV by default, --json for JSON rows
@@ -118,17 +117,18 @@ USAGE:
   apg session <sub> …         Session-scoped single-writer coordinator
                               (apg/.trans/session.sock); a durable apg
                               node/edge mutation requires a live session:
-                              start — own db.lbug exclusively, perform routed
-                              node/edge mutations and serve routed reads in
-                              receive order, buffering the node-file set
-                              until save;
-                              save — make the buffered node-file set durable
-                              (one atomic write + commit) and clear the buffer;
-                              abort — discard the buffered node-file set and
+                              start — own db.lbug exclusively, serve routed
+                              node/edge mutations and routed reads in receive
+                              order, applying each mutation to the worktree
+                              database at admission;
+                              save — write the database's marked node files
+                              and remove its pending-deletion files in one
+                              atomic write + commit, then clear the marks;
+                              abort — discard the database's pending state and
                               release the session;
-                              end — signal the live session to release the
-                              DB/socket and exit (refuses while the buffer is
-                              dirty — save or abort first)
+                              end — release the DB/socket and exit, refusing
+                              while the database carries pending state (save
+                              or abort first)
   apg --version               Print version
   apg --help                  Show this help
 
@@ -145,10 +145,10 @@ SCAN OPTIONS:
   --no-progress               Progress is on by default when stderr is a
                               terminal; this flag turns off the start line,
                               the per-node symbols and the summary
-  --force                     Rebuild from scratch: discard db.lbug and
-                              graph.jsonl, then re-run every frontend rather
-                              than assembling from the shared fact cache;
-                              apg/layers and source files are untouched
+  --force                     Rebuild from scratch: discard db.lbug, then
+                              re-run every frontend rather than assembling
+                              from the shared fact cache; apg/layers and
+                              source files are untouched
   <blacklist...>              FQN prefixes to exclude from the graph"
         .to_string()
 }
@@ -160,11 +160,11 @@ fn print_help() {
 /// `apg session <start|save|abort|end>` (phase-03): `start` launches the
 /// session-scoped single-writer coordinator (bind socket, own `db.lbug`, serve
 /// routed mutations/reads) and blocks in the foreground; `save` signals the
-/// running session to make its whole buffered node-file set durable; `abort`
-/// signals the running session to discard its buffered node-file set and
-/// release the session; `end` signals the running session — the server-side
-/// shutdown releases the DB/socket and `serve` exits. Every mutation's
-/// projection delta was applied at admission, so `end` performs no flush.
+/// running session to make the database's marked node files and pending
+/// deletions durable; `abort` signals the running session to discard the
+/// database's pending state and release the session; `end` signals the running
+/// session — the server-side shutdown releases the DB/socket and `serve` exits.
+/// Admission already applied every projection, so `end` performs no flush.
 fn session_cmd(args: &[String]) -> anyhow::Result<()> {
     let apg_root = session::require_apg_root()?;
     match args.first().map(|s| s.as_str()) {
