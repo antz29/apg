@@ -451,16 +451,16 @@ pub fn extra_cascade_targets(
 
 /// The full-universe seam (feedback-92): the complete code-FQN universe
 /// `layers::ingest_tree` validates authored `implemented-by` targets against, on
-/// the incremental path. Derived from the PREVIOUS export (`graph.jsonl`) MINUS
-/// the delta's removed FQNs UNION the delta's emitted real code FQNs — never
-/// from the target-only spool.
-pub fn full_universe(
-    apg_root: &Path,
-    prepared: &Prepared,
-    emitted_fqns: &BTreeSet<String>,
-) -> BTreeSet<String> {
-    let mut universe: BTreeSet<String> = crate::artifacts::code_universes_from_export(apg_root)
-        .map(|(scanned, _planned)| scanned)
+/// the incremental path. Derived from the previous database's captured scanned
+/// universe MINUS the delta's removed FQNs UNION the delta's emitted real code
+/// FQNs — never from the target-only spool. The base is
+/// `Prepared.previous`'s snapshot, the single read `cmd_scan` took, so no file
+/// under an `apg/` root is read here.
+pub fn full_universe(prepared: &Prepared, emitted_fqns: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut universe: BTreeSet<String> = prepared
+        .previous
+        .as_ref()
+        .map(|p| p.scanned.clone())
         .unwrap_or_default();
     for f in &prepared.removed_fqns {
         universe.remove(f);
