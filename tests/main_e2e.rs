@@ -11068,19 +11068,22 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-02 task-3 (e2e): a planned `Function` authored at a SEPARATE,
-    /// non-root cargo package's crate-prefixed FQN realizes exactly like a
-    /// root-crate planned `Function` — status cleared, location filled, FQN
-    /// kept — on BOTH build paths (an incremental splice against a
-    /// placeholder-bearing seed, then a full load).
+    /// Phase-02 task-3 / phase-06 task-1 (e2e): a planned `Module`, `File`,
+    /// `Struct` and `Function` authored at a SEPARATE, non-root cargo
+    /// package's identities realize exactly like a root-crate planned
+    /// `Function` — status cleared, location filled (except the location-less
+    /// `Module`), FQN kept — on BOTH build paths (an incremental splice
+    /// against a placeholder-bearing seed, then a full load).
     ///
     /// The fixture is agentfrontend-shaped: root crate `rootcrate` plus a
     /// nested non-root package at `src/agentlib` whose cargo `[package] name`
-    /// is `agentfrontend`. The crate prefix is the PACKAGE name, not the
-    /// directory, so the ingestor roots the declaration at
-    /// `rust.agentfrontend.collect_definitions` — byte-for-byte the authored
-    /// planned FQN. `rootcrate`'s `helper` is the control: both must reach the
-    /// SAME realized shape.
+    /// is `agentfrontend`. A Module, Struct or Function keeps the PACKAGE-name
+    /// prefix, not the directory, so the ingestor roots the declaration at
+    /// `rust.agentfrontend{,Widget,collect_definitions}` — byte-for-byte the
+    /// authored planned FQNs. A File keeps its repo-relative path
+    /// (`src/agentlib/src/lib.rs`), never a fabricated crate-prefixed FQN.
+    /// `rootcrate`'s `helper` is the control: root and separate Functions must
+    /// reach the SAME realized shape.
     ///
     /// Evidence order: declare the planned nodes while only `rootcrate` has a
     /// body, force a full load to record the planned placeholders (`status:
@@ -11121,10 +11124,14 @@ mod e2e {
 
         /// Asserts one authored FQN's realized record and returns
         /// `(evidence row, realized shape)`. A realized record carries NO
-        /// `status` key (an empty status is omitted) and a filled
-        /// location; the planned placeholder is `status: planned` + no span.
+        /// `status` key (an empty status is omitted) and, for the located
+        /// kinds (File/Struct/Function), a filled location and a matching path
+        /// identity; a Module is location-less and path-less by design. The
+        /// realized record must carry the row's own `kind` label — a row
+        /// realized under a different label is a failure.
         fn realized_row(
             recs: &[serde_json::Value],
+            kind: &str,
             fqn: &str,
             want_path: &str,
             label: &str,
@@ -11151,9 +11158,12 @@ mod e2e {
                 .unwrap_or(0);
             let status_key = rec.and_then(|r| r.get("status")).is_some();
             let located = start_line > 0 && end_line >= start_line;
+            // A File node carries its repo-relative path in its FQN, not in a
+            // separate `path` column, so its path identity is the FQN itself.
+            let path_identity = if kind == "file" { fqn } else { path };
             let row = format!(
-                "{label} `{fqn}`: record={} type={ty:?} status_key={status_key} \
-                 lines={start_line}..{end_line} path={path:?}",
+                "{label} `{fqn}`: record={} kind={kind:?} type={ty:?} status_key={status_key} \
+                 lines={start_line}..{end_line} path={path_identity:?}",
                 rec.is_some()
             );
             let shape = format!("type={ty} status_key={status_key} located={located}");
@@ -11163,30 +11173,41 @@ mod e2e {
                 ));
                 return (row, shape);
             }
-            if ty != "function" {
-                failures.push(format!(
-                    "{label} `{fqn}`: realized as `{ty}`, not `function`"
-                ));
+            if ty != kind {
+                failures.push(format!("{label} `{fqn}`: realized as `{ty}`, not `{kind}`"));
             }
             if status_key {
                 failures.push(format!(
                     "{label} `{fqn}`: LEFT PLANNED — the realized record still carries a `status`"
                 ));
             }
-            if !located {
-                failures.push(format!(
-                    "{label} `{fqn}`: location not filled ({start_line}..{end_line})"
-                ));
-            }
-            if path != want_path {
-                failures.push(format!(
-                    "{label} `{fqn}`: wrong path `{path}` (want `{want_path}`)"
-                ));
+            if kind == "module" {
+                // A Module is location-less and path-less by design; requiring
+                // a span here would spuriously fail every Module row.
+                if located || !path.is_empty() {
+                    failures.push(format!(
+                        "{label} `{fqn}`: a Module must stay location-less and path-less \
+                         (lines={start_line}..{end_line} path={path:?})"
+                    ));
+                }
+            } else {
+                if !located {
+                    failures.push(format!(
+                        "{label} `{fqn}`: location not filled ({start_line}..{end_line})"
+                    ));
+                }
+                if path_identity != want_path {
+                    failures.push(format!(
+                        "{label} `{fqn}`: wrong path `{path_identity}` (want `{want_path}`)"
+                    ));
+                }
             }
             (row, shape)
         }
 
         const MODULE_FQN: &str = "rust.agentfrontend";
+        const FILE_FQN: &str = "src/agentlib/src/lib.rs";
+        const STRUCT_FQN: &str = "rust.agentfrontend.Widget";
         const SEPARATE_FQN: &str = "rust.agentfrontend.collect_definitions";
         const ROOT_FQN: &str = "rust.rootcrate.helper";
         const SEPARATE_PATH: &str = "src/agentlib/src/lib.rs";
@@ -11256,39 +11277,23 @@ mod e2e {
         let facts = repo_dir.join(".git/apg/facts");
 
         // Declare the delta through the real authoring surface: the separate
-        // crate's module + Function, and the root crate's control Function.
+        // crate's Module + File + Struct + Function, and the root crate's
+        // control Function.
         run(
             &wt,
             &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
         );
-        run(
-            &wt,
-            &[
-                "plan",
-                "add",
-                "demo",
-                "planned",
-                "module",
-                MODULE_FQN,
-                "--name",
-                "agentfrontend",
-            ],
-        );
-        run(
-            &wt,
-            &[
-                "plan",
-                "add",
-                "demo",
-                "planned",
-                "function",
-                SEPARATE_FQN,
-                "--name",
-                "collect_definitions",
-                "--parent",
-                MODULE_FQN,
-            ],
-        );
+        for (kind, fqn, name) in [
+            ("module", MODULE_FQN, "agentfrontend"),
+            ("file", FILE_FQN, "lib.rs"),
+            ("struct", STRUCT_FQN, "Widget"),
+            ("function", SEPARATE_FQN, "collect_definitions"),
+        ] {
+            run(
+                &wt,
+                &["plan", "add", "demo", "planned", kind, fqn, "--name", name],
+            );
+        }
         run(
             &wt,
             &[
@@ -11318,6 +11323,8 @@ mod e2e {
         );
         let planned = db_records(&wt);
         assert_planned(&planned, MODULE_FQN, "module", false);
+        assert_planned(&planned, FILE_FQN, "file", true);
+        assert_planned(&planned, STRUCT_FQN, "struct", true);
         assert_planned(&planned, SEPARATE_FQN, "function", true);
         assert_planned(&planned, ROOT_FQN, "function", true);
 
@@ -11330,10 +11337,10 @@ mod e2e {
         std::fs::create_dir_all(wt.join("src/agentlib/src")).unwrap();
         std::fs::write(
             wt.join(SEPARATE_PATH),
-            "//! A separate non-root cargo package.\n\npub fn collect_definitions() -> usize {\n    0\n}\n",
+            "//! A separate non-root cargo package.\n\npub struct Widget {\n    pub value: i32,\n}\n\npub fn collect_definitions() -> usize {\n    0\n}\n",
         )
         .unwrap();
-        scratch_commit_all(&wt, "implement the planned functions");
+        scratch_commit_all(&wt, "implement the planned nodes");
 
         let mut matrix: Vec<String> = Vec::new();
         let mut failures: Vec<String> = Vec::new();
@@ -11348,26 +11355,61 @@ mod e2e {
             "the post-code scan must take the incremental splice path: {splice_err}"
         );
         let recs = db_records(&wt);
-        let (root_row, root_shape) =
-            realized_row(&recs, ROOT_FQN, ROOT_PATH, "splice/root", &mut failures);
+        let (root_row, root_shape) = realized_row(
+            &recs,
+            "function",
+            ROOT_FQN,
+            ROOT_PATH,
+            "splice/root",
+            &mut failures,
+        );
+        let (module_row, module_shape) = realized_row(
+            &recs,
+            "module",
+            MODULE_FQN,
+            "",
+            "splice/module",
+            &mut failures,
+        );
+        let (file_row, file_shape) = realized_row(
+            &recs,
+            "file",
+            FILE_FQN,
+            FILE_FQN,
+            "splice/file",
+            &mut failures,
+        );
+        let (struct_row, struct_shape) = realized_row(
+            &recs,
+            "struct",
+            STRUCT_FQN,
+            SEPARATE_PATH,
+            "splice/struct",
+            &mut failures,
+        );
         let (sep_row, sep_shape) = realized_row(
             &recs,
+            "function",
             SEPARATE_FQN,
             SEPARATE_PATH,
             "splice/separate",
             &mut failures,
         );
-        matrix.push(format!("splice path:\n  {root_row}\n  {sep_row}"));
+        matrix.push(format!(
+            "splice path:\n  {module_row}\n  {file_row}\n  {struct_row}\n  {sep_row}\n  {root_row}"
+        ));
         assert_eq!(
             root_shape, sep_shape,
-            "splice: the separate crate must realize exactly as the root crate does \
+            "splice: the separate crate's Function must realize exactly as the root crate's does \
              (root `{ROOT_FQN}` vs separate `{SEPARATE_FQN}`)"
         );
-        assert!(
-            recs.iter()
-                .any(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(MODULE_FQN)),
-            "splice: the separate crate's Module `{MODULE_FQN}` must be in the database"
-        );
+        let splice_shapes = vec![
+            module_shape,
+            file_shape,
+            struct_shape,
+            sep_shape,
+            root_shape,
+        ];
 
         // (b) A FULL load from the same planned state: the database and the
         // shared fact store dropped, then re-scanned. The planned records still
@@ -11381,25 +11423,64 @@ mod e2e {
             "the post-splice scan must be a full load: {full_err}"
         );
         let full_recs = db_records(&wt);
-        let (root_row, full_root_shape) =
-            realized_row(&full_recs, ROOT_FQN, ROOT_PATH, "full/root", &mut failures);
-        let (sep_row, full_sep_shape) = realized_row(
+        let (full_root_row, full_root_shape) = realized_row(
             &full_recs,
+            "function",
+            ROOT_FQN,
+            ROOT_PATH,
+            "full/root",
+            &mut failures,
+        );
+        let (full_module_row, full_module_shape) = realized_row(
+            &full_recs,
+            "module",
+            MODULE_FQN,
+            "",
+            "full/module",
+            &mut failures,
+        );
+        let (full_file_row, full_file_shape) = realized_row(
+            &full_recs,
+            "file",
+            FILE_FQN,
+            FILE_FQN,
+            "full/file",
+            &mut failures,
+        );
+        let (full_struct_row, full_struct_shape) = realized_row(
+            &full_recs,
+            "struct",
+            STRUCT_FQN,
+            SEPARATE_PATH,
+            "full/struct",
+            &mut failures,
+        );
+        let (full_sep_row, full_sep_shape) = realized_row(
+            &full_recs,
+            "function",
             SEPARATE_FQN,
             SEPARATE_PATH,
             "full/separate",
             &mut failures,
         );
-        matrix.push(format!("full path:\n  {root_row}\n  {sep_row}"));
+        matrix.push(format!(
+            "full path:\n  {full_module_row}\n  {full_file_row}\n  {full_struct_row}\n  {full_sep_row}\n  {full_root_row}"
+        ));
         assert_eq!(
             full_root_shape, full_sep_shape,
-            "full: the separate crate must realize exactly as the root crate does \
+            "full: the separate crate's Function must realize exactly as the root crate's does \
              (root `{ROOT_FQN}` vs separate `{SEPARATE_FQN}`)"
         );
+        let full_shapes = vec![
+            full_module_shape,
+            full_file_shape,
+            full_struct_shape,
+            full_sep_shape,
+            full_root_shape,
+        ];
         assert_eq!(
-            (root_shape.as_str(), sep_shape.as_str()),
-            (full_root_shape.as_str(), full_sep_shape.as_str()),
-            "the splice and the full load must realize the same shape"
+            splice_shapes, full_shapes,
+            "the splice and the full load must realize the same shape per kind"
         );
 
         assert!(
