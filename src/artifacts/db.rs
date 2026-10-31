@@ -970,6 +970,100 @@ impl ArtifactDb {
     }
 }
 
+/// The **previous scan's database**, read once and carried forward by a rebuild:
+/// the two code universes, the recorded Implementation kind of every code FQN,
+/// and the `Agent` records the scan must re-emit. It owns **no** database
+/// handle — [`PreviousScan::capture`] drops the one read-only handle it opens
+/// before returning it — so the next scan is free to replace `db.lbug`.
+///
+/// Every field mirrors the previous database's rows:
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreviousScan {
+    /// The real code FQNs: the four Implementation labels whose `status` is not
+    /// `planned` (see [`PLANNED_CODE_LABELS`]).
+    pub scanned: BTreeSet<String>,
+    /// The FQNs of those labels carrying `status = 'planned'` — declared code
+    /// the previous scan had not yet seen realized.
+    pub planned: BTreeSet<String>,
+    /// Every code FQN's recorded kind, lowercased — `module`, `file`, `struct`
+    /// or `function`, taken from the row's label (a planned row's kind is its
+    /// declared label's kind too). The rebuild carries these so a realized
+    /// planned node keeps its identity.
+    pub kinds: BTreeMap<String, String>,
+    /// The previous database's `Agent` rows as export records (`name` is the
+    /// FQN with its `agent.` prefix stripped, matching
+    /// [`crate::splice::seed`]'s record identity), the roster the rebuild must
+    /// re-emit.
+    pub agents: Vec<Record>,
+}
+
+impl PreviousScan {
+    /// Capture the previous database's snapshot over **one** read-only handle on
+    /// `apg/.trans/db.lbug`: the scanned and planned code universes (via
+    /// [`ArtifactDb::code_universes_from_db`]), every code row's label as its
+    /// kind, and every `Agent` row. This is the scan's snapshot of the database
+    /// it is about to replace — the phase-6 source for the previous-database
+    /// read, splice eligibility, the kind map a rebuild carries for planned
+    /// nodes, and the Agent records it re-emits.
+    ///
+    /// **Fails closed.** An absent database, an unopenable or unreadable one, a
+    /// database carrying pending state (a dirty row or a pending-removal
+    /// identity — an admitted but unsaved mutation never seeds a rebuild), or
+    /// any failed read yields `None`: never a partial snapshot and never a hard
+    /// error, so the incremental/splice path cannot seed from an untrustworthy
+    /// previous database.
+    ///
+    /// The handle is local to this call and is dropped before the caller's scan
+    /// replaces the file; the returned struct holds no `Database`.
+    pub fn capture(apg_root: &Path) -> Option<PreviousScan> {
+        let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+        if !db_path.exists() {
+            return None;
+        }
+        let db = Database::new(&db_path, SystemConfig::default().read_only(true)).ok()?;
+        let artifact = ArtifactDb { db };
+        if artifact.has_pending_state() {
+            return None;
+        }
+        let (scanned, planned) = artifact.code_universes_from_db().ok()?;
+        let conn = artifact.conn().ok()?;
+        let mut kinds = BTreeMap::new();
+        for label in PLANNED_CODE_LABELS {
+            let (_, rows) = query_rows(&conn, &format!("MATCH (n:{label}) RETURN n.fqn")).ok()?;
+            for row in rows {
+                let fqn = cell(&row, 0);
+                if !fqn.is_empty() {
+                    kinds.insert(fqn, label.to_ascii_lowercase());
+                }
+            }
+        }
+        let (_, rows) = query_rows(
+            &conn,
+            "MATCH (n:Agent) RETURN n.fqn, n.path, n.start_line, n.end_line ORDER BY n.fqn",
+        )
+        .ok()?;
+        let mut agents = Vec::with_capacity(rows.len());
+        for row in rows {
+            let fqn = cell(&row, 0);
+            let Some(name) = fqn.strip_prefix("agent.") else {
+                continue;
+            };
+            agents.push(Record::Agent {
+                name: name.to_string(),
+                path: cell(&row, 1),
+                start_line: cell(&row, 2).parse().unwrap_or(0),
+                end_line: cell(&row, 3).parse().unwrap_or(0),
+            });
+        }
+        Some(PreviousScan {
+            scanned,
+            planned,
+            kinds,
+            agents,
+        })
+    }
+}
+
 /// The transient `.trans` rel tables an authored plan/review edge can occupy.
 /// Unlike [`DURABLE_EDGE_TABLES`] these carry **no** serialized-properties
 /// column ([`edge_merge`](crate::artifacts::merge::edge_merge) returns `None` for
