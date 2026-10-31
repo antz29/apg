@@ -4,7 +4,6 @@ use apg::graph::NodeKind;
 use apg::ingest::*;
 use apg::layers::NodeProperties;
 use apg::schema::{Record, SCAN_HEAD};
-use apg::testutil::read_graph_jsonl;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -119,6 +118,80 @@ fn db_scan_row(path: &Path) -> (String, String, String, String) {
         r.get(2).cloned().unwrap_or_default(),
         r.get(3).cloned().unwrap_or_default(),
     )
+}
+
+/// The `RETURN` projection of one code node table's full row — identity,
+/// location where the model has one, classification, and the `status` flag a
+/// planned row carries until it is realized.
+fn code_table_projection(label: &str) -> &'static str {
+    match label {
+        "Module" => "n.fqn, n.status",
+        "File" => "n.fqn, n.start_line, n.end_line, n.code_type, n.status",
+        _ => "n.fqn, n.path, n.start, n.`end`, n.start_line, n.end_line, n.code_type, n.status",
+    }
+}
+
+/// Every row of the four code node tables as a per-table row set — the
+/// row-set half of the database oracle (codes are the rows a full rebuild and
+/// a splice must agree on; `Language` is scaffolding and is scoped out).
+fn db_code_rows(path: &Path) -> std::collections::BTreeMap<String, BTreeSet<Vec<String>>> {
+    ["Module", "File", "Struct", "Function"]
+        .into_iter()
+        .map(|label| {
+            let rows = db_rows(
+                path,
+                &format!("MATCH (n:{label}) RETURN {}", code_table_projection(label)),
+            )
+            .into_iter()
+            .collect();
+            (label.to_string(), rows)
+        })
+        .collect()
+}
+
+/// One code node table's row for `fqn`, asserted to exist exactly once — the
+/// realized-row half of the database oracle.
+fn db_node_row(path: &Path, label: &str, fqn: &str) -> Vec<String> {
+    let rows = db_rows(
+        path,
+        &format!(
+            "MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN {}",
+            code_table_projection(label)
+        ),
+    );
+    assert_eq!(
+        rows.len(),
+        1,
+        "exactly one {label} row for `{fqn}` in {}",
+        path.display()
+    );
+    rows.into_iter().next().unwrap()
+}
+
+/// The `Contains` edges between two code labels as `(from, to)` pairs — the
+/// incident-edge half of the database oracle.
+fn db_contains_pairs(path: &Path, from: &str, to: &str) -> BTreeSet<Vec<String>> {
+    db_rows(
+        path,
+        &format!("MATCH (a:{from})-[:Contains]->(b:{to}) RETURN a.fqn, b.fqn"),
+    )
+    .into_iter()
+    .collect()
+}
+
+/// Bulk-loads `graph` into a real on-disk `db.lbug` at `path` through the same
+/// `create_schema + copy_from` full load the scan path uses — the database,
+/// not the JSONL export, is the oracle.
+fn build_db(path: &Path, graph: &apg::graph::Graph) {
+    let ldir = path.parent().unwrap().join("load");
+    std::fs::create_dir_all(&ldir).unwrap();
+    apg::load::build_load_files(graph, &ldir).unwrap();
+    let db = lbug::Database::new(path, lbug::SystemConfig::default()).unwrap();
+    let conn = lbug::Connection::new(&db).unwrap();
+    apg::load::create_schema(&conn).unwrap();
+    apg::load::copy_from(&conn, &ldir).unwrap();
+    drop(conn);
+    drop(db);
 }
 
 /// e2e tier -- real I/O: these tests drive `ingest`/`ingest_with_reuse`,
@@ -1744,11 +1817,11 @@ mod e2e {
     /// no-full-DB-rebuild observable: the distinct splice verdict line is
     /// PRESENT on a localized re-scan and ABSENT on a full rebuild, whose path
     /// emits the full-load lines instead — a named observable, not the mere
-    /// absence of a frontend spawn. (2) The ENUMERATED equivalence oracle:
-    /// spliced vs full rebuild on per-label and per-rel-type counts, the
+    /// absence of a frontend spawn. (2) The ENUMERATED equivalence oracle over
+    /// the two `db.lbug` files: spliced vs full rebuild on per-label and
+    /// per-rel-type counts, the four code tables' full row sets, the
     /// UnresolvedTarget set by FQN WITH categories (per-category counts), the
-    /// `Scan` row, a spine query, and the EXPORT (`graph.jsonl` equality plus a
-    /// JSONL → Graph → JSONL round-trip).
+    /// `Scan` row, and a spine query.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn splice_path_is_taken_and_equals_a_full_rebuild() {
@@ -1807,7 +1880,6 @@ mod e2e {
 
         let trans = repo.root.join(apg::specs::LAYOUT).join(apg::specs::TRANS);
         let db_path = trans.join("db.lbug");
-        let jsonl_path = trans.join("graph.jsonl");
 
         // The cold scan has no previous DB: a FULL load, with no splice verdict.
         let cold = run(&["scan", "."]);
@@ -1849,17 +1921,16 @@ mod e2e {
             "the splice verdict must name the applied delta and the skipped full load: {inc_err}"
         );
 
-        // Snapshot the spliced pair, then FORCE a full rebuild of the SAME tree:
-        // clear the DB, the export AND the shared fact cache so neither the
-        // fast-path nor win-B reuse can engage.
+        // Snapshot the spliced database, then FORCE a full rebuild of the SAME
+        // tree: clear the DB AND the shared fact cache so neither the fast-path
+        // nor win-B reuse can engage.
         //
-        // The snapshots live OUTSIDE the scanned tree: the bundled structural
+        // The snapshot lives OUTSIDE the scanned tree: the bundled structural
         // scanner graphs every untracked, non-gitignored file it walks, so a
-        // `spliced.lbug`/`spliced.jsonl` written inside `repo.root` would be
-        // graphed by the full rebuild but not by the splice snapshot that
-        // predates it — the oracle would then compare two different trees.
-        // The parent scratch dir is outside the scan root, so both scans see
-        // exactly the same tree.
+        // `spliced.lbug` written inside `repo.root` would be graphed by the
+        // full rebuild but not by the splice snapshot that predates it — the
+        // oracle would then compare two different trees. The parent scratch dir
+        // is outside the scan root, so both scans see exactly the same tree.
         let snapshot_dir = repo
             .root
             .parent()
@@ -1874,11 +1945,8 @@ mod e2e {
             ));
         std::fs::create_dir_all(&snapshot_dir).unwrap();
         let spliced_db = snapshot_dir.join("spliced.lbug");
-        let spliced_jsonl = snapshot_dir.join("spliced.jsonl");
         std::fs::copy(&db_path, &spliced_db).unwrap();
-        std::fs::copy(&jsonl_path, &spliced_jsonl).unwrap();
         std::fs::remove_file(&db_path).unwrap();
-        std::fs::remove_file(&jsonl_path).unwrap();
         let _ = std::fs::remove_dir_all(repo.root.join(".git/apg/facts"));
         let full = run(&["scan", "."]);
         let full_err = String::from_utf8_lossy(&full.stderr).into_owned();
@@ -1892,7 +1960,7 @@ mod e2e {
             "a full rebuild must not emit the splice verdict: {full_err}"
         );
 
-        // (2) The enumerated equivalence oracle: spliced vs full rebuild.
+        // (2) The enumerated equivalence oracle over the two databases.
         let spliced_counts = db_table_counts(&spliced_db);
         let full_counts = db_table_counts(&db_path);
         assert_eq!(
@@ -1904,7 +1972,25 @@ mod e2e {
                 spliced_counts.contains_key(label),
                 "the oracle must enumerate the {label} node table: {spliced_counts:?}"
             );
+            assert_eq!(
+                spliced_counts.get(label),
+                full_counts.get(label),
+                "{label} count must equal a full rebuild"
+            );
         }
+        // The code tables' ROWS too, not just their counts: every Module, File,
+        // Struct and Function row (identity, location, code_type, status) must
+        // equal the full rebuild's.
+        let spliced_code = db_code_rows(&spliced_db);
+        assert!(
+            spliced_code.values().all(|rows| !rows.is_empty()),
+            "the code-table oracle must actually see rows: {spliced_code:?}"
+        );
+        assert_eq!(
+            spliced_code,
+            db_code_rows(&db_path),
+            "every code-table row must equal a full rebuild's"
+        );
         for table in [
             "Contains",
             "Calls",
@@ -1944,53 +2030,22 @@ mod e2e {
         );
 
         // The Scan row: REFRESHED by the delta (never the seeded cold-scan
-        // row) and exactly the spliced export's line 1. The refresh proof is
-        // the row DIFFERENCE plus the per-row content-key tie: `scanned_at`
-        // has one-second resolution, so under a serial e2e run the cold scan
-        // and the forced rebuild can land in the same wall-clock second and
-        // a `scanned_at`-only difference is NOT a reliable discriminator. The
-        // full-rebuild comparison is on the identity fields (sha/clean), with
-        // the line-1 ties asserted per scan.
+        // row) and identical to the full rebuild's on its identity fields. The
+        // refresh proof is the row DIFFERENCE: `scanned_at` has one-second
+        // resolution, so under a serial e2e run the cold scan and the forced
+        // rebuild can land in the same wall-clock second and a `scanned_at`-only
+        // difference is NOT a reliable discriminator.
         let spliced_scan = db_scan_row(&spliced_db);
         assert_ne!(
             spliced_scan, cold_scan,
             "the seeded Scan row must be deleted+reinserted, not preserved"
         );
-        let spliced_jsonl_text = std::fs::read_to_string(&spliced_jsonl).unwrap();
-        let spliced_first = spliced_jsonl_text.lines().next().unwrap();
-        let sv: serde_json::Value = serde_json::from_str(spliced_first).unwrap();
-        assert_eq!(
-            sv["type"], "scan_meta",
-            "line 1 leads with scan_meta: {spliced_first}"
-        );
-        assert_eq!(sv["git_sha"].as_str().unwrap_or_default(), spliced_scan.0);
-        assert_eq!(
-            sv["git_clean"].as_bool().unwrap_or(false),
-            spliced_scan.1 == "true"
-        );
-        assert_eq!(
-            sv["content_key"].as_str().unwrap_or_default(),
-            spliced_scan.2
-        );
-        assert_eq!(
-            sv["scanned_at"].as_str().unwrap_or_default(),
-            spliced_scan.3
-        );
-
-        // The full rebuild's Scan row/line 1, and the identity fields it must
-        // share with the spliced one (same tree, same HEAD, same dirty state).
         let full_scan = db_scan_row(&db_path);
         assert_eq!(
             (spliced_scan.0.clone(), spliced_scan.1.clone()),
             (full_scan.0.clone(), full_scan.1.clone()),
             "the spliced Scan row's sha/clean must match a full rebuild's"
         );
-        let full_jsonl = std::fs::read_to_string(&jsonl_path).unwrap();
-        let full_first = full_jsonl.lines().next().unwrap();
-        let fv: serde_json::Value = serde_json::from_str(full_first).unwrap();
-        assert_eq!(fv["type"], "scan_meta", "line 1 leads with scan_meta");
-        assert_eq!(fv["scanned_at"].as_str().unwrap_or_default(), full_scan.3);
-        assert_eq!(fv["content_key"].as_str().unwrap_or_default(), full_scan.2);
 
         // A sample spine query (a bare scratch repo has no authored nodes, so
         // both sides are empty — the equality is still a real assertion).
@@ -2000,37 +2055,6 @@ mod e2e {
             db_rows(&spliced_db, spine),
             db_rows(&db_path, spine),
             "the spine query must agree with a full rebuild"
-        );
-
-        // The EXPORT: record-set equality with the full rebuild's for every
-        // record kind EXCEPT the per-scan `scan_meta` line (each scan's own
-        // line 1 is tied to its own Scan row above), plus a JSONL → Graph →
-        // JSONL round-trip through the re-ingest reader.
-        let canon = |t: &str| -> std::collections::BTreeSet<String> {
-            t.lines()
-                .filter(|l| !l.starts_with("{\"type\":\"scan_meta\""))
-                .map(str::to_string)
-                .collect()
-        };
-        assert_eq!(
-            canon(&spliced_jsonl_text),
-            canon(&full_jsonl),
-            "every non-scan_meta export record must equal a full rebuild's"
-        );
-        let back = read_graph_jsonl(&spliced_jsonl).unwrap();
-        let again = repo.root.join("again.jsonl");
-        apg::load::write_graph_jsonl(&back, &again).unwrap();
-        let again_text = std::fs::read_to_string(&again).unwrap();
-        assert_eq!(
-            canon(&spliced_jsonl_text),
-            canon(&again_text),
-            "graph.jsonl must round-trip through read_graph_jsonl"
-        );
-        // …including its `scan_meta` line 1 (the Scan node round-trips too).
-        assert_eq!(
-            again_text.lines().next().unwrap(),
-            spliced_first,
-            "the round-tripped export must reproduce the scan_meta line"
         );
 
         let _ = std::fs::remove_dir_all(&home);
@@ -2053,8 +2077,20 @@ mod e2e {
     /// until the assembly is fixed and flips green with NO test change: a cached
     /// declaration supersedes a `planned` placeholder for all four kinds —
     /// status cleared, the FQN kept, the cached location restored (a Module is
-    /// location-less by model) — and the assembled export is set-equal to a
-    /// no-reuse full rebuild of the same facts.
+    /// location-less by model) — and the assembled database is table- and
+    /// row-equal to a no-reuse full rebuild of the same facts.
+    ///
+    /// The oracle is the two `db.lbug` files, not the JSONL export: both graphs
+    /// are bulk-loaded through the same `create_schema + copy_from` full load
+    /// the scan path uses, then compared on the four code tables' counts and
+    /// full row sets, each realized planned row's own status/location, and the
+    /// incident code-side `Contains` edges (both halves). The LANGUAGE ROOT is
+    /// scaffolding-only and scoped out: this spool carries no module record, so
+    /// the assembly has no `Language` node nor its `rust -> rust.diagcrate`
+    /// edge, while the no-reuse reference materialises both from its
+    /// `Record::Module` (the scaffolding replay is pinned separately by
+    /// `skipped_language_scaffolding_is_replayed_into_the_assembly`). The Module
+    /// ROW is still compared — pass 2/2b realizes it from the warm unit.
     ///
     /// Fixture shape (the live win-B shape): a warm `FactStore` holds ONE file's
     /// resolved fact unit; the spool re-emits an UNRELATED target file plus the
@@ -2062,7 +2098,7 @@ mod e2e {
     /// whose facts are warm is NOT a re-emission target, so only the cache
     /// carries its declaration — exactly the masking the seam must undo.
     #[test]
-    #[ignore = "e2e tier: real I/O (temp FactStore dir); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (temp FactStore dir/db.lbug); run via cargo test-e2e"]
     fn cached_declaration_supersedes_a_planned_placeholder() {
         use apg::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
 
@@ -2122,8 +2158,8 @@ mod e2e {
             }
             graph
         };
-        let reference_jsonl = dir.join("reference.jsonl");
-        apg::load::write_graph_jsonl(&reference, &reference_jsonl).unwrap();
+        let reference_db = dir.join("reference").join("db.lbug");
+        build_db(&reference_db, &reference);
 
         // Warm the store with that file's real fact unit, extracted FROM the
         // reference graph so the cached nodes are exactly what a scan stores.
@@ -2279,34 +2315,85 @@ mod e2e {
             matrix.join("\n")
         );
 
-        // The export is the artifact both consumers read (the DB full load and
-        // the splice delta source): every code node and edge record must be
-        // set-equal to a no-reuse full rebuild. The LANGUAGE ROOT is
-        // scaffolding-only and is scoped out here: this spool carries no module
-        // records, so the assembly has no `Language` node while the no-reuse
-        // reference materialises one from its `Record::Module` (the scaffolding
-        // replay is pinned separately by
-        // `skipped_language_scaffolding_is_replayed_into_the_assembly`).
-        let assembled_jsonl = dir.join("assembled.jsonl");
-        apg::load::write_graph_jsonl(&assembled, &assembled_jsonl).unwrap();
-        let code_records = |p: &Path| -> BTreeSet<String> {
-            std::fs::read_to_string(p)
-                .unwrap()
-                .lines()
-                .filter(|line| {
-                    let v: serde_json::Value = serde_json::from_str(line).unwrap();
-                    !matches!(v["type"].as_str(), Some("scan_meta") | Some("language"))
-                        && !(v["type"] == "contains" && (v["from"] == "rust" || v["to"] == "rust"))
-                })
-                .map(str::to_string)
-                .collect()
-        };
+        // The database is the artifact both consumers read (the query index and
+        // the splice delta source): the assembled `db.lbug` must be table- and
+        // row-equal to a no-reuse full rebuild's. The LANGUAGE ROOT is
+        // scaffolding-only and scoped out here: this spool carries no module
+        // records, so the assembly has no `Language` node (nor its
+        // `rust -> rust.diagcrate` edge) while the no-reuse reference
+        // materialises one from its `Record::Module` (the scaffolding replay is
+        // pinned separately by
+        // `skipped_language_scaffolding_is_replayed_into_the_assembly`). The
+        // Module ROW itself is still compared: pass 2/2b realizes it from the
+        // warm unit.
+        let assembled_db = dir.join("assembled").join("db.lbug");
+        build_db(&assembled_db, &assembled);
+
+        let reference_counts = db_table_counts(&reference_db);
+        let assembled_counts = db_table_counts(&assembled_db);
+        for table in ["Module", "File", "Struct", "Function"] {
+            assert_eq!(
+                assembled_counts.get(table),
+                reference_counts.get(table),
+                "the {table} table must hold as many rows as a no-reuse full rebuild"
+            );
+        }
         assert_eq!(
-            code_records(&assembled_jsonl),
-            code_records(&reference_jsonl),
-            "every code node and edge record in the assembled export must equal a no-reuse \
-             full rebuild's"
+            db_code_rows(&assembled_db),
+            db_code_rows(&reference_db),
+            "every Module/File/Struct/Function row (identity, location, code_type, status) must \
+             equal a no-reuse full rebuild's"
         );
+
+        // Each realized planned node's own row: status CLEARED and the cached
+        // location FILLED, identical to the no-reuse reference row (a Module is
+        // location-less by model).
+        for (label, fqn) in [
+            ("Module", MODULE),
+            ("File", FILE),
+            ("Struct", STRUCT),
+            ("Function", FUNCTION),
+        ] {
+            let got = db_node_row(&assembled_db, label, fqn);
+            assert_eq!(
+                got,
+                db_node_row(&reference_db, label, fqn),
+                "{label} `{fqn}` row must equal a no-reuse full rebuild's"
+            );
+            assert_eq!(
+                got.last().map(String::as_str),
+                Some(""),
+                "{label} `{fqn}` must not carry `status: planned`"
+            );
+        }
+
+        // Its incident edges, both halves: every code-side `Contains` pair must
+        // equal a no-reuse full rebuild's, and the three edges the placeholder
+        // spool declared survive the cached declaration superseding it.
+        for (from, to) in [
+            ("Module", "File"),
+            ("File", "Struct"),
+            ("File", "Function"),
+            ("Struct", "Function"),
+        ] {
+            assert_eq!(
+                db_contains_pairs(&assembled_db, from, to),
+                db_contains_pairs(&reference_db, from, to),
+                "the {from} -> {to} Contains edges must equal a no-reuse full rebuild's"
+            );
+        }
+        for (from, to, a, b) in [
+            ("Module", "File", MODULE, FILE),
+            ("File", "Struct", FILE, STRUCT),
+            ("File", "Function", FILE, FUNCTION),
+        ] {
+            assert!(
+                db_contains_pairs(&assembled_db, from, to)
+                    .contains(&vec![a.to_string(), b.to_string()]),
+                "the assembled database must carry the realized {from} -> {to} edge \
+                 `{a}` -> `{b}`"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
