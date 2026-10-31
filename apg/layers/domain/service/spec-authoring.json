@@ -62,12 +62,12 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.spec-model-enforcement",
+      "target": "requirements.requirement.spec-lint-tier-scope-is-cumulative",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.spec-lint-tier-scope-is-cumulative",
+      "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
     },
     {
@@ -78,6 +78,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.two-representation-model-documented",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-tool-descriptions-name-live-edge-kinds",
       "properties": {}
     }
   ],

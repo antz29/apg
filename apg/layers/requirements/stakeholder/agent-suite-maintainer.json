@@ -139,6 +139,11 @@
       "kind": "requires",
       "target": "requirements.requirement.scratch-markdown-only",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.suite-tool-descriptions-name-live-edge-kinds",
+      "properties": {}
     }
   ],
   "in": []

@@ -94,6 +94,11 @@
       "kind": "requires",
       "target": "requirements.requirement.validated-authoring-requires-a-scanned-database",
       "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.suite-tool-descriptions-name-live-edge-kinds",
+      "properties": {}
     }
   ],
   "in": []

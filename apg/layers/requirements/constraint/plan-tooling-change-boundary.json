@@ -1,9 +1,0 @@
-{
-  "layer": "requirements",
-  "type": "constraint",
-  "name": "plan-tooling-change-boundary",
-  "body": "The plan-tooling change-set changes no binary code and no suite tool other than the plan-phases tool and the shared helper it uses, and the shared-lib change stays additive.",
-  "properties": {},
-  "out": [],
-  "in": []
-}
