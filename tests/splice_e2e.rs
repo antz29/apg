@@ -1067,17 +1067,17 @@ fn agent_rows(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
     out
 }
 
-/// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files,
-/// writes `graph.jsonl` and node files under the temp dir. Each is
+/// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files
+/// and writes node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
 /// point is the named guard `cargo test-e2e`
-/// (= `cargo test tests::e2e:: -- --ignored`).
+/// (= `cargo test e2e:: -- --ignored`).
 mod e2e {
     use super::*;
 
     /// (a) A seed copy preserves every table / every row of the previous DB.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn seed_copy_preserves_every_table_and_row() {
         let dir = scratch("preserve");
         let prev = dir.join("db.lbug");
@@ -1145,7 +1145,7 @@ mod e2e {
     /// (b) A missing previous DB invalidates the seed (fallback), and no temp is
     /// created.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn missing_previous_db_falls_back_to_full_load() {
         let dir = scratch("missing");
         let prev = dir.join("db.lbug");
@@ -1165,7 +1165,7 @@ mod e2e {
     /// (c) An incompatible schema invalidates the seed (fallback): the previous
     /// DB opens but its tables differ from this binary's `create_schema`.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn incompatible_schema_falls_back_to_full_load() {
         let dir = scratch("schema");
         let prev = dir.join("db.lbug");
@@ -1193,7 +1193,7 @@ mod e2e {
     /// (c) A storage-format / version mismatch (a file that is not a database)
     /// invalidates the seed (fallback), and no temp is left behind.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn unreadable_previous_db_falls_back_to_full_load() {
         let dir = scratch("format");
         let prev = dir.join("db.lbug");
@@ -1219,7 +1219,7 @@ mod e2e {
     /// rebuild's, while covering persist / disappear / unresolved-GC / Scan
     /// refresh in one delta.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn delta_application_matches_a_full_rebuild() {
         let dir = scratch("delta");
         let prev_path = dir.join("db.lbug");
@@ -1326,7 +1326,7 @@ mod e2e {
     /// equivalence-guarded seed must refuse such a DB and hand the caller to the
     /// full load.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn stale_local_seed_is_refused_when_another_worktree_advanced_the_store() {
         use apg::cache::{CacheKey, Manifest, ScanConfigKey};
         use apg::delta::ScanRecord;
@@ -1372,8 +1372,9 @@ mod e2e {
 
         // The unguarded splice — the pre-fix behaviour — applies the
         // empty-target delta: no code unit is upserted, so the stale seeded
-        // rows survive and the export is the current full tree. The DB therefore
-        // DIVERGES from a full rebuild: exactly the bug this guard prevents.
+        // rows survive and the DB carries the seed's older tree. The DB
+        // therefore DIVERGES from a full rebuild: exactly the bug this guard
+        // prevents.
         {
             let seeded = match seed(&prev_path) {
                 SeedDecision::Seed(s) => s,
@@ -1446,9 +1447,9 @@ mod e2e {
 
     /// A spec-only change-set: the assembled graph carries the SAME code as the
     /// seed DB but DIFFERENT authored/transient rows (an extra `Requirement`).
-    /// The win-C splice writes no authored row while `graph.jsonl` is serialized
-    /// from the full assembled graph, so seeding this DB would publish a
-    /// `db.lbug` that diverges from its own export. The phase-01 authored-identity
+    /// The win-C splice writes no authored row, so seeding this DB would
+    /// publish a `db.lbug` that diverges from the assembled authored rows the
+    /// full load projects. The phase-01 authored-identity
     /// guard must refuse the seed and hand the caller to the full load, which
     /// projects exactly the assembled authored/transient tables — so a spec-only
     /// splice can never diverge from a full rebuild.
@@ -1457,7 +1458,7 @@ mod e2e {
     /// content key it returned `Seed`, so the step-3 assertion below (an
     /// `UnrepresentedAuthored` fallback) could not hold.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn spec_only_delta_cannot_diverge_from_full_rebuild() {
         let dir = scratch("spec-only-splice");
         let prev_path = dir.join("db.lbug");
@@ -1492,7 +1493,7 @@ mod e2e {
                 panic!("expected UnrepresentedAuthored, got: {}", other.describe())
             }
             SeedDecision::Seed(_) => panic!(
-                "a spec-only delta must never seed: the spliced DB would diverge from its export"
+                "a spec-only delta must never seed: the spliced DB would diverge from the recorded authored rows"
             ),
         }
 
@@ -1772,7 +1773,7 @@ mod e2e {
     /// treated every seeded module as in scope and `DETACH DELETE`d the
     /// scaffolding the assembled graph could not vouch for.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn module_scaffolding_survives_a_partial_scan_that_skips_a_language() {
         let dir = scratch("skipped-lang");
         let prev_path = dir.join("db.lbug");
@@ -2233,7 +2234,7 @@ mod e2e {
     /// A removed file named only by `removed_fqns` (not by a target path) is
     /// still detached — the subtraction half of the full-universe seam.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn removed_fqns_are_detached_even_outside_the_target_paths() {
         let dir = scratch("removed-fqns");
         let prev_path = dir.join("db.lbug");
@@ -2341,7 +2342,7 @@ mod e2e {
     /// the same assembled graph on EVERY authored, transient and code table —
     /// so the seed path's database read leaves no table behind.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn spliced_and_full_rebuild_agree_on_every_table_count() {
         let dir = scratch("counts");
         let prev_path = dir.join("db.lbug");
@@ -2556,7 +2557,7 @@ mod e2e {
     /// the existing enumerated splice equivalence + rollback oracles stay
     /// green beside it.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn batched_dml_statement_count_is_bounded_and_size_independent() {
         // A small delta and a 4x-larger delta of the SAME shape: the batched
         // statement count is a function of the label/rel-pair set, not of the
@@ -2639,7 +2640,7 @@ mod e2e {
     /// dangling edge; and the per-rel-type counts still equal a full rebuild,
     /// so nothing a rebuild keeps was lost.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn persisting_fqn_is_upserted_and_incoming_edges_survive() {
         let dir = scratch("incoming");
         let prev_path = dir.join("db.lbug");
@@ -2751,7 +2752,7 @@ mod e2e {
     /// its category exactly once (dedup by FQN). The per-category counts equal a
     /// full rebuild.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn unresolved_target_lifecycle_survives_gc_and_dedup() {
         let dir = scratch("unresolved-life");
         let prev_path = dir.join("db.lbug");
@@ -2938,7 +2939,7 @@ mod e2e {
     /// the spliced DB then missed a `Module` row and `Contains` rels a full
     /// rebuild keeps (`domain.constraint.db-splice-equivalence`).
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn added_file_and_new_package_land_like_a_full_rebuild() {
         let dir = scratch("add-file-module");
         let prev_path = dir.join("db.lbug");
@@ -4370,10 +4371,10 @@ mod e2e {
     /// AGREEMENT — the published DB's healed rows (status cleared, location
     /// filled) equal a full rebuild's.
     ///
-    /// Real I/O (db.lbug/graph.jsonl/fs), so `#[ignore]`d e2e
+    /// Real I/O (db.lbug/fs), so `#[ignore]`d e2e
     /// (`global.constraint.test-tier-boundaries`).
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn splice_heals_a_planned_seed_row_the_assembly_realizes() {
         const MODULE_FQN: &str = "rust.heal.widget";
         const FILE_FQN: &str = "heal/widget.rs";
