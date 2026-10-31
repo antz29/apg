@@ -62,13 +62,12 @@ pub fn record(
     // feedback-102: the per-file units cannot carry a language's
     // pure-intermediate modules or its `Module -> Module` hierarchy, so record
     // that scaffolding alongside them. A later partial scan that skips a
-    // language replays it, keeping the win-B-assembled graph — and therefore the
-    // `graph.jsonl` rendered from it — a full rebuild's equal. This runs BEFORE
-    // the manifest/scan-record save, so a scaffolding write failure aborts the
-    // recording and the next scan takes the full-scan fallback rather than
-    // reusing an incomplete store. The assembled graph is complete here (spawned
-    // languages emit their full scaffolding; skipped ones were just replayed),
-    // so the extraction is authoritative.
+    // language replays it, keeping the win-B-assembled graph a full rebuild's
+    // equal. This runs BEFORE the manifest/scan-record save, so a scaffolding
+    // write failure aborts the recording and the next scan takes the full-scan
+    // fallback rather than reusing an incomplete store. The assembled graph is
+    // complete here (spawned languages emit their full scaffolding; skipped
+    // ones were just replayed), so the extraction is authoritative.
     let scaffolding = crate::cache::ModuleScaffolding::extract(graph, scan_root);
     store.put_scaffolding_all(&scaffolding, cache_key)?;
     store.save_index()?;
@@ -79,9 +78,9 @@ pub fn record(
         sha: sha.to_string(),
         cache_key: cache_key.clone(),
         manifest: manifest.clone(),
-        // The same content-identity key the DB `Scan` row and graph.jsonl line
-        // 1 carry (this scan's `scan_meta`), so the next scan can verify its
-        // LOCAL seed against the shared record before splicing (feedback-101).
+        // The same content-identity key the DB `Scan` row carries (this scan's
+        // `scan_meta`), so the next scan can verify its LOCAL seed against the
+        // shared record before splicing (feedback-101).
         content_key: graph
             .nodes
             .get(crate::schema::SCAN_HEAD)
