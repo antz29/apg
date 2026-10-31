@@ -212,23 +212,19 @@ pub fn write_jsonl_and_reingest(
     specs::write_jsonl(&tmp, records)?;
     std::fs::rename(&tmp, path)?;
 
-    // 2. Auto-commit durable targets, then re-anchor scan_meta.
-    //
-    // Capture the post-commit state so the DB's OWN `Scan` row can be brought to
-    // the identical state (step 4): the re-anchor is graph.jsonl-only, and the
-    // two halves must name the same git state.
-    let mut reanchored: Option<git::GitState> = None;
+    // 2. Auto-commit durable targets, then re-anchor the database's own `Scan`
+    //    row. The re-anchor itself lands the post-commit git state on that row
+    //    (a live session makes it a no-op: the session's save owns the DB and
+    //    refreshes the row through its held handle), so the projection below is
+    //    database-only — no export step follows.
     if !path.starts_with(apg_root.join(specs::TRANS)) {
         match git::auto_commit(apg_root, path) {
             Ok(Some(_)) => {
                 let state = git::git_state(apg_root);
-                match git::reanchor_scan_meta(apg_root, &state) {
-                    Ok(()) => reanchored = Some(state),
-                    Err(e) => {
-                        eprintln!(
-                            "apg: warning: could not re-anchor scan_meta after auto-commit: {e:#}"
-                        );
-                    }
+                if let Err(e) = git::reanchor_scan_meta(apg_root, &state) {
+                    eprintln!(
+                        "apg: warning: could not re-anchor scan_meta after auto-commit: {e:#}"
+                    );
                 }
             }
             Ok(None) => {}
@@ -247,31 +243,6 @@ pub fn write_jsonl_and_reingest(
         reingest_project_with(apg_root, &deletes, &after)?;
     }
 
-    // 4. Reconcile the DB's own `Scan` row to the re-anchored graph.jsonl state.
-    //    A transient (`apg/.trans/`) write never commits and never re-anchors
-    //    line 1, so its DB `Scan` row must stay put — refresh only when the
-    //    durable commit re-anchored a live DB. The DB is opened from scratch
-    //    (the projection's own open has already closed); a failure degrades to a
-    //    warning, exactly like the re-anchor it mirrors (the durable write
-    //    already landed, and the next scan rebuilds).
-    if let (Some(state), true) = (&reanchored, has_db) {
-        match ArtifactDb::open(apg_root) {
-            Ok(db) => {
-                if let Err(e) = db.refresh_scan_row(
-                    state.sha.as_deref(),
-                    state.sha.as_ref().map(|_| state.clean),
-                    state.content_key.as_deref(),
-                ) {
-                    eprintln!(
-                        "apg: warning: could not refresh the DB Scan row after commit: {e:#}"
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("apg: warning: could not open the DB to refresh its Scan row: {e:#}");
-            }
-        }
-    }
     Ok(())
 }
 
