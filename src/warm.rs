@@ -97,11 +97,11 @@ pub fn warm_prepared(
 }
 
 /// The code-FQN universe of the shared store's complete warm cache — the
-/// full-universe seam's source when no local export exists yet (a fresh
+/// full-universe seam's source when no local database exists yet (a fresh
 /// worktree): every fragment's re-based code FQNs (module FQNs included) plus
 /// every language's module scaffolding. The warm assembly produces exactly these
 /// nodes, so authored `implemented-by` validation sees a full rebuild's universe
-/// without the local `graph.jsonl` a full scan would have written.
+/// without the local `db.lbug` a full scan would have written.
 pub fn warm_universe(
     store_root: &Path,
     cache_key: &cache::CacheKey,
@@ -148,11 +148,12 @@ pub fn warm_universe(
 /// from the shared store (the incremental sibling of [`warm_universe`]).
 ///
 /// The incremental full-universe seam ([`incremental::full_universe`]) derives
-/// its base from THIS checkout's previous export, which can lag the shared store
-/// when another worktree scanned ahead: a file that is byte-identical to the
-/// shared record but newer than the local export is reused (not re-emitted), so
-/// its code FQNs would drop out of the universe and falsely trip `spec drift`
-/// during `implemented-by` validation. Unioning this set in closes that gap.
+/// its base from THIS checkout's previous database, which can lag the shared
+/// store when another worktree scanned ahead: a file that is byte-identical to
+/// the shared record but newer than the local database is reused (not
+/// re-emitted), so its code FQNs would drop out of the universe and falsely trip
+/// `spec drift` during `implemented-by` validation. Unioning this set in closes
+/// that gap.
 pub fn reuse_universe(
     store_root: &Path,
     cache_key: &cache::CacheKey,
