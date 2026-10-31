@@ -10,7 +10,7 @@
 
 mod common;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -129,75 +129,76 @@ fn go_repo(tag: &str) -> Repo {
     repo
 }
 
-/// A node record's string property, panicking when the export omits it.
-fn field<'a>(record: &'a serde_json::Value, key: &str) -> &'a str {
-    record
-        .get(key)
-        .and_then(|value| value.as_str())
-        .unwrap_or_else(|| panic!("graph record {record} has no `{key}`"))
+/// One database row per result, each row its cells as strings, from `query`
+/// against the scanned `db.lbug`; panics when the query fails.
+fn db_rows(conn: &lbug::Connection, query: &str) -> Vec<Vec<String>> {
+    apg::splice::query_rows(conn, query)
+        .unwrap_or_else(|e| panic!("query {query:?}: {e}"))
+        .1
 }
 
 /// The language a code FQN is rooted under: its first `.`-separated component
-/// (the `lang_switch` id — `go.scratch`, `misc.`).
+/// (the `lang_switch` id — `go.scratch`, `misc.`), taken from the database row
+/// the FQN came back in.
 fn language_of(fqn: &str) -> &str {
     fqn.split('.').next().unwrap_or(fqn)
 }
 
-/// The scanned graph's own per-kind and per-language node counts, read from the
-/// `graph.jsonl` export. A File's language comes from the module that contains
-/// it (`Module -Contains-> File`); every other code kind is rooted under its
-/// language, so its FQN's first component is the language.
+/// The scanned graph's own per-kind and per-language node counts, read
+/// read-only from the worktree's `apg/.trans/db.lbug`. A File's language comes
+/// from the module that contains it (`Module -Contains-> File`); every other
+/// code kind is rooted under its language, so its FQN's first component is the
+/// language.
 fn graph_counts(root: &Path) -> Summary {
-    let path = root.join(LAYOUT).join(TRANS).join("graph.jsonl");
-    let text =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let records: Vec<serde_json::Value> = text
-        .lines()
-        .map(|line| {
-            serde_json::from_str(line).unwrap_or_else(|e| panic!("graph.jsonl line {line:?}: {e}"))
-        })
-        .collect();
-    let is = |record: &serde_json::Value, kind: &str| field(record, "type") == kind;
-    let modules: BTreeSet<String> = records
-        .iter()
-        .filter(|r| is(r, "module"))
-        .map(|r| field(r, "fqn").to_string())
-        .collect();
-    let files: BTreeSet<String> = records
-        .iter()
-        .filter(|r| is(r, "file"))
-        .map(|r| field(r, "fqn").to_string())
-        .collect();
-    let mut file_language: BTreeMap<String, String> = BTreeMap::new();
-    for record in records.iter().filter(|r| is(r, "contains")) {
-        let (from, to) = (field(record, "from"), field(record, "to"));
-        if modules.contains(from) && files.contains(to) {
-            file_language.insert(to.to_string(), language_of(from).to_string());
-        }
-    }
+    let path = root.join(LAYOUT).join(TRANS).join("db.lbug");
+    let db = lbug::Database::new(&path, lbug::SystemConfig::default().read_only(true))
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let conn = lbug::Connection::new(&db).unwrap();
+    let fqns = |label: &str| -> Vec<String> {
+        db_rows(&conn, &format!("MATCH (n:{label}) RETURN n.fqn"))
+            .into_iter()
+            .map(|row| row.into_iter().next().unwrap_or_default())
+            .collect()
+    };
+    let language_nodes = fqns("Language");
+    let modules = fqns("Module");
+    let files = fqns("File");
+    let structs = fqns("Struct");
+    let functions = fqns("Function");
+    let file_language: BTreeMap<String, String> = db_rows(
+        &conn,
+        "MATCH (m:Module)-[:Contains]->(f:File) RETURN f.fqn, m.fqn",
+    )
+    .into_iter()
+    .map(|row| (row[0].clone(), language_of(&row[1]).to_string()))
+    .collect();
     let mut languages: BTreeMap<String, usize> = BTreeMap::new();
-    for record in &records {
-        let language = match field(record, "type") {
-            "language" | "module" | "struct" | "function" => {
-                language_of(field(record, "fqn")).to_string()
-            }
-            "file" => {
-                let fqn = field(record, "fqn");
-                file_language
-                    .get(fqn)
-                    .unwrap_or_else(|| panic!("graph File {fqn} has no module parent"))
-                    .clone()
-            }
-            _ => continue,
-        };
-        *languages.entry(language).or_default() += 1;
+    for fqn in language_nodes
+        .iter()
+        .chain(&modules)
+        .chain(&structs)
+        .chain(&functions)
+    {
+        *languages.entry(language_of(fqn).to_string()).or_default() += 1;
+    }
+    for fqn in &files {
+        let language = file_language
+            .get(fqn)
+            .unwrap_or_else(|| panic!("graph File {fqn} has no module parent"));
+        *languages.entry(language.clone()).or_default() += 1;
     }
     Summary {
         kinds: KINDS
             .iter()
             .map(|(_, label)| {
-                let kind = label.to_ascii_lowercase();
-                let count = records.iter().filter(|r| is(r, &kind)).count();
+                let count = match *label {
+                    "Language" => language_nodes.len(),
+                    "Module" => modules.len(),
+                    "File" => files.len(),
+                    "Struct" => structs.len(),
+                    "Function" => functions.len(),
+                    _ => 0,
+                };
                 (label.to_string(), count)
             })
             .collect(),
