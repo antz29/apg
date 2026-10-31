@@ -125,7 +125,8 @@ impl FullScanReason {
                 format!("cache key drifted ({recorded} → {current}) — full scan")
             }
             FullScanReason::NoPreviousExport => {
-                "no previous export to derive the full code universe — full scan".to_string()
+                "no usable previous worktree database (absent, unreadable, or carrying pending state) to derive the full code universe — full scan"
+                    .to_string()
             }
             FullScanReason::DeltaUnavailable => {
                 "previous scan record unavailable — full scan".to_string()
