@@ -12,7 +12,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.task-record-field-set",
+      "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
       "properties": {}
     },
     {
@@ -22,7 +22,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.task-assigned-to-names-a-scanned-agent",
+      "target": "requirements.requirement.task-record-field-set",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-tasks-reports-a-truncated-page",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.plan-tasks-status-filter-runs-before-the-limit",
       "properties": {}
     }
   ],

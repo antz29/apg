@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "list-tool-filters-before-it-limits",
+  "body": "A suite list tool applies its filter inside the database query so a row limit bounds the filtered set, and it reports a page that reaches the limit as truncated rather than as the whole result.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

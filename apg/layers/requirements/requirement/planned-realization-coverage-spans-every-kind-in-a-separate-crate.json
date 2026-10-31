@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-realization-coverage-spans-every-kind-in-a-separate-crate",
+  "body": "The planned-realization regression matrix exercises every kind in a separate non-root cargo package on both build paths, so a Struct or File declared there realizes with its crate-prefixed FQN kept and its location filled.",
+  "properties": {
+    "feature": "planned-node-realization"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    }
+  ]
+}

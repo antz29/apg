@@ -17,6 +17,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.planned-node-realizes-through-the-cached-fact-assembly",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
       "properties": {}
     },
@@ -37,7 +42,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.planned-node-realizes-through-the-cached-fact-assembly",
+      "target": "requirements.requirement.planned-realization-coverage-spans-every-kind-in-a-separate-crate",
       "properties": {}
     }
   ],

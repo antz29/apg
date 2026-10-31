@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "validated-authoring-requires-a-scanned-database",
+  "body": "A validated multi-file node write resolves its code identities from the worktree database and refuses with a scan-first error while that database is absent, so authoring before a first scan goes through the single-file writer.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    }
+  ]
+}

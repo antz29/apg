@@ -2,22 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "code-universe-read",
-  "body": "The code-identity read seam every spec check resolves against: the scanned and planned FQN sets a database query yields plus the plan store's declarations.",
+  "body": "The code-identity read seam every spec check resolves against: the scanned and planned FQN sets a database query yields, the plan store's declarations, and the scan-first refusal a validated write meets while that database is absent.",
   "properties": {},
   "out": [
     {
-      "kind": "realises",
-      "target": "domain.service.graph-materialization",
+      "kind": "implemented-by",
+      "target": "rust.apg.artifacts.project.code_universes",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "rust.apg.incremental.prepare.full_universe",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.artifacts.project.code_universes",
       "properties": {}
     },
     {
@@ -28,6 +23,11 @@
     {
       "kind": "is-role",
       "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-materialization",
       "properties": {}
     }
   ],

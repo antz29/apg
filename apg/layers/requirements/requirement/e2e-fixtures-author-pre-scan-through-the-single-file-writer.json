@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "e2e-fixtures-author-pre-scan-through-the-single-file-writer",
+  "body": "Every end-to-end fixture authors durable nodes before a first scan through the single-file writer alone, and a regression test proves that write lands for the first scan while a validated write with no database refuses.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    }
+  ]
+}

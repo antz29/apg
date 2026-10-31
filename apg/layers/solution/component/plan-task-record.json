@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "plan-task-record",
-  "body": "The transient plan task record and its surfaces: the title and status properties, the assigned-to, implements, and per-kind operation edges, the authoring validation, and the markdown task list.",
+  "body": "The transient plan task record and its surfaces: title and status properties, the assigned-to, implements, and per-kind operation edges, the authoring validation, markdown task list, and the listing's status filter and truncation report.",
   "properties": {},
   "out": [
     {

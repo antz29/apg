@@ -12,12 +12,22 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.tier-separable-tests",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
+      "target": "requirements.requirement.e2e-fixtures-author-pre-scan-through-the-single-file-writer",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.planned-realization-coverage-spans-every-kind-in-a-separate-crate",
       "properties": {}
     }
   ],

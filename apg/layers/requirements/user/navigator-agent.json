@@ -32,6 +32,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.merge-validates-against-the-branch-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
       "properties": {}
     },
@@ -157,7 +162,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.merge-validates-against-the-branch-database",
+      "target": "requirements.requirement.plan-tasks-reports-a-truncated-page",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.plan-tasks-status-filter-runs-before-the-limit",
       "properties": {}
     }
   ],

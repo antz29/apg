@@ -77,6 +77,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.spec-lint-tier-scope-is-cumulative",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.spec-model-enforcement",
       "properties": {}
     },
@@ -87,7 +92,7 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.spec-lint-tier-scope-is-cumulative",
+      "target": "requirements.requirement.validated-authoring-requires-a-scanned-database",
       "properties": {}
     }
   ],

@@ -7,22 +7,22 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.graph-has-two-representations",
+      "target": "requirements.requirement.code-universe-read-from-the-database",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.session-start-recovers-an-unclean-database",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.session-pending-state-never-fresh",
+      "target": "requirements.requirement.database-shape-change-discards-rather-than-migrates",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.graph-export-removed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.graph-has-two-representations",
       "properties": {}
     },
     {
@@ -37,12 +37,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.code-universe-read-from-the-database",
+      "target": "requirements.requirement.session-pending-state-never-fresh",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.database-shape-change-discards-rather-than-migrates",
+      "target": "requirements.requirement.session-start-recovers-an-unclean-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.validated-authoring-requires-a-scanned-database",
       "properties": {}
     }
   ],
