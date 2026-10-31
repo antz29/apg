@@ -71,8 +71,8 @@ pub struct Reuse<'a> {
     /// empty target set on a partial/incremental scan). Their global module
     /// scaffolding — the pure-intermediate modules and `Module -> Module`
     /// hierarchy that no per-file fact unit carries — is replayed from the store
-    /// so the assembled graph (and the `graph.jsonl` rendered from it) equals a
-    /// full rebuild (feedback-102).
+    /// so the assembled graph — and, with it, the database rows it lands in —
+    /// matches a full rebuild (feedback-102).
     pub skipped_langs: BTreeSet<String>,
 }
 
@@ -250,7 +250,7 @@ pub fn ingest(
 /// removed_fqns, scan }` from it — `targets` being the phase-2 re-emission
 /// target set (the delete scope) and `removed_fqns` the delta's removed
 /// declarations — and the splicer derives its DML from exactly that. The
-/// previous `graph.jsonl` is never re-read and no second assembly runs; the
+/// previous database rows are never re-read and no second assembly runs; the
 /// full-record path ([`ingest`]) is unchanged.
 ///
 /// `progress` streams one symbol per admitted code node from BOTH the spool
@@ -374,11 +374,11 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     // A language whose frontend was skipped re-emits nothing, so its
     // pure-intermediate modules and every `Module -> Module` hierarchy edge —
     // which no per-file fact unit can express — must be replayed from the store
-    // or the assembled graph (the `graph.jsonl` export source) is structurally
-    // incomplete even when the spliced DB keeps the seed's rows. Only a language
-    // the orchestrator actually skipped is replayed, so a spawned language's
-    // fresh scaffolding (emitted unconditionally, outside the emission filter)
-    // is never shadowed by stale cache rows.
+    // or the assembled graph — and, with it, the database rows it lands in — is
+    // structurally incomplete even when the spliced DB keeps the seed's rows.
+    // Only a language the orchestrator actually skipped is replayed, so a
+    // spawned language's fresh scaffolding (emitted unconditionally, outside the
+    // emission filter) is never shadowed by stale cache rows.
     for lang in &reuse.skipped_langs {
         let Some(scaffolding) = reuse.store.scaffolding(lang, reuse.cache_key) else {
             continue;
