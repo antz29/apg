@@ -1,9 +1,7 @@
-use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database, SystemConfig};
 
-use crate::schema::Record;
 use crate::specs;
 use crate::splice::seed::{cell, query_rows};
 
@@ -24,10 +22,6 @@ pub struct GitState {
 
 fn db_path(apg_root: &Path) -> PathBuf {
     apg_root.join(specs::TRANS).join("db.lbug")
-}
-
-pub(crate) fn graph_jsonl_path(apg_root: &Path) -> PathBuf {
-    apg_root.join(specs::TRANS).join("graph.jsonl")
 }
 
 // ---------------------------------------------------------------------------
@@ -252,33 +246,6 @@ pub struct RecordedScan {
     pub content_key: Option<String>,
 }
 
-/// The recorded git state of the scan that built the live DB, read from the
-/// `scan_meta` control record on line 1 of `graph.jsonl`. `None` when there is
-/// no graph.jsonl, its first line is not a `scan_meta` record with both git
-/// fields (a pre-hardening export, a non-git scan, or a corrupted line).
-/// `content_key` carries the phase-01 content-identity key when present.
-pub fn recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
-    let f = std::fs::File::open(graph_jsonl_path(apg_root)).ok()?;
-    let line = std::io::BufReader::new(f).lines().next()?.ok()?;
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-    match serde_json::from_str::<Record>(line) {
-        Ok(Record::ScanMeta {
-            git_sha: Some(sha),
-            git_clean: Some(clean),
-            content_key,
-            ..
-        }) => Some(RecordedScan {
-            sha,
-            clean,
-            content_key,
-        }),
-        _ => None,
-    }
-}
-
 /// The recorded state of the scan that built the live DB, read from the DB's
 /// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
 /// DB's account of itself. This row is the ONE recorded-state source of the
@@ -288,8 +255,9 @@ pub fn recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// closed** and never panics: a missing, unopenable or locked DB; a DB with no
 /// `Scan` row; an empty `git_sha` (a non-git scan); a `git_clean` that is
 /// neither `"true"` nor `"false"`; or an empty `content_key` (a pre-hardening
-/// DB). Parsing matches [`recorded_scan`]: `git_sha` empty means non-git,
-/// `git_clean` is `"true"`/`"false"`, and an empty key is `None`.
+/// DB). Every field is parsed from the row itself: an empty `git_sha` means
+/// non-git, `git_clean` is `"true"`/`"false"`, and an empty `content_key` is
+/// `None`.
 pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
     let db = Database::new(db_path(apg_root), SystemConfig::default().read_only(true)).ok()?;
     let conn = Connection::new(&db).ok()?;

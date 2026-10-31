@@ -403,8 +403,8 @@ impl ArtifactDb {
 
     /// The two code-reference universes `layers::validate_change_over` (and the
     /// direct `validate_change`) validate `implemented-by` targets against, read
-    /// from the **live database this handle already holds** — the DB-side twin
-    /// of [`crate::artifacts::code_universes_from_export`], so session admission
+    /// from the **live database this handle already holds** — the borrowed-handle
+    /// twin of [`crate::artifacts::code_universes`], so session admission
     /// never opens a second `db.lbug` handle nor reads `apg/.trans/graph.jsonl`:
     ///
     /// - `scanned` — the real code FQNs of the four Implementation labels
@@ -412,8 +412,9 @@ impl ArtifactDb {
     /// - `planned` — the FQNs of those labels carrying `status = 'planned'` (a
     ///   plan-writer placeholder awaiting realization). The plan store's
     ///   `Record::PlannedNode` declarations are projected into exactly these rows
-    ///   by the authoring paths, so the held DB reproduces the export reader's
-    ///   union without touching the transient plan files.
+    ///   by the authoring paths, so the held DB reproduces
+    ///   [`crate::artifacts::code_universes`]'s union without touching the
+    ///   transient plan files.
     ///
     /// Unlike the free [`crate::artifacts::code_universes`] (which opens its own
     /// read-only handle), this borrows the caller's held handle, so the session
@@ -440,13 +441,15 @@ impl ArtifactDb {
 
     /// DELETE-then-CREATE the single `Scan` row (fqn [`crate::schema::SCAN_HEAD`],
     /// `scan/HEAD`) on the **already-open** database, setting it to the same git
-    /// state the caller just re-anchored `graph.jsonl`'s `scan_meta` lead to.
+    /// state the caller just re-anchored the database's own `Scan` row to.
     ///
-    /// This is the DB-side half of every durability point's reconciliation: a
-    /// durable commit re-anchors `graph.jsonl` line 1 (`git::reanchor_scan_meta`,
-    /// which never opens the DB), and this primitive brings the DB's OWN `Scan`
-    /// row to the identical state so [`crate::git::db_recorded_scan`] and
-    /// [`crate::git::recorded_scan`] can never disagree.
+    /// This primitive is the write half of every durability point's
+    /// reconciliation: a durable commit re-anchors the database's own `Scan` row
+    /// through this primitive (`git::reanchor_scan_meta`, which opens the DB and
+    /// writes the row), and this primitive brings that row to the identical
+    /// state — the row it DELETE-then-CREATEs is the row
+    /// [`crate::git::db_recorded_scan`] reads, so the database's account of
+    /// itself can never disagree with the row written for it.
     ///
     /// The columns mirror the two existing writers exactly — the splice's step 9
     /// ([`crate::splice::apply`]) and [`crate::load::tables::build_load_files`]'s
