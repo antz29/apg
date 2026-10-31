@@ -1400,7 +1400,7 @@ mod e2e {
     ///   write-through to the live database.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
-    fn write_project_decoupled_from_db_validates_export_and_records_unvalidated() {
+    fn write_project_decoupled_from_db_records_an_unscanned_code_ref_unvalidated() {
         // (a) No db.lbug: the write path refuses with its scan-first error
         // rather than recording the code refs unvalidated. A fresh fixture's
         // db.lbug is removed before the mutation.
