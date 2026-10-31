@@ -63,7 +63,7 @@ pub fn scanner_records<'a>(
 }
 
 /// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
-/// pipeline and write `db.lbug`, `graph.jsonl`, and `apg-frontend.log` into
+/// pipeline and write the derived `db.lbug` and `apg-frontend.log` into
 /// the project's `.apg` directory. A repo may mix languages: auto-detection
 /// (or `--language a,b`) runs every frontend present and merges their graphs
 /// into one database. Opaque ids are namespaced per language
@@ -71,7 +71,7 @@ pub fn scanner_records<'a>(
 /// ingestor which language the following records came from (for code_type
 /// classification and FQN rendering). A `scan_meta` control record leads the
 /// whole stream with the git state the scan ran under (recorded as the DB's
-/// `Scan` node and graph.jsonl line 1).
+/// `Scan` row).
 pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // Per-phase timing (phase-04): `scan_start` is taken before any work so the
     // startup/overhead phase spans argument parsing onward.
@@ -156,8 +156,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     version_gate::require_layout_version(&gate_root, "re-run `apg scan`")?;
 
     // Resolve the committed `apg/` layout root, then run the pipeline from
-    // inside its gitignored `.trans/` so db.lbug / graph.jsonl /
-    // apg-frontend.log all land there (the committed `apg/` data — config,
+    // inside its gitignored `.trans/` so db.lbug and apg-frontend.log land
+    // there (the committed `apg/` data — config,
     // specs, notes — stays in the root).
     let apg_root = find_or_create_apg_root(&project_dir);
     // Lifecycle exclusivity: a scan replaces `db.lbug` (it unlinks and rebuilds
@@ -185,9 +185,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // Staleness of the pre-scan DB vs the tree (STALE/FRESH/N-A).
     log.ln(&git::staleness_line(&apg_root, &git_state));
 
-    // `--force` is a TRUE REBUILD: discard the derived index and export through
-    // the ONE shared deletion mechanism, so the freshness fast path below
-    // cannot reuse the old DB and the pipeline has no prior export to splice.
+    // `--force` is a TRUE REBUILD: discard the derived index through the ONE
+    // shared deletion mechanism, so the freshness fast path below cannot reuse
+    // the old DB and the pipeline has no previous database to splice.
     // Run after the verdict above, which is therefore the honest pre-force
     // state, and before the fast-path probe. The shared fact store
     // (`<git-common-dir>/apg/facts`) lives outside `.trans` and is never
@@ -551,7 +551,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // before each language's records so the ingestor classifies and renders
     // each under the right language. A `scan_meta` control record (the git
     // state this scan ran under) leads the whole stream; the ingestor turns it
-    // into the DB's `Scan` node and the export puts it on graph.jsonl line 1.
+    // into the DB's `Scan` row.
     //
     // The scanner stream is built by a helper (borrowing the spool paths) so
     // it can be read twice: once for a pre-ingest that computes the scanned
@@ -580,12 +580,13 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // holds only the re-emitted target facts, so a language skipped/emission-
     // filtered this scan would vanish from the universe and `validate_code_refs`
     // would falsely bail `spec drift`. Derive the FULL universe instead from the
-    // PREVIOUS export (the sole full code-identity source) MINUS the delta's
-    // removed FQNs UNION the delta's emitted real code FQNs — never the
-    // target-only spool. On a full scan the full spool IS the universe.
+    // previous database's captured scanned universe (the sole full code-identity
+    // source) MINUS the delta's removed FQNs UNION the delta's emitted real code
+    // FQNs — never the target-only spool. On a full scan the full spool IS the
+    // universe.
     //
     // Warm-cache path (phase-06 task-4): the spool is EMPTY (zero frontends) and
-    // a fresh worktree has no local export, so derive the universe from the
+    // a fresh worktree has no local database, so derive the universe from the
     // shared store's re-based facts + module scaffolding — exactly the nodes the
     // warm assembly produces.
     let scanned_code: BTreeSet<String> = if warm_complete {
@@ -650,10 +651,10 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         let mut universe = incremental::full_universe(&incremental, &emitted_fqns);
         // The reused files' facts are spliced from the shared store, not
         // re-emitted, so they contribute no spool FQNs. This checkout's previous
-        // export can lag the shared store (another worktree scanned ahead), so
+        // database can lag the shared store (another worktree scanned ahead), so
         // union in the reused units' own code FQNs — otherwise a reused file
-        // newer than the local export would drop out of the universe and falsely
-        // trip `spec drift`.
+        // newer than the local database would drop out of the universe and
+        // falsely trip `spec drift`.
         if let Some(plan) = &reuse_plan {
             universe.extend(reuse_universe(
                 &plan.store_root,
