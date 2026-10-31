@@ -2,7 +2,9 @@
 
 ## Pipeline
 
-Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/graph.jsonl`.
+Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug`, the one derived
+database (assembled from the scanned code and the durable `apg/layers/**` node
+files — the system of record at rest).
 
 - The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
   C++: `src/cpplib/main.cpp`, Rust: `src/rustlib/src/main.rs` — a standalone
@@ -26,10 +28,11 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   *facts only*: declarations, references, edges. It never computes FQNs and
   never does graph assembly.
 - The **ingestor** (`src/ingest.rs`) spawns the scanner, resolves identity
-  (canonical FQN), builds the graph, bulk-loads LadybugDB, and writes
-  `graph.jsonl` as the export. `apg/.trans/db.lbug` is the query index;
-  `apg/.trans/graph.jsonl`
-  is the self-contained export artifact (canonical FQNs, no opaque ids).
+  (canonical FQN), builds the graph, and bulk-loads LadybugDB. The durable
+  `apg/layers/**` node files are the system of record at rest;
+  `apg/.trans/db.lbug` is the one derived representation — the query index and
+  the code-identity/freshness source — rebuilt from the node files and the
+  scanned code.
 - Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
@@ -152,7 +155,8 @@ The project builds a single `apg` binary (package `apg`):
   from.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [--no-progress] [--force] [blacklist...]`
-  — run the pipeline; writes `apg/.trans/db.lbug`, `apg/.trans/graph.jsonl`,
+  — run the pipeline; produces `apg/.trans/db.lbug` (derived from the durable
+  `apg/layers/**` node files and the scanned code) and
   `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
   languages; when omitted, `apg` auto-detects **every** language present and
   scans them all, merging their graphs into one database (a multi-language repo
@@ -164,12 +168,12 @@ The project builds a single `apg` binary (package `apg`):
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
   is always skipped). `--force` is a true rebuild: it discards `db.lbug` (with
-  its `wal`/`shm` sidecars) and `graph.jsonl` before scanning, and bypasses
+  its `wal`/`shm` sidecars) before scanning, and bypasses
   the two reuse paths — the unchanged-tree fast path and the shared fact
   store's warm-cache and incremental fact reuse — so every frontend re-runs
   rather than assembling from recorded facts; the store itself and
-  `apg/layers/**` are left untouched, and without the flag both reuse paths
-  behave exactly as before.
+  `apg/layers/**` (the system of record) are left untouched, and without the
+  flag both reuse paths behave exactly as before.
   When stderr is a terminal, scan streams live progress to
   stderr (never `apg-frontend.log`): a `Scan running...` start line, one kind
   symbol per node — 🌍 Language, 📦 Module, 📄 File, 🧱 Struct, ⚙️ Function — and
