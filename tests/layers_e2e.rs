@@ -1385,69 +1385,61 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-7: decoupled validation at the MUTATION level.
+    /// Phase-02 task-7: decoupled validation at the MUTATION level — the
+    /// worktree database is the ONE code-identity source.
     ///
-    /// - With BOTH `db.lbug` and `graph.jsonl` absent, a mutation succeeds:
-    ///   structural references are still validated (a dangling authored edge is
-    ///   refused), while an `implemented-by` code FQN is recorded UNVALIDATED.
-    /// - With `graph.jsonl` present, a drift/invalid code FQN is rejected
-    ///   WITHOUT opening `db.lbug` — proven by holding a read-write
-    ///   `ArtifactDb` and asserting the reported error is the drift, not the
-    ///   lbug write-lock collision.
-    /// - The projection delta is applied write-through when a DB exists.
+    /// - With no `db.lbug`, a mutation is refused with its own scan-first error
+    ///   and nothing is written: there is no unvalidated-record path.
+    /// - With the fixture database present, an `implemented-by` FQN absent from
+    ///   both universes is drift (`spec drift`), refused before anything is
+    ///   written or committed.
+    /// - A planned FQN declared in the plan store — projected as a
+    ///   `status: planned` row, the Pending universe — is accepted and recorded
+    ///   durably, never called drift.
+    /// - A scanned code FQN is accepted, and its projection delta is applied
+    ///   write-through to the live database.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_project_decoupled_from_db_validates_export_and_records_unvalidated() {
-        // (a) Both artifacts gone: structural refs still validated, code refs
-        // recorded unvalidated. A fresh fixture's db.lbug + graph.jsonl are
-        // removed before the mutations.
-        let (wt_apg, repo, _wt) = mutation_fixture("decoupled-gone");
-        let db_path = wt_apg.join(apg::specs::TRANS).join("db.lbug");
-        let export_path = wt_apg.join(apg::specs::TRANS).join("graph.jsonl");
-        std::fs::remove_file(&db_path).unwrap();
-        std::fs::remove_file(&export_path).unwrap();
+        // (a) No db.lbug: the write path refuses with its scan-first error
+        // rather than recording the code refs unvalidated. A fresh fixture's
+        // db.lbug is removed before the mutation.
+        let (wt_apg, repo, wt) = mutation_fixture("decoupled-no-db");
+        std::fs::remove_file(wt_apg.join(apg::specs::TRANS).join("db.lbug")).unwrap();
+        let head_before = testutil::commit_count(&wt);
 
-        // Structural reference validation still runs (no artifacts needed): a
-        // dangling authored `contains` target is refused (no file, no commit).
-        let mut dangling = node("requirements", "requirement", "dangling");
-        dangling
+        let mut no_db = node("solution", "component", "no-db-sys");
+        no_db
             .out
-            .push(out_edge("contains", "requirements.requirement.ghost"));
-        let err = write_project(&wt_apg, &[dangling], &[]).unwrap_err();
+            .push(out_edge("implemented-by", "go.fixture.mod.Store"));
+        let err = write_project(&wt_apg, &[no_db], &[]).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("ghost"),
-            "structural refs must validate from the node files alone: {msg}"
+            msg.contains("db.lbug"),
+            "the refusal must name the missing database: {msg}"
         );
-        let dangling_path = node_file_path(&wt_apg, Layer::Requirements, "requirement", "dangling");
         assert!(
-            !dangling_path.exists(),
-            "a refused structural mutation must not land a file"
+            msg.contains("run `apg scan` first"),
+            "the refusal must name the remedy: {msg}"
         );
-
-        // A code-FQN implemented-by to an unscanned FQN succeeds with both
-        // artifacts gone: recorded unvalidated (no export ⇒ no code identity).
-        let mut unvalidated = node("solution", "component", "unknown-sys");
-        unvalidated
-            .out
-            .push(out_edge("implemented-by", "fixture.mod.NotScanned"));
-        write_project(&wt_apg, &[unvalidated], &[]).unwrap();
-        let back = read_node_file(&wt_apg, "solution", "component", "unknown-sys");
+        let no_db_path = node_file_path(&wt_apg, Layer::Solution, "component", "no-db-sys");
         assert!(
-            back.out
-                .iter()
-                .any(|oe| oe.kind == "implemented-by" && oe.target == "fixture.mod.NotScanned"),
-            "the unvalidated code ref must still be recorded durably"
+            !no_db_path.exists(),
+            "a refused no-database write must not land a file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            head_before,
+            "a refused no-database write must not commit"
         );
         testutil::remove(&repo);
 
-        // (b)/(c) graph.jsonl present: the drift check runs until it rejects,
-        // BEFORE any db.lbug open; a valid code ref is accepted and projected.
-        let (wt_apg, repo, _wt) = mutation_fixture("decoupled-export");
+        // (b)/(c)/(d) The fixture database present: the drift check resolves
+        // against its scanned/planned universes.
+        let (wt_apg, repo, wt) = mutation_fixture("decoupled-db");
 
-        // Hold the DB read-write, so any DB open on the validation path would
-        // fail with an lbug lock error instead of the drift refusal.
-        let held = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        // (b) implemented-by -> a FQN neither scanned nor planned: drift.
+        let head_before = testutil::commit_count(&wt);
         let mut drift = node("solution", "component", "drift-sys");
         drift
             .out
@@ -1456,15 +1448,55 @@ mod e2e {
         let msg = format!("{err:#}");
         assert!(msg.contains("spec drift"), "expected drift refusal: {msg}");
         assert!(msg.contains("fixture.mod.Gone"), "{msg}");
-        assert!(
-            !msg.contains("Could not set lock"),
-            "validation must never open db.lbug: {msg}"
-        );
         let drift_path = node_file_path(&wt_apg, Layer::Solution, "component", "drift-sys");
         assert!(!drift_path.exists(), "a refused drift write lands nothing");
-        drop(held);
+        assert_eq!(
+            testutil::commit_count(&wt),
+            head_before,
+            "a refused drift write must not commit"
+        );
 
-        // A valid implemented-by to scanned code is accepted, and the
+        // (c) A planned FQN is Pending, not drift: declare it in the plan
+        // store and project the `status: planned` row, then the same edge is
+        // accepted and recorded durably.
+        let plan_path = apg::specs::plan_jsonl_path(&wt_apg, "foo");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "foo",
+            &[Record::PlannedNode {
+                fqn: "fixture.mod.Widget".to_string(),
+                kind: "struct".to_string(),
+                name: "Widget".to_string(),
+                parent: SCAN_MOD.to_string(),
+            }],
+        )
+        .unwrap();
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert_eq!(
+                query_cells(
+                    &db,
+                    "MATCH (s:Struct) WHERE s.fqn = 'fixture.mod.Widget' RETURN s.status"
+                ),
+                vec![vec!["planned".to_string()]],
+                "the plan-store declaration must be projected as a planned row"
+            );
+        }
+        let mut pending = node("solution", "component", "pending-sys");
+        pending
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.Widget"));
+        write_project(&wt_apg, &[pending], &[]).unwrap();
+        let back = read_node_file(&wt_apg, "solution", "component", "pending-sys");
+        assert!(
+            back.out
+                .iter()
+                .any(|oe| oe.kind == "implemented-by" && oe.target == "fixture.mod.Widget"),
+            "the pending code ref must be recorded durably"
+        );
+
+        // (d) A valid implemented-by to scanned code is accepted, and the
         // projection delta is applied write-through to the live DB.
         let mut known = node("solution", "component", "known-sys");
         known
@@ -1729,8 +1761,10 @@ mod e2e {
         ];
         artifacts::write_jsonl_and_reingest(&wt_apg, &mirror, "foo", &feedback).unwrap();
 
-        // --- sources → expected (label, fqn) and (table, from, to) sets ---
-        let (scanned, planned) = apg::artifacts::code_universes_from_export(&wt_apg).unwrap();
+        // --- sources → expected (label, fqn) and (table, from, to) sets: the
+        // code universes come from the worktree database (the code-identity
+        // source), never the export ---
+        let (scanned, planned) = artifacts::code_universes(&wt_apg).unwrap();
         let mut source_records = apg::layers::ingest_tree(&wt_apg, &scanned, &planned).unwrap();
         for f in apg::specs::plan_files(&wt_apg)
             .into_iter()
@@ -1954,20 +1988,18 @@ mod e2e {
     // --- Tier-4 constraint language scope (phase-07 task-24) ---
 
     /// An implementation constraint's `applies-to` Language scope lands end to
-    /// end. The write funnel (`write_project` — the path a live session's save
-    /// flushes its buffered node set through) accepts an
+    /// end in the database. The write funnel (`write_project` — the path a live
+    /// session's save flushes its buffered node set through) accepts an
     /// `implementation.constraint` plus an `applies-to` edge naming a
     /// `LANGUAGE_ROOTS` id and commits it in one mutation. The write-through's
     /// own projection must already carry the `AppliesTo` row (pre-scan, the
-    /// live merge path); a full scan then
-    /// carries both artifacts: the DB holds the `AppliesTo` row
-    /// (`Constraint → Language`, properties intact) and `graph.jsonl`
-    /// serializes the `applies-to` wire record — and because ingest admission
-    /// materialises the target's `Language` node, an id the Go-only checkout
-    /// never scanned (`rust`) keeps its edge instead of being dropped as a
-    /// dangling endpoint. A target that is not a Language identity (an authored
-    /// node, or another code FQN) is refused before anything is written or
-    /// committed.
+    /// live merge path); a full scan rebuilds from the durable sources, and the
+    /// database then holds both halves — the `AppliesTo` row
+    /// (`Constraint → Language`, properties intact) and the target's
+    /// materialised `Language` node — so an id the Go-only checkout never
+    /// scanned (`rust`) keeps its edge instead of being dropped as a dangling
+    /// endpoint. A target that is not a Language identity (an authored node, or
+    /// another code FQN) is refused before anything is written or committed.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn applies_to_scope_lands_in_projection_and_export_and_refuses_non_language() {
@@ -2030,78 +2062,9 @@ mod e2e {
             "one durable mutation commits once"
         );
 
-        // A full scan carries both artifacts.
+        // A full scan rebuilds from the durable sources; the database keeps
+        // the Constraint → Language pair after the rebuild.
         testutil::scan_checkout(&wt).unwrap();
-
-        // graph.jsonl serializes the record in its wire shape: type/from/to,
-        // with the DB-only properties column never leaking into the export.
-        let export = wt_apg.join(apg::specs::TRANS).join("graph.jsonl");
-        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&export)
-            .unwrap()
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
-        let applies_lines: Vec<&serde_json::Value> = lines
-            .iter()
-            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("applies-to"))
-            .collect();
-        assert_eq!(
-            applies_lines.len(),
-            1,
-            "graph.jsonl must carry exactly one applies-to record"
-        );
-        let wire = applies_lines[0];
-        assert_eq!(wire.get("from").and_then(|v| v.as_str()), Some(LAW));
-        assert_eq!(wire.get("to").and_then(|v| v.as_str()), Some("rust"));
-        assert_eq!(
-            wire.as_object().map(|o| o.len()),
-            Some(3),
-            "the applies-to wire shape is type/from/to: {wire}"
-        );
-
-        // The export is proven through the SHARED reader, not only as a raw
-        // JSON line: `read_graph_jsonl` rebuilds the graph's `applies_to` set
-        // from that wire record, and writing the graph back keeps it.
-        let graph = testutil::read_graph_jsonl(&export).unwrap();
-        assert_eq!(
-            graph.applies_to,
-            std::collections::HashSet::from([(LAW.to_string(), "rust".to_string())]),
-            "read_graph_jsonl must rebuild exactly the (constraint, Language) pair"
-        );
-        let roundtrip = std::env::temp_dir().join(format!(
-            "apg-applies-to-roundtrip-{}.jsonl",
-            std::process::id()
-        ));
-        apg::load::write_graph_jsonl(&graph, &roundtrip).unwrap();
-        let rewritten: Vec<serde_json::Value> = std::fs::read_to_string(&roundtrip)
-            .unwrap()
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
-        let rewritten_applies: Vec<&serde_json::Value> = rewritten
-            .iter()
-            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("applies-to"))
-            .collect();
-        assert_eq!(
-            rewritten_applies.len(),
-            1,
-            "the read→write round-trip must keep exactly one applies-to record"
-        );
-        let rewritten_wire = rewritten_applies[0];
-        assert_eq!(
-            rewritten_wire.get("from").and_then(|v| v.as_str()),
-            Some(LAW)
-        );
-        assert_eq!(
-            rewritten_wire.get("to").and_then(|v| v.as_str()),
-            Some("rust")
-        );
-        assert_eq!(
-            rewritten_wire.as_object().map(|o| o.len()),
-            Some(3),
-            "the round-tripped applies-to wire shape stays type/from/to: {rewritten_wire}"
-        );
-        std::fs::remove_file(&roundtrip).unwrap();
 
         // The DB projection carries the row — `AppliesTo` FROM Constraint TO
         // Language, its serialized-properties column intact. Ingest admission
