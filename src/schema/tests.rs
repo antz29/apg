@@ -12,8 +12,8 @@ mod unit {
 
     #[test]
     fn scan_meta_control_record_parses_and_serializes() {
-        // The scan_meta control record as `apg scan` emits it (line 1 of
-        // graph.jsonl): git fields present in a git repo...
+        // The scan_meta control record as `apg scan` emits it (recorded as
+        // the database's `Scan` row): git fields present in a git repo...
         let r: Record = serde_json::from_str(
         r#"{"type":"scan_meta","git_sha":"abc123","git_clean":true,"content_key":"deadbeef","scanned_at":"2026-09-07T00:00:00Z"}"#,
     )
