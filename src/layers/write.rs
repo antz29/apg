@@ -688,17 +688,23 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 ///    flush reaches step 4 with the whole buffered set and makes one commit for
 ///    all of it. No durable write is ever buffered: the files hit disk (and
 ///    git) before anything is projected.
-/// 5. **Re-anchor the staleness gate's `scan_meta`** after the commit
-///    (graph.jsonl only — never opens `db.lbug`).
+/// 5. **Capture the post-commit git state** — no `graph.jsonl` lead is
+///    re-anchored; step 7 is the one row refresh, reconciling the database's
+///    own `Scan` row to this state.
 /// 6. **Projection delta** — apply the exact durable delta
 ///    ([`projection_deletes`] = removed ∪ changed FQNs, guarded for planned
 ///    code FQNs) to the live DB, in one transaction, AFTER the durable commit
-///    (commit-then-project). The same transaction re-MERGEs the worktree's
-///    transient record set ([`append_transient_records`]: the plan store + the
-///    five feedback tier mirrors) so a changed-FQN DETACH cannot drop a
-///    pre-existing transient pairing (`Feedback -[:Reviews]-> <node>`).
-///    Skipped when no DB exists (the files are the durable form); a re-ingest
-///    failure leaves the committed durable state authoritative.
+///    (commit-then-project). The `implemented-by` code identities validate
+///    against the worktree database itself
+///    ([`code_universes`](crate::artifacts::code_universes)) — the one
+///    code-identity source, this step running only when that database exists —
+///    so there is no export to read and no export-absent fallback. The same
+///    transaction re-MERGEs the worktree's transient record set
+///    ([`append_transient_records`]: the plan store + the five feedback tier
+///    mirrors) so a changed-FQN DETACH cannot drop a pre-existing transient
+///    pairing (`Feedback -[:Reviews]-> <node>`). Skipped when no DB exists (the
+///    files are the durable form); a re-ingest failure leaves the committed
+///    durable state authoritative.
 pub fn write_project(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -745,17 +751,10 @@ pub fn write_project_with(
     //    `write_through_with_deletes` with the whole buffered set).
     write_through_with_deletes(apg_root, writes, deletes)?;
 
-    // 5. Re-anchor the staleness gate's recorded scan_meta AFTER the commit
-    //    (mirrors the JSONL funnel's commit path: DB and tree in sync by
-    //    construction, so consecutive node/edge mutations never trip the
-    //    refuse-on-stale gate). graph.jsonl only — no db.lbug open. A re-anchor
-    //    failure degrades to a warning — the mutation already landed. The
-    //    captured state is reused below to reconcile the DB's own `Scan` row to
-    //    the SAME state.
+    // 5. Capture the post-commit git state. No `graph.jsonl` lead is re-anchored
+    //    here: step 7 is the one row refresh, reconciling the worktree DB's own
+    //    `Scan` row to this state.
     let state = git::git_state(apg_root);
-    if let Err(e) = git::reanchor_scan_meta(apg_root, &state) {
-        eprintln!("apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}");
-    }
 
     // Test-only injection at the commit→project boundary (phase-05 task-14,
     // window 1): the durable write is committed by now; a failure here leaves
@@ -773,31 +772,14 @@ pub fn write_project_with(
     //    is one projection implementation).
     //    The direct path owns the caller-side responsibilities [`project_only`]
     //    used to carry: the no-DB skip (the projection applies only when a query
-    //    index exists — the files are the durable form otherwise), the
-    //    code-identity source (the `graph.jsonl` export, with the export-absent
-    //    fallback seeding every `implemented-by` target as planned so it records
-    //    UNVALIDATED rather than aborting on a phantom drift; the next scan
-    //    re-validates), and the full transient re-merge.
+    //    index exists — the files are the durable form otherwise) and the full
+    //    transient re-merge. The code-identity universes come from the worktree
+    //    database itself ([`artifacts::code_universes`]); this block runs only
+    //    when that database exists, so it is always the identity source.
     let nodes = read_existing_nodes(apg_root)?;
     let deletes = projection_deletes(apg_root, writes, deletes);
     if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
-        let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
-        if !graph_jsonl.exists() {
-            // No code-identity source: the code-FQN refs are recorded
-            // UNVALIDATED. Treat every implemented-by target as pending so the
-            // projection re-merge records them instead of rejecting them as
-            // drift. The direct path's effective set IS the on-disk store read
-            // back above (the durable write already landed), so the write set
-            // and the base set are one and the same.
-            for n in &nodes {
-                for oe in &n.out {
-                    if oe.kind == "implemented-by" {
-                        planned.insert(oe.target.clone());
-                    }
-                }
-            }
-        }
+        let (scanned, planned) = artifacts::code_universes(apg_root)?;
         // The direct path assembles its own records: validate + convert the
         // on-disk node set (`ingest_nodes`) and re-merge the worktree's
         // transient records (`append_transient_records`) before handing the
@@ -808,12 +790,12 @@ pub fn write_project_with(
         project_only(&deletes, &records, project)?;
     }
 
-    // 7. Reconcile the DB's own `Scan` row to the SAME re-anchored state that
-    //    graph.jsonl's lead now names, so db_recorded_scan and recorded_scan can
-    //    never disagree. The projection above opened and closed its own DB, so
-    //    this opens a fresh handle (there is no held one on the direct path); a
-    //    failure degrades to a warning like the re-anchor it mirrors — the
-    //    durable write already landed and the next scan rebuilds.
+    // 7. Reconcile the DB's own `Scan` row to the post-commit git state captured
+    //    in step 5 — the one row refresh this path performs, so the recorded
+    //    state names the worktree the commit left. The projection above opened
+    //    and closed its own DB, so this opens a fresh handle (there is no held
+    //    one on the direct path); a failure degrades to a warning — the durable
+    //    write already landed and the next scan rebuilds.
     if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
         match artifacts::ArtifactDb::open(apg_root) {
             Ok(db) => {
