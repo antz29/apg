@@ -82,11 +82,13 @@ pub enum FullScanReason {
     NotAncestor { recorded: String, head: String },
     /// The global cache key drifted (binary/format/config).
     CacheKeyDrift { recorded: String, current: String },
-    /// The previous export (`apg/.trans/graph.jsonl`) is absent, so the
-    /// full code-FQN universe cannot be derived from it. Only raised when the
-    /// scan would otherwise emission-filter (a non-empty target set): a
-    /// worktree with no local export whose target set is empty emits every
-    /// fact, so the full spool is the universe.
+    /// The previous worktree database (`apg/.trans/db.lbug`) is absent,
+    /// unreadable, or carries pending state (a dirty row or a pending-removal
+    /// identity), so the full code-FQN universe cannot be derived from it.
+    /// Only raised when the scan would otherwise emission-filter (a non-empty
+    /// target set): a worktree whose target set is empty emits every fact, so
+    /// the full spool is the universe and reuse stays available. Keeps its
+    /// historical name and tag (`no-previous-export`) until the rename task.
     NoPreviousExport,
     /// The delta could not be computed (a corrupt/unreadable store record).
     DeltaUnavailable,
