@@ -175,7 +175,7 @@ mod e2e {
 
             let prepared = prepare(&repo_dir, &apg_root, &config, false);
             assert!(
-                matches!(prepared.full_scan, Some(FullScanReason::NoPreviousExport)),
+                matches!(prepared.full_scan, Some(FullScanReason::NoPreviousDatabase)),
                 "an absent previous database with a non-empty target set must full-scan: {:?}",
                 prepared.full_scan
             );
@@ -206,7 +206,7 @@ mod e2e {
 
             let prepared = prepare(&repo_dir, &apg_root, &config, false);
             assert!(
-                matches!(prepared.full_scan, Some(FullScanReason::NoPreviousExport)),
+                matches!(prepared.full_scan, Some(FullScanReason::NoPreviousDatabase)),
                 "a previous database carrying pending state with a non-empty target set must full-scan: {:?}",
                 prepared.full_scan
             );
