@@ -519,4 +519,125 @@ Patch only.
             REQUEST.into_iter().chain(NAVIGATOR),
         );
     }
+
+    /// Every shipped tool description that lists edge kinds advertises only
+    /// the live SPEC §4 vocabulary. `APG_LIB` (`lib/apg.ts`) is shared plumbing,
+    /// not a tool description, so it is not swept. The expected set is pinned
+    /// as a literal and asserted equal to the validator's own
+    /// [`crate::layers::validate::EDGE_KINDS`], so a kind added to or removed
+    /// from the validator fails this pin loudly instead of drifting silently.
+    /// The retired tokens are rejected only as list elements — never as a
+    /// whole-file substring — so prose using the English verb "drives"
+    /// (`lib/apg.ts`) stays exempt.
+    #[test]
+    fn shipped_suite_tool_sources_name_only_live_edge_kinds() {
+        use std::collections::BTreeSet;
+
+        const LIVE: [&str; 15] = [
+            "requires",
+            "contains",
+            "driven-by",
+            "reads",
+            "writes",
+            "calls",
+            "publishes",
+            "subscribes",
+            "realises",
+            "is-role",
+            "uses",
+            "represents",
+            "implemented-by",
+            "details",
+            "applies-to",
+        ];
+        // Retired vocabulary: legitimate prose still uses the verb "drives", so
+        // only list elements are checked — never the whole file text.
+        const RETIRED: [&str; 3] = ["drives", "realised-by", "depends-on"];
+
+        let live: BTreeSet<&str> = LIVE.into_iter().collect();
+        let validator: BTreeSet<&str> = crate::layers::validate::EDGE_KINDS
+            .iter()
+            .copied()
+            .collect();
+        assert_eq!(
+            live, validator,
+            "the pinned live edge-kind literal has drifted from validate::EDGE_KINDS"
+        );
+        for retired in RETIRED {
+            assert!(
+                !live.contains(retired),
+                "`{retired}` is retired: listing it must fail the membership check"
+            );
+        }
+
+        /// The bare comma-separated tokens a description lists after `marker`,
+        /// up to the next period, with a trailing `(required)` qualifier
+        /// stripped. `None` when the description carries no such marker.
+        fn listed_kinds<'a>(
+            name: &str,
+            description: &'a str,
+            marker: &str,
+        ) -> Option<Vec<&'a str>> {
+            let rest = &description[description.find(marker)? + marker.len()..];
+            let list = &rest[..rest
+                .find('.')
+                .unwrap_or_else(|| panic!("{name}: {marker:?} list never closed by a period"))];
+            Some(
+                list.split(',')
+                    .map(str::trim)
+                    .map(|token| {
+                        token
+                            .split_once(" (")
+                            .map_or(token, |(bare, _)| bare.trim())
+                    })
+                    .inspect(|token| {
+                        assert!(
+                            !token.is_empty(),
+                            "{name}: {marker:?} carries an empty element"
+                        );
+                    })
+                    .collect(),
+            )
+        }
+
+        let mut tool_description_checked = false;
+        let mut kind_description_checked = false;
+        for &(name, content) in SUITE_TOOLS {
+            for marker in ["Kinds (SPEC §4):", "Edge kind:"] {
+                let Some(kinds) = listed_kinds(name, content, marker) else {
+                    continue;
+                };
+                for kind in &kinds {
+                    assert!(
+                        live.contains(kind),
+                        "{name}: {marker:?} lists `{kind}`, which is not a live SPEC §4 edge kind{}",
+                        if RETIRED.contains(kind) {
+                            " (retired)"
+                        } else {
+                            ""
+                        }
+                    );
+                }
+                if name == "apg_edge.ts" {
+                    assert!(
+                        kinds.contains(&"driven-by"),
+                        "apg_edge.ts: {marker:?} must advertise `driven-by`"
+                    );
+                    if marker == "Kinds (SPEC §4):" {
+                        tool_description_checked = true;
+                    } else {
+                        kind_description_checked = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            tool_description_checked,
+            "apg_edge.ts must list its edge kinds in the tool description"
+        );
+        assert!(
+            kind_description_checked,
+            "apg_edge.ts must list its edge kinds in the `kind` input description"
+        );
+    }
 }
