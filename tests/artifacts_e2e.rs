@@ -1469,8 +1469,8 @@ mod e2e {
     /// `status = 'planned'`, so the REAL code node and its incident edges survive
     /// removing the plan's placeholder declaration.
     /// (3) An `implemented-by` to a declared-but-unscanned planned FQN stays
-    /// Pending (never drift) once `code_universes_from_export` reads the plan
-    /// store.
+    /// Pending (never drift) once `code_universes` reads the branch database,
+    /// whose plan-store planned rows carry the declaration.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn planned_fqn_states_reflect_and_guard_realized_code() {
@@ -1585,7 +1585,7 @@ mod e2e {
             &[planned(candidate, "function", "wait", "apg.session")],
         )
         .unwrap();
-        let (scanned, planned_fqns) = code_universes_from_export(&apg_root).unwrap();
+        let (scanned, planned_fqns) = code_universes(&apg_root).unwrap();
         assert_eq!(
             apg::layers::classify_code_ref(candidate, &scanned, &planned_fqns),
             apg::layers::CodeRefStatus::Pending,
