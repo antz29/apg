@@ -1989,9 +1989,9 @@ mod e2e {
 
     /// An implementation constraint's `applies-to` Language scope lands end to
     /// end in the database. The write funnel (`write_project` — the path a live
-    /// session's save flushes its buffered node set through) accepts an
-    /// `implementation.constraint` plus an `applies-to` edge naming a
-    /// `LANGUAGE_ROOTS` id and commits it in one mutation. The write-through's
+    /// session's save lands its dirty rows and pending-deletion files through)
+    /// accepts an `implementation.constraint` plus an `applies-to` edge naming
+    /// a `LANGUAGE_ROOTS` id and commits it in one mutation. The write-through's
     /// own projection must already carry the `AppliesTo` row (pre-scan, the
     /// live merge path); a full scan rebuilds from the durable sources, and the
     /// database then holds both halves — the `AppliesTo` row
