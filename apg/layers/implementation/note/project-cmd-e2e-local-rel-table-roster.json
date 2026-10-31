@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-cmd-e2e-local-rel-table-roster",
+  "body": "`merge_spec_only_lands_authored_rows_in_main_db` carries a test-local kind-to-rel-table roster covering the 15 durable authored edge kinds, duplicating production's private `DURABLE_EDGE_TABLES` (src/artifacts/db.rs) because no public accessor exists; it panics on an unknown kind, so a new authored edge kind fails loudly rather than silently skipping a row. Upgrade to a crate-visible roster accessor if that roster becomes queryable or shared, rather than refactoring only for this test.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.merge_spec_only_lands_authored_rows_in_main_db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

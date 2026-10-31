@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "merge-strength-e2e-root-tolerant-planned-fixture",
+  "body": "`merge_strength_refuses_a_component_without_an_implemented_by_claim`'s planned-only case relies on `plan_verify_at`'s language-root-tolerant realization treating a `rust.`-rooted planned node as realized by the scanned `go.` sibling, so narrowing that tolerance requires reshaping the fixture. The real-claim case also does not distinguish whether merge strength's scanned universe came from the database or the export, because the real FQN resolves in both; upgrade if the universe's source itself needs pinning.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.merge_strength_refuses_a_component_without_an_implemented_by_claim",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
