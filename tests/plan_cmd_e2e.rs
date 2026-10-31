@@ -131,10 +131,10 @@ fn authored_fqns_in_db(apg_root: &Path) -> BTreeSet<String> {
 ///    node's in-edge set is rebuilt from the assembled out-edges (a minimal
 ///    file is materialised for an authored target that has none yet).
 /// 2. **Planned registration**: every `implemented-by` target the tree
-///    references but the code export does not know is registered as a
-///    `status: planned` code node in BOTH the export (so the tree digest
-///    classifies it Pending instead of drifting) and the projected stream (so
-///    the DB can materialise the authored→code edge).
+///    references but the branch database's code universes do not know is
+///    registered as a `status: planned` code node in the projected stream (the
+///    `PlannedNode` record below), so the tree digest classifies it Pending
+///    instead of drifting and the DB materialises the authored→code edge.
 /// 3. **Full re-projection**: detach every authored/transient FQN the DB
 ///    carries, then re-merge the durable tree plus the transient plan/feedback
 ///    legs.
@@ -190,7 +190,7 @@ fn reproject_layers(apg_root: &Path) {
     }
 
     // 2. Planned registration.
-    let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root).unwrap();
+    let (scanned, mut planned) = artifacts::code_universes(apg_root).unwrap();
     let mut registered: Vec<String> = Vec::new();
     for n in &nodes {
         for oe in &n.out {
@@ -205,21 +205,6 @@ fn reproject_layers(apg_root: &Path) {
     }
     registered.sort();
     registered.dedup();
-    let export = apg_root.join(specs::TRANS).join("graph.jsonl");
-    if !registered.is_empty() && export.exists() {
-        let mut g = testutil::read_graph_jsonl(&export).unwrap();
-        for fqn in &registered {
-            g.nodes.insert(
-                fqn.clone(),
-                Node {
-                    kind: NodeKind::Module,
-                    status: Some("planned".to_string()),
-                    ..Node::default()
-                },
-            );
-        }
-        load::write_graph_jsonl(&g, &export).unwrap();
-    }
 
     // 3. Full re-projection.
     let mut records = layers::ingest_tree(apg_root, &scanned, &planned).unwrap();
@@ -241,7 +226,8 @@ fn reproject_layers(apg_root: &Path) {
     artifacts::reingest_layers(apg_root, &deletes, &records).unwrap();
 }
 
-/// Builds a real DB + load files under `dir/apg` (used by `fixture`).
+/// Builds the fixture's only artifact: a real DB + load files under `dir/apg`
+/// (used by `fixture`).
 fn db_at(dir: &Path) {
     let mut g = Graph::default();
     g.nodes.insert(
@@ -302,7 +288,7 @@ fn db_at(dir: &Path) {
     // The branch graph's Agent roster `task_assignment_universes` reads: every
     // task-authoring scenario assigns `agent.implementer`, so the shared graph
     // carries it as the located tier-4 node a scan produces (an `agent` record
-    // is not code, so the export's code universes ignore it).
+    // is not code, so the DB's code universes ignore it).
     g.nodes.insert(
         "agent.implementer".to_string(),
         Node {
@@ -333,12 +319,9 @@ fn db_at(dir: &Path) {
     drop(conn);
     drop(db);
 
-    // The fixture's code universe must exist in BOTH the DB and the export:
-    // `code_universes_from_export` / `tree_authored_identity` read the export
-    // only, so a DB-only code graph reads as an empty universe and silently
-    // drops the authored implemented-by / authored-to-code edges.
+    // The DB is the only artifact the fixture builds: `code_universes` /
+    // `PreviousScan::capture` / `tree_authored_identity` all read it.
     let apg_root = dir.join(specs::LAYOUT);
-    load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
     // Project any pre-existing durable layers the fixture already carries (a
     // baseline authored on `main` before the branch was cut) so the DB agrees
     // with `tree_authored_identity` from the outset.
@@ -761,8 +744,8 @@ mod e2e {
     /// SHORT-CIRCUITS its DB reads and evaluates only the `recorded_scan`/git
     /// half. The reason is concrete: a routed durable mutation is projected into
     /// the session-held DB at admission but is NOT durable until `apg session
-    /// save`, so a direct read of `db.lbug` observes a DB the saved tree (and
-    /// `graph.jsonl`) does not yet describe —
+    /// save`, so a direct read of `db.lbug` observes a DB the saved tree does
+    /// not yet describe —
     /// `seed_authored_identity(db) != tree_authored_identity(tree)`. Pre-fix
     /// that divergence read as a stale DB, so plan verify's stale precheck and a
     /// transient plan/review write's stale gate were spuriously refused. The
@@ -5811,22 +5794,28 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg/rust frontend/db.lbug/plan store); run via cargo test-e2e"]
     fn apply_gate_realizes_a_planned_node_in_a_separate_crate() {
-        /// The checkout's `apg/.trans/graph.jsonl` export, parsed per line.
-        fn export(wt: &Path) -> Vec<serde_json::Value> {
-            let path = wt.join("apg/.trans/graph.jsonl");
-            std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| serde_json::from_str(l).unwrap())
-                .collect()
+        /// `count(*)` for `query` over the branch database.
+        fn count(conn: &Connection, query: &str) -> i64 {
+            let (_, rows) = apg::splice::query_rows(conn, query).unwrap();
+            rows.first()
+                .and_then(|r| r.first())
+                .and_then(|c| c.trim().parse().ok())
+                .unwrap_or(0)
         }
 
-        /// The one export record at `fqn`.
-        fn record<'a>(recs: &'a [serde_json::Value], fqn: &str) -> &'a serde_json::Value {
-            recs.iter()
-                .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(fqn))
-                .unwrap_or_else(|| panic!("`{fqn}` must be in the export"))
+        /// The branch database's `Function` row at `fqn`: its `(status, path,
+        /// start_line)` cells, an absent cell as the empty string. `None` when
+        /// no Function row carries the FQN.
+        fn function_row(conn: &Connection, fqn: &str) -> Option<Vec<String>> {
+            let (_, rows) = apg::splice::query_rows(
+                conn,
+                &format!(
+                    "MATCH (n:Function {{fqn: '{fqn}'}}) \
+                     RETURN n.status AS status, n.path AS path, n.start_line AS start_line"
+                ),
+            )
+            .unwrap();
+            rows.into_iter().next()
         }
 
         const MODULE: &str = "agentfrontend";
@@ -5915,23 +5904,27 @@ mod e2e {
         // Pre-code scan: the placeholders are recorded; the crate-prefixed
         // declaration's FQN is nowhere in the graph yet.
         run(&wt, &["scan", ".", "--language", "rust"]);
-        let pre = export(&wt);
-        let planned = record(&pre, PLANNED_FN);
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let conn = db.conn().unwrap();
+        let planned = function_row(&conn, PLANNED_FN)
+            .unwrap_or_else(|| panic!("`{PLANNED_FN}` must be a branch-DB Function row"));
         assert_eq!(
-            planned.get("type").and_then(|v| v.as_str()),
-            Some("function"),
-            "{planned}"
-        );
-        assert_eq!(
-            planned.get("status").and_then(|v| v.as_str()),
+            planned.first().map(String::as_str),
             Some("planned"),
-            "the planned record must predate the code: {planned}"
+            "the planned row must predate the code: {planned:?}"
         );
-        assert!(
-            pre.iter()
-                .all(|r| r.get("fqn").and_then(|v| v.as_str()) != Some(REALIZED_FN)),
-            "the crate-prefixed declaration must not exist before it lands"
-        );
+        for label in ["Module", "File", "Struct", "Function"] {
+            assert_eq!(
+                count(
+                    &conn,
+                    &format!("MATCH (n:{label} {{fqn: '{REALIZED_FN}'}}) RETURN count(*)")
+                ),
+                0,
+                "the crate-prefixed declaration must not exist before it lands"
+            );
+        }
+        drop(conn);
+        drop(db);
 
         // Land the separate crate's declaration and commit: a clean tree is
         // what the plan store's staleness gate (and the verify gate) read.
@@ -5946,25 +5939,21 @@ mod e2e {
 
         // The scanned implementation node is the crate-prefixed identity —
         // real, located, no planned status.
-        let recs = export(&wt);
-        let real = record(&recs, REALIZED_FN);
-        assert_eq!(
-            real.get("type").and_then(|v| v.as_str()),
-            Some("function"),
-            "{real}"
-        );
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let conn = db.conn().unwrap();
+        let real = function_row(&conn, REALIZED_FN)
+            .unwrap_or_else(|| panic!("`{REALIZED_FN}` must be a branch-DB Function row"));
         assert!(
-            real.get("status").is_none(),
-            "the realized node keeps no planned status: {real}"
+            real.first().cloned().unwrap_or_default().is_empty(),
+            "the realized node keeps no planned status: {real:?}"
         );
-        assert_eq!(
-            real.get("path").and_then(|v| v.as_str()),
-            Some(LIB_PATH),
-            "{real}"
-        );
+        assert_eq!(real.get(1).map(String::as_str), Some(LIB_PATH), "{real:?}");
         assert!(
-            real.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) > 0,
-            "the realized node carries a location: {real}"
+            real.get(2)
+                .and_then(|s| s.trim().parse::<u64>().ok())
+                .unwrap_or(0)
+                > 0,
+            "the realized node carries a location: {real:?}"
         );
 
         // The plan record survives the scans and the bare FQN stays a planned
@@ -5979,15 +5968,15 @@ mod e2e {
                 .any(|r| matches!(r, Record::PlannedNode { fqn, .. } if fqn == PLANNED_FN)),
             "the scan must not drop the planned-node record: {plan_records:?}"
         );
-        let bare = recs
-            .iter()
-            .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(PLANNED_FN))
-            .expect("the bare planned placeholder must still be in the export");
+        let bare = function_row(&conn, PLANNED_FN)
+            .expect("the bare planned placeholder must still be in the branch database");
         assert_eq!(
-            bare.get("status").and_then(|v| v.as_str()),
+            bare.first().map(String::as_str),
             Some("planned"),
-            "the bare authored FQN must stay a planned placeholder: {bare}"
+            "the bare authored FQN must stay a planned placeholder: {bare:?}"
         );
+        drop(conn);
+        drop(db);
 
         // GREEN: the bare authored planned node is satisfied by the rooted
         // scanned node (`realization_candidates`' `<root>.<identity>` variant).
