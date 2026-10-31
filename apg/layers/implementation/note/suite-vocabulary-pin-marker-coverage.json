@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "suite-vocabulary-pin-marker-coverage",
+  "body": "The suite-tool vocabulary pin anchors only the two exact markers `Kinds (SPEC §4):` and `Edge kind:`; a future edge-kind-bearing tool described under different wording would escape the sweep. Extend the marker list when a second edge-kind-bearing tool ships.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.install.tests.unit.shipped_suite_tool_sources_name_only_live_edge_kinds",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
