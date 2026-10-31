@@ -9,7 +9,7 @@ export default Plugin.define({
         name: "apg_spec_lint",
         options: { codemode: false },
         description:
-          "Run the deterministic, read-only durable-spec lint (`apg spec lint`) from the project root and return its report. Reports the shared mechanical validator set (the edge matrix, the event-only publishes/subscribes target rule, and the whole-model cardinalities the write path also uses), the R3/R4 rule violations, and the tier-1-3 body budget as ERRORS (a non-zero exit) and the tier-1-3 wording advisories as non-blocking warnings — the deterministic pre-pass the plan-review and spec-review passes run before their semantic review. Whole-model change-set delta coverage is excluded (a plan-verification concern). Reads the durable node files; never writes. Omit `tier` to lint all tiers; `--tier requirements|domain|solution` scopes the run to one tier plus the typed upstream spine paths it requires. `lint` is the only subcommand.",
+          "Run the deterministic, read-only durable-spec lint (`apg spec lint`) from the project root and return its report. Reports the shared mechanical validator set (the edge matrix, the event-only publishes/subscribes target rule, and the whole-model cardinalities the write path also uses), the R3/R4 rule violations, and the tier-1-3 body budget as ERRORS (a non-zero exit) and the tier-1-3 wording advisories as non-blocking warnings — the deterministic pre-pass the plan-review and spec-review passes run before their semantic review. Whole-model change-set delta coverage is excluded (a plan-verification concern). Reads the durable node files; never writes. `--tier requirements|domain|solution` selects a cumulative scope: the named tier is checked together with every tier above it in the catalog ladder (requirements above domain above solution), including each tier-crossing coverage rule whose supplying tier is in scope (requirement coverage needs Domain, service realisation needs Solution). Omit `tier` to lint all tiers. `lint` is the only subcommand.",
         input: {
           type: "object",
           properties: {
@@ -20,7 +20,7 @@ export default Plugin.define({
             tier: {
               type: "string",
               enum: ["requirements", "domain", "solution"],
-              description: "Optional single-tier lint scope: validate that tier's local structure, cardinalities, and constraints plus only the typed upstream spine paths it requires. Omit to lint all tiers.",
+              description: "Optional cumulative lint scope: the named tier is checked together with every tier above it in the catalog ladder (requirements above domain above solution), including each tier-crossing coverage rule whose supplying tier is in scope (requirement coverage needs Domain, service realisation needs Solution). Omit to lint all tiers.",
             },
           },
           required: [],
