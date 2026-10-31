@@ -241,8 +241,9 @@ The project builds a single `apg` binary (package `apg`):
   the write path itself calls (the SPEC §4 edge-kind matrix, the event-only
   `publishes`/`subscribes` target rule, and the whole-model cardinalities);
   non-blocking R1/R5 wording advisories are emitted for tier-1-3 bodies
-  (constraints exempt). `--tier` scopes a run to one tier plus the typed
-  upstream spine paths it requires (omitted = every tier). It never writes,
+  (constraints exempt). `--tier` is cumulative: the named tier is checked
+  together with every tier above it, including each coverage rule whose
+  supplying tier is in scope; omitted, it checks every tier. It never writes,
   never reads the merge-base tree, and leaves the plan change-set
   delta/coverage gates to `apg plan verify`.
 - `apg --version`, `apg --help`.
