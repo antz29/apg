@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "merge-strength-opens-branch-db-under-spec-lock",
+  "body": "`merge_strength_check` reads the scanned universe from the branch `db.lbug` through `code_universes` while holding the extended spec flock; that is safe only because `project_merge_at` has already refused a live session and the merge act is the exclusive writer — the plan paths rely on the same serialization. Upgrade if a future caller ever invokes merge strength outside the session-exclusive merge act, since it would then open a database a live session may own.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.merge.merge_strength_check",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
