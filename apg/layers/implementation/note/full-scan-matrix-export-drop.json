@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "full-scan-matrix-export-drop",
-  "body": "Limit: the full-scan matrix drops the branch's seeded export before authoring, simultaneously forcing NoPreviousExport and letting Module/File be declared planned although the crate/file already exist; a fixture that must pin authoring-time acceptance against a live branch DB can only declare Struct/Function at absent FQNs. Upgrade when a test needs to pin authoring acceptance rather than realization.",
+  "body": "The full-scan matrix removes the branch's seeded database before authoring, so the scan has no previous database and runs the full load; each kind's realization is then read from the resulting `db.lbug` rows rather than a recovered export. With no previous database, Module and File are declared planned at the FQNs the crate and the file already occupy, while Struct and Function land at absent FQNs. Limit: a fixture that must pin authoring-time acceptance against a live branch database can only declare Struct/Function at absent FQNs. Upgrade when a test needs to pin authoring acceptance rather than realization.",
   "properties": {},
   "out": [
     {

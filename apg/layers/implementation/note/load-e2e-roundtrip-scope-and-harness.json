@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "load-e2e-roundtrip-scope-and-harness",
-  "body": "The edge-modelled round-trip test no longer asserts the Note/Details, Feedback/Reviews and Satisfies spec-rel round-trip the old synthetic fixture bundled in (those rows stay covered by tests/layers_e2e.rs and tests/artifacts_e2e.rs), and it drives the scan through the hermetic testutil::scan_checkout stand-in (real ingest to parquet to COPY to graph.jsonl, no frontend process). Limit: this test owns only the task edge model, not the whole spec/plan schema surface, and not a frontend-driven scan. Upgrade: fold the Note/Feedback/Satisfies fixtures back in if one test should own the whole surface, and switch to a frontend-driven scan if process-level coverage is required at this tier.",
+  "body": "The round-trip test drives the plan's edge model through a real scan into `db.lbug`: the transient plan row carries fqn/title/status only, its `AssignedTo`/`Implements` and per-kind operation rows join the Agent, Component and live/planned code targets, and every relation is re-queried with both endpoints exact while the retired record columns are asserted not to bind. The scan is the hermetic `testutil::scan_checkout` stand-in — real ingest straight to the derived database, no frontend process and no export. Limit: this test owns the plan edge model, not the spec-relation surface (Note/Details, Feedback/Reviews and Satisfies stay in the sibling e2e crates). Upgrade by folding those fixtures in if one test should own the whole surface, and switch to a frontend-driven scan if process-level coverage is required.",
   "properties": {},
   "out": [
     {

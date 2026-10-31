@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "layers-e2e-roundtrip-private-helper",
-  "body": "The applies-to e2e round-trip writes its rewrite to a temp-dir file and parses it, instead of reusing `assert_graph_jsonl_consistent`, because that helper is private to the sibling `tests/artifacts_e2e.rs` integration crate. Limit: the round-trip check is reproduced locally rather than shared. Upgrade: call the shared helper once it moves into `apg::testutil`.",
+  "body": "The applies-to round trip reads its assertions through the file's shared `query_cells` reader over an `artifacts::ArtifactDb` handle, so the `AppliesTo` pair (`Constraint → Language`, properties intact) and the materialised `Language` row are checked in `db.lbug`; the export serialisation the round trip used to reproduce locally is gone. Limit: `query_cells` is private to `tests/layers_e2e.rs`, so a sibling integration crate cannot reuse it. Upgrade by promoting it into `apg::testutil` when a second e2e crate needs the same cell reader.",
   "properties": {},
   "out": [
     {

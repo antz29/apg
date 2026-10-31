@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "cached-declaration-e2e-oracle-scope",
-  "body": "Limits: the export oracle scopes out the language-scaffolding records (the bare language root and Contains edges incident to it), because the reuse spool carries no module records so the assembly lacks a Language node while the no-reuse reference materialises one from a Record::Module — upgrade to a strict full-export comparison when the reuse assembly replays the language root on the spawned path; and the Module arm exercises pass 2, not pass 2b (skipped_langs empty) — add a skipped-language fixture if pass 2b's planned-aware guard ever needs direct pinning.",
+  "body": "The database oracle compares two `db.lbug` files — the assembled reuse graph and a no-reuse full rebuild of the same facts — on the four code tables' counts, their full row sets, each realized planned node's own status/location row, and the incident code-side `Contains` pairs in both halves. Limits: the oracle scopes out the language-scaffolding records (the bare language root and the `Contains` edges incident to it), because the reuse spool carries no module record so the assembly has no `Language` node while the no-reuse reference materialises one from a `Record::Module` — upgrade to a strict full-database comparison when the reuse assembly replays the language root; and the Module arm exercises pass 2, not pass 2b (skipped_langs empty) — add a skipped-language fixture if pass 2b's planned-aware guard needs direct pinning.",
   "properties": {},
   "out": [
     {
