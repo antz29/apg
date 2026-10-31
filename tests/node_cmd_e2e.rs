@@ -3920,7 +3920,7 @@ mod e2e {
     /// beside a present-but-unconnectable session socket. The next `apg query`
     /// must NOT serve that stale index: it detects the stale socket, reclaims
     /// it, forces the full rebuild (which discards `db.lbug` + its `.wal`/`.shm`
-    /// sidecars + `graph.jsonl`) from the durable `apg/layers/**` node files, and
+    /// sidecars) from the durable `apg/layers/**` node files, and
     /// serves ONLY the last-saved state — the buffered change is gone.
     ///
     /// The two seeded durable nodes are committed directly through
@@ -6464,7 +6464,7 @@ mod e2e {
     /// start` before any socket is bound, naming the offending file and the
     /// remedy, and leaves the held `db.lbug` untouched.
     ///
-    /// `project_with_db` leaves `.trans` with only `db.lbug`/`graph.jsonl`, so a
+    /// `project_with_db` leaves `.trans` with only `db.lbug`, so a
     /// single malformed `.trans/plans/foo.jsonl` planted before start is the
     /// only transient file the start-time seed enumerates. The seed reads it via
     /// `specs::read_jsonl`, which fails loud, and — because the seed runs BEFORE
