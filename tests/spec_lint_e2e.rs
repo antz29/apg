@@ -209,6 +209,19 @@ mod e2e {
         // the crash/reclaim test uses. The base is a complete, whole-model-valid
         // durable model (SPEC §8.1), so the `demo-val` requirement added below
         // can be rooted and driven-by'd onto it at save.
+        //
+        // Ordering constraint: the direct `write_project` seed validates code
+        // refs against the worktree database, so a minimal current (empty) DB
+        // must exist BEFORE it — seed the schema and record it at the worktree
+        // HEAD first. The scan below then rebuilds that DB over the seeded
+        // model.
+        testutil::touch_db(&apg_root);
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         testutil::seed_valid_model(&apg_root);
         testutil::scan_checkout(&wt).unwrap();
 
@@ -431,6 +444,18 @@ mod e2e {
         let repo = Repo::new("speclint-tier-domain");
         let wt = repo.start_project("foo");
         let apg_root = wt.join(specs::LAYOUT);
+        // Ordering constraint: `seed_valid_model` is the direct `write_project`
+        // path, which validates code refs against the worktree database — so
+        // seed a minimal current (empty) DB and record it at the worktree HEAD
+        // BEFORE the first seed. No fixture step removes it, so one seed
+        // serves the later writes too.
+        testutil::touch_db(&apg_root);
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         testutil::seed_valid_model(&apg_root);
 
         // The complete model passes every cumulative scope and the all-tier run
@@ -562,6 +587,18 @@ mod e2e {
         let repo = Repo::new("speclint-tier-req");
         let wt = repo.start_project("foo");
         let apg_root = wt.join(specs::LAYOUT);
+        // Ordering constraint: `seed_valid_model` is the direct `write_project`
+        // path, which validates code refs against the worktree database — so
+        // seed a minimal current (empty) DB and record it at the worktree HEAD
+        // BEFORE the first seed. No fixture step removes it, so one seed
+        // serves the later write.
+        testutil::touch_db(&apg_root);
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         testutil::seed_valid_model(&apg_root);
 
         // The complete model passes every cumulative scope and the all-tier run.
@@ -669,6 +706,19 @@ mod e2e {
         // scan it before opening the session. The base node is a lone
         // `global.constraint` — an unconstrained type, so the seeded store is
         // whole-model-valid (SPEC §8.1) on its own.
+        //
+        // Ordering constraint: the direct `write_project` seed validates code
+        // refs against the worktree database, so a minimal current (empty) DB
+        // must exist BEFORE it — seed the schema and record it at the worktree
+        // HEAD first. The scan below then rebuilds that DB over the seeded
+        // model.
+        testutil::touch_db(&apg_root);
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         apg::layers::write_project(
             &apg_root,
             &[testutil::node("global", "constraint", "seed")],
