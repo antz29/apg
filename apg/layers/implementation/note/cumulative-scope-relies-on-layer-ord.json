@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cumulative-scope-relies-on-layer-ord",
+  "body": "`lint` and `model_errors` express the cumulative tier scope as `layer <= scope` over `Layer`'s derived catalog order (`Requirements < Domain < Solution < Plans < Implementation < Global`). Limit: the comparison silently admits Plans/Implementation/Global into scope if `--tier` ever accepts a value at or below them in that order; `parse_lint_args` currently refuses those values, so the ladder effectively stops at Solution. Upgrade to an explicit tier window (comparing only the three tier positions) if a wider `--tier` surface ever lands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.spec_lint.model_errors",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
