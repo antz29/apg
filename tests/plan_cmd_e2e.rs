@@ -772,6 +772,12 @@ mod e2e {
     /// * `is_stale` / `refusal_message` report NO stale, so a transient
     ///   plan/review write is accepted rather than refused.
     ///
+    /// The saved tree's `tree_authored_identity` is captured ahead of `session
+    /// start`, before the session opens the DB, and compared to the
+    /// post-admission `seed_authored_identity` — so the divergence assertion
+    /// never needs a second handle on a database a live session owns. The
+    /// `is_fresh` / `is_stale` / transient-write assertions are unchanged.
+    ///
     /// The session holds the extended `specs.lock` flock for its life, so the
     /// direct `plan verify` / plan-write paths run once it releases; this saves
     /// and ends the session, then asserts `apg plan verify` succeeds and a
@@ -787,6 +793,12 @@ mod e2e {
         // A green branch plan (no planned nodes, no feedback, no coverage
         // claims), projected into the branch DB.
         write_plan(&apg_root);
+
+        // The saved tree's authored identity, captured BEFORE the session opens
+        // the DB (`tree_authored_identity` reads the previous database): the
+        // post-admission divergence assertion below compares it against the
+        // session-held DB's `seed_authored_identity`.
+        let tree_digest = apg::splice::seed::tree_authored_identity(&apg_root).unwrap();
 
         // A real live session owns the worktree DB for the whole assertion
         // block below.
@@ -824,11 +836,10 @@ mod e2e {
         );
 
         // The divergence is REAL and observable through a direct (read-only) DB
-        // read: the DB's authored digest differs from the saved tree's. Left to
-        // the pre-fix DB reads, `is_fresh` would return false.
+        // read: the DB's authored digest differs from the saved tree's captured
+        // above. Left to the pre-fix DB reads, `is_fresh` would return false.
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
         let db_digest = apg::splice::seed::seed_authored_identity(&db_path).unwrap();
-        let tree_digest = apg::splice::seed::tree_authored_identity(&apg_root).unwrap();
         assert_ne!(
             db_digest, tree_digest,
             "the unsaved buffered mutation must make the on-disk DB diverge from the saved tree"
