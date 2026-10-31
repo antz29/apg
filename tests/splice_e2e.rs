@@ -3158,9 +3158,10 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-01 task-2 (e2e): the SPLICE realization matrix for a ROOT crate.
-    /// A planned `File`, `Struct` and `Function` each declared at its
-    /// root-crate FQN must be REALIZED by the next incremental splice — the
+    /// Phase-01 task-2 / phase-06 task-2 (e2e): the SPLICE realization matrix
+    /// for a ROOT crate and a NESTED non-root cargo package. A planned `File`,
+    /// `Struct` and `Function` each declared at its own FQN must be REALIZED by
+    /// the next incremental splice — the
     /// seeded placeholder replaced by the scanned declaration: `status` cleared,
     /// the location filled, and the FQN kept. The location-less planned `Module`
     /// (SPEC §4) realizes through the Phase-7 seed-row heal
@@ -3170,7 +3171,13 @@ mod e2e {
     /// under the Phase-4 exclusion gate
     /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`).
     ///
-    /// The branch DB is seeded with all four `status: planned` placeholders
+    /// The nested package sits at `src/agentlib` with cargo PACKAGE name
+    /// `agentfrontend`, so its Module/Struct/Function FQNs are
+    /// `rust.agentfrontend…` (package name over directory) and its File keeps
+    /// the repo-relative `src/agentlib/src/lib.rs` — all four realize beside
+    /// the root crate's four rows, which stay at their root-crate FQNs.
+    ///
+    /// The branch DB is seeded with all eight `status: planned` placeholders
     /// first: authoring a plan against the branch's live DB projects its
     /// `Record::PlannedNode` declarations into the DB as `planned` code rows
     /// (`artifacts::write_jsonl_and_reingest`, read-your-writes), which is the
@@ -3191,6 +3198,13 @@ mod e2e {
         const FILE_FQN: &str = "src/widget.rs";
         const STRUCT_FQN: &str = "rust.planned-splice.widget.Widget";
         const FUNCTION_FQN: &str = "rust.planned-splice.widget.compute";
+        // The nested NON-ROOT package: its identity is the cargo PACKAGE name
+        // (`agentfrontend`), never its directory (`agentlib`); its File keeps
+        // the repo-relative path inside that package.
+        const NESTED_MODULE_FQN: &str = "rust.agentfrontend";
+        const NESTED_FILE_FQN: &str = "src/agentlib/src/lib.rs";
+        const NESTED_STRUCT_FQN: &str = "rust.agentfrontend.Widget";
+        const NESTED_FUNCTION_FQN: &str = "rust.agentfrontend.collect_definitions";
 
         /// One row of `fqn`'s own label in the DB, as the label's
         /// `(status, …location)` columns: `(status)` for Module,
@@ -3233,13 +3247,20 @@ mod e2e {
         // remains clean for `project start`'s clean-default gate.
         repo.write(
             ".gitignore",
-            "Cargo.lock\n/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+            "Cargo.lock\n/target\n**/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
         );
         repo.write(
             "Cargo.toml",
             "[package]\nname = \"planned-splice\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         );
         repo.write("src/lib.rs", "pub fn placeholder() -> i32 { 0 }\n");
+        // A nested NON-ROOT package. Its `lib.rs` is ABSENT until the
+        // declarations land, so its Module, File, Struct and Function are all
+        // planned deltas realized by the same splice.
+        repo.write(
+            "src/agentlib/Cargo.toml",
+            "[package]\nname = \"agentfrontend\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
         repo.commit_all("init source");
 
         let run = |dir: &Path, args: &[&str]| -> std::process::Output {
@@ -3267,9 +3288,10 @@ mod e2e {
         let wt = repo.root.join("apg").join(".worktrees").join("demo");
         assert!(wt.is_dir(), "the project worktree must exist");
 
-        // The four planned nodes are absent from the scanned graph, so a plan of
-        // the delta may declare them; authoring projects them into the branch DB
-        // as `planned` code rows (the seed state the splice must realize).
+        // The eight planned nodes are absent from the scanned graph, so a plan
+        // of the delta may declare them; authoring projects them into the
+        // branch DB as `planned` code rows (the seed state the splice must
+        // realize).
         run(
             &wt,
             &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
@@ -3279,6 +3301,10 @@ mod e2e {
             ("file", FILE_FQN, "widget.rs"),
             ("struct", STRUCT_FQN, "Widget"),
             ("function", FUNCTION_FQN, "compute"),
+            ("module", NESTED_MODULE_FQN, "agentfrontend"),
+            ("file", NESTED_FILE_FQN, "lib.rs"),
+            ("struct", NESTED_STRUCT_FQN, "Widget"),
+            ("function", NESTED_FUNCTION_FQN, "collect_definitions"),
         ] {
             run(
                 &wt,
@@ -3297,6 +3323,10 @@ mod e2e {
             ("File", FILE_FQN),
             ("Struct", STRUCT_FQN),
             ("Function", FUNCTION_FQN),
+            ("Module", NESTED_MODULE_FQN),
+            ("File", NESTED_FILE_FQN),
+            ("Struct", NESTED_STRUCT_FQN),
+            ("Function", NESTED_FUNCTION_FQN),
         ] {
             let row = db_row(&db_path, kind, fqn);
             let status = row.as_ref().map(|r| cell(r, 0)).unwrap_or_default();
@@ -3329,9 +3359,18 @@ mod e2e {
             "pub struct Widget {\n    pub value: i32,\n}\n\npub fn compute(value: i32) -> i32 {\n    value + 1\n}\n",
         )
         .unwrap();
+        // The nested package's declarations: its `src/agentlib/src/lib.rs` is
+        // the planned File, and the Module/Struct/Function recorded from it
+        // carry the cargo PACKAGE name (`agentfrontend`).
+        std::fs::create_dir_all(wt.join("src/agentlib/src")).unwrap();
+        std::fs::write(
+            wt.join(NESTED_FILE_FQN),
+            "//! A nested non-root cargo package.\n\npub struct Widget {\n    pub value: i32,\n}\n\npub fn collect_definitions() -> usize {\n    0\n}\n",
+        )
+        .unwrap();
         wt_commit(
             &wt,
-            &["src/lib.rs", "src/widget.rs"],
+            &["src/lib.rs", "src/widget.rs", NESTED_FILE_FQN],
             "implement the planned nodes",
         );
 
@@ -3348,12 +3387,18 @@ mod e2e {
         );
 
         // Post-splice: the DB row itself is realized — status cleared, location
-        // filled, FQN kept at its own label.
-        for (kind, fqn, located) in [
-            ("Module", MODULE_FQN, false),
-            ("File", FILE_FQN, true),
-            ("Struct", STRUCT_FQN, true),
-            ("Function", FUNCTION_FQN, true),
+        // filled, FQN kept at its own label. `want_path` is the row's own path
+        // identity per kind: the repo-relative File FQN for a File, the owning
+        // file for a Struct/Function, and empty for the location-less Module.
+        for (kind, fqn, located, want_path) in [
+            ("Module", MODULE_FQN, false, ""),
+            ("File", FILE_FQN, true, FILE_FQN),
+            ("Struct", STRUCT_FQN, true, FILE_FQN),
+            ("Function", FUNCTION_FQN, true, FILE_FQN),
+            ("Module", NESTED_MODULE_FQN, false, ""),
+            ("File", NESTED_FILE_FQN, true, NESTED_FILE_FQN),
+            ("Struct", NESTED_STRUCT_FQN, true, NESTED_FILE_FQN),
+            ("Function", NESTED_FUNCTION_FQN, true, NESTED_FILE_FQN),
         ] {
             let Some(row) = db_row(&db_path, kind, fqn) else {
                 failures.push(format!(
@@ -3365,7 +3410,7 @@ mod e2e {
             let (path, sl, el) = match kind {
                 "Module" => (String::new(), 0, 0),
                 "File" => (
-                    FILE_FQN.to_string(),
+                    want_path.to_string(),
                     cell(&row, 1).parse().unwrap_or(0),
                     cell(&row, 2).parse().unwrap_or(0),
                 ),
@@ -3394,9 +3439,9 @@ mod e2e {
                         "{kind} `{fqn}`: location not filled (start_line={sl}, end_line={el})"
                     ));
                 }
-                if kind != "File" && path != FILE_FQN {
+                if path != want_path {
                     failures.push(format!(
-                        "{kind} `{fqn}`: wrong path `{path}` (want `{FILE_FQN}`)"
+                        "{kind} `{fqn}`: wrong path `{path}` (want `{want_path}`)"
                     ));
                 }
             }
