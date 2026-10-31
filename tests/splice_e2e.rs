@@ -2949,7 +2949,7 @@ mod e2e {
     /// records the delta's `ScanRow` (feedback-91).
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
-    fn published_export_equals_a_full_rebuild_and_round_trips() {
+    fn published_database_equals_a_full_rebuild() {
         let dir = scratch("export-roundtrip");
         let prev_path = dir.join("db.lbug");
         let export = dir.join("graph.jsonl");
