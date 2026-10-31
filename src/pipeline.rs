@@ -310,7 +310,7 @@ pub(crate) fn run_pipeline(
 ///
 /// Returns the splice report on success; `None` on any ineligibility or
 /// mid-sequence failure, in which case the caller runs the existing full load
-/// (the correctness reference) and the previous artifacts are left in place.
+/// (the correctness reference) and the previous `db.lbug` is left in place.
 /// This function never panics: a failure is a logged fallback.
 ///
 /// `graph` is the win-B assembled graph (re-emitted target units PLUS cached
