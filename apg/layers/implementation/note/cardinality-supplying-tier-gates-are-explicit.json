@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "cardinality-supplying-tier-gates-are-explicit",
-  "body": "`validate_cardinalities` gates only the two tier-crossing coverage rules whose subject tier is more abstract than their data tier (requirement coverage on Domain in scope, service realisation on Solution in scope); every other rule relies on its subject tier already including its data tier in the cumulative window. Limit: a future rule whose subject tier is more abstract than its data supply must add its own supplying-tier gate, or a scoped run will demand completeness from a tier it is not checking. Upgrade by centralising the gate (a rule-to-supplying-tier table) when a third such rule appears.",
+  "body": "`validate_cardinalities` gates only the two tier-crossing coverage rules whose subject tier is more abstract than their data tier (requirement coverage on Domain in scope, service realisation on Solution in scope); every other scope-aware loop relies on its subject tier already including its data tier in the cumulative window. The one scope-blind loop is the `implemented-by` claim exclusivity (one Component per code node): a shared claim is a whole-model violation and is reported under every scope. Limit: a future rule whose subject tier is more abstract than its data supply must add its own supplying-tier gate. Upgrade by centralising the gate (a rule-to-supplying-tier table) when a third gated rule appears.",
   "properties": {},
   "out": [
     {
