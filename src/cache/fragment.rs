@@ -551,7 +551,7 @@ impl FileIndex {
 /// `Module -> Module` hierarchy edge are invisible to the fact cache. A partial
 /// scan that skips an unchanged language's frontend therefore cannot rebuild
 /// that scaffolding from the cached per-file units alone — the win-B-assembled
-/// graph (and the `graph.jsonl` rendered from it) would be structurally
+/// graph — and, with it, the database rows it lands in — would be structurally
 /// incomplete even though the spliced DB kept the seed's rows. This record is
 /// stored per language under the same cache-key dir as the fact units and
 /// replayed whenever that language's frontend is skipped.
