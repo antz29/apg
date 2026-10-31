@@ -2281,15 +2281,14 @@ mod e2e {
     }
 
     // -----------------------------------------------------------------------
-    // Atomic publish + rollback (phase-03 task-3)
+    // Atomic publish (phase-03 task-3)
     // -----------------------------------------------------------------------
 
-    /// The publish contract's three arms: a failure BEFORE the database swap
-    /// leaves the previous `db.lbug` byte-identical and no debris; a failure
-    /// AFTER the database swap rolls `db.lbug` back byte-identical from its
-    /// backup and never publishes the export; and the happy path flips the
-    /// database, answers the spliced snapshot, and leaves no
-    /// temp/backup/WAL debris.
+    /// The publish contract is the database swap alone: the happy path flips
+    /// `db.lbug` to the spliced graph, answers the spliced snapshot, and leaves
+    /// no temp/backup/WAL debris. The early-failure and rollback arms retired
+    /// with the export — `publish` ignores the export path, so its failure
+    /// contract is gone and only the database swap is asserted.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn publish_swaps_the_database_and_leaves_no_debris() {
@@ -2300,56 +2299,6 @@ mod e2e {
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
         build_db(&prev_path, &previous_graph(&a, &b, &c));
-        let previous_db = std::fs::read(&prev_path).unwrap();
-
-        // A publish that fails before the database swap (its export temp cannot
-        // be written) leaves the previous `db.lbug` byte-identical and cleans up
-        // every transient it created — the database-only early-failure contract.
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        let unwritable = dir.join("missing").join("graph.jsonl");
-        let err = publish(seeded, &assembled, &unwritable).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("No such file or directory"),
-            "the export-write failure must surface: {err:#}"
-        );
-        assert_eq!(
-            std::fs::read(&prev_path).unwrap(),
-            previous_db,
-            "a failure before the database swap leaves db.lbug byte-identical"
-        );
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "an early failure must clean up its temps/backups: {:?}",
-            transient_entries(&dir)
-        );
-
-        // A publish that fails AFTER the database swap (its export rename is
-        // injected to fail) rolls `db.lbug` back from its backup, so the pair is
-        // never new-DB + stale-export: previous bytes return, no export is
-        // published, and every transient is gone.
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        install_publish_hook(PublishStage::BeforeExportRename, || {
-            Err(std::io::Error::other("injected export-rename failure").into())
-        });
-        let err = publish(seeded, &assembled, &export).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("rolled back to its previous bytes"),
-            "a post-swap failure must report the rollback: {err:#}"
-        );
-        assert_eq!(
-            std::fs::read(&prev_path).unwrap(),
-            previous_db,
-            "a failure after the database swap must restore db.lbug byte-identically"
-        );
-        assert!(
-            !export.exists(),
-            "the export rename never happened, so nothing may be published there"
-        );
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "the rollback must clean up its temps/backups: {:?}",
-            transient_entries(&dir)
-        );
 
         // The happy path: the database flips to the spliced graph.
         let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);

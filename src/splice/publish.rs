@@ -1,48 +1,39 @@
 //! The atomic-publish half of the splice (phase-03 task-3): checkpoint+close
-//! the spliced copy, write the new `graph.jsonl`, and flip both artifacts with
-//! same-filesystem renames, backups, and rollback.
+//! the spliced copy and flip `db.lbug` into place with a same-filesystem
+//! rename, its backup, and the directory fsync that makes it durable.
 
 use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database};
 
 use crate::graph::Graph;
-use crate::load;
 
 use super::seed::SeededDb;
 
 // ---------------------------------------------------------------------------
-// Atomic publish of the two artifacts (phase-03 task-3)
+// Atomic publish of the database (phase-03 task-3)
 // ---------------------------------------------------------------------------
 //
-// The splice produces TWO coupled artifacts and both must flip together:
-// `apg/.trans/db.lbug` (the query index) and `apg/.trans/graph.jsonl` (the
-// sole code-identity/freshness/validation source — `git.rs` and
-// `artifacts.rs`). A new DB beside a stale export (or vice versa) is a
-// corrupt pair, so the publish is ordered to make that impossible on any
+// The splice publishes ONE artifact: `apg/.trans/db.lbug` (the query index).
+// The publish is ordered to make a partial failure impossible on any
 // *reported* failure:
 //
 // 1. **Nothing published yet** — the delta has already been applied to the
-//    seeded temp copy (task-2); an earlier failure (seed / delta / export
-//    build) leaves the previous `db.lbug` byte-identical.
+//    seeded temp copy (task-2); an earlier failure (seed / delta) leaves the
+//    previous `db.lbug` byte-identical.
 // 2. **Checkpoint + close the spliced copy**, then fsync it. `CHECKPOINT`
 //    flushes the WAL into the main file; dropping the handle closes it so no
 //    `.wal`/`.shm` sidecar is left behind. A live handle would also keep the
 //    temp inode open, making the rename publish the wrong file.
-// 3. **Build the new export from the P2-assembled in-memory [`Graph`]** via
-//    the existing tested [`load::write_graph_jsonl`] into a same-directory
-//    temp, then fsync it. Never a DB→jsonl projection: `write_graph_jsonl`
-//    single-sources the export format.
-// 4. **Back up both targets** in the same directory, then swap: rename the
-//    temp DB over `db.lbug`, then the temp export over `graph.jsonl`.
-// 5. **fsync the containing directory** so both renames are durable, then
-//    remove the backups.
+// 3. **Back up the target** in the same directory, then rename the temp over
+//    `db.lbug`. The rename is all-or-nothing, so a failure leaves the
+//    previous file in place.
+// 4. **fsync the containing directory** so the rename is durable, then remove
+//    the backup.
 //
-// **Rollback**: if the `graph.jsonl` rename fails after the `db.lbug` rename
-// succeeded, restore `db.lbug` from its backup so BOTH targets return to the
-// previous state. If that restore itself fails, leave the backups in place
-// and fail loudly with the manual recovery path — never a silently mixed
-// pair.
+// The `graph.jsonl` export legs have retired, so both of `publish`'s trailing
+// parameters — the P2-assembled `graph` and the `export` path — are unused
+// (underscored); the next task in this phase removes them.
 
 /// The `graph.jsonl` export path under an `apg/` layout root — the same
 /// `.trans/` directory as [`db_path`], so the export rename is same-filesystem.
@@ -57,7 +48,7 @@ pub fn export_path(apg_root: &Path) -> PathBuf {
 /// DB and `export` holds `graph`'s [`load::write_graph_jsonl`] rendering; on a
 /// reported failure both targets are the previous bytes. `export` should be
 /// [`export_path`] — a sibling of `target_path` in `.trans/`.
-pub fn publish(seeded: SeededDb, graph: &Graph, export: &Path) -> anyhow::Result<()> {
+pub fn publish(seeded: SeededDb, _graph: &Graph, _export: &Path) -> anyhow::Result<()> {
     let SeededDb {
         db,
         temp_path,
@@ -71,27 +62,11 @@ pub fn publish(seeded: SeededDb, graph: &Graph, export: &Path) -> anyhow::Result
         return Err(e);
     }
 
-    // (3) Build the export from the in-memory graph into a same-directory temp
-    // and fsync it. No target is touched on a build failure.
-    let export_temp = transient_sibling(export, "graph", "tmp");
-    let built = (|| -> anyhow::Result<()> {
-        fire_publish_hook(PublishStage::BeforeExportWrite)?;
-        load::write_graph_jsonl(graph, &export_temp)?;
-        fsync_file(&export_temp)?;
-        Ok(())
-    })();
-    if let Err(e) = built {
-        remove_quietly(&export_temp);
-        remove_quietly(&temp_path);
-        return Err(e);
-    }
-
-    // (4) Save backups of both current targets, then swap DB first, export
-    // second. `db_backup`/`export_backup` are same-directory snapshots.
+    // (3) Save a backup of the current target, then swap the temp over it.
+    // Both are same-directory snapshots.
     let db_backup = match save_backup(&target_path) {
         Ok(b) => b,
         Err(e) => {
-            remove_quietly(&export_temp);
             remove_quietly(&temp_path);
             return Err(anyhow::anyhow!(
                 "could not back up {} before the publish: {e}",
@@ -99,55 +74,23 @@ pub fn publish(seeded: SeededDb, graph: &Graph, export: &Path) -> anyhow::Result
             ));
         }
     };
-    let export_backup = match save_backup(export) {
-        Ok(b) => b,
-        Err(e) => {
-            remove_quietly(&export_temp);
-            remove_quietly(&temp_path);
-            remove_quietly_opt(db_backup.as_deref());
-            return Err(anyhow::anyhow!(
-                "could not back up {} before the publish: {e}",
-                export.display()
-            ));
-        }
-    };
 
     if let Err(e) = std::fs::rename(&temp_path, &target_path) {
-        // The DB rename is all-or-nothing, so nothing has been published;
-        // drop every transient and leave both targets at their previous bytes.
-        remove_quietly(&export_temp);
+        // The rename is all-or-nothing, so nothing has been published;
+        // drop the transient and leave the target at its previous bytes.
         remove_quietly(&temp_path);
         remove_quietly_opt(db_backup.as_deref());
-        remove_quietly_opt(export_backup.as_deref());
         return Err(anyhow::anyhow!(
             "could not rename the spliced db over {}: {e}",
             target_path.display()
         ));
     }
 
-    // The DB is now new. Swap the export; on failure roll the DB back so the
-    // pair is never new-DB + stale-export.
-    let swapped = (|| -> anyhow::Result<()> {
-        fire_publish_hook(PublishStage::BeforeExportRename)?;
-        std::fs::rename(&export_temp, export)?;
-        Ok(())
-    })();
-    if let Err(e) = swapped {
-        return rollback_export_swap(
-            db_backup.as_deref(),
-            &target_path,
-            export_backup.as_deref(),
-            &export_temp,
-            e,
-        );
-    }
-
-    // (5) Make both renames durable, then remove the backups.
-    for dir in publish_dirs(&target_path, export) {
+    // (4) Make the rename durable, then remove the backup.
+    for dir in publish_dirs(&target_path, &target_path) {
         fsync_dir(&dir)?;
     }
     remove_quietly_opt(db_backup.as_deref());
-    remove_quietly_opt(export_backup.as_deref());
     Ok(())
 }
 
@@ -197,55 +140,9 @@ fn save_backup(target: &Path) -> std::io::Result<Option<PathBuf>> {
     }
 }
 
-/// The export rename failed after the DB was already swapped: restore the DB
-/// from its backup so BOTH targets return to the previous state. If the
-/// restore itself fails, leave the backups in place and fail loudly with the
-/// manual recovery path (never a new DB paired with a stale export).
-fn rollback_export_swap(
-    db_backup: Option<&Path>,
-    target_path: &Path,
-    export_backup: Option<&Path>,
-    export_temp: &Path,
-    cause: anyhow::Error,
-) -> anyhow::Result<()> {
-    remove_quietly(export_temp);
-    let Some(backup) = db_backup else {
-        // The seed requires a previous DB, so there is normally always a
-        // backup; defensive only.
-        remove_quietly_opt(export_backup);
-        return Err(cause);
-    };
-    match std::fs::rename(backup, target_path) {
-        Ok(()) => {
-            // The export target was never swapped (its rename is
-            // all-or-nothing), so the previous export is still in place and
-            // `export_backup` is a redundant copy.
-            remove_quietly_opt(export_backup);
-            for dir in publish_dirs(target_path, target_path) {
-                let _ = fsync_dir(&dir);
-            }
-            Err(cause.context(
-                "the graph.jsonl swap failed after the db.lbug swap; db.lbug was rolled back to its previous bytes",
-            ))
-        }
-        Err(restore_err) => anyhow::bail!(
-            "publish failed ({cause:#}) and rolling {} back from its backup failed ({restore_err}); \
-             the previous db.lbug is preserved at {} and the previous graph.jsonl at {} — recover with \
-             `mv '{}' '{}'` and re-run the scan",
-            target_path.display(),
-            backup.display(),
-            export_backup
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "(none)".to_string()),
-            backup.display(),
-            target_path.display(),
-        ),
-    }
-}
-
 /// A unique same-directory sibling of `target` for a transient `tag`/`ext`
-/// file (publish temps, backups). Kept in `target`'s parent so every rename
-/// this module performs is an atomic same-filesystem rename.
+/// file (the spliced database temp and its backup). Kept in `target`'s parent
+/// so every rename this module performs is an atomic same-filesystem rename.
 fn transient_sibling(target: &Path, tag: &str, ext: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -276,8 +173,8 @@ fn fsync_dir(path: &Path) -> std::io::Result<()> {
     std::fs::File::open(path)?.sync_all()
 }
 
-/// The distinct parent directories of the two published targets (one, in the
-/// normal `.trans/` layout).
+/// The distinct parent directories the published database's rename touches
+/// (one, in the normal `.trans/` layout).
 fn publish_dirs(a: &Path, b: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     for p in [a, b] {
@@ -299,46 +196,4 @@ fn remove_quietly_opt(path: Option<&Path>) {
     if let Some(p) = path {
         remove_quietly(p);
     }
-}
-
-// A one-shot injection fired at a chosen publish stage, so the
-// rollback/early-failure paths can be exercised deterministically (the
-// `fire_projection_hook` pattern in `artifacts.rs`). Compiled unconditionally
-// (never installed outside tests, so the hook is a no-op) so the relocated
-// `tests/splice_e2e.rs` integration crate can reach `install_publish_hook`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PublishStage {
-    /// Before the new export temp is written — models an export-build failure.
-    BeforeExportWrite,
-    /// After the DB swap, before the export swap — models the partial-failure
-    /// rollback trigger.
-    BeforeExportRename,
-}
-
-type PublishHook = Box<dyn FnOnce() -> anyhow::Result<()>>;
-
-thread_local! {
-    static PUBLISH_HOOK: std::cell::RefCell<Option<(PublishStage, PublishHook)>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-pub fn install_publish_hook(
-    stage: PublishStage,
-    hook: impl FnOnce() -> anyhow::Result<()> + 'static,
-) {
-    PUBLISH_HOOK.with(|c| *c.borrow_mut() = Some((stage, Box::new(hook))));
-}
-
-fn fire_publish_hook(stage: PublishStage) -> anyhow::Result<()> {
-    PUBLISH_HOOK.with(|c| {
-        let mut slot = c.borrow_mut();
-        if slot.as_ref().is_some_and(|(s, _)| *s == stage) {
-            match slot.take() {
-                Some((_, hook)) => hook(),
-                None => Ok(()),
-            }
-        } else {
-            Ok(())
-        }
-    })
 }
