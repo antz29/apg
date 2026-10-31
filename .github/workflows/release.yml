@@ -24,7 +24,7 @@ jobs:
         include:
           # Intel (macos-13) runners have been retired upstream, so only ARM
           # bottles are published; Intel Macs build from source.
-          - os: macos-14
+          - os: macos-15
             arch: arm64
     runs-on: ${{ matrix.os }}
     env:
@@ -191,7 +191,7 @@ jobs:
   publish:
     name: Publish release
     needs: [bottle, linux]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
         with:

@@ -606,7 +606,7 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    single publish job commits the bottle sha256s to `main`, creates the release
    as a draft, attaches every asset, and publishes it.
 7. **Verify the assets are the new version**: `gh release view vX.Y.Z` must list
-   `*-X.Y.Z.arm64_sonoma.bottle.*.tar.gz` (NOT the previous version) plus the
+   `*-X.Y.Z.arm64_sequoia.bottle.*.tar.gz` (NOT the previous version) plus the
    `apg-linux-*` tarballs. If the bottles show the old version, you tagged
    before step 4.
 
