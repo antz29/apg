@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "splice-module-row-location-shape",
+  "body": "The splice matrix's Module rows assert only the cleared planned status (the `db_row` query selects just `status`), not the location-less/path-less shape main_e2e's `realized_row` pins; upgrade the Module row check if a Module can realize with a bogus location.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.planned_node_realizes_on_the_splice_for_every_kind",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

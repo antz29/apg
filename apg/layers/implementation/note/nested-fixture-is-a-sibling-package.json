@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "nested-fixture-is-a-sibling-package",
+  "body": "The nested fixture is a standalone sibling Cargo package (package name over directory), matching the main_e2e fixture; workspace-member nesting is covered by the rust-frontend discovery tests, not this matrix.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.planned_node_realizes_on_the_splice_for_every_kind",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
