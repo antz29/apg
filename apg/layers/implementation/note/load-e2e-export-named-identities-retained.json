@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "load-e2e-export-named-identities-retained",
+  "body": "Two tests/load_e2e.rs identities keep the graph_jsonl vocabulary although nothing in the file reads or writes an export: graph_jsonl_roundtrips_tier_nodes_and_spine and graph_jsonl_carries_only_repo_relative_identities now assert database rows, and the file's ignore reasons no longer list the retired artifact. They are retained under phase 8's accepted-debt list, so the names are deliberately stale rather than false. Upgrade when a future pass renames the retained identities to their database reality — a function rename that re-points this note's details edge together with the sibling name.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.load_e2e.e2e.graph_jsonl_roundtrips_tier_nodes_and_spine",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
