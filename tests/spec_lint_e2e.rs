@@ -59,8 +59,8 @@ mod e2e {
     fn spec_lint_reports_r3_r4_and_skips_delta_gates() {
         let (apg_root, repo, wt) = wt_fixture("report");
 
-        // Real scanned code: the branch gets a current `db.lbug`/`graph.jsonl`
-        // and the solution node's `implemented-by` target (`go.fixture.mod.Store`)
+        // Real scanned code: the branch gets a current `db.lbug` and the
+        // solution node's `implemented-by` target (`go.fixture.mod.Store`)
         // resolves against the scanned universe.
         wt_write(
             &wt,
@@ -69,7 +69,7 @@ mod e2e {
         );
         wt_commit(&wt, &["code/seed.scan.jsonl"], "seed code");
 
-        // Build the real branch DB/graph.jsonl over the seeded code, so the
+        // Build the real branch `db.lbug` over the seeded code, so the
         // fixture's `implemented-by` code target resolves against the scanned
         // universe.
         testutil::scan_checkout(&wt).unwrap();
