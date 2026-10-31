@@ -23,9 +23,11 @@ fn wt_write(wt: &Path, rel: &str, content: &str) {
 /// A project context for node-file-only tests: a real git repo whose
 /// worktree `foo` on branch `foo` hosts the durable `apg/layers` store, but
 /// with NO seed code and NO scan — so no `db.lbug`/code graph and no
-/// process-wide `CWD_LOCK` hold. `write_project` skips its projection leg
-/// when `db.lbug` is absent, so the write/validate/commit path (and every
-/// node-file read) behaves identically. Returns `(wt_apg_root, repo, wt_root)`.
+/// process-wide `CWD_LOCK` hold. The direct write path requires the database
+/// (it refuses without one), so this fixture deliberately creates none: a
+/// caller that needs the validated `write_project` writer must seed a
+/// database first (e.g. [`testutil::touch_db`]). Returns
+/// `(wt_apg_root, repo, wt_root)`.
 fn node_store_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
     let repo = Repo::new(&format!("nodecmd-{tag}"));
     let wt = repo.start_project("foo");
@@ -4585,6 +4587,20 @@ mod e2e {
         // the crash/reclaim test uses. The base is a complete, whole-model-valid
         // durable model (SPEC §8.1), so the `demo-val` requirement added below
         // can be rooted and driven-by'd onto it at save.
+        //
+        // Ordering constraint: the direct `write_project` seed validates its
+        // code refs against the worktree database, which this fixture
+        // deliberately does not create, so a minimal current DB (schema + a
+        // `Scan` row at the worktree HEAD, which is still the main HEAD here)
+        // must exist BEFORE the seed. The scan below then rebuilds that DB
+        // over the seeded model.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         testutil::seed_valid_model(&wt_apg);
         testutil::scan_checkout(&wt).unwrap();
 
