@@ -2288,7 +2288,16 @@ mod e2e {
     // SPEC §8.2/§9.2: the sole deferred obligation ends at the merge act.
     // Plan verification tolerates a Component with no `implemented-by` claim;
     // merge-strength validation does not — the whole-model check refuses
-    // BEFORE the branch is merged and the main graph rebuilt.
+    // BEFORE the branch is merged and the main graph rebuilt. This pins the
+    // whole refusal matrix over the branch model: a claimless Component, an
+    // undriven Requirement, an unrealised Service, and a claim naming a
+    // planned-only FQN (drift against the branch DB, because merge strength
+    // resolves claims against real scanned code and discards the plan's
+    // planned universe) are each refused, while a claim naming real
+    // branch-database code passes. Every refusal leaves main's tip, the
+    // worktree and the project branch untouched; the passing case runs LAST,
+    // because a successful merge moves main and self-cleans the worktree and
+    // branch.
     // ------------------------------------------------------------------
 
     #[test]
@@ -2395,8 +2404,19 @@ mod e2e {
         }
         layers::write_project(&wt_apg, &nodes, &[]).unwrap();
 
-        // Plan verify is green: the added requirement is Satisfies'd, and a
-        // claim-less solution node is only the gate's `no_claims` warning.
+        // The planned-only FQN: the same code identity as the scanned
+        // `go.fixture.mod.Store`, rooted under a different language. Plan
+        // verification's realization gate is language-root tolerant, so the
+        // planned node below is treated as realized by the scanned `go.`
+        // sibling; merge strength requires real branch-DB code at the claimed
+        // FQN and discards the planned universe, so a claim on it is drift.
+        let planned_fqn = "rust.fixture.mod.Store";
+        let real_fqn = format!("{MOD_FQN}.Store");
+
+        // The plan store: Satisfies the added requirement and touches both
+        // possible claims — a `creates` of the planned-only FQN and a `modifies`
+        // of the real scanned code — so derived coverage holds in every
+        // variant (coverage is verb- and status-agnostic).
         let plan_path = wt_apg
             .join(specs::TRANS)
             .join("plans")
@@ -2427,39 +2447,194 @@ mod e2e {
                     from: "strength/plan.phase-01".into(),
                     to: "requirements.requirement.r1".into(),
                 },
+                Record::Task {
+                    fqn: "strength/plan.phase-01.task-1".into(),
+                    title: "Create the planned node".into(),
+                    status: "pending".into(),
+                },
+                Record::Contains {
+                    from: "strength/plan.phase-01".into(),
+                    to: "strength/plan.phase-01.task-1".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::StructCreate {
+                    from: "strength/plan.phase-01.task-1".into(),
+                    to: planned_fqn.into(),
+                },
+                Record::Task {
+                    fqn: "strength/plan.phase-01.task-2".into(),
+                    title: "Touch the real scanned code".into(),
+                    status: "pending".into(),
+                },
+                Record::Contains {
+                    from: "strength/plan.phase-01".into(),
+                    to: "strength/plan.phase-01.task-2".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::StructModify {
+                    from: "strength/plan.phase-01.task-2".into(),
+                    to: real_fqn.clone(),
+                },
+                Record::PlannedNode {
+                    fqn: planned_fqn.into(),
+                    kind: "struct".into(),
+                    name: "Store".into(),
+                    parent: MOD_FQN.into(),
+                },
             ],
         )
         .unwrap();
-        plan_cmd::plan_verify_at(&wt_apg, "strength").unwrap();
 
-        // The merge act refuses at merge strength — the whole model lacks the
-        // Component's exactly-one real scanned-code claim.
+        // Variants of the SAME base node set: set the Component's claim and/or
+        // drop both halves of one authored edge, then write only the files that
+        // differ from the current on-disk model so pairing stays intact.
+        let variant = |claim: Option<&str>, drop: Option<(&str, &str, &str)>| -> Vec<NodeFile> {
+            let mut v = nodes.clone();
+            if let Some((kind, from, to)) = drop {
+                v[idx[from]]
+                    .out
+                    .retain(|e| !(e.kind == kind && e.target == to));
+                v[idx[to]]
+                    .in_edges
+                    .retain(|e| !(e.kind == kind && e.source == from));
+            }
+            if let Some(target) = claim {
+                v[idx["solution.component.comp"]]
+                    .out
+                    .push(out_e("implemented-by", target));
+            }
+            v
+        };
+        let mut current = nodes.clone();
+        let mut write_variant = |next: Vec<NodeFile>| {
+            let writes: Vec<NodeFile> = next
+                .iter()
+                .zip(current.iter())
+                .filter(|(a, b)| a != b)
+                .map(|(a, _)| a.clone())
+                .collect();
+            layers::write_project(&wt_apg, &writes, &[]).unwrap();
+            current = next;
+        };
+
         let main_repo = git2::Repository::open(&repo.root).unwrap();
         let main_tip_before = main_repo.head().unwrap().peel_to_commit().unwrap().id();
+        let assert_refused = |err: anyhow::Error, needles: &[&str]| {
+            let msg = format!("{err:#}");
+            for needle in needles {
+                assert!(msg.contains(needle), "expected `{needle}` in: {msg}");
+            }
+            assert_eq!(
+                main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+                main_tip_before,
+                "a merge-strength refusal must not move the main checkout"
+            );
+            assert!(
+                wt.is_dir(),
+                "a merge-strength refusal must leave the worktree in place"
+            );
+            assert!(
+                main_repo.find_worktree("strength").is_ok(),
+                "a merge-strength refusal must leave the worktree registered"
+            );
+            assert!(
+                main_repo
+                    .find_branch("strength", git2::BranchType::Local)
+                    .is_ok(),
+                "a merge-strength refusal must leave the project branch in place"
+            );
+        };
+
+        // 1. The deferred obligation: a Component with no `implemented-by`
+        // claim. Plan verify is green (a claim-less solution node is only its
+        // `no_claims` warning); the merge act refuses at merge strength.
+        plan_cmd::plan_verify_at(&wt_apg, "strength").unwrap();
         let err =
             project_merge_at(&repo.apg_root(), "strength", Some(&start_scan_locked)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("merge-strength"), "{msg}");
-        assert!(msg.contains("solution.component.comp"), "{msg}");
-        assert!(msg.contains("no `implemented-by` claim"), "{msg}");
-        assert_eq!(
-            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
-            main_tip_before,
-            "a merge-strength refusal must not move the main checkout"
+        assert_refused(
+            err,
+            &[
+                "merge-strength",
+                "solution.component.comp",
+                "no `implemented-by` claim",
+            ],
         );
-        assert!(
-            wt.is_dir(),
-            "a merge-strength refusal must leave the worktree in place"
+
+        // 2. A claim naming the planned-only FQN is drift against the branch
+        // database: plan verify tolerates the planned node (root-tolerant
+        // realization), but merge strength resolves claims against the branch
+        // DB's real code and discards the planned universe.
+        write_variant(variant(Some(planned_fqn), None));
+        plan_cmd::plan_verify_at(&wt_apg, "strength").unwrap();
+        let err =
+            project_merge_at(&repo.apg_root(), "strength", Some(&start_scan_locked)).unwrap_err();
+        assert_refused(
+            err,
+            &[
+                "merge-strength",
+                planned_fqn,
+                "spec drift: code FQN",
+                "is gone from the scanned graph",
+            ],
         );
+
+        // 3. An undriven Requirement: drop `s —driven-by→ r1` from both
+        // endpoint files; requirement coverage fails at merge strength.
+        write_variant(variant(
+            Some(&real_fqn),
+            Some((
+                "driven-by",
+                "domain.service.s",
+                "requirements.requirement.r1",
+            )),
+        ));
+        plan_cmd::plan_verify_at(&wt_apg, "strength").unwrap();
+        let err =
+            project_merge_at(&repo.apg_root(), "strength", Some(&start_scan_locked)).unwrap_err();
+        assert_refused(
+            err,
+            &[
+                "merge-strength",
+                "Requirement `requirements.requirement.r1` is `driven-by` no Service",
+            ],
+        );
+
+        // 4. An unrealised Service: drop `comp —realises→ s`; service
+        // realisation fails at merge strength.
+        write_variant(variant(
+            Some(&real_fqn),
+            Some(("realises", "solution.component.comp", "domain.service.s")),
+        ));
+        plan_cmd::plan_verify_at(&wt_apg, "strength").unwrap();
+        let err =
+            project_merge_at(&repo.apg_root(), "strength", Some(&start_scan_locked)).unwrap_err();
+        assert_refused(
+            err,
+            &[
+                "merge-strength",
+                "Service `domain.service.s` is realised by no Component",
+            ],
+        );
+
+        // 5. A claim naming a real branch-database FQN passes — LAST, because a
+        // successful merge moves main and self-cleans the worktree + branch.
+        write_variant(variant(Some(&real_fqn), None));
+        project_merge_at(&repo.apg_root(), "strength", Some(&start_scan_locked)).unwrap();
+        assert_ne!(
+            repo.head_sha(),
+            main_tip_before.to_string(),
+            "the passing merge moves the main tip"
+        );
+        assert!(!wt.is_dir(), "the passing merge removes the worktree");
         assert!(
-            main_repo.find_worktree("strength").is_ok(),
-            "a merge-strength refusal must leave the worktree registered"
+            main_repo.find_worktree("strength").is_err(),
+            "the passing merge removes the worktree registration"
         );
         assert!(
             main_repo
                 .find_branch("strength", git2::BranchType::Local)
-                .is_ok(),
-            "a merge-strength refusal must leave the project branch in place"
+                .is_err(),
+            "the passing merge deletes the project branch"
         );
         testutil::remove(&repo);
     }
