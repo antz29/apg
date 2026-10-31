@@ -488,9 +488,11 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Scope, mirror image (SPEC §9.2): a Requirements cardinality violation is
-    /// reported by requirements and all-tier lint and is invisible to domain
-    /// lint.
+    /// The `--tier` scope is cumulative (SPEC §9.2/§9.4): a scope checks its own
+    /// tier and every tier upstream of it. A Requirements cardinality violation
+    /// is therefore reported by requirements, domain and solution lint alike —
+    /// every cumulative window includes Requirements — as well as by the
+    /// all-tier run, while the complete model passes every one of those scopes.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
     fn spec_lint_tier_scopes_requirements_violations() {
@@ -498,6 +500,21 @@ mod e2e {
         let wt = repo.start_project("foo");
         let apg_root = wt.join(specs::LAYOUT);
         testutil::seed_valid_model(&apg_root);
+
+        // The complete model passes every cumulative scope and the all-tier run.
+        for args in [
+            vec!["spec", "lint", "--tier", "requirements"],
+            vec!["spec", "lint", "--tier", "domain"],
+            vec!["spec", "lint", "--tier", "solution"],
+            vec!["spec", "lint"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(
+                out.status.success(),
+                "the complete model must pass `{args:?}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
 
         // The User no longer requires a Requirement (its only `requires` edge).
         let mut nodes = testutil::valid_model();
@@ -520,21 +537,26 @@ mod e2e {
             .collect();
         apg::layers::write_project(&apg_root, &changed, &[]).unwrap();
 
+        // Every cumulative window includes Requirements, so each scope reports
+        // the requirements-local violation — as does the all-tier run.
         let rule = "`requirements.user.customer` requires no Requirement";
-        let requirements = testutil::spawn_apg(&["spec", "lint", "--tier", "requirements"], &wt);
-        assert!(!requirements.status.success());
-        assert!(
-            String::from_utf8_lossy(&requirements.stderr).contains(rule),
-            "requirements lint must report the requirements violation: {}",
-            String::from_utf8_lossy(&requirements.stderr)
-        );
-
-        let domain = testutil::spawn_apg(&["spec", "lint", "--tier", "domain"], &wt);
-        assert!(
-            domain.status.success(),
-            "domain lint must not require requirements completeness: {}",
-            String::from_utf8_lossy(&domain.stderr)
-        );
+        for args in [
+            vec!["spec", "lint", "--tier", "requirements"],
+            vec!["spec", "lint", "--tier", "domain"],
+            vec!["spec", "lint", "--tier", "solution"],
+            vec!["spec", "lint"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(
+                !out.status.success(),
+                "`{args:?}` must report the requirements violation"
+            );
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains(rule),
+                "`{args:?}` must report `{rule}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
 
         testutil::remove(&repo);
     }
