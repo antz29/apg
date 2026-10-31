@@ -79,7 +79,7 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
 
     // Freshness gate: start seeds the branch DB by copying main's scan, so
     // main must have a CURRENT scan for main's HEAD. `!git::is_fresh` (never
-    // `is_stale`) — a missing `db.lbug`/`graph.jsonl` is "not fresh" too, which
+    // `is_stale`) — a missing `db.lbug` is "not fresh" too, which
     // `is_stale` alone cannot see. This sits AFTER `refuse_start` (dirty/
     // collision/in-worktree refusals keep precedence) and BEFORE the gitignore
     // self-heal, so a refusal never mutates the main checkout.
