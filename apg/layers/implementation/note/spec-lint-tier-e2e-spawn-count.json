@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "spec-lint-tier-e2e-spawn-count",
+  "body": "`spec_lint_tier_scopes_requirements_violations` spawns the candidate binary eight times per run — four complete-model scopes plus four broken-model scopes — each a real process that re-reads the layers tree. Upgrade to fewer invocations (or a shared multi-scope invocation) if lint startup latency ever dominates the e2e tier.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.spec_lint_e2e.e2e.spec_lint_tier_scopes_requirements_violations",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
