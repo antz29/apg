@@ -13,10 +13,9 @@
 //!    data: the whole-file copy already preserves every unaffected node/rel row,
 //!    so the splice path runs no full-load pass;
 //! 3. **task-3** — checkpoint+close the spliced copy, then atomically publish
-//!    BOTH artifacts: the `db.lbug` rename over `target_path` and the fresh
-//!    `graph.jsonl` rename over its `.trans/` sibling — with backups and
-//!    rollback, so a partial swap can never leave a new DB paired with a stale
-//!    export;
+//!    the single `db.lbug` — a same-filesystem rename over `target_path` with
+//!    a backup and rollback, so a failed swap leaves the previous database
+//!    byte-identical;
 //! 4. **task-4** — the pipeline dispatch that decides seed-vs-full-load.
 //!
 //! This is seed-from-previous, not overlay-on-empty, per
