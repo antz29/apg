@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "code-kinds-e2e-identity-deferred-rename",
-  "body": "The test keeps the code_kinds_from_export identity while it asserts PreviousScan::capture, because the plan pins the function identity until the export accessor is deleted. The name asserts a retired accessor. Upgrade — rename it alongside the export accessor's deletion so the name follows the surviving database reader.",
+  "body": "The test keeps the `code_kinds_from_export` identity even though the export accessor it is named after is deleted: the identity is deliberately retained under phase 8's accepted-debt list, because its subject survives — a planned FQN's recorded kind (`struct`) is preferred over the `module` fallback, read from the branch database through `PreviousScan::capture`, and an FQN the database does not record stays absent rather than being invented. The deferred rename is answered by that review decision, so no test identity changes; upgrade only if a later phase renames the retained identities and re-points their `details` edges together.",
   "properties": {},
   "out": [
     {
