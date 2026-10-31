@@ -87,9 +87,8 @@ pub enum FullScanReason {
     /// identity), so the full code-FQN universe cannot be derived from it.
     /// Only raised when the scan would otherwise emission-filter (a non-empty
     /// target set): a worktree whose target set is empty emits every fact, so
-    /// the full spool is the universe and reuse stays available. Keeps its
-    /// historical name and tag (`no-previous-export`) until the rename task.
-    NoPreviousExport,
+    /// the full spool is the universe and reuse stays available.
+    NoPreviousDatabase,
     /// The delta could not be computed (a corrupt/unreadable store record).
     DeltaUnavailable,
     /// The caller asked for a from-scratch rebuild (`apg scan --force`): the
@@ -106,7 +105,7 @@ impl FullScanReason {
             FullScanReason::NoHead => "no-head",
             FullScanReason::NotAncestor { .. } => "recorded-not-ancestor",
             FullScanReason::CacheKeyDrift { .. } => "cache-key-drift",
-            FullScanReason::NoPreviousExport => "no-previous-export",
+            FullScanReason::NoPreviousDatabase => "no-previous-database",
             FullScanReason::DeltaUnavailable => "delta-unavailable",
             FullScanReason::Forced => "forced",
         }
@@ -126,7 +125,7 @@ impl FullScanReason {
             FullScanReason::CacheKeyDrift { recorded, current } => {
                 format!("cache key drifted ({recorded} → {current}) — full scan")
             }
-            FullScanReason::NoPreviousExport => {
+            FullScanReason::NoPreviousDatabase => {
                 "no usable previous worktree database (absent, unreadable, or carrying pending state) to derive the full code universe — full scan"
                     .to_string()
             }
