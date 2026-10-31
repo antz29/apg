@@ -25,6 +25,30 @@ export function tasksQuery(project: string, status: string | undefined, limit: n
  RETURN pp.fqn, t.fqn, t.title, t.status, a.fqn, c.fqn ORDER BY t.fqn LIMIT ${limit}`
 }
 
+/** The page verdict for a task listing: the data rows (the CSV header already
+ *  stripped) clamped to exactly `limit`, plus the notice to show in place of
+ *  the table (zero rows) or beneath it (truncated). An exactly-`limit` page is
+ *  complete and carries no notice, so the caller fetches one probe row past
+ *  the limit — only that extra row can prove the page was truncated. */
+export function tasksPageNotice(
+  project: string,
+  status: string | undefined,
+  limit: number,
+  rows: string[][],
+): { rows: string[][]; notice?: string } {
+  if (rows.length === 0)
+    return {
+      rows,
+      notice: status ? `No tasks match status=${status}` : `No tasks in plan \`${project}\`.`,
+    }
+  if (rows.length > limit)
+    return {
+      rows: rows.slice(0, limit),
+      notice: `Truncated to the first ${limit} tasks; raise \`limit\` to see more.`,
+    }
+  return { rows }
+}
+
 /** Every task's operation rel rows plus its `Target` destination rows, as one
  *  relation set (the DB has no `type()` function, so each table is named). */
 function operationQuery(): string {
@@ -79,7 +103,7 @@ export default Plugin.define({
           let edges: string[][]
           try {
             tasks = csvToRows(
-              await runCypher(merged, tasksQuery(project, input.status, limit), input.directory),
+              await runCypher(merged, tasksQuery(project, input.status, limit + 1), input.directory),
             )
             edges = csvToRows(await runCypher(merged, operationQuery(), input.directory))
           } catch (e) {
@@ -87,7 +111,10 @@ export default Plugin.define({
             // opaque crash (or a benign "no tasks") when the guard rejects the result.
             return { content: e instanceof Error ? e.message : String(e) }
           }
-          if (tasks.length <= 1) return { content: `No tasks in plan \`${project}\`.` }
+          // The header row is stripped before the page verdict, so a
+          // status-filtered empty result is a zero-match, never "no plan".
+          const page = tasksPageNotice(project, input.status, limit, tasks.slice(1))
+          if (page.rows.length === 0 && page.notice) return { content: page.notice }
 
           const ops = new Map<string, [string, string, string][]>()
           const dest = new Map<string, string>()
@@ -102,7 +129,7 @@ export default Plugin.define({
           }
 
           const lines = ["task,phase,title,status,assignedTo,implements,operations"]
-          for (const [phase, fqn, title, status, assigned, component] of tasks.slice(1)) {
+          for (const [phase, fqn, title, status, assigned, component] of page.rows) {
             const short = fqn.replace(`${project}/`, "")
             const phaseShort = phase.replace(`${project}/`, "")
             // The projection drops an AssignedTo edge whose Agent is absent
@@ -126,9 +153,8 @@ export default Plugin.define({
               ].join(","),
             )
           }
-          return {
-            content: lines.length > 1 ? lines.join("\n") : `No tasks match status=${input.status ?? "any"}`,
-          }
+          const table = lines.join("\n")
+          return { content: page.notice ? `${table}\n\n${page.notice}` : table }
         },
       })
     })
