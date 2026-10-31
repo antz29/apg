@@ -500,39 +500,6 @@ fn assert_lossless_round_trip(reconstructed: &[layers::NodeFile], expected: &[la
     );
 }
 
-/// The DB-only serialized-properties column must never leak into `graph.jsonl`:
-/// every export line keeps the `Export` shape, and the export round-trips
-/// through `read_graph_jsonl` → `write_graph_jsonl` (line-set equality —
-/// `Graph`'s maps are unordered, so the scan's line order is not stable).
-fn assert_graph_jsonl_consistent(graph_path: &Path) {
-    let text = std::fs::read_to_string(graph_path).unwrap();
-    for line in text.lines() {
-        let value: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert!(
-            value.get("properties").is_none(),
-            "graph.jsonl must not carry the DB-only serialized-properties column: {line}"
-        );
-    }
-    let graph = testutil::read_graph_jsonl(graph_path).unwrap();
-    let round_trip = graph_path.with_extension("roundtrip.jsonl");
-    load::write_graph_jsonl(&graph, &round_trip).unwrap();
-    let canonical = |p: &Path| -> Vec<String> {
-        let mut lines: Vec<String> = std::fs::read_to_string(p)
-            .unwrap()
-            .lines()
-            .map(str::to_string)
-            .collect();
-        lines.sort();
-        lines
-    };
-    assert_eq!(
-        canonical(graph_path),
-        canonical(&round_trip),
-        "graph.jsonl must round-trip through read_graph_jsonl"
-    );
-    std::fs::remove_file(&round_trip).unwrap();
-}
-
 /// Every regular file under `dir` as `(path relative to `dir`, bytes)`, sorted —
 /// the byte-identity snapshot the forced-scan acceptance test compares before
 /// and after the rebuild.
@@ -1151,134 +1118,60 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-23: `code_kinds_from_export` resolves the Implementation
-    /// kind of every code FQN from the `graph.jsonl` export plus the plan
-    /// store's declared kinds, with NO `db.lbug` open.
+    /// Phase-04 task-23: the four Implementation kinds a code FQN **records in
+    /// `db.lbug`** are what a caller materialises it at — one row of each kind
+    /// (module, file, struct, function) is present, and the recorded kinds are
+    /// exactly those four (no other kind is invented).
     ///
-    /// The fixture deliberately writes a BOGUS `db.lbug` (not a database): if
-    /// the accessor opened it, decoding would fail — a passed test proves the
-    /// DB was never touched. The four Implementation record types each resolve
-    /// to their own kind; a Struct and a Function declared only in the plan
-    /// store resolve at their declared kind; the export's kind wins where both
-    /// name the same FQN (the scan realized the planned node); an FQN neither
-    /// source names stays absent (the caller's `module` default covers it); the
-    /// `scan_meta` control record and spec/plan/edge records are skipped; and an
-    /// absent export still yields the plan store's kinds.
+    /// The fixture is a REAL database: a hermetic scan of a scratch repo
+    /// (`testutil::project_with_db`) whose payload declares a module, a struct,
+    /// a function and a file. `PreviousScan::capture` reads the recorded kinds
+    /// from that database alone — this test writes and parses no `graph.jsonl`
+    /// export.
     #[test]
-    #[ignore = "e2e tier: real I/O (graph.jsonl via temp_dir); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn code_kinds_from_export_reads_the_four_implementation_types() {
-        let dir = std::env::temp_dir().join(format!("apg-kinds-export-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let trans = dir.join(specs::TRANS);
-        std::fs::create_dir_all(trans.join("plans")).unwrap();
+        let (repo, wt, wt_apg) = testutil::project_with_db("kinds-four-kinds");
 
-        // graph.jsonl: the scan_meta control lead, one record of each
-        // Implementation kind, and spec/plan/edge records that must all be
-        // skipped. `github.com/x/y.Store` is also declared planned with a
-        // different kind below — the export wins.
-        let graph = [
-        r#"{"type":"scan_meta","git_sha":"abc","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
-        r#"{"type":"module","fqn":"github.com/x/y"}"#,
-        r#"{"type":"file","fqn":"src/store.go","start_line":1,"end_line":100,"code_type":"src"}"#,
-        r#"{"type":"struct","fqn":"github.com/x/y.Store","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
-        r#"{"type":"function","fqn":"github.com/x/y.Store.Get","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
-        r#"{"type":"requirement","fqn":"github.com/x/y/req.one","title":"One","body":"b"}"#,
-        r#"{"type":"planned_node","fqn":"github.com/x/y.PlannedOnly","kind":"struct","name":"PlannedOnly","parent":"github.com/x/y"}"#,
-        r#"{"type":"contains","from":"github.com/x/y","to":"github.com/x/y.Store"}"#,
-    ]
-    .join("\n");
-        std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
+        // One function row on top of the fixture payload (module + struct +
+        // file): the recorded kinds must span all four Implementation labels.
+        let seed = wt.join("code/seed.scan.jsonl");
+        let mut payload = testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]);
+        payload.push_str(&testutil::function_line(
+            "n4",
+            "fixture.mod",
+            "Lookup",
+            "/abs/store.go",
+        ));
+        payload.push('\n');
+        std::fs::write(&seed, payload).unwrap();
+        testutil::wt_commit(&wt, &["code/seed.scan.jsonl"], "function payload");
+        testutil::scan_checkout(&wt).unwrap();
 
-        // The plan store declares a Struct and a Function the export does not
-        // carry (each at its declared kind), and re-declares the scanned Store
-        // as a Function — the export's Struct must win.
-        specs::write_jsonl(
-            &trans.join("plans").join("foo.jsonl"),
-            &[
-                Record::PlannedNode {
-                    fqn: "apg.session.PlannedStruct".into(),
-                    kind: "struct".into(),
-                    name: "PlannedStruct".into(),
-                    parent: "apg.session".into(),
-                },
-                Record::PlannedNode {
-                    fqn: "apg.session.planned_fn".into(),
-                    kind: "function".into(),
-                    name: "planned_fn".into(),
-                    parent: "apg.session".into(),
-                },
-                Record::PlannedNode {
-                    fqn: "github.com/x/y.Store".into(),
-                    kind: "function".into(),
-                    name: "Store".into(),
-                    parent: "github.com/x/y".into(),
-                },
-            ],
-        )
-        .unwrap();
+        let snapshot = PreviousScan::capture(&wt_apg).expect("a clean scanned database captures");
 
-        // A bogus DB — never opened by the kind accessor.
-        std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
+        let kinds: BTreeSet<&str> = snapshot.kinds.values().map(String::as_str).collect();
+        assert_eq!(
+            kinds,
+            BTreeSet::from(["module", "file", "struct", "function"]),
+            "the database records exactly the four Implementation kinds: {:?}",
+            snapshot.kinds
+        );
+        for (fqn, kind) in [
+            ("go.fixture.mod", "module"),
+            ("/abs/store.go", "file"),
+            ("go.fixture.mod.Store", "struct"),
+            ("go.fixture.mod.Lookup", "function"),
+        ] {
+            assert_eq!(
+                snapshot.kinds.get(fqn).map(String::as_str),
+                Some(kind),
+                "{fqn} must record its Implementation kind: {:?}",
+                snapshot.kinds
+            );
+        }
 
-        let kinds = code_kinds_from_export(&dir).unwrap();
-        assert_eq!(
-            kinds.get("github.com/x/y").map(String::as_str),
-            Some("module")
-        );
-        assert_eq!(kinds.get("src/store.go").map(String::as_str), Some("file"));
-        assert_eq!(
-            kinds.get("github.com/x/y.Store").map(String::as_str),
-            Some("struct"),
-            "the export's kind beats the plan store's conflicting declaration"
-        );
-        assert_eq!(
-            kinds.get("github.com/x/y.Store.Get").map(String::as_str),
-            Some("function")
-        );
-        assert_eq!(
-            kinds.get("apg.session.PlannedStruct").map(String::as_str),
-            Some("struct"),
-            "a plan-store-only Struct resolves at its declared kind"
-        );
-        assert_eq!(
-            kinds.get("apg.session.planned_fn").map(String::as_str),
-            Some("function"),
-            "a plan-store-only Function resolves at its declared kind"
-        );
-
-        // Skipped records never reach the map: the scan_meta lead, the
-        // spec/plan/edge records — and an FQN neither source names stays
-        // absent (the caller's `module` default covers it).
-        assert_eq!(
-            kinds.len(),
-            6,
-            "only the four export kinds plus the two plan-store-only kinds"
-        );
-        assert!(!kinds.contains_key("github.com/x/y/req.one"));
-        assert!(!kinds.contains_key("github.com/x/y.PlannedOnly"));
-        assert!(!kinds.contains_key("github.com/x/y.Gone"));
-
-        // graph.jsonl absent: the export contributes nothing; the plan store's
-        // declared kinds remain — the scanned Store now resolves at the plan
-        // store's kind, the only one left.
-        std::fs::remove_file(trans.join("graph.jsonl")).unwrap();
-        let kinds2 = code_kinds_from_export(&dir).unwrap();
-        assert_eq!(kinds2.len(), 3);
-        assert_eq!(
-            kinds2.get("apg.session.PlannedStruct").map(String::as_str),
-            Some("struct")
-        );
-        assert_eq!(
-            kinds2.get("apg.session.planned_fn").map(String::as_str),
-            Some("function")
-        );
-        assert_eq!(
-            kinds2.get("github.com/x/y.Store").map(String::as_str),
-            Some("function"),
-            "without the export the plan store's kind is the only kind"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     /// Phase-08 task-1: the Implementation kind a code FQN **records in the
@@ -2467,7 +2360,7 @@ mod e2e {
     /// properties, and both edge halves; project it through a REAL scan
     /// (`create_schema`/`build_load_files`, the `layers::ingest_tree` leg); then
     /// assert `ArtifactDb::node_files_from_db` reconstructs it exactly and that
-    /// `graph.jsonl` stays a consistent, property-free export.
+    /// the database describes the authored nodes by identity.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn node_files_from_db_round_trips_every_property_through_a_full_scan() {
@@ -2483,24 +2376,13 @@ mod e2e {
 
         let db = ArtifactDb::open(&wt_apg).unwrap();
         let reconstructed = db.node_files_from_db().unwrap();
+        assert!(
+            db.has_node("domain.entity.order"),
+            "the database must describe the authored entity"
+        );
         drop(db);
 
         assert_lossless_round_trip(&reconstructed, &expected);
-
-        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
-        assert_graph_jsonl_consistent(&graph_path);
-
-        // The export still describes the authored nodes by identity (it is
-        // deliberately not the property carrier).
-        let export = std::fs::read_to_string(&graph_path).unwrap();
-        assert!(
-            export.lines().any(|line| {
-                let v: serde_json::Value = serde_json::from_str(line).unwrap();
-                v.get("type").and_then(|t| t.as_str()) == Some("entity")
-                    && v.get("fqn").and_then(|f| f.as_str()) == Some("domain.entity.order")
-            }),
-            "graph.jsonl must describe the authored entity"
-        );
 
         testutil::remove(&repo);
     }
@@ -2510,8 +2392,7 @@ mod e2e {
     /// (`ArtifactDb::reingest_layers_on`, the `merge_records` write-through the
     /// live coordinator applies at admission) against a real `db.lbug`, must
     /// reconstruct exactly — the serialized-properties column carries the full
-    /// map through `merge_node`/`merge_edge` (both halves), and `graph.jsonl` is
-    /// left consistent.
+    /// map through `merge_node`/`merge_edge` (both halves).
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn node_files_from_db_round_trips_every_property_through_the_session_merge() {
@@ -2532,7 +2413,6 @@ mod e2e {
         drop(db);
 
         assert_lossless_round_trip(&reconstructed, &expected);
-        assert_graph_jsonl_consistent(&wt_apg.join(specs::TRANS).join("graph.jsonl"));
 
         testutil::remove(&repo);
     }
@@ -2876,15 +2756,16 @@ mod e2e {
     /// the `implemented-by` code universes SOLELY from the held `db.lbug`.
     ///
     /// While the session is live, BOTH disk-side sources the pre-phase-2
-    /// admission path could have leaned on are destroyed: the mutated node's own
-    /// `apg/layers/**` file (deleted) and the code-identity export
-    /// `apg/.trans/graph.jsonl` (corrupted). A routed mutation touching the node
-    /// still admits — it resolves the node's base content from the held DB, not
-    /// the gone file — and its `implemented-by` target validates against the DB's
-    /// scanned code universe: the REAL target (`go.fixture.mod.Store`, the scanned
-    /// struct) admits, while a bogus target is refused as spec drift, never
-    /// silently recorded unchecked/pending (which is what an empty universe would
-    /// do). A routed query then sees the projected change.
+    /// admission path could have leaned on are unavailable: the mutated node's
+    /// own `apg/layers/**` file (deleted) and the database's own path on disk
+    /// (`db.lbug` renamed aside — the session keeps serving the handle it
+    /// already holds). A routed mutation touching the node still admits — it
+    /// resolves the node's base content from the held DB, not the gone file —
+    /// and its `implemented-by` target validates against the DB's scanned code
+    /// universe: the REAL target (`go.fixture.mod.Store`, the scanned struct)
+    /// admits, while a bogus target is refused as spec drift, never silently
+    /// recorded unchecked/pending (which is what an empty universe would do). A
+    /// routed query then sees the projected change.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn session_admission_resolves_the_node_set_and_code_universes_from_the_held_db() {
@@ -2895,7 +2776,7 @@ mod e2e {
         // its Component (`order-handler`) whose target is REAL scanned code from
         // the fixture payload (`go.fixture.mod.Store`). The scan projects both
         // into `db.lbug`, so the session holds them when the node file and the
-        // export are later destroyed.
+        // database path are later destroyed.
         let mut model = testutil::valid_model();
         model
             .iter_mut()
@@ -2929,7 +2810,9 @@ mod e2e {
         );
 
         // Destroy BOTH disk-side sources while the session is live: the mutated
-        // node's file and the code-identity export.
+        // node's file and the database path. The database is renamed aside (an
+        // open handle keeps its inode/mmap live on macOS), never written with
+        // garbage — the session must serve what it already holds.
         let node_file =
             layers::node_file_path(&wt_apg, Layer::Solution, "component", "order-handler");
         assert!(
@@ -2937,12 +2820,20 @@ mod e2e {
             "the node file must exist before it is deleted"
         );
         std::fs::remove_file(&node_file).unwrap();
-        let export = wt_apg.join(specs::TRANS).join("graph.jsonl");
+        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
         assert!(
-            export.exists(),
-            "the export must exist before it is corrupted"
+            db_path.exists(),
+            "the database must exist before it is moved aside"
         );
-        std::fs::write(&export, "this is not a graph.jsonl\n").unwrap();
+        std::fs::rename(
+            &db_path,
+            wt_apg.join(specs::TRANS).join("db.lbug.held-aside"),
+        )
+        .unwrap();
+        assert!(
+            !db_path.exists(),
+            "the database path must be gone while the session holds the handle"
+        );
 
         // (1) A routed mutation touching the (file-deleted) node still admits:
         // its base content and its `implemented-by` ref resolve from the held DB.
@@ -4139,10 +4030,11 @@ mod e2e {
     /// scan-force phase-01 task-4 (acceptance, scratch /tmp repo, CANDIDATE
     /// binary only — `global.constraint.no-real-project-test`): `apg scan
     /// --force` is a TRUE REBUILD. It discards `db.lbug` (with its `.wal`/`.shm`
-    /// sidecars) and `graph.jsonl` through the one shared discard and rebuilds
-    /// both from freshly emitted facts, while every `apg/layers/**` node file
-    /// and every source file stays byte-identical and the shared fact store's
-    /// `scan.json` survives untouched.
+    /// sidecars) through the one shared discard and rebuilds it from freshly
+    /// emitted facts, while every `apg/layers/**` node file and every source
+    /// file stays byte-identical and the shared fact store's `scan.json`
+    /// survives untouched. The database is the only derived artifact: a scan
+    /// writes no `graph.jsonl`.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/facts store); run via cargo test-e2e"]
     fn forced_scan_discards_the_derived_index_and_rebuilds_it_from_scratch() {
@@ -4182,17 +4074,18 @@ mod e2e {
             String::from_utf8_lossy(&out.stderr).into_owned()
         };
 
-        // The cold scan: a real pipeline run that emits the graph and records
-        // the shared store's baseline.
+        // The cold scan: a real pipeline run that builds the database and
+        // records the shared store's baseline.
         assert!(
             run(&["scan", "."]).contains("[scan] running go frontend"),
             "the cold scan must run the go frontend"
         );
         let trans = apg_root.join(specs::TRANS);
         let db = trans.join("db.lbug");
+        assert!(db.exists(), "the cold scan must produce db.lbug");
         assert!(
-            db.exists() && trans.join("graph.jsonl").exists(),
-            "the cold scan must produce db.lbug + graph.jsonl"
+            !trans.join("graph.jsonl").exists(),
+            "a scan writes no graph.jsonl export"
         );
 
         // Plant the sidecars so their discard is observable whatever lbug
@@ -4229,10 +4122,12 @@ mod e2e {
             "the forced scan must bypass both reuse paths: {err}"
         );
 
-        // Both derived artifacts are back, `db.lbug` as a NEW file.
+        // The derived artifact is back, `db.lbug` as a NEW file — and the scan
+        // writes no export beside it.
+        assert!(db.exists(), "the forced scan must rebuild db.lbug");
         assert!(
-            db.exists() && trans.join("graph.jsonl").exists(),
-            "the forced scan must rebuild db.lbug + graph.jsonl"
+            !trans.join("graph.jsonl").exists(),
+            "a scan writes no graph.jsonl export"
         );
         assert_ne!(
             std::fs::metadata(&db).unwrap().ino(),
