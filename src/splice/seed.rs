@@ -99,10 +99,9 @@ pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
 /// `assembled` is the assembled graph's authored/transient identity
 /// ([`assembled_authored_identity`]). Once the content key matches, the seed DB
 /// must ALSO represent the assembled authored/transient rows: the win-C splice
-/// writes no authored row, while `graph.jsonl` is serialized from the full
-/// assembled graph, so a same-content seed that lacks those rows would publish
-/// a DB diverging from its export. When the seed's own digest
-/// ([`seed_authored_identity`]) differs, the seed is refused with
+/// writes no authored row, so a same-content seed that lacks those rows would
+/// publish a DB that cannot answer like a full rebuild. When the seed's own
+/// digest ([`seed_authored_identity`]) differs, the seed is refused with
 /// [`SeedFallback::UnrepresentedAuthored`] and the caller runs the full load.
 ///
 /// Every failure is a [`SeedFallback`], never a panic: an unopenable seed DB on
@@ -158,11 +157,11 @@ pub fn seed_key_matches(seed: Option<&str>, expected: Option<&str>) -> bool {
 /// authored/transient set.
 ///
 /// The win-C splice writes no authored/transient row (it applies only the code
-/// delta), while `graph.jsonl` is serialized from the FULL assembled graph, so
-/// a spec-only change-set would publish a DB that diverges from its export. The
-/// caller threads this digest — and a seed DB digest computed the same way
-/// (`seed_authored_identity`) — into the guard; an inequality makes the seed
-/// ineligible and the existing full load (the correctness reference) runs.
+/// delta), so a spec-only change-set would publish a DB that cannot answer like
+/// a full rebuild. The caller threads this digest — and a seed DB digest
+/// computed the same way (`seed_authored_identity`) — into the guard; an
+/// inequality makes the seed ineligible and the existing full load (the
+/// correctness reference) runs.
 ///
 /// ## Canonical form
 ///
@@ -603,10 +602,10 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
 /// database — the same snapshot `cmd_scan` threads and the splice seed
 /// consumes: the code-reference universe `ingest_tree` validates
 /// `implemented-by` targets against, each code FQN's recorded Implementation
-/// kind, and the `Agent` records. No `graph.jsonl` parse is performed. A
-/// `None` capture (an absent, unreadable or pending-state database) contributes
-/// empty universes, kinds and agents, so the digest then reflects only the
-/// durable layers and the transient plan legs.
+/// kind, and the `Agent` records. A `None` capture (an absent, unreadable or
+/// pending-state database) contributes empty universes, kinds and agents, so
+/// the digest then reflects only the durable layers and the transient plan
+/// legs.
 ///
 /// Those real code FQNs are ALSO carried into the assembly as placeholder code
 /// nodes, so `ingest`'s finalize keeps the authored→code edges (`implemented-by`,
@@ -631,7 +630,7 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
     // The previous database read once: the code-identity universes the real scan
     // validates `implemented-by` refs against, every code FQN's recorded kind and
     // the Agent roster. An absent, unreadable or pending-state database yields
-    // empty values, exactly as an absent export did.
+    // empty values.
     let previous = crate::artifacts::PreviousScan::capture(apg_root);
     let (scanned, planned) = previous
         .as_ref()
@@ -674,7 +673,7 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
     // finalize would prune every `AssignedTo` edge (the target node would be
     // absent). `Agent` is not an authored kind, so it contributes no authored
     // row; its only effect is to keep those edges. The snapshot already holds
-    // the export-shaped records (its `name` is the FQN sans `agent.` prefix).
+    // these `Agent` records (its `name` is the FQN sans `agent.` prefix).
     if let Some(previous) = &previous {
         records.extend(previous.agents.iter().cloned());
     }
@@ -961,11 +960,11 @@ pub enum SeedFallback {
     StaleSeed { seed: String, recorded: String },
     /// The previous DB was built from the same tree content the delta was
     /// derived from, but its **authored/transient rows** are not the assembled
-    /// graph's — the win-C splice writes no authored/transient row and
-    /// `graph.jsonl` is serialized from the full assembled graph, so seeding it
-    /// would publish a DB that diverges from its export (phase-01). Distinct
-    /// from [`StaleSeed`](Self::StaleSeed), which is a content-key / worktree
-    /// drift: this is the assembled identity's authored/transient divergence.
+    /// graph's — the win-C splice writes no authored/transient row, so seeding
+    /// it would publish a DB that cannot answer like a full rebuild.
+    /// Distinct from [`StaleSeed`](Self::StaleSeed), which is a content-key /
+    /// worktree drift: this is the assembled identity's authored/transient
+    /// divergence.
     /// Carries the seed DB's authored/transient digest and the assembled
     /// graph's so the log attributes the divergence. The caller runs the full
     /// load.
