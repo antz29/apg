@@ -90,13 +90,13 @@ pub enum Record {
     },
 
     /// Pipeline-internal control record, emitted by `apg scan` at the front of
-    /// the merged stream and as **line 1 of `graph.jsonl`**:
+    /// the merged stream:
     /// `{"type":"scan_meta","git_sha":"...","git_clean":true,"scanned_at":"..."}`.
     /// Carries the git state the scan ran under — HEAD sha plus whether
     /// `git status --porcelain` was empty — so a later mutation gate can tell
     /// whether the live DB matches the tree. The git fields are absent when the
     /// scanned dir is not a git repo. The ingestor records it as the DB's
-    /// `Scan` node (fqn [`SCAN_HEAD`]).
+    /// `Scan` row (fqn [`SCAN_HEAD`]).
     ///
     /// `content_key` is the **content-identity** half of that state (win A):
     /// a digest over the working tree + index + untracked file *content*, never
