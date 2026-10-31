@@ -531,8 +531,8 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     //
     // A full load rewrites the Scan node from the scan_meta record; the splice
     // must DELETE the seeded row and INSERT the new one, or the previous scan's
-    // git state survives and the spliced DB disagrees with a full rebuild and
-    // with graph.jsonl line 1.
+    // git state survives and the spliced DB disagrees with the Scan row a full
+    // rebuild records.
     conn.query("MATCH (s:Scan) DELETE s")?;
     conn.query(&format!(
         "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}}})",
