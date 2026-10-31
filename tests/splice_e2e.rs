@@ -2467,12 +2467,14 @@ mod e2e {
     // Enumerated equivalence oracle + export leg (phase-03 task-8)
     // -----------------------------------------------------------------------
 
-    /// `domain.constraint.db-splice-equivalence`, enumerated: a spliced DB
-    /// agrees with a full rebuild of the same assembled graph on EVERY table's
-    /// row count — the per-label NODE counts AND the per-rel-type COUNTS
-    /// (Contains/Calls/Uses/UnresolvedCall/UnresolvedUse listed explicitly) —
-    /// on the UnresolvedTarget set by FQN WITH categories (hence the
-    /// per-category counts), and on the single `Scan` row.
+    /// `domain.constraint.db-splice-equivalence`, enumerated, with the authored
+    /// and transient tiers populated: the seed's authored identity is read from
+    /// the DATABASE (`PreviousScan`'s capture), the previous DB and the
+    /// assembled graph carry the SAME Stakeholder/Requirement/Plan/PlanPhase/
+    /// Task/Note rows and the `Requires`/`Contains`/`Details` edges they
+    /// author, and the spliced DB's reused tables agree with a full rebuild of
+    /// the same assembled graph on EVERY authored, transient and code table —
+    /// so the seed path's database read leaves no table behind.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
     fn spliced_and_full_rebuild_agree_on_every_table_count() {
@@ -2482,10 +2484,121 @@ mod e2e {
         let a = "/x/a.go".to_string();
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
+
+        // The same authored/transient rows on both sides: a Stakeholder and a
+        // Requirement joined by `requires`, a Plan ⊃ PlanPhase ⊃ Task
+        // `Contains` chain, and a Note whose `details` edge names real code.
+        let authored_rows = |g: &mut Graph| {
+            g.nodes.insert(
+                "requirements.stakeholder.alice".into(),
+                Node {
+                    kind: NodeKind::Stakeholder,
+                    name: Some("Alice".into()),
+                    body: Some("the stakeholder".into()),
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                "requirements.requirement.req".into(),
+                Node {
+                    kind: NodeKind::Requirement,
+                    title: Some("the requirement".into()),
+                    body: Some("the requirement body".into()),
+                    feature: Some("the feature".into()),
+                    ..Node::default()
+                },
+            );
+            g.requires.insert((
+                "requirements.stakeholder.alice".into(),
+                "requirements.requirement.req".into(),
+            ));
+
+            g.nodes.insert(
+                "plans.plan.demo".into(),
+                Node {
+                    kind: NodeKind::Plan,
+                    title: Some("Demo".into()),
+                    strategy: Some("the strategy".into()),
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                "plans.plan.demo.phase-01".into(),
+                Node {
+                    kind: NodeKind::PlanPhase,
+                    number: Some(1),
+                    title: Some("Phase one".into()),
+                    deliverable: Some("the deliverable".into()),
+                    status: Some("pending".into()),
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                "plans.plan.demo.phase-01.task-1".into(),
+                Node {
+                    kind: NodeKind::Task,
+                    title: Some("Task one".into()),
+                    status: Some("pending".into()),
+                    ..Node::default()
+                },
+            );
+            g.contains
+                .insert(("plans.plan.demo".into(), "plans.plan.demo.phase-01".into()));
+            g.contains.insert((
+                "plans.plan.demo.phase-01".into(),
+                "plans.plan.demo.phase-01.task-1".into(),
+            ));
+
+            g.nodes.insert(
+                "implementation.note.n1".into(),
+                Node {
+                    kind: NodeKind::Note,
+                    body: Some("the note body".into()),
+                    sub_kind: Some("design".into()),
+                    ..Node::default()
+                },
+            );
+            g.details
+                .insert(("implementation.note.n1".into(), "m.A.f".into()));
+        };
+
+        let mut prev = previous_graph(&a, &b, &c);
+        let mut assembled = assembled_graph(&a, &b);
+        authored_rows(&mut prev);
+        authored_rows(&mut assembled);
+
+        build_db(&prev_path, &prev);
         std::fs::write(&export, b"previous export\n").unwrap();
 
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+        // The seed's own account of its authored rows is READ FROM THE DATABASE
+        // and must equal the assembled graph's authored/transient identity —
+        // otherwise `seed` would be ineligible (full load) by construction.
+        let seed_authored = seed_authored_identity(&prev_path).unwrap();
+        let assembled_authored = assembled_authored_identity(&assembled);
+        assert_eq!(
+            seed_authored, assembled_authored,
+            "the seed DB's authored identity must equal the assembled graph's"
+        );
+
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+        let targets: BTreeSet<String> = [a.clone(), c.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &assembled,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
         publish(seeded, &assembled, &export).unwrap();
 
         // The full-rebuild reference: the same assembled graph, loaded whole.
@@ -2498,6 +2611,28 @@ mod e2e {
             spliced_counts, expected_counts,
             "every table's row count must equal a full rebuild"
         );
+        // Prove the authored/transient half is NON-VACUOUS: the seed path must
+        // reuse these populated tables, or the whole-map equality above says
+        // nothing about them.
+        for label in [
+            "Stakeholder",
+            "Requirement",
+            "Plan",
+            "PlanPhase",
+            "Task",
+            "Note",
+        ] {
+            assert!(
+                spliced_counts.get(label).is_some_and(|&n| n > 0),
+                "the oracle must enumerate the populated {label} node table: {spliced_counts:?}"
+            );
+        }
+        for table in ["Requires", "Contains", "Details"] {
+            assert!(
+                spliced_counts.get(table).is_some_and(|&n| n > 0),
+                "the oracle must enumerate the populated {table} rel table: {spliced_counts:?}"
+            );
+        }
         // Prove the enumeration is COMPLETE: every code label and every code
         // rel table the oracle compares is actually in the map (a missing
         // table would otherwise make the equality above vacuous).
