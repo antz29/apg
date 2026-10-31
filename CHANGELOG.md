@@ -9,6 +9,44 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.28.1
+
+Patch release: republishes the v0.28.0 content, which was tagged but never
+published, on a runner image GitHub does not retire the next day, and stops
+shipping a bottle checksum the publish job now writes itself.
+
+**Why v0.28.1 exists.** `v0.28.0` was tagged and pushed on 2026-10-31 but never
+published: its `Bottle (macos-14)` job was cancelled by GitHub's scheduled
+macOS 14 runner brownout, and the `publish` job also ran on `macos-14` *and*
+gated on `needs: [bottle, linux]`, so no asset was ever attached and
+`releases/latest` remained `v0.27.0`. Because a tag-triggered run uses the
+workflow file at the tag — and that file still names `macos-14` — the v0.28.0
+run could not be re-run successfully. The v0.28.0 content carries forward
+unchanged (see its entry below); this release ships it plus the runner fix.
+
+**Release pipeline on `macos-15`.** `.github/workflows/release.yml` runs both
+the bottle matrix and the `publish` job on `macos-15`. GitHub retires the
+macOS 14 images on 2026-11-02 (actions/runner-images#13518).
+
+**Bottle tag is `arm64_sequoia`.** A `macos-15` bottle is tagged for the Sequoia
+ABI, so the release assets are `*-0.28.1.arm64_sequoia.bottle.*.tar.gz`;
+`AGENTS.md`'s release-verification step now names `arm64_sequoia`.
+
+**Checksumless bottle blocks.** All eight `Formula/*.rb` `bottle do` blocks
+carry only `root_url` and `rebuild` — the stale `arm64_sonoma` checksum is
+gone, since the asset it described was never built. The publish job's
+`brew bottle --merge --write` writes the new `arm64_sequoia` checksums from the
+build JSON, and `scripts/release.sh`'s formula-revision commit message states
+that split (the revision commit writes no bottle sha256).
+
+**COBOL frontend implementer agent.** `.opencode/agents/cobollib-implementer.md`
+ships in this release — the implementer for a future `src/cobollib/` COBOL
+frontend crate (hand-written parser, no external COBOL grammar or runtime). The
+crate itself is not part of this release. The agent was added on the remote
+(c40cd7fdc) after the v0.28.0 entry was written, so this entry records it.
+
+No durable-spec model change.
+
 ## v0.28.0
 
 Minor release: the derived graph is one database — `graph.jsonl` is retired —
