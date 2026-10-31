@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "bottle-block-carries-no-checksum",
+  "body": "The eight Formula bottle blocks now carry only root_url and rebuild: the stale arm64_sonoma checksum was removed because the macos-15 pipeline will never publish a sonoma bottle, and no arm64_sequoia checksum was written by hand because the publish job's `brew bottle --merge --write` derives it from the build JSON. Limit: a checksumless bottle block is unvalidated locally — the implementer holds no ruby/brew/actionlint grant, so the first macOS 15 release run is the real validator, and the repo gate never parses Actions YAML or Ruby formula syntax. Upgrade when the first sequoia publish lands, or if the bottle job's `brew install --build-bottle` or a tap audit objects to a checksumless block: let the merge populate the block, or drop `rebuild` alongside the checksum.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "misc.Formula",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
