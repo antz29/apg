@@ -203,97 +203,9 @@ pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTre
     ArtifactDb { db }.code_universes_from_db()
 }
 
-/// The **export-side twin** of [`code_universes`] (the database read): the two
-/// code-reference universes parsed from the `apg/.trans/graph.jsonl` export
-/// plus the plan store, resolved **without opening `db.lbug`**.
-///
-/// The database is the single code-identity source. Every production consumer —
-/// the flock-guarded plan paths (`plan_cmd`), the scan's previous-scan snapshot
-/// ([`super::db::PreviousScan::capture`]), the merge strength check
-/// (`project_cmd::merge`) and the direct write path
-/// (`layers::write::validate_change` / `write_project_with`) — resolves its
-/// universes through [`code_universes`] / [`ArtifactDb::code_universes_from_db`];
-/// nothing under `src/` calls this reader. It is kept only for the e2e
-/// fixtures that still assert against the export:
-///
-/// - `tests/artifacts_e2e.rs` —
-///   `e2e::code_universes_from_export_classifies_real_planned_absent_without_db`
-///   and `e2e::planned_fqn_states_reflect_and_guard_realized_code`
-/// - `tests/layers_e2e.rs` — `e2e::projection_equals_sources_two_way_nodes_and_edges`
-/// - `tests/plan_cmd_e2e.rs` — `reproject_layers`
-/// - `tests/review_cmd_e2e.rs` — `db_at`
-///
-/// The pair it returns:
-///
-/// - `scanned` — the real code FQNs from the `apg/.trans/graph.jsonl` export
-///   (a `module`/`file`/`struct`/`function` record without
-///   `status: planned`). `graph.jsonl` is written only by a scan, so a FQN
-///   absent from it is not called drift here while the export is missing — the
-///   caller gates on the export.
-/// - `planned` — the FQNs the plan store declares still awaiting realization
-///   (`Record::PlannedNode` in every `apg/.trans/plans/<project>.jsonl`), UNION
-///   any `status: planned` code record already projected into the export. A
-///   declared-but-unscanned FQN (e.g. `apg.session.Coordinator` before its scan)
-///   therefore classifies Pending, never drift.
-///
-/// The export is parsed as generic JSON: only the four Implementation record
-/// types and their `fqn`/`status` fields are consulted, and the `scan_meta`
-/// control record on line 1 (or any spec/plan/edge record) is skipped.
-pub fn code_universes_from_export(
-    apg_root: &Path,
-) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
-    let mut scanned = BTreeSet::new();
-    let mut planned = BTreeSet::new();
-
-    let export = apg_root.join(specs::TRANS).join("graph.jsonl");
-    if export.exists() {
-        let text = std::fs::read_to_string(&export)?;
-        for (i, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
-                anyhow::anyhow!(
-                    "{}:{}: bad graph.jsonl record: {e}",
-                    export.display(),
-                    i + 1
-                )
-            })?;
-            let Some(kind) = value.get("type").and_then(|t| t.as_str()) else {
-                continue;
-            };
-            if !matches!(kind, "module" | "file" | "struct" | "function") {
-                continue;
-            }
-            let Some(fqn) = value.get("fqn").and_then(|f| f.as_str()) else {
-                continue;
-            };
-            let status = value.get("status").and_then(|s| s.as_str()).unwrap_or("");
-            if status == "planned" {
-                planned.insert(fqn.to_string());
-            } else {
-                scanned.insert(fqn.to_string());
-            }
-        }
-    }
-
-    // The plan store's planned-node declarations. A plan store FQN already
-    // scanned stays in both sets; `classify_code_ref` prefers `scanned` (Real).
-    for f in specs::plan_files(apg_root) {
-        for record in specs::read_jsonl(&f)? {
-            if let Record::PlannedNode { fqn, .. } = record {
-                planned.insert(fqn);
-            }
-        }
-    }
-
-    Ok((scanned, planned))
-}
-
 /// The **Implementation kind** every code FQN materialises at, resolved
-/// **without opening `db.lbug`** — the kind accessor beside
-/// [`code_universes_from_export`]:
+/// **without opening `db.lbug`** — the export-side kind accessor beside the
+/// database reader [`code_universes`]:
 ///
 /// - the four Implementation record types from the `apg/.trans/graph.jsonl`
 ///   export (`module`/`file`/`struct`/`function`), and
@@ -303,13 +215,13 @@ pub fn code_universes_from_export(
 ///   scan realized the planned node), and a FQN with no declared kind stays
 ///   absent from the map — the caller's `module` default covers it.
 ///
-/// **Totality.** Both legs key on the same `fqn` identity the sibling universe
-/// reader keys on, so every FQN [`code_universes_from_export`] returns that a
-/// record names resolves at its recorded kind — a stale or partial export
-/// cannot leave it to the caller's `module` default.
+/// **Totality.** Both legs key on the same `fqn` identity the database reader
+/// keys on, so every FQN [`code_universes`] returns that a record names resolves
+/// at its recorded kind — a stale or partial export cannot leave it to the
+/// caller's `module` default.
 ///
 /// The export is parsed as generic JSON: the `scan_meta` control record and
-/// every spec/plan/edge record are skipped, exactly as the sibling does.
+/// every spec/plan/edge record are skipped.
 pub fn code_kinds_from_export(apg_root: &Path) -> anyhow::Result<HashMap<String, String>> {
     let mut kinds = HashMap::new();
 
