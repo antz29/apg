@@ -9,10 +9,14 @@
 //! the tier-1-3 body-budget rule as **errors**, and emits non-blocking advisory
 //! wording warnings for tier-1-3 node bodies a reviewer is likely to reject.
 //!
-//! **Scope** (`--tier`) and **context** are orthogonal (SPEC §9.2): a single
-//! tier scopes which rules run (its local structure plus the typed upstream
-//! spine paths it requires), while the context is always ordinary lint (a
-//! missing Component `implemented-by` is permitted, SPEC §8.2). Save and
+//! **Scope** (`--tier`) is cumulative (SPEC §9.2): the named tier is checked
+//! together with every tier above it in the catalog ladder (`requirements`
+//! alone, `domain` with `requirements`, `solution` with both), so the per-node
+//! rules, R3/R4, note confinement, the body budget and the wording advisories
+//! all select nodes by that ladder. The shared mechanical validator still
+//! receives the full model and applies its own scope ([`model_errors`]).
+//! Scope and **context** are orthogonal: the context is always ordinary lint
+//! (a missing Component `implemented-by` is permitted, SPEC §8.2). Save and
 //! merge-strength contexts are internal caller choices of the shared
 //! validator's `Context`, never lint flags.
 //!
@@ -360,12 +364,15 @@ pub(crate) fn body_budget_errors(nodes: &[NodeFile]) -> Vec<String> {
 /// writes, nor does it read the merge-base tree or the plan store (the
 /// change-set delta coverage gates are plan-verification concerns, SPEC §9.3).
 ///
-/// `tier` is the **scope** (SPEC §9.2/§9.4): `Some(layer)` restricts the local
-/// per-node rules, the shared mechanical validator set, and the advisories to
-/// that tier plus the typed upstream spine paths it requires; `None` checks all
-/// tiers. Scope is not context: lint always enforces the ordinary-lint
-/// `Context::Lint` boundary (a missing Component `implemented-by` is
-/// permitted, SPEC §8.2).
+/// `tier` is the **scope** (SPEC §9.2/§9.4) and it is cumulative: `Some(layer)`
+/// checks that tier together with every tier above it in the catalog ladder
+/// (`requirements` alone, `domain` with `requirements`, `solution` with both),
+/// so the per-node rules, R3/R4, note confinement, the body budget and the
+/// advisories select nodes by the ladder; the shared mechanical validator still
+/// receives the full model and applies its own scope ([`model_errors`]). `None`
+/// checks all tiers. Scope is not context: lint always enforces the
+/// ordinary-lint `Context::Lint` boundary (a missing Component `implemented-by`
+/// is permitted, SPEC §8.2).
 ///
 /// Errors (blocking — `cmd_spec` reports them and exits non-zero):
 /// - **the shared mechanical validator set** — [`model_errors`] runs the SPEC
@@ -399,13 +406,15 @@ pub fn lint(apg_root: &Path, tier: Option<Layer>) -> anyhow::Result<(Vec<String>
     let fqn_of =
         |n: &NodeFile| crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
 
-    // Scope: the per-node rules and advisories see only the selected tier's
-    // nodes; the shared validator below sees the whole model (an in-scope node's
-    // spine path resolves against it) but reports only in-scope subjects.
+    // Scope is cumulative: the selected tier together with every tier above it
+    // in the catalog ladder (`Layer`'s declaration order — requirements above
+    // domain above solution), because this one selection feeds R3/R4, note
+    // confinement, the body budget and the advisories. The shared validator
+    // below still sees the whole model and applies its own scope.
     let scoped: Vec<NodeFile> = match tier {
         Some(scope) => nodes
             .iter()
-            .filter(|n| layer_of(&n.layer) == scope)
+            .filter(|n| layer_of(&n.layer) <= scope)
             .cloned()
             .collect(),
         None => nodes.clone(),
@@ -482,7 +491,8 @@ pub fn lint(apg_root: &Path, tier: Option<Layer>) -> anyhow::Result<(Vec<String>
 
 /// `apg spec lint` — the argv handler for the `spec` subcommand. The only valid
 /// subcommand is `lint`: parse the optional `--tier` scope
-/// (`requirements`/`domain`/`solution`; omitted = all tiers, SPEC §9.4),
+/// (`requirements`/`domain`/`solution`, the named tier plus every tier above
+/// it; omitted = all tiers, SPEC §9.4),
 /// resolve the layout root, run [`lint`], print the non-blocking advisories and
 /// then the blocking errors to stderr, and exit non-zero (via the returned
 /// error) when any error is found; a clean spec prints a one-line summary to
