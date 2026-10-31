@@ -3367,8 +3367,8 @@ mod e2e {
 
         let session = testutil::start_session_process(&wt, &home);
 
-        // Route one durable mutation: admitted into the write-back buffer (and
-        // projected into the held DB) but NOT durable until save. A lone
+        // Route one durable mutation: applied to the worktree database at
+        // admission (projected) but NOT durable until save. A lone
         // `global.constraint` keeps the model whole-model-valid (SPEC §8.1).
         let add = testutil::ApgCommand::new(&[
             "node",
