@@ -3077,24 +3077,26 @@ mod e2e {
 
     /// spec-splice-guard phase-03 task-1 (e2e): a SPEC-ONLY `apg project
     /// merge` — no code change at all — must land the merged authored
-    /// node/edge in main's `db.lbug` (the query index), not merely in the
-    /// `graph.jsonl` export it publishes beside it.
+    /// node/edge rows in main's `db.lbug`: the rebuild's one landing artifact,
+    /// and the query index every later read resolves against.
     ///
     /// The defect path: `project start` seeds the branch DB from main's scan;
-    /// the branch then authors a durable requirement + value + `driven-by` edge
-    /// through a LIVE session (the mandatory-session path) and saves — a
+    /// the branch then authors a durable requirement + service + `driven-by`
+    /// edge through a LIVE session (the mandatory-session path) and saves — a
     /// SPEC-ONLY change, with NO worktree scan, so the branch DB still matches
     /// main's seed content identity. Merging fast-forwards main to the branch;
     /// its rebuild takes the win-C splice fast path, whose `apply` writes no
-    /// authored/transient row (it applies only the code delta) while
-    /// `publish` serializes `graph.jsonl` from the FULL assembled graph. Main's
-    /// DB therefore silently loses the merged spec, and the splice stamps the
+    /// authored/transient row (it applies only the code delta). Main's database
+    /// therefore silently loses the merged spec, and the splice stamps the
     /// merged HEAD so a later `apg scan` fast-paths as fresh and never corrects
     /// it.
     ///
     /// The phase-01 authored-identity guard makes the seed ineligible (the
     /// assembled graph's authored rows are not represented in the seed DB), so
-    /// the correctness-reference FULL LOAD runs and main's DB and export agree.
+    /// the correctness-reference FULL LOAD runs and assembles every row of the
+    /// branch's `apg/layers/**` model into main's database. The assertions
+    /// below compare that database against the branch's own durable snapshot —
+    /// database-side equality, with nothing compared against an export.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/live session/db.lbug); run via cargo test-e2e"]
     fn merge_spec_only_lands_authored_rows_in_main_db() {
@@ -3332,6 +3334,16 @@ mod e2e {
             .unwrap();
         plan_cmd::plan_verify_at(&wt_apg, "spec-only").unwrap();
 
+        // Snapshot the branch's durable authored model BEFORE the merge — the
+        // merge self-cleans the worktree, so `apg/layers/**` must be read now.
+        // These are exactly the rows the unconditional full-load rebuild must
+        // assemble into main's database; every one is asserted after the merge.
+        let authored = layers::read_existing_nodes(&wt_apg).unwrap();
+        assert!(
+            !authored.is_empty(),
+            "the branch must carry the authored model to merge"
+        );
+
         // Merge from the main checkout with a REAL rebuild: the rebuild seam
         // spawns the candidate binary's `apg scan .` on main (the binary is
         // what resolves the staged frontends; the in-process default cannot).
@@ -3356,9 +3368,10 @@ mod e2e {
         project_merge_at(&repo_apg, "spec-only", Some(&rebuild)).unwrap();
 
         // THE ASSERTION THAT ISOLATES THE DEFECT: main's `db.lbug` ITSELF (the
-        // query index), not just `graph.jsonl`, carries the merged authored
-        // node and edge. Pre-fix the splice published a DB without them while
-        // the export, serialized from the full assembled graph, kept them.
+        // query index the rebuild assembles) must carry every merged authored
+        // node and edge row exactly as the unconditional full-load rebuild
+        // renders it from `apg/layers/**`. Pre-fix the splice applied only the
+        // code delta and left the database without them.
         let main_apg = repo_dir.join(specs::LAYOUT);
         let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
         assert!(
@@ -3379,6 +3392,29 @@ mod e2e {
                 .parse()
                 .unwrap_or(0)
         };
+        // The authored edge kind's DB rel table (`apg/layers/**` kind → the
+        // table the rebuild loads it into); an unexpected kind fails loudly
+        // rather than silently skipping a row.
+        let rel_table = |kind: &str| -> &'static str {
+            match kind {
+                "contains" => "Contains",
+                "requires" => "Requires",
+                "driven-by" => "DrivenBy",
+                "realises" => "Realises",
+                "is-role" => "IsRole",
+                "implemented-by" => "SpecImplementedBy",
+                "applies-to" => "AppliesTo",
+                "calls" => "Calls",
+                "publishes" => "Publishes",
+                "subscribes" => "Subscribes",
+                "reads" => "Reads",
+                "writes" => "Writes",
+                "uses" => "Uses",
+                "represents" => "Represents",
+                "details" => "Details",
+                other => panic!("unknown authored edge kind `{other}`"),
+            }
+        };
         assert_eq!(
             count(&format!(
                 "MATCH (:Service {{fqn: '{svc_fqn}'}})-[:DrivenBy]->(:Requirement {{fqn: '{req_fqn}'}}) RETURN count(*)"
@@ -3386,11 +3422,37 @@ mod e2e {
             1,
             "main's db.lbug must carry the merged authored driven-by edge"
         );
+        // DATABASE-SIDE EQUALITY: every node in the branch's durable snapshot
+        // resolves in main's database, and every authored out edge exists there
+        // exactly once — the merged rows exactly as the full-load rebuild
+        // assembles them.
+        for node in &authored {
+            let fqn = format!("{}.{}.{}", node.layer, node.node_type, node.name);
+            assert!(
+                db.has_node(&fqn),
+                "main's db.lbug must carry every merged authored node; `{fqn}` is missing"
+            );
+            for edge in &node.out {
+                let table = rel_table(&edge.kind);
+                assert_eq!(
+                    count(&format!(
+                        "MATCH (a)-[r:{table}]->(b) WHERE a.fqn = {} AND b.fqn = {} RETURN count(*)",
+                        artifacts::lit(&fqn),
+                        artifacts::lit(&edge.target)
+                    )),
+                    1,
+                    "main's db.lbug must carry the merged `{}` edge `{fqn}` -> `{}` exactly once",
+                    edge.kind,
+                    edge.target
+                );
+            }
+        }
         drop(db);
 
         // A subsequent scan must not MASK the loss: pre-fix the splice stamped
         // the merged HEAD, so an `apg scan` fast-pathed as fresh and never
-        // corrected the missing row. The authored row must still be there.
+        // corrected the missing row. The database must still carry the merged
+        // authored rows after the re-scan.
         let rescan = warm_run(&repo_dir, &home, &["scan", "."]);
         assert!(
             rescan.status.success(),
@@ -3401,6 +3463,27 @@ mod e2e {
         assert!(
             db.has_node(req_fqn),
             "a subsequent scan must not mask the authored-row loss"
+        );
+        assert!(
+            db.has_node(svc_fqn),
+            "a subsequent scan must not mask the authored service loss"
+        );
+        let count = |q: &str| -> i64 {
+            db.q(q)
+                .unwrap()
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        };
+        assert_eq!(
+            count(&format!(
+                "MATCH (:Service {{fqn: '{svc_fqn}'}})-[:DrivenBy]->(:Requirement {{fqn: '{req_fqn}'}}) RETURN count(*)"
+            )),
+            1,
+            "a subsequent scan must not mask the merged authored driven-by edge"
         );
         drop(db);
 
