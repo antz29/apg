@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.ingest_e2e.e2e.cached_declaration_supersedes_a_planned_placeholder",
+      "target": "rust.ingest_e2e.code_table_projection",
       "properties": {}
     }
   ],
