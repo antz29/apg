@@ -840,8 +840,8 @@ pub fn write_project_with(
 /// [`records_for_nodes`](crate::layers::tree::records_for_nodes).
 ///
 /// The caller owns the code-identity source and the projection closure:
-/// [`write_project_with`] is the direct path (on-disk store + the `graph.jsonl`
-/// export), while the session's admission
+/// [`write_project_with`] is the direct path (the on-disk store and the branch
+/// database's code universe), while the session's admission
 /// ([`Coordinator::apply_mutation`](crate::session::Coordinator::apply_mutation))
 /// projects the held database. It is the general partial-delta projection seam,
 /// not authoring-mutation-specific.
