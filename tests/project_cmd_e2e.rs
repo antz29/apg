@@ -1123,22 +1123,48 @@ fn warm_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output
         .output()
 }
 
-/// Every `graph.jsonl` record except the leading `scan_meta` (the code +
-/// layer/transient records a full scan and the warm assembly must agree on).
+/// Every node and relationship row of the checkout's `db.lbug`, opened
+/// **read-only**, as canonical `table`-qualified strings — the database-side
+/// record set (code nodes/edges and the authored/transient rows) a full scan,
+/// the warm-assembled branch database and an untouched main database must
+/// agree on. The `Scan` control node (the export's former `scan_meta` lead)
+/// and the session's `PendingRemoval` ledger are not graph records and are
+/// skipped.
 fn graph_records(dir: &Path) -> std::collections::BTreeSet<String> {
-    let path = dir
-        .join(specs::LAYOUT)
-        .join(specs::TRANS)
-        .join("graph.jsonl");
-    let text =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    text.lines()
-        .filter(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).unwrap_or(serde_json::Value::Null);
-            v.get("type").and_then(|t| t.as_str()) != Some("scan_meta")
-        })
-        .map(str::to_string)
-        .collect()
+    let path = dir.join(specs::LAYOUT).join(specs::TRANS).join("db.lbug");
+    let db = lbug::Database::new(&path, lbug::SystemConfig::default().read_only(true))
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let conn = lbug::Connection::new(&db).unwrap();
+    let rows = |query: &str| -> Vec<Vec<String>> {
+        conn.query(query)
+            .unwrap_or_else(|e| panic!("query `{query}` on {}: {e}", path.display()))
+            .map(|row| row.iter().map(|v| v.to_string()).collect())
+            .collect()
+    };
+    let mut records = std::collections::BTreeSet::new();
+    for table in rows("CALL show_tables() RETURN name, type") {
+        let (name, kind) = (&table[0], &table[1]);
+        if name == "PendingRemoval" {
+            continue;
+        }
+        match kind.as_str() {
+            "NODE" if name == "Scan" => {}
+            "NODE" => {
+                for row in rows(&format!("MATCH (n:{name}) RETURN n.*")) {
+                    records.insert(format!("node {name} {}", row.join("\u{1f}")));
+                }
+            }
+            "REL" => {
+                for row in rows(&format!(
+                    "MATCH (a)-[r:{name}]->(b) RETURN a.fqn, b.fqn, r.*"
+                )) {
+                    records.insert(format!("rel {name} {}", row.join("\u{1f}")));
+                }
+            }
+            _ => {}
+        }
+    }
+    records
 }
 
 /// e2e tier -- real I/O: every test here creates/merges/deletes real git
@@ -1151,16 +1177,17 @@ mod e2e {
 
     /// fast-project-start task-5 (e2e): `apg project start` at a
     /// freshly-scanned main copies main's `apg/.trans` into the branch
-    /// verbatim — the branch `db.lbug` + `graph.jsonl` are byte-identical
-    /// to main's, and NO new frontend runs (the copied `apg-frontend.log`
-    /// still carries main's single frontend run and nothing is appended).
+    /// verbatim — the branch `db.lbug` is byte-identical to main's, its row
+    /// set equals a full scan's, and NO new frontend runs (the copied
+    /// `apg-frontend.log` still carries main's single frontend run and
+    /// nothing is appended).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn warm_cache_project_start_spawns_no_frontend_and_equals_a_full_scan() {
         let (base, repo_dir, home) = warm_scratch("warm");
 
-        // Full scan on the main checkout: populates main's `.trans`
-        // (db.lbug + graph.jsonl + the frontend log) at the recorded HEAD.
+        // Full scan on the main checkout: populates main's `.trans` (the
+        // database + the frontend log) at the recorded HEAD.
         let scan = warm_run(&repo_dir, &home, &["scan", "."]);
         assert!(
             scan.status.success(),
@@ -1175,7 +1202,6 @@ mod e2e {
             "the baseline full scan must spawn the go frontend: {main_log}"
         );
         let main_db = std::fs::read(main_trans.join("db.lbug")).unwrap();
-        let main_graph = std::fs::read(main_trans.join("graph.jsonl")).unwrap();
         let full_scan_records = graph_records(&repo_dir);
         assert!(
             !full_scan_records.is_empty(),
@@ -1198,18 +1224,12 @@ mod e2e {
             "the branch db.lbug must be seeded"
         );
 
-        // Byte-identical copy: the branch DB and graph ARE main's scan, and
-        // the copied log is unchanged — start appended nothing, so no new
-        // frontend ran.
+        // Byte-identical copy: the branch DB IS main's scan, and the copied
+        // log is unchanged — start appended nothing, so no new frontend ran.
         assert_eq!(
             std::fs::read(wt_trans.join("db.lbug")).unwrap(),
             main_db,
             "the branch db.lbug must be byte-identical to main's"
-        );
-        assert_eq!(
-            std::fs::read(wt_trans.join("graph.jsonl")).unwrap(),
-            main_graph,
-            "the branch graph.jsonl must be byte-identical to main's"
         );
         assert_eq!(
             std::fs::read_to_string(wt_trans.join("apg-frontend.log")).unwrap(),
@@ -1217,11 +1237,12 @@ mod e2e {
             "the copied frontend log must be byte-identical — no new frontend ran"
         );
 
-        // Same code nodes and edges as the full scan of the commit.
+        // Same database rows — code nodes/edges and authored/transient records
+        // — as the full scan of the commit.
         assert_eq!(
             graph_records(&wt),
             full_scan_records,
-            "the branch graph must equal a full scan of the commit"
+            "the branch database rows must equal a full scan of the commit"
         );
 
         let _ = std::fs::remove_dir_all(&base);
@@ -1991,8 +2012,8 @@ mod e2e {
         repo.commit_all("seed code");
 
         // A main-checkout scan first: the "untouched" assertions compare
-        // against a real main DB (its db.lbug + graph.jsonl must not move
-        // during in-worktree operation).
+        // against a real main DB (its database rows must not move during
+        // in-worktree operation).
         start_scan_locked(&repo.root).unwrap();
         let main_apg = repo.apg_root();
         let main_db = artifacts::ArtifactDb::open(&main_apg).unwrap();
@@ -2000,8 +2021,7 @@ mod e2e {
         assert!(main_db.has_node(format!("{MOD_FQN}.Lookup").as_str()));
         drop(main_db);
         let main_db_bytes = std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap();
-        let main_graph_bytes =
-            std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap();
+        let main_rows = graph_records(&repo.root);
         let main_tip = repo.head_sha();
 
         // 1. start from main: one command yields worktree + branch + branch
@@ -2147,17 +2167,17 @@ mod e2e {
         );
 
         // 2d. the MAIN checkout's apg/ is untouched by all of it: its db.lbug
-        // and graph.jsonl are byte-identical, no apg/layers was created there,
-        // and main's branch never moved.
+        // is byte-identical, its database rows are unchanged, no apg/layers
+        // was created there, and main's branch never moved.
         assert_eq!(
             std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
             main_db_bytes,
             "main's db.lbug must be unchanged by the in-worktree operations"
         );
         assert_eq!(
-            std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap(),
-            main_graph_bytes,
-            "main's graph.jsonl must be unchanged by the in-worktree operations"
+            graph_records(&repo.root),
+            main_rows,
+            "main's database rows must be unchanged by the in-worktree operations"
         );
         assert!(
             !main_apg.join("layers").exists(),
