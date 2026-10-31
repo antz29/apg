@@ -92,6 +92,7 @@ pub fn warm_prepared(
         reuse_candidates,
         manifest,
         recorded_content_key: record.content_key.clone(),
+        previous: None,
     })
 }
 

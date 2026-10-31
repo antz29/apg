@@ -120,6 +120,14 @@ pub struct Prepared {
     /// publish a DB that is not a full rebuild (feedback-101, see
     /// [`crate::splice::seed_checked`]).
     pub recorded_content_key: Option<String>,
+    /// The previous worktree database's snapshot — the recorded `scanned` /
+    /// `planned` code universes, the code kinds, and the Agent records —
+    /// captured once per scan. `None` until the scan assigns that single
+    /// capture, and when the database is absent, unreadable, or carries
+    /// pending state. Threaded to the pipeline's consumers (the full-universe
+    /// base, splice eligibility, the seed's authored identity) so they never
+    /// open a second handle.
+    pub previous: Option<crate::artifacts::PreviousScan>,
 }
 
 impl Prepared {
@@ -230,6 +238,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
                 reuse_candidates: Vec::new(),
                 manifest: Manifest::default(),
                 recorded_content_key: None,
+                previous: None,
             };
         }
     };
@@ -244,6 +253,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
             reuse_candidates: Vec::new(),
             manifest: Manifest::build(scan_root),
             recorded_content_key: None,
+            previous: None,
         };
     }
     // The content identity the delta is derived from, captured BEFORE the
@@ -266,6 +276,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
             reuse_candidates: Vec::new(),
             manifest,
             recorded_content_key: None,
+            previous: None,
         };
     }
 
@@ -330,6 +341,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
             reuse_candidates: Vec::new(),
             manifest,
             recorded_content_key: None,
+            previous: None,
         };
     }
 
@@ -385,6 +397,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         reuse_candidates,
         manifest,
         recorded_content_key,
+        previous: None,
     }
 }
 
