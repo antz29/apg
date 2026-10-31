@@ -2,22 +2,12 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "suite-tool-descriptions-name-live-edge-kinds",
-  "body": "The shipped suite tool descriptions and input schemas advertise only live durable edge kinds — `driven-by`, never the retired `drives` — and a deterministic check pins every shipped suite tool source against the retired kind tokens.",
+  "body": "The shipped suite tool descriptions and schemas advertise only the live durable edge kinds — `driven-by` in place of the `drives` spelling — and a deterministic check pins every suite tool source against the retired kind tokens.",
   "properties": {
     "feature": "spec-model-enforcement"
   },
   "out": [],
   "in": [
-    {
-      "kind": "requires",
-      "source": "requirements.stakeholder.agent-suite-maintainer",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "source": "requirements.stakeholder.spec-author",
-      "properties": {}
-    },
     {
       "kind": "driven-by",
       "source": "domain.service.opencode-integration",
@@ -26,6 +16,16 @@
     {
       "kind": "driven-by",
       "source": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }
   ]
