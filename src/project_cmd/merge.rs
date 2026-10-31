@@ -32,6 +32,13 @@ pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
 /// merged project cleans up after itself: its worktree is removed and its
 /// branch deleted (self-cleanup; never the default branch). Any refusal or
 /// failure before the success path leaves both untouched.
+///
+/// The main rebuild after the merge is unconditional: every change-set — a
+/// spec-only one included — takes the same rebuild, with no source-diff or
+/// spec-only short-circuit. The merged authored nodes and edges reach main's
+/// database exactly as that rebuild assembles them from `apg/layers/**` plus
+/// the scanned code. The rebuild is the correctness path, not an optimisation
+/// to skip: a merge that skipped it would leave main's database stale.
 pub fn project_merge_at(
     main_apg_root: &Path,
     name: &str,
@@ -176,12 +183,16 @@ pub fn project_merge_at(
         repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))?;
     }
 
-    // Main rebuild: a plain unguarded scan on main. Cleanup runs ONLY on the
-    // success path — any refusal or failure before this point leaves the
-    // worktree and branch untouched. The worktree is unregistered + removed
-    // and the project branch deleted (safe: the merged branch is by
-    // definition merged into the default branch; the default branch itself is
-    // hard-refused inside delete_branch).
+    // Main rebuild: a plain unguarded scan on main, and it is unconditional —
+    // every change-set (a spec-only one included) takes this same rebuild, with
+    // no source-diff or spec-only short-circuit: the merged authored rows are in
+    // main's database only after this rebuild assembles them from
+    // `apg/layers/**` plus the scanned code, so skipping it would leave the
+    // database stale. Cleanup runs ONLY on the success path — any refusal or
+    // failure before this point leaves the worktree and branch untouched. The
+    // worktree is unregistered + removed and the project branch deleted (safe:
+    // the merged branch is by definition merged into the default branch; the
+    // default branch itself is hard-refused inside delete_branch).
     let rebuild = rebuild.unwrap_or(&real_scan);
     rebuild(&identity.main_root)?;
     git::remove_worktree(&identity.main_root, name)?;
