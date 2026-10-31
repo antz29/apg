@@ -442,7 +442,7 @@ impl ArtifactDb {
     ///   union without touching the transient plan files.
     ///
     /// Unlike the free [`crate::artifacts::code_universes`] (which opens its own
-    /// read-write handle), this borrows the caller's held handle, so the session
+    /// read-only handle), this borrows the caller's held handle, so the session
     /// amortizes ONE open across its whole life. `UnresolvedTarget` is
     /// deliberately excluded — an unresolved reference is not code.
     pub fn code_universes_from_db(&self) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
