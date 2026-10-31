@@ -2379,23 +2379,22 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-6: `ArtifactDb::code_universes_from_db` reads the scanned
-    /// and planned code-FQN universes from a REAL `db.lbug` — a hermetic scan of
-    /// real source (`testutil::project_with_db`, the canonical code payload)
-    /// plus a plan-writer-authored planned Implementation node the scan
-    /// projects as a `status = planned` code row — and those sets equal the ones
-    /// `artifacts::code_universes_from_export` derives from the SAME scan's
-    /// `graph.jsonl` (plus the plan store). The DB-side twin lets session
-    /// admission validate `implemented-by` refs with no `graph.jsonl` read.
+    /// Phase-06 task-9: `PreviousScan::capture` is the previous database's
+    /// snapshot over **one** read — the scanned and planned code universes,
+    /// every code FQN's recorded kind, and the `Agent` roster — captured from a
+    /// REAL `db.lbug` (a hermetic scan of real source,
+    /// `testutil::project_with_db`, plus a plan-writer-authored planned
+    /// Implementation node the scan projects as a `status = planned` code row).
+    /// A database carrying pending state (an admitted-but-unsaved ledger
+    /// identity) captures as absent, never as a partial snapshot.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn code_universes_from_db_match_the_export_universes_for_a_real_scan() {
         let (repo, wt, wt_apg) = testutil::project_with_db("code-universes-from-db");
 
         // A planned Implementation node declared in the plan store: the next
-        // scan projects it as a `status = planned` Struct row into both
-        // `db.lbug` and `graph.jsonl`. `parent` is the scanned module FQN, so
-        // the Contains edge resolves.
+        // scan projects it as a `status = planned` Struct row into `db.lbug`.
+        // `parent` is the scanned module FQN, so the Contains edge resolves.
         let planned_fqn = "go.fixture.mod.Future";
         specs::write_jsonl(
             &specs::plan_jsonl_path(&wt_apg, "foo"),
@@ -2409,38 +2408,105 @@ mod e2e {
         .unwrap();
         testutil::scan_checkout(&wt).unwrap();
 
-        // The DB-side universes from the real `db.lbug`.
+        let snapshot = PreviousScan::capture(&wt_apg).expect("a clean scanned database captures");
+
         let db = ArtifactDb::open(&wt_apg).unwrap();
         let (db_scanned, db_planned) = db.code_universes_from_db().unwrap();
-        drop(db);
 
-        // The export-side universes from the same scan's `graph.jsonl`.
-        let (export_scanned, export_planned) = code_universes_from_export(&wt_apg).unwrap();
-
-        // The scanned universe carries the real code from the source payload
-        // (PHASE_09: the frontend module identity is language-rooted),
-        // independent of the export file.
-        assert!(db_scanned.contains("go.fixture.mod"), "{db_scanned:?}");
-        assert!(
-            db_scanned.contains("go.fixture.mod.Store"),
-            "{db_scanned:?}"
+        // The captured universes are the database's own, and carry the real
+        // code from the source payload (PHASE_09: the frontend module identity
+        // is language-rooted).
+        assert_eq!(
+            snapshot.scanned, db_scanned,
+            "the capture's scanned universe is the database's"
         );
-        assert!(db_scanned.contains("/abs/store.go"), "{db_scanned:?}");
+        assert_eq!(
+            snapshot.planned, db_planned,
+            "the capture's planned universe is the database's"
+        );
+        for fqn in ["go.fixture.mod", "go.fixture.mod.Store", "/abs/store.go"] {
+            assert!(
+                snapshot.scanned.contains(fqn),
+                "{fqn} is scanned code: {:?}",
+                snapshot.scanned
+            );
+        }
         // The planned placeholder is planned, never real code.
         assert!(
-            !db_scanned.contains(planned_fqn),
-            "a status:planned node is not scanned code: {db_scanned:?}"
+            !snapshot.scanned.contains(planned_fqn),
+            "a status:planned node is not scanned code: {:?}",
+            snapshot.scanned
         );
-        assert!(db_planned.contains(planned_fqn), "{db_planned:?}");
+        assert!(
+            snapshot.planned.contains(planned_fqn),
+            "{:?}",
+            snapshot.planned
+        );
 
-        // The DB reader and the graph.jsonl reader agree exactly on both sets.
+        // Every universe FQN carries the kind its database row records.
+        for (fqn, kind) in [
+            ("go.fixture.mod", "module"),
+            ("go.fixture.mod.Store", "struct"),
+            ("/abs/store.go", "file"),
+            (planned_fqn, "struct"),
+        ] {
+            assert_eq!(
+                snapshot.kinds.get(fqn).map(String::as_str),
+                Some(kind),
+                "{fqn} must record its Implementation kind: {:?}",
+                snapshot.kinds
+            );
+        }
+        for fqn in snapshot.scanned.iter().chain(snapshot.planned.iter()) {
+            assert!(
+                snapshot.kinds.contains_key(fqn),
+                "{fqn} has no recorded kind: {:?}",
+                snapshot.kinds
+            );
+        }
+
+        // The Agent roster is the database's own `Agent` rows, as the export
+        // records the rebuild re-emits (`agent.` prefix stripped).
+        let (_, agent_rows) = apg::splice::query_rows(
+            &db.conn().unwrap(),
+            "MATCH (n:Agent) RETURN n.fqn, n.path, n.start_line, n.end_line ORDER BY n.fqn",
+        )
+        .unwrap();
+        let db_agents: Vec<Record> = agent_rows
+            .iter()
+            .filter_map(|row| {
+                let fqn = apg::splice::cell(row, 0);
+                let name = fqn.strip_prefix("agent.")?.to_string();
+                Some(Record::Agent {
+                    name,
+                    path: apg::splice::cell(row, 1),
+                    start_line: apg::splice::cell(row, 2).parse().unwrap_or(0),
+                    end_line: apg::splice::cell(row, 3).parse().unwrap_or(0),
+                })
+            })
+            .collect();
         assert_eq!(
-            db_scanned, export_scanned,
-            "scanned universes must be identical from db.lbug and graph.jsonl"
+            snapshot.agents, db_agents,
+            "the capture carries the database's Agent roster"
         );
-        assert_eq!(
-            db_planned, export_planned,
-            "planned universes must be identical from db.lbug and graph.jsonl+plan store"
+        drop(db);
+
+        // Pending state: an admitted-but-unsaved ledger identity never seeds a
+        // rebuild — the capture fails closed.
+        ArtifactDb::open(&wt_apg)
+            .unwrap()
+            .record_pending_removal("requirements.stakeholder.customer")
+            .unwrap();
+        assert!(
+            PreviousScan::capture(&wt_apg).is_none(),
+            "a database carrying pending state does not capture"
+        );
+
+        // An absent database has no previous scan either.
+        std::fs::remove_file(wt_apg.join(specs::TRANS).join("db.lbug")).unwrap();
+        assert!(
+            PreviousScan::capture(&wt_apg).is_none(),
+            "an absent database does not capture"
         );
 
         testutil::remove(&repo);
