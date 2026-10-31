@@ -598,30 +598,45 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
 /// byte-identical to those same authored rows' entry in a real scan's assembled
 /// graph.
 ///
-/// The code-reference universe `ingest_tree` validates `implemented-by` targets
-/// against is read from the export
-/// ([`crate::artifacts::code_universes_from_export`]), never from the DB. Those
-/// real code FQNs are ALSO carried into the assembly as placeholder code nodes,
-/// so `ingest`'s finalize keeps the authored→code edges (`implemented-by`,
+/// Every code-side fact comes from the ONE
+/// [`crate::artifacts::PreviousScan::capture`] read of the previous worktree
+/// database — the same snapshot `cmd_scan` threads and the splice seed
+/// consumes: the code-reference universe `ingest_tree` validates
+/// `implemented-by` targets against, each code FQN's recorded Implementation
+/// kind, and the `Agent` records. No `graph.jsonl` parse is performed. A
+/// `None` capture (an absent, unreadable or pending-state database) contributes
+/// empty universes, kinds and agents, so the digest then reflects only the
+/// durable layers and the transient plan legs.
+///
+/// Those real code FQNs are ALSO carried into the assembly as placeholder code
+/// nodes, so `ingest`'s finalize keeps the authored→code edges (`implemented-by`,
 /// `details`, `reviews`) exactly as the real scan's assembled graph does — the
 /// real scan has the actual code nodes; the tree has none. A `PlannedNode`
 /// placeholder enters at its exact FQN (no language re-rooting) at the
-/// recorded kind [`crate::artifacts::code_kinds_from_export`] resolves for that
-/// FQN — the export's code record, else the plan store's declared kind, and
-/// `module` only for a FQN no record names — so the kind-paired Task operation
-/// edges (`struct_modify` and its siblings) survive finalize exactly as they do
-/// against the real nodes. Being a code kind, the placeholder contributes no
-/// authored row to the digest; its only effect is to keep those edges. The
-/// export's `agent` records are carried the same way, as `Agent` placeholders,
-/// so the `AssignedTo` edges targeting them survive finalize; `Agent` is not an
-/// authored kind either, so the digest gains only those edges.
+/// recorded kind the snapshot resolves for that FQN — the database row's
+/// recorded kind, and `module` only for a FQN no row names — so the kind-paired
+/// Task operation edges (`struct_modify` and its siblings) survive finalize
+/// exactly as they do against the real nodes. Being a code kind, the
+/// placeholder contributes no authored row to the digest; its only effect is to
+/// keep those edges. The snapshot's `Agent` records are carried the same way,
+/// as `Agent` placeholders, so the `AssignedTo` edges targeting them survive
+/// finalize; `Agent` is not an authored kind either, so the digest gains only
+/// those edges.
 ///
-/// No database is opened. Every failure (a malformed layers/transient file, a
-/// drift ref, a bad export line) is returned as an `Err`.
+/// The one read-only database handle lives inside `capture` and is dropped
+/// before it returns, so no handle is held while the seed runs. Every remaining
+/// failure (a malformed layers/transient file, a drift ref) is returned as an
+/// `Err`.
 pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
-    // The code-identity universe the real scan validates `implemented-by` refs
-    // against, from the export only.
-    let (scanned, planned) = crate::artifacts::code_universes_from_export(apg_root)?;
+    // The previous database read once: the code-identity universes the real scan
+    // validates `implemented-by` refs against, every code FQN's recorded kind and
+    // the Agent roster. An absent, unreadable or pending-state database yields
+    // empty values, exactly as an absent export did.
+    let previous = crate::artifacts::PreviousScan::capture(apg_root);
+    let (scanned, planned) = previous
+        .as_ref()
+        .map(|p| (p.scanned.clone(), p.planned.clone()))
+        .unwrap_or_default();
 
     // The durable tree (validated against the code/planned universes) plus the
     // worktree's transient legs — exactly `cmd_scan`'s post-code record stream.
@@ -637,17 +652,16 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
     // scan's actual code nodes, without which `ingest`'s finalize would prune
     // every authored→code edge (the target node would be absent). Each carries
     // the recorded Implementation kind, so the kind-paired Task operation edges
-    // survive finalize — a stale or partial export cannot drop them, because
-    // the plan store's declared kind covers a FQN the export omits. Only a FQN
-    // no record names (a plan declaration carrying no kind) falls back to
-    // `module`. Code kinds contribute no authored row, so the digest is
+    // survive finalize. Both universes and the kind map sweep the same four code
+    // labels, so every universe FQN is row-named and the `module` fallback is
+    // defensive only. Code kinds contribute no authored row, so the digest is
     // unchanged by their presence other than through the edges they keep.
-    let kinds = crate::artifacts::code_kinds_from_export(apg_root)?;
+    let kinds = previous.as_ref().map(|p| &p.kinds);
     for fqn in scanned.iter().chain(planned.iter()) {
         records.push(Record::PlannedNode {
             fqn: fqn.clone(),
             kind: kinds
-                .get(fqn)
+                .and_then(|kinds| kinds.get(fqn))
                 .cloned()
                 .unwrap_or_else(|| "module".to_string()),
             name: String::new(),
@@ -655,51 +669,14 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
         });
     }
 
-    // Placeholder Agent nodes for the export's `agent` records — the analog of
-    // the real scan's actual Agent nodes, without which `ingest`'s finalize
-    // would prune every `AssignedTo` edge (the target node would be absent).
-    // `Agent` is not an authored kind, so it contributes no authored row; its
-    // only effect is to keep those edges. `agent_node` renders the FQN from the
-    // record's `name`, so the export FQN's `agent.` prefix is stripped here.
-    let export = apg_root.join(crate::specs::TRANS).join("graph.jsonl");
-    if export.exists() {
-        let text = std::fs::read_to_string(&export)?;
-        for (i, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
-                anyhow::anyhow!(
-                    "{}:{}: bad graph.jsonl record: {e}",
-                    export.display(),
-                    i + 1
-                )
-            })?;
-            if value.get("type").and_then(|t| t.as_str()) != Some("agent") {
-                continue;
-            }
-            let Some(name) = value
-                .get("fqn")
-                .and_then(|f| f.as_str())
-                .and_then(|fqn| fqn.strip_prefix("agent."))
-            else {
-                continue;
-            };
-            records.push(Record::Agent {
-                name: name.to_string(),
-                path: value
-                    .get("path")
-                    .and_then(|p| p.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                start_line: value
-                    .get("start_line")
-                    .and_then(|n| n.as_u64())
-                    .unwrap_or(0) as u32,
-                end_line: value.get("end_line").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
-            });
-        }
+    // Placeholder Agent nodes for the previous database's `Agent` rows — the
+    // analog of the real scan's actual Agent nodes, without which `ingest`'s
+    // finalize would prune every `AssignedTo` edge (the target node would be
+    // absent). `Agent` is not an authored kind, so it contributes no authored
+    // row; its only effect is to keep those edges. The snapshot already holds
+    // the export-shaped records (its `name` is the FQN sans `agent.` prefix).
+    if let Some(previous) = &previous {
+        records.extend(previous.agents.iter().cloned());
     }
 
     let (graph, _) = crate::ingest::ingest(
