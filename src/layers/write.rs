@@ -685,9 +685,10 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 ///    — the system-of-record durability point, and the ONLY step that controls
 ///    the flock-guaranteed single commit. On the direct (test/single-mutation)
 ///    path that commit is one logical mutation; under a live session the save
-///    flush reaches step 4 with the whole buffered set and makes one commit for
-///    all of it. No durable write is ever buffered: the files hit disk (and
-///    git) before anything is projected.
+///    flush reaches step 4 with the whole pending set — the dirty rows plus the
+///    pending-deletion identities — and makes one commit for all of it. Nothing
+///    durable exists before that commit: the files hit disk (and git) here, not
+///    at admission.
 /// 5. **Capture the post-commit git state** — no `graph.jsonl` lead is
 ///    re-anchored; step 7 is the one row refresh, reconciling the database's
 ///    own `Scan` row to this state.
@@ -748,7 +749,7 @@ pub fn write_project_with(
     // 4. Atomic write + delete + single commit — the durability point. This is
     //    the whole flock-held sequence's controlled commit (the direct path's
     //    one logical mutation; under a session the save flush reaches this via
-    //    `write_through_with_deletes` with the whole buffered set).
+    //    `write_through_with_deletes` with the whole pending set).
     write_through_with_deletes(apg_root, writes, deletes)?;
 
     // 5. Capture the post-commit git state. No `graph.jsonl` lead is re-anchored
@@ -825,8 +826,8 @@ pub fn write_project_with(
 /// node+out-edge records (via
 /// [`records_for_nodes`](crate::layers::tree::records_for_nodes)), extended with
 /// the incident in-edge records read from the held database — and `delete_fqns`
-/// — exactly the identities **THIS** mutation touched (never a cumulative
-/// buffer set). It applies that delta through the caller-supplied projection
+/// — exactly the identities **THIS** mutation touched (never the whole
+/// pending set). It applies that delta through the caller-supplied projection
 /// closure — with NO atomic node-file write, NO git commit, and NO
 /// guard/staleness re-check (the session owns the DB and its lifetime lock).
 ///
