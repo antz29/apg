@@ -176,17 +176,21 @@ pub fn next_free(records: &[Record], kind: &str) -> u64 {
         .unwrap_or(1)
 }
 
-/// The two code-reference universes `layers::ingest_tree` validates
-/// `implemented-by` targets against, read from `apg/.trans/db.lbug` over one
-/// **read-only** handle: `scanned` = every code-node FQN the last scan produced
+/// The two code-reference universes every `implemented-by` consumer validates
+/// against — `scanned` = every code-node FQN the last scan produced
 /// (Module/File/Struct/Function without `status: planned`), `planned` = the
-/// planned-node FQNs still awaiting realization (`status: planned`).
+/// planned-node FQNs still awaiting realization (`status: planned`) — read from
+/// `apg/.trans/db.lbug` over one **read-only** handle. The database is the
+/// single code-identity source; no export is consulted.
 ///
-/// This is the one read-only database query for the code identity: it writes
-/// nothing, opens the database exactly once, and returns
-/// [`ArtifactDb::code_universes_from_db`]'s pair — the same identity read
-/// [`super::db::PreviousScan::capture`] uses. Its callers are the flock-guarded
-/// plan paths (`plan_cmd`) and the merge strength check.
+/// This is the one database read of both universes for every consumer: it
+/// writes nothing, opens the database exactly once, and returns
+/// [`ArtifactDb::code_universes_from_db`]'s pair. Its consumers are the
+/// flock-guarded plan paths (`plan_cmd`), the scan's previous-scan snapshot
+/// ([`super::db::PreviousScan::capture`], through its own handle on the same
+/// [`ArtifactDb::code_universes_from_db`] read), the merge strength check
+/// (`project_cmd::merge`) and the direct write path
+/// (`layers::write::validate_change` / `write_project_with`).
 pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
     let db_path = apg_root.join(specs::TRANS).join("db.lbug");
     if !db_path.exists() {
