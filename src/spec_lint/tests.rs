@@ -352,10 +352,15 @@ mod unit {
         }
     }
 
-    /// Scope is separate from context (SPEC §9.2): a domain cardinality
-    /// violation is reported by all-tier and domain lint, and is invisible to
-    /// requirements lint; a requirements violation is the mirror image. The
-    /// complete fixture passes every scope.
+    /// Scope is separate from context (SPEC §9.2) and is **cumulative**: a
+    /// scoped run checks the selected tier's rules plus every tier above it in
+    /// catalog order (`Requirements < Domain < Solution`), so a requirements
+    /// violation is visible to every scope while a solution violation is not.
+    /// The two supplying-tier coverage rules stay gated on their supplier:
+    /// requirement coverage (every Requirement is `driven-by` a Service) runs
+    /// only with Domain in scope and service realisation (every Service is
+    /// realised by a Component) only with Solution in scope. The complete
+    /// fixture passes every scope.
     #[test]
     fn tier_scope_hides_other_tiers_violations() {
         assert!(model_errors(&valid_model(), None, Context::Lint).is_empty());
@@ -367,35 +372,79 @@ mod unit {
             );
         }
 
-        // Domain: a Service realised by no Component.
-        let mut domain_broken = valid_model();
+        // Domain-supplied coverage: a Requirement `driven-by` no Service. The
+        // rule belongs to Domain, so it is reported by the solution scope (a
+        // cumulative superset) but not by the requirements scope, where the
+        // supplier is out of scope.
+        let mut domain_coverage_broken = valid_model();
         without_edge(
-            &mut domain_broken,
+            &mut domain_coverage_broken,
+            "domain",
+            "service",
+            "place-order",
+            "driven-by",
+            "requirements.requirement.place-order",
+        );
+        let coverage_rule =
+            "Requirement `requirements.requirement.place-order` is `driven-by` no Service";
+        for (scope, label) in [
+            (None, "all-tier"),
+            (Some(Layer::Domain), "domain"),
+            (Some(Layer::Solution), "solution"),
+        ] {
+            assert!(
+                model_errors(&domain_coverage_broken, scope, Context::Lint)
+                    .iter()
+                    .any(|e| e.contains(coverage_rule)),
+                "{label} lint must report the domain-supplied coverage violation"
+            );
+        }
+        let requirements_errors = model_errors(
+            &domain_coverage_broken,
+            Some(Layer::Requirements),
+            Context::Lint,
+        );
+        assert!(
+            !requirements_errors
+                .iter()
+                .any(|e| e.contains(coverage_rule)),
+            "requirements lint must not report the domain-supplied coverage rule: {requirements_errors:?}"
+        );
+
+        // Solution-supplied coverage: a Service realised by no Component. The
+        // rule belongs to Solution, so both the domain and requirements scopes
+        // exclude its supplier.
+        let mut solution_coverage_broken = valid_model();
+        without_edge(
+            &mut solution_coverage_broken,
             "solution",
             "component",
             "order-handler",
             "realises",
             "domain.service.place-order",
         );
-        let domain_rule = "Service `domain.service.place-order` is realised by no Component";
-        assert!(
-            model_errors(&domain_broken, None, Context::Lint)
-                .iter()
-                .any(|e| e.contains(domain_rule)),
-            "all-tier lint must report the domain violation"
-        );
-        assert!(
-            model_errors(&domain_broken, Some(Layer::Domain), Context::Lint)
-                .iter()
-                .any(|e| e.contains(domain_rule)),
-            "domain lint must report the domain violation"
-        );
-        assert!(
-            model_errors(&domain_broken, Some(Layer::Requirements), Context::Lint).is_empty(),
-            "requirements lint must not report a domain cardinality violation"
-        );
+        let realisation_rule = "Service `domain.service.place-order` is realised by no Component";
+        for (scope, label) in [(None, "all-tier"), (Some(Layer::Solution), "solution")] {
+            assert!(
+                model_errors(&solution_coverage_broken, scope, Context::Lint)
+                    .iter()
+                    .any(|e| e.contains(realisation_rule)),
+                "{label} lint must report the solution-supplied coverage violation"
+            );
+        }
+        for (scope, label) in [
+            (Some(Layer::Domain), "domain"),
+            (Some(Layer::Requirements), "requirements"),
+        ] {
+            let errors = model_errors(&solution_coverage_broken, scope, Context::Lint);
+            assert!(
+                !errors.iter().any(|e| e.contains(realisation_rule)),
+                "{label} lint must not report the solution-supplied coverage rule: {errors:?}"
+            );
+        }
 
-        // Requirements: a User requiring no Requirement.
+        // Requirements-local: a User requiring no Requirement. Cumulative scope
+        // keeps this rule in every window.
         let mut requirements_broken = valid_model();
         without_edge(
             &mut requirements_broken,
@@ -406,26 +455,19 @@ mod unit {
             "requirements.requirement.place-order",
         );
         let requirements_rule = "`requirements.user.customer` requires no Requirement";
-        assert!(
-            model_errors(&requirements_broken, None, Context::Lint)
-                .iter()
-                .any(|e| e.contains(requirements_rule)),
-            "all-tier lint must report the requirements violation"
-        );
-        assert!(
-            model_errors(
-                &requirements_broken,
-                Some(Layer::Requirements),
-                Context::Lint
-            )
-            .iter()
-            .any(|e| e.contains(requirements_rule)),
-            "requirements lint must report the requirements violation"
-        );
-        assert!(
-            model_errors(&requirements_broken, Some(Layer::Domain), Context::Lint).is_empty(),
-            "domain lint must not report a requirements cardinality violation"
-        );
+        for (scope, label) in [
+            (None, "all-tier"),
+            (Some(Layer::Requirements), "requirements"),
+            (Some(Layer::Domain), "domain"),
+            (Some(Layer::Solution), "solution"),
+        ] {
+            assert!(
+                model_errors(&requirements_broken, scope, Context::Lint)
+                    .iter()
+                    .any(|e| e.contains(requirements_rule)),
+                "{label} lint must report the requirements violation"
+            );
+        }
     }
 
     /// The shared mechanical validator set surfaces through lint (SPEC §9.1):
@@ -510,12 +552,14 @@ mod unit {
     }
 
     /// Scoped lint flags a dangling authored endpoint on an in-scope edge (the
-    /// SPEC §9.2 "drift" reading): endpoint existence is structural, not a
-    /// "downstream completeness" question, so a `--tier requirements` run
-    /// reports a `driven-by` edge whose target Requirement is missing (the
-    /// source Service is the more-concrete upstream tier).
+    /// SPEC §9.2 "drift" reading): endpoint existence is structural for the
+    /// edges a scope validates, not a "downstream completeness" question. A
+    /// `driven-by` edge is DOMAIN-sourced, so a missing target Requirement is
+    /// out of the requirements scope and is reported only by the domain scope
+    /// (and every cumulative superset of it).
     #[test]
-    fn requirements_scope_flags_a_dangling_driven_by_target() {
+    fn a_dangling_driven_by_target_is_out_of_the_requirements_scope_and_reported_by_the_domain_scope()
+     {
         let mut dangling = valid_model();
         dangling
             .iter_mut()
@@ -524,12 +568,19 @@ mod unit {
             .out
             .push(out_edge("driven-by", "requirements.requirement.missing"));
 
-        let errors = model_errors(&dangling, Some(Layer::Requirements), Context::Lint);
+        let requirements_errors = model_errors(&dangling, Some(Layer::Requirements), Context::Lint);
         assert!(
-            errors.iter().any(|e| e
+            !requirements_errors.iter().any(|e| e
+                .contains("edge `driven-by` endpoint `requirements.requirement.missing`")),
+            "requirements scope must not validate a domain-sourced edge: {requirements_errors:?}"
+        );
+
+        let domain_errors = model_errors(&dangling, Some(Layer::Domain), Context::Lint);
+        assert!(
+            domain_errors.iter().any(|e| e
                 .contains("edge `driven-by` endpoint `requirements.requirement.missing`")
                 && e.contains("dangling authored reference")),
-            "requirements scope must flag the dangling authored endpoint as drift: {errors:?}"
+            "domain scope must flag the dangling authored endpoint as drift: {domain_errors:?}"
         );
     }
 
