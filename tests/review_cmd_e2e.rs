@@ -58,7 +58,8 @@ fn write_layer_node(
     layers::write_node(apg_root, &node).unwrap();
 }
 
-/// Builds a real DB + load files under `dir/apg` (used by `fixture`).
+/// Builds the fixture's database at `dir/apg/.trans/db.lbug` from its load
+/// files, then projects the authored node files into it (used by `fixture`).
 fn db_at(dir: &Path) {
     let mut g = Graph::default();
     g.nodes.insert(
@@ -146,13 +147,12 @@ fn db_at(dir: &Path) {
     write_layer_node(&apg_root, layers::Layer::Solution, "system", "checkout", "");
     write_layer_node(&apg_root, layers::Layer::Global, "constraint", "law", "");
 
-    // The fixture's code universe must exist in the export — the sole
-    // code-identity source `code_universes_from_export` reads — then the durable
-    // authored rows are projected through the funnel (`layers::ingest_tree` +
-    // `artifacts::reingest_layers`), mirroring the `plan_cmd_e2e` modernization.
-    // The code graph above holds no authored rows, so the detach set is empty.
-    load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
-    let (scanned, planned) = artifacts::code_universes_from_export(&apg_root).unwrap();
+    // The fixture's code universe already lives in `db.lbug` above — the sole
+    // code-identity source `code_universes` reads — then the durable authored
+    // rows are projected through the funnel (`layers::ingest_tree` +
+    // `artifacts::reingest_layers`). The code graph above holds no authored
+    // rows, so the detach set is empty.
+    let (scanned, planned) = artifacts::code_universes(&apg_root).unwrap();
     let records = layers::ingest_tree(&apg_root, &scanned, &planned).unwrap();
     artifacts::reingest_layers(&apg_root, &std::collections::BTreeSet::new(), &records).unwrap();
 }
