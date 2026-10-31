@@ -145,8 +145,8 @@ pub struct ScanRecord {
     pub cache_key: CacheKey,
     pub manifest: Manifest,
     /// The content-identity key of the tree this scan ran on (win A,
-    /// phase-01) — the same key the scan wrote into the DB `Scan` row and
-    /// `graph.jsonl` line 1, and the same tree `manifest` describes. It is
+    /// phase-01) — the same key the scan records in the database's `Scan` row
+    /// (the `scan_meta` record), and the same tree `manifest` describes. It is
     /// captured here so the NEXT scan can verify that this worktree's LOCAL
     /// `db.lbug` was built from the very tree the SHARED delta is derived from
     /// (see `crate::splice::seed_checked`, feedback-101). A missing key (a

@@ -79,7 +79,7 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     // Take the extended lock BEFORE judging staleness: `apg scan` holds the same
     // blocking flock for its whole rebuild, so a verify overlapping a scan waits
-    // for it and judges the finished DB/export instead of a transient one.
+    // for it and judges the finished branch database instead of a transient one.
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
     if crate::git::is_stale(apg_root) {
         anyhow::bail!(

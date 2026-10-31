@@ -29,9 +29,11 @@
 //! 3. **Commit + scan_meta re-anchor** (R8): the git2 commit helper and the
 //!    scan_meta re-anchor. The helper stages a caller-supplied change set and
 //!    makes one commit on the project branch (single-file diffs for a
-//!    single-file set); durable `apg node`/`apg edge` mutations are buffered
-//!    by the live session and reach it once, at `apg session save`, not per
-//!    mutation. The re-anchor then rewrites the recorded scan_meta to the new
+//!    single-file set); durable `apg node`/`apg edge` mutations are applied to
+//!    the worktree database at admission and mark the node files they change
+//!    dirty, reaching the commit once, at `apg session save` — which writes
+//!    the dirty rows and the pending-deletion files — not per mutation. The
+//!    re-anchor then rewrites the recorded scan_meta to the new
 //!    state so consecutive mutations do not each demand a rescan. Plan
 //!    mutations never commit: `apg/.trans` is gitignored and transient by
 //!    design.

@@ -235,9 +235,10 @@ pub fn live_session(apg_root: &Path) -> bool {
 /// [`Coordinator::force_full_scan`], and `run_pipeline`'s stale-socket guard and
 /// full-load branch. No caller keeps a second deletion list.
 ///
-/// The `graph.jsonl` export is not part of this discard (its deletion is
-/// phase 10's cut). The node files under `apg/layers/**` and every source file
-/// are never touched here; the caller rebuilds the database from them.
+/// The `graph.jsonl` export no longer exists (its deletion landed with the
+/// publish cut in phase 10), so there is no export to discard. The node files
+/// under `apg/layers/**` and every source file are never touched here; the
+/// caller rebuilds the database from them.
 pub(crate) fn discard_derived_index(trans_dir: &Path) {
     for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm"] {
         let _ = std::fs::remove_file(trans_dir.join(name));
@@ -702,9 +703,12 @@ impl Coordinator {
         self.db.clear_pending_state()?;
 
         // Re-anchor the staleness gate AFTER the commit (mirrors the direct
-        // path's write_project_with steps 4–5): graph.jsonl only, never opens
-        // db.lbug. A re-anchor failure degrades to a warning — the durable
-        // write already landed.
+        // path's write_project_with steps 4–5): refresh the worktree database's
+        // `Scan` row. The helper opens the database and writes that row; with
+        // this session's socket live it returns without taking a second handle,
+        // so the same state is reconciled below through the handle already
+        // held. A re-anchor failure degrades to a warning — the durable write
+        // already landed.
         let state = crate::git::git_state(&self.apg_root);
         match crate::git::reanchor_scan_meta(&self.apg_root, &state) {
             Ok(()) => {
@@ -768,10 +772,10 @@ impl Coordinator {
     /// ([`crate::cmd_scan`]), which drives the same
     /// [`crate::pipeline::run_pipeline`] a normal scan runs — ingestion is
     /// never reimplemented here. The derived index (`db.lbug` and its
-    /// `graph.jsonl` export) is discarded FIRST so the scan cannot take its
+    /// `.wal`/`.shm` sidecars) is discarded FIRST so the scan cannot take its
     /// content-identity freshness fast path (or an incremental splice seeded
     /// from a database whose pending rows no node file backs) and reuse the
-    /// unsaved state; a genuine full scan then rebuilds both from the durable
+    /// unsaved state; a genuine full scan then rebuilds it from the durable
     /// node files and the scanned code.
     pub fn abort(mut self) -> anyhow::Result<()> {
         // Decide from the held DB BEFORE releasing it: a dirty row or a ledger
@@ -807,9 +811,9 @@ impl Coordinator {
     /// handle, flock and socket — [`abort`](Self::abort) releases them once the
     /// held database's own pending state (a dirty row or a pending-removal
     /// identity) decided the discard, and the start crash-check has not bound
-    /// them yet. All this does is discard the derived `db.lbug` +
-    /// `graph.jsonl`, so the scan cannot take a reuse fast path over the
-    /// unsaved projection that database carried, then run the scan from the
+    /// them yet. All this does is discard the derived `db.lbug` and its
+    /// `.wal`/`.shm` sidecars, so the scan cannot take a reuse fast path over
+    /// the unsaved projection that database carried, then run the scan from the
     /// project root (the session owns the layout root, whose parent is the
     /// project dir). The scan's process-global `chdir` into `.trans` is
     /// restored so the serve loop's remaining lifetime is unaffected.
@@ -824,11 +828,12 @@ impl Coordinator {
     /// artifacts are discarded, so the rebuild sources the authored graph from
     /// the node files, never from the discarded database.
     fn force_full_scan(apg_root: &Path) -> anyhow::Result<()> {
-        // Discard the derived index and its export: with no `db.lbug` the scan
-        // freshness fast path cannot fire, and with no `graph.jsonl` there is
-        // no previous export to splice from — the scan is forced to rebuild
-        // from the durable node files (`apg/layers/**`) and freshly scanned
-        // code. The node files themselves are the system of record and are
+        // Discard the derived index — `db.lbug` and its `.wal`/`.shm` sidecars,
+        // through `discard_derived_index`: with no `db.lbug` the scan freshness
+        // fast path cannot fire, and no previous database survives to seed a
+        // splice, so the scan is forced to rebuild from the durable node files
+        // (`apg/layers/**`) and freshly scanned code. There is no export to
+        // discard. The node files themselves are the system of record and are
         // never touched.
         let trans = apg_root.join(specs::TRANS);
         discard_derived_index(&trans);
