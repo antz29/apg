@@ -1090,81 +1090,65 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-8: `code_universes_from_export` classifies Real
-    /// (graph.jsonl) / Planned (plan store) / absent with NO `db.lbug` open.
+    /// Phase-08 task-2: `code_universes` classifies Real (the branch
+    /// database's scanned code) / Pending (a planned FQN the plan store
+    /// declares but the scanned universe lacks) / Drift (present in neither).
     ///
-    /// The fixture deliberately writes a BOGUS `db.lbug` (not a database): if
-    /// the resolver opened it, decoding would fail — a passed test proves the
-    /// DB was never touched. A declared-but-unscanned planned FQN (the
-    /// `apg.session.Coordinator` example) classifies Planned, never drift.
+    /// The database is the one code-identity source: the fixture is a real
+    /// hermetic scan (`testutil::project_with_db`) whose plan store declares a
+    /// `status = planned` Struct the source does not contain, so the scan
+    /// projects it as a database row and the reader serves both universes from
+    /// `db.lbug` alone. No `graph.jsonl` is written or parsed.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn code_universes_from_export_classifies_real_planned_absent_without_db() {
-        let dir = std::env::temp_dir().join(format!("apg-cu-export-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let trans = dir.join(specs::TRANS);
-        std::fs::create_dir_all(trans.join("plans")).unwrap();
+        let (repo, wt, wt_apg) = testutil::project_with_db("code-universes-export-classify");
 
-        // graph.jsonl: a scan_meta lead, two real code nodes, and one node
-        // already projected with `status: planned` (a planned declaration that
-        // a scan carried through).
-        let graph = [
-        r#"{"type":"scan_meta","git_sha":"abc","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
-        r#"{"type":"module","fqn":"github.com/x/y"}"#,
-        r#"{"type":"struct","fqn":"github.com/x/y.Store","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
-        r#"{"type":"function","fqn":"github.com/x/y.plannedFn","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src","status":"planned"}"#,
-    ]
-    .join("\n");
-        std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
-
-        // The plan store declares a FQN that has not been scanned yet.
+        // A plan-writer declaration the scanned source does not contain: the
+        // next scan projects it as a `status = planned` Struct row, so the
+        // branch database itself carries both universes.
+        let planned_fqn = "go.fixture.mod.Future";
         specs::write_jsonl(
-            &trans.join("plans").join("foo.jsonl"),
+            &specs::plan_jsonl_path(&wt_apg, "foo"),
             &[Record::PlannedNode {
-                fqn: "apg.session.Coordinator".into(),
-                kind: "struct".into(),
-                name: "Coordinator".into(),
-                parent: "apg.session".into(),
+                fqn: planned_fqn.to_string(),
+                kind: "struct".to_string(),
+                name: "Future".to_string(),
+                parent: "go.fixture.mod".to_string(),
             }],
         )
         .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
 
-        // A bogus DB — never opened by the resolver.
-        std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
-
-        let (scanned, planned) = code_universes_from_export(&dir).unwrap();
-        assert!(scanned.contains("github.com/x/y"));
-        assert!(scanned.contains("github.com/x/y.Store"));
+        let (scanned, planned) = code_universes(&wt_apg).unwrap();
         assert!(
-            !scanned.contains("github.com/x/y.plannedFn"),
-            "a status:planned export record is not real code"
+            scanned.contains("go.fixture.mod.Store"),
+            "a scanned struct is real code: {scanned:?}"
         );
-        assert!(planned.contains("github.com/x/y.plannedFn"));
-        assert!(planned.contains("apg.session.Coordinator"));
+        assert!(
+            !scanned.contains(planned_fqn),
+            "a status:planned row is not real code: {scanned:?}"
+        );
+        assert!(
+            planned.contains(planned_fqn),
+            "the declared-but-unscanned FQN is planned: {planned:?}"
+        );
 
-        // The three-way classification: Real / Planned (never Drift) / Drift.
+        // The three-way classification: Real / Pending (never Drift) / Drift.
         assert_eq!(
-            apg::layers::classify_code_ref("github.com/x/y.Store", &scanned, &planned),
+            apg::layers::classify_code_ref("go.fixture.mod.Store", &scanned, &planned),
             apg::layers::CodeRefStatus::Real
         );
         assert_eq!(
-            apg::layers::classify_code_ref("apg.session.Coordinator", &scanned, &planned),
+            apg::layers::classify_code_ref(planned_fqn, &scanned, &planned),
             apg::layers::CodeRefStatus::Pending
         );
         assert_eq!(
-            apg::layers::classify_code_ref("apg.gone.Nope", &scanned, &planned),
+            apg::layers::classify_code_ref("go.fixture.gone.Nope", &scanned, &planned),
             apg::layers::CodeRefStatus::Drift
         );
 
-        // graph.jsonl absent: the export contributes nothing; the plan store's
-        // planned FQNs remain — the caller's graph.jsonl gate decides whether
-        // code-FQN refs are validated at all.
-        std::fs::remove_file(trans.join("graph.jsonl")).unwrap();
-        let (scanned2, planned2) = code_universes_from_export(&dir).unwrap();
-        assert!(scanned2.is_empty(), "no export ⇒ no scanned universe");
-        assert!(planned2.contains("apg.session.Coordinator"));
-
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     /// Phase-04 task-23: `code_kinds_from_export` resolves the Implementation
