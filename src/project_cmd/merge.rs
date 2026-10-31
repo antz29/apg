@@ -207,10 +207,15 @@ pub fn project_merge_at(
 /// Runs [`layers::validate_cardinalities`] over the whole durable branch model
 /// with [`layers::Context::MergeStrength`] (presence + at-most-one), then
 /// [`layers::validate_code_refs`] over every `implemented-by` target with an
-/// EMPTY planned universe: an export-scanned FQN is `Real`, while a
-/// planned/pending target — which `apg plan verify` tolerates — is drift at
-/// merge. The branch's `graph.jsonl` export is the code universe, so no database
-/// is opened. Pure read; refuses with every violation listed.
+/// EMPTY planned universe: a scanned FQN is `Real`, while a planned/pending
+/// target — which `apg plan verify` tolerates — is drift at merge.
+///
+/// The scanned universe is read from the branch worktree's `apg/.trans/db.lbug`
+/// via [`crate::artifacts::code_universes`]; the planned set it also returns is
+/// deliberately discarded, because merge strength requires real scanned code,
+/// not a promise. This runs with no live session (the merge refuses one earlier)
+/// and after the branch database has been proven present. Pure read; refuses
+/// with every violation listed.
 fn merge_strength_check(wt_apg: &Path, name: &str) -> anyhow::Result<()> {
     let _lock = crate::artifacts::acquire_spec_lock(wt_apg)?;
     let nodes = layers::read_existing_nodes(wt_apg)?;
@@ -226,7 +231,7 @@ fn merge_strength_check(wt_apg: &Path, name: &str) -> anyhow::Result<()> {
     let mut problems =
         layers::validate_cardinalities(&assembled, None, layers::Context::MergeStrength);
 
-    let (scanned, _planned) = crate::artifacts::code_universes_from_export(wt_apg)?;
+    let (scanned, _planned) = crate::artifacts::code_universes(wt_apg)?;
     let refs: Vec<&str> = nodes
         .iter()
         .flat_map(|n| n.out.iter())
