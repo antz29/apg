@@ -1387,10 +1387,10 @@ mod e2e {
     /// feedback-102: a language whose frontend was skipped re-emits nothing, so
     /// its global module scaffolding (pure-intermediate modules, file-less
     /// descendants, and every `Module -> Module` edge) must be replayed from the
-    /// store into the assembled graph — the `graph.jsonl` export source — or the
-    /// export is structurally incomplete even though the spliced DB keeps the
-    /// seed's rows. The replay is gated on the exact `skipped_langs` verdict, so
-    /// a spawned language is never shadowed by stale cache rows.
+    /// store so the assembled graph — and, with it, the database rows it lands
+    /// in — matches a full rebuild. The replay is gated on the exact
+    /// `skipped_langs` verdict, so a spawned language is never shadowed by
+    /// stale cache rows.
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn skipped_language_scaffolding_is_replayed_into_the_assembly() {
