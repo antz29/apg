@@ -712,19 +712,28 @@ mod e2e {
 
     // --- write_project orchestration (phase-3 task-16) ---
 
-    /// `validate_change` accepts a valid add and refuses an invalid one (bad
-    /// name) without writing anything — the complete change is validated first.
+    /// The write path's name allowlist: a valid add is accepted and an invalid
+    /// one (bad name) is refused without writing anything — the complete change
+    /// is validated first. The bare fixture carries no `db.lbug`, so the rule is
+    /// driven through the shared `validate_change_over` body with the on-disk
+    /// base and empty code universes; `validate_change`'s absent-database
+    /// refusal stays pinned by
+    /// `write_project_decoupled_from_db_records_an_unscanned_code_ref_unvalidated`.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn validate_change_rejects_invalid_node_without_writing() {
         let root = temp_root("validate-change");
         let a = node("requirements", "requirement", "a");
         write_node(&root, &a).unwrap();
+        let base = read_existing_nodes(&root).unwrap();
+        let none = BTreeSet::new();
 
         let b = node("requirements", "requirement", "b");
-        assert!(validate_change(&root, std::slice::from_ref(&b), &[]).is_ok());
+        assert!(
+            validate_change_over(&root, &base, std::slice::from_ref(&b), &[], &none, &none).is_ok()
+        );
         let bad = node("requirements", "requirement", "Bad Name");
-        assert!(validate_change(&root, &[bad], &[]).is_err());
+        assert!(validate_change_over(&root, &base, &[bad], &[], &none, &none).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 
