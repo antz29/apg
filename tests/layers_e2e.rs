@@ -775,12 +775,18 @@ mod e2e {
     }
 
     /// SPEC §3.3: `publishes`/`subscribes` targets must be `Entity` with
-    /// `kind: event` — `validate_change` refuses a plain entity (the edge
-    /// matrix is type-only) and accepts the event-targeted edge.
+    /// `kind: event` — the rule refuses a plain entity (the edge matrix is
+    /// type-only) and accepts the event-targeted edge. The bare fixture
+    /// carries no `db.lbug`, so the rule is driven through the shared
+    /// `validate_change_over` body with the on-disk base and empty code
+    /// universes; `validate_change`'s absent-database refusal stays pinned by
+    /// `write_project_decoupled_from_db_records_an_unscanned_code_ref_unvalidated`.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn validate_change_requires_publishes_subscribes_targets_to_be_events() {
         let root = temp_root("write-event-targets");
+        let base = read_existing_nodes(&root).unwrap();
+        let none = BTreeSet::new();
         for kind in ["publishes", "subscribes"] {
             // Entity (kind: event) → accepted.
             let mut svc = node("domain", "service", "checkout");
@@ -793,7 +799,7 @@ mod e2e {
                 .in_edges
                 .push(in_edge(kind, "domain.service.checkout"));
             assert!(
-                validate_change(&root, &[svc, event], &[]).is_ok(),
+                validate_change_over(&root, &base, &[svc, event], &[], &none, &none).is_ok(),
                 "{kind} -> Entity(kind:event) must be accepted"
             );
 
@@ -807,7 +813,7 @@ mod e2e {
             plain
                 .in_edges
                 .push(in_edge(kind, "domain.service.checkout"));
-            let err = validate_change(&root, &[svc, plain], &[])
+            let err = validate_change_over(&root, &base, &[svc, plain], &[], &none, &none)
                 .unwrap_err()
                 .to_string();
             assert!(err.contains(kind), "{kind}: {err}");
