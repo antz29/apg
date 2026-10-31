@@ -914,7 +914,7 @@ fn transient_entries(dir: &Path) -> Vec<String> {
 
 /// Seeds `prev_path` and applies the standard delta (a body change to
 /// `a.go` and the removal of `c.go`), returning the spliced copy together
-/// with the assembled graph that `publish` must render the export from.
+/// with the assembled graph the delta was applied from.
 fn seed_and_splice(prev_path: &Path, a: &str, b: &str, c: &str) -> (SeededDb, Graph) {
     let seeded = match seed(prev_path) {
         SeedDecision::Seed(s) => s,
