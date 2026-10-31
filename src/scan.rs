@@ -297,8 +297,12 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         None
     };
     let warm_complete = warm.is_some();
-    let incremental =
+    let mut incremental =
         warm.unwrap_or_else(|| incremental::prepare(&project_dir, &apg_root, &scan_config, force));
+    // Capture the previous database's snapshot once, past the fast-path return
+    // and under the spec lock: `capture` releases its read-only handle before
+    // returning, so the rebuild below can replace `db.lbug` uncontended.
+    incremental.previous = crate::artifacts::PreviousScan::capture(&apg_root);
     let mut handoff = FrontendHandoff::default();
     let mut reuse_plan: Option<incremental::ReusePlan> = None;
     if let Some(reason) = &incremental.full_scan {
@@ -643,7 +647,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             })
             .map(|(f, _)| f.clone())
             .collect();
-        let mut universe = incremental::full_universe(&apg_root, &incremental, &emitted_fqns);
+        let mut universe = incremental::full_universe(&incremental, &emitted_fqns);
         // The reused files' facts are spliced from the shared store, not
         // re-emitted, so they contribute no spool FQNs. This checkout's previous
         // export can lag the shared store (another worktree scanned ahead), so
