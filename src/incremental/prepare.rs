@@ -334,7 +334,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         return Prepared {
             store_root,
             cache_key,
-            full_scan: Some(FullScanReason::NoPreviousExport),
+            full_scan: Some(FullScanReason::NoPreviousDatabase),
             targets_rel: BTreeSet::new(),
             changed_rel: BTreeSet::new(),
             removed_fqns: BTreeSet::new(),
