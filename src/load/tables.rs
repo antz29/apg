@@ -1013,8 +1013,8 @@ pub(crate) type TaskEdgeSet = fn(&Graph) -> &HashSet<(String, String)>;
 
 /// The transient task-edge rel tables (SCHEMA.md, phase 4) and the `Graph`
 /// edge set each projects, in spool-tag order. Shared by the load files, the
-/// schema DDL, the seed digest and the export so the table set is
-/// single-sourced. A `target` row names the renames/moves (or creates)
+/// schema DDL and the seed digest so the table set is single-sourced. A
+/// `target` row names the renames/moves (or creates)
 /// destination; every `to` endpoint is a code FQN, live or planned.
 pub(crate) const TASK_EDGE_TABLES: [(&str, TaskEdgeSet); 23] = [
     ("AssignedTo", |g| &g.assigned_to),

@@ -1,5 +1,5 @@
 //! Bulk-load of a [`Graph`] into `db.lbug` via `COPY FROM` PARQUET load files
-//! (SPEC §6 step 4), plus the `graph.jsonl` export (step 5).
+//! (SPEC §6 step 4) — the only artifact `apg/.trans` holds.
 //!
 //! Load files are written with the low-level `parquet` writer so that string
 //! columns carry the legacy `ConvertedType::UTF8` annotation. lbug 0.19.1's
@@ -7,15 +7,12 @@
 //! arrow-rs default (`LogicalType::String`) would be misread as `BLOB`.
 //!
 //! The cohesive groups live in submodules — the low-level PARQUET sink
-//! ([`parquet`]), the load tables and their pair enumerations ([`tables`]),
-//! and the `graph.jsonl` export ([`export`]) — all re-exported here so
-//! `crate::load::<name>` keeps resolving.
+//! ([`parquet`]) and the load tables and their pair enumerations ([`tables`]) —
+//! all re-exported here so `crate::load::<name>` keeps resolving.
 
-pub mod export;
 pub mod parquet;
 pub mod tables;
 
-pub use export::*;
 pub use parquet::*;
 pub use tables::*;
 

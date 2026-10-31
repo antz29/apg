@@ -1,6 +1,6 @@
 //! The low-level PARQUET sink for the load files: the column model, the
 //! generic writer, and the graph location/line accessors shared by the load
-//! tables and the `graph.jsonl` export.
+//! tables.
 
 use std::fs::File;
 use std::path::Path;
