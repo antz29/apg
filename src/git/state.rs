@@ -241,7 +241,8 @@ fn content_key(repo: &git2::Repository) -> String {
     format!("{h:016x}")
 }
 
-/// The recorded state of the scan that built the live DB (`recorded_scan`).
+/// The recorded state of the scan that built the live DB (its own `Scan` row,
+/// [`db_recorded_scan`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedScan {
     pub sha: String,
@@ -280,9 +281,8 @@ pub fn recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 
 /// The recorded state of the scan that built the live DB, read from the DB's
 /// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
-/// DB's account of itself, independent of the `graph.jsonl` export
-/// [`recorded_scan`] reads. This is the SCAN_HEAD half of the freshness check:
-/// the export and the DB must agree before the DB is reusable.
+/// DB's account of itself. This row is the ONE recorded-state source of the
+/// freshness check ([`is_fresh`]).
 ///
 /// The DB is opened **read-only** and never modified. Every failure **fails
 /// closed** and never panics: a missing, unopenable or locked DB; a DB with no
@@ -316,33 +316,72 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
     })
 }
 
+/// The same `Scan` row [`db_recorded_scan`] reads, taken through the live
+/// session's routed read instead of opening a second handle on the
+/// session-owned DB. Parses the `apg query --json` rows and fails closed
+/// exactly like the direct read (an empty sha, a non-`true`/`false` clean, or
+/// an empty content key ⇒ `None`).
+fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
+    let out = crate::session::forward_query(
+        apg_root,
+        "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key",
+        true,
+    )
+    .ok()?;
+    let rows: serde_json::Value = serde_json::from_str(&out).ok()?;
+    let row = rows.as_array()?.first()?.as_object()?;
+    let field = |name: &str| {
+        row.get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let sha = field("git_sha");
+    if sha.is_empty() {
+        return None;
+    }
+    let clean = match field("git_clean").as_str() {
+        "true" => true,
+        "false" => false,
+        _ => return None,
+    };
+    let key = field("content_key");
+    Some(RecordedScan {
+        sha,
+        clean,
+        content_key: (!key.is_empty()).then_some(key),
+    })
+}
+
 /// The content-identity freshness predicate (win A): the live DB is reusable
-/// as-is iff it exists, the DB's **own** `Scan` row agrees with the
-/// `graph.jsonl` recorded scan, AND the current tree's content identity matches
-/// that recorded scan exactly — recorded HEAD sha, cleanliness and
-/// content-identity key all equal the current values. mtime is never consulted:
-/// a touch without a byte change stays fresh, a byte edit is stale.
+/// as-is iff it exists AND the current tree's content identity matches the git
+/// state recorded in the DB's **own** `Scan` row exactly — recorded HEAD sha,
+/// cleanliness and content-identity key all equal the current values. mtime is
+/// never consulted: a touch without a byte change stays fresh, a byte edit is
+/// stale.
 ///
 /// The DB-existence precondition comes FIRST. The fast-path's action is "reuse
-/// the existing DB", so with no `db.lbug` at all (or a `graph.jsonl` without
-/// its DB) there is nothing to reuse → NOT fresh. A missing/pre-hardening
-/// recorded key means freshness cannot be verified → NOT fresh.
+/// the existing DB", so with no `db.lbug` at all there is nothing to reuse →
+/// NOT fresh. A missing/pre-hardening recorded key means freshness cannot be
+/// verified → NOT fresh. The recorded state is read from the DB alone
+/// ([`db_recorded_scan`]); the DB↔export agreement half has retired, so
+/// `graph.jsonl` plays no part in the verdict.
 ///
-/// **DB↔export agreement** ([`db_recorded_scan`] vs [`recorded_scan`]): the two
-/// halves must name the same git state (sha, cleanliness and content key) — the
-/// DB is reusable only when its own `Scan` row and the export cannot disagree.
-/// A DB with no `Scan` row, or one that disagrees, is NOT fresh. Every failure
-/// **fails closed** (never panics): a missing/unopenable/locked DB, a missing
-/// export, or a mismatch all mean "not fresh".
+/// **Live session**: while a live session owns `db.lbug`, the same `Scan` row
+/// is taken through the session's routed read ([`db_recorded_scan_routed`])
+/// instead of opening a second handle on the session-owned DB, so a live
+/// session never makes the on-disk fast path unfresh. The pending-state, table
+/// shape and authored/transient checks below are SHORT-CIRCUITED then; the
+/// recorded/git content comparison runs for both cases.
 ///
-/// **Authored/transient reconciliation**: the DB's own authored/transient
-/// digest ([`crate::splice::seed::seed_authored_identity`]) must also equal the
-/// on-disk tree's ([`crate::splice::seed::tree_authored_identity`]) — the
-/// independent source of truth. This is the recovery safety net: a durability
-/// commit that re-anchors the DB `Scan` row to the current state cannot mask an
-/// authored row the DB dropped, because the DB digest is compared to the tree,
-/// never to a value refreshed from the DB. An error computing either digest is
-/// NOT fresh (fail closed).
+/// **Authored/transient reconciliation** (no-live-session branch only): the
+/// DB's own authored/transient digest ([`crate::splice::seed::seed_authored_identity`])
+/// must also equal the on-disk tree's ([`crate::splice::seed::tree_authored_identity`])
+/// — the independent source of truth. This is the recovery safety net: a
+/// durability commit that re-anchors the DB `Scan` row to the current state
+/// cannot mask an authored row the DB dropped, because the DB digest is
+/// compared to the tree, never to a value refreshed from the DB. An error
+/// computing either digest is NOT fresh (fail closed).
 ///
 /// **Pending state and table shape** (no-live-session branch only): the DB must
 /// carry no pending state — no dirty row and no pending-removal identity
@@ -352,18 +391,15 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// binary's schema ([`crate::splice::seed::validate_compatible`]), because a
 /// database another binary wrote cannot be reasoned about. Either verdict is
 /// NOT fresh (fail closed). Both reads sit in the no-live-session branch, so a
-/// live session short-circuits them like the other DB reads.
+/// live session short-circuits them.
 ///
 /// A session socket that is present but fails a connect/`Ping` is also NOT
 /// fresh: an unclean session exit leaves the socket behind while the derived
 /// DB reflects only the last saved state, so a phantom projection exists and
-/// the on-disk DB cannot be trusted until a rebuild. A LIVE session (one that
-/// answers `Ping`) owns the DB directly, so opening it here would contend with
-/// the session and see only the on-disk database's last saved state: the DB
-/// reads ([`db_recorded_scan`], the pending-state and table-shape checks, and
-/// the authored/transient reconciliation) are SHORT-CIRCUITED and only the
-/// `recorded_scan`/git half is evaluated. A live
-/// session therefore never makes the on-disk fast path unfresh.
+/// the on-disk DB cannot be trusted until a rebuild.
+///
+/// Every failure **fails closed** (never panics): a missing/unopenable/locked
+/// DB, a DB with no readable `Scan` row, or a mismatch all mean "not fresh".
 ///
 /// This is deliberately not `!is_stale`: `is_stale` is N/A (false) when there
 /// is no DB or the dir is not a git repo, so `is_stale != !is_fresh` there.
@@ -385,14 +421,19 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     let Some(cur_sha) = head_sha(&repo) else {
         return false;
     };
-    let Some(rec) = recorded_scan(apg_root) else {
+    // The DB's own `Scan` row is the one recorded-state source. While a live
+    // session owns `db.lbug` it holds the DB exclusively, so it is taken through
+    // the session's routed read rather than a second handle here.
+    let Some(rec) = (if live_session {
+        db_recorded_scan_routed(apg_root)
+    } else {
+        db_recorded_scan(apg_root)
+    }) else {
         return false;
     };
-    // While a live session owns `db.lbug` it holds the DB exclusively; opening
-    // it here would contend with the session and observe only the on-disk
-    // database's last saved state. Short-circuit the database reads below and
-    // evaluate the recorded_scan/git half alone, so a live session never makes
-    // the on-disk fast path unfresh.
+    // While a live session owns `db.lbug`, short-circuit the database reads
+    // below, so a live session never makes the on-disk fast path unfresh. The
+    // recorded/git content comparison still runs.
     if !live_session {
         // Pending state (a dirty row or a pending-removal identity) is an
         // admitted-but-unsaved mutation: the derived DB is ahead of the last
@@ -404,19 +445,6 @@ pub fn is_fresh(apg_root: &Path) -> bool {
         // about. The scan's own seed eligibility asks the same question.
         // Fails closed.
         if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
-            return false;
-        }
-        // The DB's own `Scan` row must exist and agree with the export exactly:
-        // either half alone is not enough to reuse the DB (the DB and graph.jsonl
-        // are refreshed together at every durability point, so they agree by
-        // construction on a soundly-built DB).
-        let Some(db_rec) = db_recorded_scan(apg_root) else {
-            return false;
-        };
-        if db_rec.sha != rec.sha
-            || db_rec.clean != rec.clean
-            || db_rec.content_key != rec.content_key
-        {
             return false;
         }
         // Recovery safety net: the DB's ACTUAL authored/transient digest must
@@ -477,7 +505,7 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
         return None;
     }
     let current = git_state(apg_root);
-    let recorded = match recorded_scan(apg_root) {
+    let recorded = match db_recorded_scan(apg_root) {
         Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
     };
@@ -510,7 +538,7 @@ pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
         );
     }
     let cur = state_str(Some(cur_sha), current.clean);
-    match recorded_scan(apg_root) {
+    match db_recorded_scan(apg_root) {
         None => format!(
             "Git state: recorded {} vs current {cur} → STALE",
             state_str(None, false)
