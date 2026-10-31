@@ -1068,7 +1068,7 @@ mod e2e {
     /// `db.lbug` alone. No `graph.jsonl` is written or parsed.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn code_universes_from_export_classifies_real_planned_absent_without_db() {
+    fn code_universes_from_the_branch_database_classify_a_planned_absent_fqn_as_pending() {
         let (repo, wt, wt_apg) = testutil::project_with_db("code-universes-export-classify");
 
         // A plan-writer declaration the scanned source does not contain: the
