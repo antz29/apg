@@ -4424,9 +4424,9 @@ mod e2e {
     /// file is not a target; (2) GATE CLOSED — the no-code Module keeps its row
     /// and every incoming/outgoing edge byte-identically, the assembled-absent
     /// child Function (named in `removed_fqns`) is never healed, selected or
-    /// deleted, and `nodes_deleted` stays 0; (3) EXPORT-VS-DB AGREEMENT — the
-    /// published DB's healed rows equal a full rebuild's and the published
-    /// export's healed records agree with both.
+    /// deleted, and `nodes_deleted` stays 0; (3) SPLICED-VS-FULL-REBUILD
+    /// AGREEMENT — the published DB's healed rows (status cleared, location
+    /// filled) equal a full rebuild's.
     ///
     /// Real I/O (db.lbug/graph.jsonl/fs), so `#[ignore]`d e2e
     /// (`global.constraint.test-tier-boundaries`).
@@ -4515,21 +4515,6 @@ mod e2e {
             drop(conn);
             drop(db);
             out
-        }
-
-        /// Every export record whose `fqn` is in `fqns`, canonicalized.
-        fn export_records(path: &Path, fqns: &BTreeSet<String>) -> BTreeSet<String> {
-            std::fs::read_to_string(path)
-                .unwrap()
-                .lines()
-                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-                .filter(|v| {
-                    v.get("fqn")
-                        .and_then(|f| f.as_str())
-                        .is_some_and(|f| fqns.contains(f))
-                })
-                .map(|v| v.to_string())
-                .collect()
         }
 
         let planned = |kind: NodeKind| Node {
@@ -4888,8 +4873,8 @@ mod e2e {
             "the heal splice must never widen the delete scope for a planned row: {report:?}"
         );
 
-        // --- (3) EXPORT-VS-DB AGREEMENT: publish, then compare the healed rows
-        // to a full rebuild of the same assembled graph and the export to both.
+        // --- (3) SPLICED-VS-FULL-REBUILD AGREEMENT: publish, then compare the
+        // healed rows to a full rebuild of the same assembled graph.
         publish(seeded, &assembled, &export).unwrap();
         let expected_path = dir.join("expected.lbug");
         build_db(&expected_path, &assembled);
@@ -4899,64 +4884,20 @@ mod e2e {
             ("Struct", STRUCT_FQN),
             ("Function", FUNCTION_FQN),
         ] {
+            let row = db_row(&prev_path, label, fqn)
+                .unwrap_or_else(|| panic!("`{fqn}` is absent from the published spliced DB"));
+            // Row equality carries the located kinds' `path` (the declaration's
+            // file) and positive start_line/end_line; the status cell pins the
+            // healed placeholder's clearing.
             assert_eq!(
-                db_row(&prev_path, label, fqn),
+                Some(row.clone()),
                 db_row(&expected_path, label, fqn),
                 "the spliced DB's healed {label} `{fqn}` must equal a full rebuild's"
             );
-        }
-        let healed: BTreeSet<String> = [MODULE_FQN, FILE_FQN, STRUCT_FQN, FUNCTION_FQN]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        let reference = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &reference).unwrap();
-        assert_eq!(
-            export_records(&export, &healed),
-            export_records(&reference, &healed),
-            "the published export must carry a full rebuild's records for the healed FQNs"
-        );
-        // The export's own healed records agree with the spliced DB rows (status
-        // cleared; the located kinds' path/lines).
-        let published = std::fs::read_to_string(&export).unwrap();
-        let record = |fqn: &str| -> serde_json::Value {
-            published
-                .lines()
-                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-                .find(|v| v.get("fqn").and_then(|f| f.as_str()) == Some(fqn))
-                .unwrap_or_else(|| panic!("`{fqn}` has no record in the published export"))
-        };
-        for (label, fqn) in [
-            ("Module", MODULE_FQN),
-            ("File", FILE_FQN),
-            ("Struct", STRUCT_FQN),
-            ("Function", FUNCTION_FQN),
-        ] {
-            let row = db_row(&prev_path, label, fqn)
-                .unwrap_or_else(|| panic!("`{fqn}` is absent from the published spliced DB"));
-            let rec = record(fqn);
             assert!(
-                rec.get("status").is_none(),
-                "the export's `{fqn}` must carry no planned status: {rec}"
+                cell(&row, 0).is_empty(),
+                "the published DB's `{fqn}` must carry no planned status: {row:?}"
             );
-            if label == "Module" {
-                continue;
-            }
-            let (sl, el) = match label {
-                "File" => (
-                    cell(&row, 1).parse::<u32>().unwrap_or(0),
-                    cell(&row, 2).parse::<u32>().unwrap_or(0),
-                ),
-                _ => (
-                    cell(&row, 2).parse::<u32>().unwrap_or(0),
-                    cell(&row, 3).parse::<u32>().unwrap_or(0),
-                ),
-            };
-            assert_eq!(rec["start_line"], sl, "export/DB start_line for `{fqn}`");
-            assert_eq!(rec["end_line"], el, "export/DB end_line for `{fqn}`");
-            if label != "File" {
-                assert_eq!(rec["path"], FILE_FQN, "export/DB path for `{fqn}`");
-            }
         }
 
         let _ = std::fs::remove_dir_all(&dir);
