@@ -2286,8 +2286,7 @@ mod e2e {
     /// The publish contract is the database swap alone: the happy path flips
     /// `db.lbug` to the spliced graph, answers the spliced snapshot, and leaves
     /// no temp/backup/WAL debris. The early-failure and rollback arms retired
-    /// with the export — `publish` ignores the export path, so its failure
-    /// contract is gone and only the database swap is asserted.
+    /// with the export; only the database swap is asserted.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn publish_swaps_the_database_and_leaves_no_debris() {
