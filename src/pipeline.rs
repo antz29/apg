@@ -3,7 +3,7 @@
 //!
 //! Extracted from the crate root as a cohesive single-responsibility module
 //! (phase-04 decomposition); no behaviour change — the same ingested graph, the
-//! same recorded facts, and the same `db.lbug` + `graph.jsonl` artifacts.
+//! same recorded facts, and the same derived `db.lbug` database.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -16,8 +16,8 @@ use crate::progress::Progress;
 use crate::scan::temp_dir;
 use crate::{cache, classify, graph, incremental, ingest, load, schema, session, splice, timing};
 
-/// Consumes the merged scanner JSONL stream, ingests it, and loads `db.lbug` +
-/// `graph.jsonl` (SPEC §6).
+/// Consumes the merged scanner JSONL stream, ingests it, and loads the derived
+/// `db.lbug` database (SPEC §6).
 ///
 /// `input` carries the win-B incremental state when the scan is incremental
 /// (phase-02 task-7/task-8): the cached fact units to splice into the assembly
@@ -42,8 +42,7 @@ pub(crate) fn run_pipeline(
     // Phase-04 task-4: this function owns two reported phases. Ingest-assembly
     // covers the ingestor passes, cleanup, and the fact-store recording from
     // entry to the DB dispatch below; db-load covers that dispatch (splice OR
-    // parquet/Database::new/create_schema/copy_from) and the `graph.jsonl`
-    // export.
+    // parquet/Database::new/create_schema/copy_from).
     let assembly_start = std::time::Instant::now();
     let (mut graph, report) = {
         // Stream the scanner JSONL straight into the ingestor. On the win-B
@@ -158,8 +157,8 @@ pub(crate) fn run_pipeline(
     let db_start = std::time::Instant::now();
 
     // `run_pipeline` runs from inside `<apg_root>/.trans` (both `cmd_scan` and
-    // the hermetic test harness chdir there), so the previous/next artifacts
-    // are `<apg_root>/.trans/{db.lbug,graph.jsonl}` (SPEC §6).
+    // the hermetic test harness chdir there), so the previous/next artifact is
+    // `<apg_root>/.trans/db.lbug` (SPEC §6).
     let apg_root = std::env::current_dir()
         .ok()
         .and_then(|cwd| cwd.parent().map(Path::to_path_buf));
@@ -195,9 +194,9 @@ pub(crate) fn run_pipeline(
     //    socket survived.
     //
     // Either cause discards the derived index — `db.lbug` with its `.wal`/`.shm`
-    // sidecars and the `graph.jsonl` export — through the ONE shared
+    // sidecars, the one artifact — through the ONE shared
     // `discard_derived_index(".")` below, and forces the full load to rebuild
-    // both from the assembled graph (`apg/layers/**` + the scanned code) rather
+    // it from the assembled graph (`apg/layers/**` + the scanned code) rather
     // than seeding the splice from the unsaved rows. A live session answers
     // `Ping` (refused above) and a database with neither a stale socket nor
     // pending state is the ordinary case — the reuse fast path is unchanged for
@@ -239,10 +238,10 @@ pub(crate) fn run_pipeline(
     //
     // On the win-B incremental path the previous `db.lbug` already holds every
     // unaffected row, so seed a copy of it, apply the phase-2 delta as DML
-    // (`splice`), and publish BOTH artifacts atomically instead of rebuilding
-    // from scratch. The existing full load (remove + create_schema + copy_from
-    // + write_graph_jsonl) stays the correctness reference and runs whenever the
-    // splice is ineligible or fails mid-sequence. `input.reuse` is `Some`
+    // (`splice`), and publish the database atomically instead of rebuilding
+    // from scratch. The existing full load (remove + create_schema + copy_from)
+    // stays the correctness reference and runs whenever the splice is ineligible
+    // or fails mid-sequence. `input.reuse` is `Some`
     // exactly on the incremental path (it is `None` on every correctness
     // full-scan fallback), and `input.targets_rel`/`removed_fqns` are the SAME
     // phase-2 sets that drove the frontend target hand-off.
@@ -261,14 +260,11 @@ pub(crate) fn run_pipeline(
             report.unresolved_gc,
             report.scan_refreshed,
         ));
-        // Export routing (phase-03 task-7): on the splice branch the export is
-        // serialized by the UNCHANGED `load::write_graph_jsonl` into a
-        // same-directory `.graph-*.tmp` sibling inside `splice::publish` above
-        // and renamed in AFTER the spliced DB (DB first, then export), so both
-        // artifacts of the P2-assembled full in-memory graph land atomically.
-        // The full-load branch below keeps the standalone direct `graph.jsonl`
-        // write, so every Export record kind/property still comes from the one
-        // tested writer.
+        // Publish (phase-03 task-7; the publish cut narrows it to one artifact):
+        // the target state flips ONE artifact — the database — atomically, so
+        // the P2-assembled full in-memory graph lands as `db.lbug` alone. Until
+        // that cut lands, `splice::publish` above still carries its export
+        // argument unchanged.
     } else {
         let dir = temp_dir();
         std::fs::create_dir_all(&dir).unwrap();
@@ -278,7 +274,7 @@ pub(crate) fn run_pipeline(
 
         // cwd is `.trans`, so the derived index lives at "."; discard the index
         // and its sidecars (a leftover `db.lbug.wal` makes `Database::new`
-        // panic) before rebuilding. `graph.jsonl` is rewritten below.
+        // panic) before rebuilding.
         session::discard_derived_index(Path::new("."));
         if std::path::Path::new("db.lbug").exists() {
             panic!(
@@ -295,10 +291,6 @@ pub(crate) fn run_pipeline(
         log.ln("[load] copy_from...");
         load::copy_from(&conn, &dir).unwrap();
         log.ln("[load] copy_from done");
-
-        log.ln("[load] write_graph_jsonl...");
-        load::write_graph_jsonl(&graph, std::path::Path::new("graph.jsonl")).unwrap();
-        log.ln("[load] graph.jsonl written");
 
         log.ln("[load] dropping db...");
         drop(conn);
