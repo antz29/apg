@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "plan-tasks-reports-a-truncated-page",
-  "body": "A plan-tasks listing whose row count reaches the limit reports a truncated page naming that limit, and an empty page reports that the filtered query matched zero tasks.",
+  "body": "The plan-tasks tool returns exactly the clamped limit (1–1000) rows, reports truncation naming it only when a limit+1 probe row exists, and a status-filtered empty page reports zero matches, unlike an unfiltered empty plan's no-tasks notice.",
   "properties": {
     "feature": "plan-tooling"
   },
