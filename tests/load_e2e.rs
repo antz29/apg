@@ -795,7 +795,7 @@ mod e2e {
     /// duplicated into any other node-label table.
     #[test]
     #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
-    fn scan_meta_is_graph_jsonl_line_one() {
+    fn scan_meta_is_the_database_scan_row() {
         let dir = std::env::temp_dir().join(format!("apg-test-scanmeta-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
