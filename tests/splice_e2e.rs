@@ -2292,7 +2292,7 @@ mod e2e {
     /// temp/backup/WAL debris.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
-    fn publish_swaps_both_artifacts_and_leaves_no_debris() {
+    fn publish_swaps_the_database_and_leaves_no_debris() {
         let dir = scratch("publish-ok");
         let prev_path = dir.join("db.lbug");
         let export = dir.join("graph.jsonl");
