@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "pending-state-discard-fails-closed-and-unasserted",
-  "body": "`run_pipeline`'s pending-state probe opens `db.lbug` read-only and fails closed, so an unopenable or locked database also forces the full load and discards the index — the safe direction (never seed from an unreadable database); upgrade only if a scan over a locked database should refuse instead of rebuilding. The new discard-and-rebuild branch also has no direct assertion until the scan/query recovery e2e (phase-4 task-11) lands; the unchanged unit/int gate covers the rest.",
+  "body": "`run_pipeline`'s pending-state probe opens `db.lbug` read-only and fails closed, so an unopenable or locked database also forces the full load and discards the index — the safe direction (never seed from an unreadable database); upgrade only if a scan over a locked database should refuse instead of rebuilding. The `.unasserted` half of this note's name is retired: the scan/query recovery e2e (`rust.main_e2e.e2e.scan_and_query_recover_a_pending_state_or_shape_changed_database`) now asserts this classification and the rebuilt database directly.",
   "properties": {},
   "out": [
     {

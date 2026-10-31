@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "pending-state-ledger-query-duplicated",
-  "body": "`has_pending_state` inlines `pending_removals`' ledger query (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`) to keep the read on one connection instead of opening a second handle, so the query string now lives in two places in this file. Upgrade to a connection-taking ledger reader shared by both callers when `pending_removals` gains a second caller that could reuse the same connection.",
+  "body": "`has_pending_state` and `db_has_pending_state` each inline `pending_removals`' ledger query (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`) to keep the read on one connection of their own handle, so the query string now lives in three places in this file (`pending_removals`, `has_pending_state`, `db_has_pending_state`). Upgrade to a connection-taking ledger reader shared by all three when a caller must reuse a connection and a fourth copy would otherwise appear.",
   "properties": {},
   "out": [
     {
