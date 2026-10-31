@@ -262,9 +262,8 @@ pub(crate) fn run_pipeline(
         ));
         // Publish (phase-03 task-7; the publish cut narrows it to one artifact):
         // the target state flips ONE artifact — the database — atomically, so
-        // the P2-assembled full in-memory graph lands as `db.lbug` alone. Until
-        // that cut lands, `splice::publish` above still carries its export
-        // argument unchanged.
+        // the P2-assembled full in-memory graph lands as `db.lbug` alone, with
+        // no export argument left to carry.
     } else {
         let dir = temp_dir();
         std::fs::create_dir_all(&dir).unwrap();
@@ -307,7 +306,7 @@ pub(crate) fn run_pipeline(
 
 /// The win-C DB-build dispatch (phase-03 task-4): try to seed the working
 /// `db.lbug` from the previous scan and apply the phase-2 delta as DML, then
-/// publish `db.lbug` + `graph.jsonl` atomically (`splice::publish`).
+/// publish `db.lbug` atomically (`splice::publish`).
 ///
 /// Returns the splice report on success; `None` on any ineligibility or
 /// mid-sequence failure, in which case the caller runs the existing full load
@@ -406,11 +405,11 @@ pub fn try_splice_build(
         }
     };
 
-    match splice::publish(seeded, graph, &splice::export_path(apg_root)) {
+    match splice::publish(seeded) {
         Ok(()) => Some(report),
         Err(e) => {
-            // `publish` rolls both targets back to their previous bytes on a
-            // reported failure, so the full load starts from a clean pair.
+            // A reported `publish` failure leaves the single published database
+            // at its previous bytes, with no second target to roll back.
             log.ln(&format!(
                 "[load] splice: publish failed ({e:#}) — falling back to the full load"
             ));

@@ -516,7 +516,6 @@ struct WideOutcome {
 fn wide_splice(n: usize) -> WideOutcome {
     let dir = scratch(&format!("batch-{n}"));
     let prev_path = dir.join("db.lbug");
-    let export = dir.join("graph.jsonl");
     // Previous: every file. Assembled: the same tree minus the LAST file
     // (the removed file), every surviving unit re-emitted (a body change).
     let previous = wide_tree(n, n, "oldsha", "oldkey");
@@ -544,7 +543,7 @@ fn wide_splice(n: usize) -> WideOutcome {
         report.dml_statements, first.dml_statements,
         "the statement count is deterministic across runs"
     );
-    publish(seeded, &assembled, &export).unwrap();
+    publish(seeded).unwrap();
     let expected_path = dir.join("expected.lbug");
     build_db(&expected_path, &assembled);
 
@@ -2294,15 +2293,14 @@ mod e2e {
     fn publish_swaps_the_database_and_leaves_no_debris() {
         let dir = scratch("publish-ok");
         let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
         let a = "/x/a.go".to_string();
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
         build_db(&prev_path, &previous_graph(&a, &b, &c));
 
         // The happy path: the database flips to the spliced graph.
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        publish(seeded, &assembled, &export).unwrap();
+        let (seeded, _) = seed_and_splice(&prev_path, &a, &b, &c);
+        publish(seeded).unwrap();
 
         let snap = published_snapshot(&prev_path);
         assert!(
@@ -2348,7 +2346,6 @@ mod e2e {
     fn spliced_and_full_rebuild_agree_on_every_table_count() {
         let dir = scratch("counts");
         let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
         let a = "/x/a.go".to_string();
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
@@ -2436,7 +2433,6 @@ mod e2e {
         authored_rows(&mut assembled);
 
         build_db(&prev_path, &prev);
-        std::fs::write(&export, b"previous export\n").unwrap();
 
         // The seed's own account of its authored rows is READ FROM THE DATABASE
         // and must equal the assembled graph's authored/transient identity —
@@ -2467,7 +2463,7 @@ mod e2e {
                 },
             })
             .unwrap();
-        publish(seeded, &assembled, &export).unwrap();
+        publish(seeded).unwrap();
 
         // The full-rebuild reference: the same assembled graph, loaded whole.
         let expected_path = dir.join("expected.lbug");
@@ -2901,14 +2897,13 @@ mod e2e {
     fn published_database_equals_a_full_rebuild() {
         let dir = scratch("export-roundtrip");
         let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
         let a = "/x/a.go".to_string();
         let b = "/x/b.go".to_string();
         let c = "/x/c.go".to_string();
         build_db(&prev_path, &previous_graph(&a, &b, &c));
 
         let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        publish(seeded, &assembled, &export).unwrap();
+        publish(seeded).unwrap();
 
         // The full-rebuild reference: the same assembled graph, loaded whole.
         let expected_path = dir.join("expected.lbug");
@@ -3106,7 +3101,6 @@ mod e2e {
     fn spliced_scan_carries_the_agent_node_set_of_a_full_rebuild() {
         let dir = scratch("agent-set");
         let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
         let alpha = ".opencode/agents/alpha.md".to_string();
         let beta = ".opencode/agents/beta.md".to_string();
         let gamma = ".opencode/agents/gamma.md".to_string();
@@ -3138,7 +3132,7 @@ mod e2e {
                 },
             })
             .unwrap();
-        publish(seeded, &assembled, &export).unwrap();
+        publish(seeded).unwrap();
 
         // The full-rebuild reference: the same assembled graph loaded whole.
         let expected_path = dir.join("expected.lbug");
@@ -4641,7 +4635,6 @@ mod e2e {
 
         let dir = scratch("heal-seed-row");
         let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
         build_db(&prev_path, &seed);
 
         // Fixture sanity: the four rows really are planned, location-less seed
@@ -4824,7 +4817,7 @@ mod e2e {
 
         // --- (3) SPLICED-VS-FULL-REBUILD AGREEMENT: publish, then compare the
         // healed rows to a full rebuild of the same assembled graph.
-        publish(seeded, &assembled, &export).unwrap();
+        publish(seeded).unwrap();
         let expected_path = dir.join("expected.lbug");
         build_db(&expected_path, &assembled);
         for (label, fqn) in [

@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database};
 
-use crate::graph::Graph;
-
 use super::seed::SeededDb;
 
 // ---------------------------------------------------------------------------
@@ -30,25 +28,13 @@ use super::seed::SeededDb;
 //    previous file in place.
 // 4. **fsync the containing directory** so the rename is durable, then remove
 //    the backup.
-//
-// The `graph.jsonl` export legs have retired, so both of `publish`'s trailing
-// parameters — the P2-assembled `graph` and the `export` path — are unused
-// (underscored); the next task in this phase removes them.
 
-/// The `graph.jsonl` export path under an `apg/` layout root — the same
-/// `.trans/` directory as [`db_path`], so the export rename is same-filesystem.
-pub fn export_path(apg_root: &Path) -> PathBuf {
-    apg_root.join(crate::specs::TRANS).join("graph.jsonl")
-}
-
-/// Publishes the splice's two artifacts atomically (phase-03 task-3).
+/// Publishes the splice's single artifact atomically (phase-03 task-3).
 ///
-/// Consumes the [`SeededDb`] (whose delta must already be applied) and the
-/// P2-assembled in-memory `graph`. On success `target_path` holds the spliced
-/// DB and `export` holds `graph`'s [`load::write_graph_jsonl`] rendering; on a
-/// reported failure both targets are the previous bytes. `export` should be
-/// [`export_path`] — a sibling of `target_path` in `.trans/`.
-pub fn publish(seeded: SeededDb, _graph: &Graph, _export: &Path) -> anyhow::Result<()> {
+/// Consumes the [`SeededDb`] (whose delta must already be applied). On success
+/// `target_path` holds the spliced `db.lbug`; on a reported failure it is left
+/// at its previous bytes.
+pub fn publish(seeded: SeededDb) -> anyhow::Result<()> {
     let SeededDb {
         db,
         temp_path,
