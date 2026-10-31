@@ -108,15 +108,16 @@ fn assembled_nodes(nodes: &[NodeFile]) -> BTreeMap<String, &NodeFile> {
 /// checked, context only governs the deferred Component `implemented-by`
 /// presence rule (SPEC §8.2).
 ///
-/// A scoped run validates the edges whose source is in scope (the tier's local
-/// structure) plus the typed cross-tier edges whose target is in scope and
-/// whose source is an upstream tier (the upstream spine paths the tier
-/// requires — e.g. `driven-by` from a Domain Service into a Requirements
-/// Requirement). Every
-/// validated edge's authored endpoints must exist in the model — endpoint
-/// existence is structural (drift), not an out-of-scope "downstream
-/// completeness" question, so a single-tier run flags a dangling authored
-/// endpoint on the edges it validates (SPEC §9.2).
+/// A scoped run validates one cumulative source-layer slice: an edge is in
+/// scope when its SOURCE layer is the selected tier or a tier above it, so
+/// `--tier requirements` validates requirements-sourced edges alone,
+/// `--tier domain` adds domain-sourced edges, and `--tier solution` adds
+/// solution-sourced edges; no `--tier` validates every edge. The same `tier`
+/// is handed to [`validate_cardinalities`]. Every validated edge's authored
+/// endpoints must exist in the model — endpoint existence is structural
+/// (drift), not an out-of-scope "downstream completeness" question, so a
+/// single-tier run flags a dangling authored endpoint on the edges it
+/// validates (SPEC §9.2).
 /// Pure — no I/O.
 pub(crate) fn model_errors(
     nodes: &[NodeFile],
@@ -126,32 +127,15 @@ pub(crate) fn model_errors(
     let assembled = assembled_nodes(nodes);
     let mut errors: Vec<String> = Vec::new();
 
-    // Tier rank for the upstream-spine filter: requirements < domain <
-    // solution. Under P3, cross-tier edges point "up" (concrete → abstract),
-    // so an in-scope tier's upstream-spine edges have their SOURCE in a more
-    // concrete tier (a higher rank) and their TARGET in the in-scope tier —
-    // e.g. `driven-by` from a Domain Service into a Requirements Requirement.
-    let rank = |layer: Layer| match layer {
-        Layer::Requirements => Some(1u8),
-        Layer::Domain => Some(2u8),
-        Layer::Solution => Some(3u8),
-        _ => None,
-    };
-
+    // Cumulative source-layer scope: the selected tier plus every tier above
+    // it in catalog order (requirements < domain < solution), so a single-tier
+    // run validates the edges its own layer sources.
     let mut edges: Vec<(&str, &str, &str)> = Vec::new();
     for (from, node) in &assembled {
         let src_layer = layer_of(&node.layer);
         for edge in &node.out {
-            let in_scope = tier.is_none_or(|scope| src_layer == scope);
-            let upstream = tier.is_some_and(|scope| {
-                parse_fqn(&edge.target).is_ok_and(|(dst_layer, _, _)| {
-                    dst_layer == scope
-                        && rank(src_layer)
-                            .zip(rank(dst_layer))
-                            .is_some_and(|(s, d)| s > d)
-                })
-            });
-            if in_scope || upstream {
+            let in_scope = tier.is_none_or(|scope| src_layer <= scope);
+            if in_scope {
                 edges.push((edge.kind.as_str(), from.as_str(), edge.target.as_str()));
             }
         }
