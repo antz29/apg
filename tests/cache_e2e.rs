@@ -340,12 +340,12 @@ mod e2e {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// fix-module-identity task-18: cross-worktree cached reuse is
-    /// repo-relative. The cold main-checkout scan records the shared cache;
-    /// a second worktree at the same commit reuses it and mints exactly the
-    /// SAME File identities — no checkout root appears in either graph, so
-    /// the cache's original checkout-relative model is now the graph's
-    /// repo-relative base. Candidate binary only, scratch repo.
+    /// Cross-worktree cached reuse is repo-relative. The cold main-checkout
+    /// scan records the shared cache; a second worktree at the same commit
+    /// reuses it, and the `db.lbug` each scan built carries exactly the SAME
+    /// repo-relative code identities — no checkout root appears in either
+    /// database, so the cached checkout-relative model now shares the
+    /// database's repo-relative base. Candidate binary only, scratch repo.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn cross_worktree_cached_reuse_is_repo_relative() {
@@ -367,13 +367,28 @@ mod e2e {
                 .env("HOME", &home_s)
                 .output()
         };
-        let file_fqns = |dir: &Path| -> std::collections::BTreeSet<String> {
-            let text = std::fs::read_to_string(dir.join("apg/.trans/graph.jsonl")).unwrap();
-            text.lines()
-                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-                .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("file"))
-                .filter_map(|v| v.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
-                .collect()
+        // The identities come from the database each scan built, never the
+        // JSONL export.
+        let code_identities = |dir: &Path| -> std::collections::BTreeSet<String> {
+            let db_path = dir.join("apg/.trans/db.lbug");
+            let db = lbug::Database::new(&db_path, lbug::SystemConfig::default().read_only(true))
+                .unwrap_or_else(|e| panic!("open {}: {e}", db_path.display()));
+            let conn = lbug::Connection::new(&db).unwrap();
+            let mut ids = std::collections::BTreeSet::new();
+            for (label, property) in [
+                ("Module", "fqn"),
+                ("File", "fqn"),
+                ("Struct", "path"),
+                ("Function", "path"),
+            ] {
+                let (_, rows) = apg::splice::query_rows(
+                    &conn,
+                    &format!("MATCH (n:{label}) RETURN n.{property}"),
+                )
+                .unwrap();
+                ids.extend(rows.into_iter().filter_map(|row| row.into_iter().next()));
+            }
+            ids
         };
 
         // The cold main-checkout scan records the shared store.
@@ -383,18 +398,18 @@ mod e2e {
             "cold scan: {}",
             String::from_utf8_lossy(&cold.stderr)
         );
-        let main_files = file_fqns(&repo.root);
+        let main_ids = code_identities(&repo.root);
         assert!(
-            main_files.contains("a/a.go"),
-            "repo-relative File identity: {main_files:?}"
+            main_ids.contains("a/a.go"),
+            "repo-relative File identity: {main_ids:?}"
         );
         assert!(
             repo.root.join(".git/apg/facts/index.json").is_file(),
             "the shared fact store must be indexed after a scan"
         );
 
-        // A clean second worktree at the same commit reuses that store and
-        // mints the SAME identities.
+        // A clean second worktree at the same commit reuses that store, and
+        // its scan's database carries the SAME identities.
         let wt = repo.start_project("wt2");
         let fresh = scan(&wt);
         assert!(
@@ -409,16 +424,16 @@ mod e2e {
                 || fresh_err.contains("warm cache"),
             "the worktree must reuse the shared cache: {fresh_err}"
         );
-        let wt_files = file_fqns(&wt);
-        for f in &wt_files {
-            assert!(!f.starts_with('/'), "no absolute File fqn: {f}");
+        let wt_ids = code_identities(&wt);
+        for id in &wt_ids {
+            assert!(!id.starts_with('/'), "no absolute identity: {id}");
             assert!(
-                !f.contains(&repo.root.to_string_lossy().into_owned()),
-                "no checkout component: {f}"
+                !id.contains(&repo.root.to_string_lossy().into_owned()),
+                "no checkout component: {id}"
             );
         }
         assert_eq!(
-            wt_files, main_files,
+            wt_ids, main_ids,
             "cross-worktree identities must be identical"
         );
 
