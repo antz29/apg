@@ -1372,7 +1372,7 @@ mod e2e {
     /// `diverged_authored_rows_are_not_fast_pathed`.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug); run via cargo test-e2e"]
-    fn db_scan_row_diverging_from_the_export_is_unfresh() {
+    fn db_scan_row_diverging_from_the_worktree_git_state_is_unfresh() {
         let repo = fixture_repo("fresh-db-export");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
