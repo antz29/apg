@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "splice-module-row-location-shape",
-  "body": "The splice matrix's Module rows assert only the cleared planned status (the `db_row` query selects just `status`), not the location-less/path-less shape main_e2e's `realized_row` pins; upgrade the Module row check if a Module can realize with a bogus location.",
+  "body": "The splice matrix's Module rows assert only the cleared planned status, not the location-less/path-less shape main_e2e's realized_row pins; upgrade the Module row check if a Module can realize with a bogus location. The nested fixture is a standalone sibling Cargo package (package name over directory), matching the main_e2e fixture; workspace-member nesting is covered by the rust-frontend discovery tests, not this matrix. The File-row path assertion is a schema-forced tautology in both matrices because File nodes carry no `path` column; fold in a real path comparison if the File schema gains one.",
   "properties": {},
   "out": [
     {
