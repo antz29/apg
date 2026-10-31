@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "capture-e2e-agent-roster-vacuous",
+  "body": "`code_universes_from_db_match_the_export_universes_for_a_real_scan`'s Agent half compares `PreviousScan::capture`'s agents against the DB's `Agent` rows, but the canonical code payload carries no `.opencode/agents/` records, so the assertion proves only that the two agree on an empty roster. Upgrade by giving the fixture an agent-definition payload if a non-empty roster round-trip ever needs pinning.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.e2e.code_universes_from_db_match_the_export_universes_for_a_real_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
