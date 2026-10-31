@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "prepare-opens-one-read-only-probe",
+  "body": "`prepare` now opens a read-only probe of `db.lbug` (`db_has_pending_state`) on every targeted scan whose database exists, in addition to the capture `cmd_scan` takes later. It is one cheap open in a path that already walks the tree and reads the fact store; upgrade to a cheaper pending-state check (or thread the capture's verdict through) only if a scan-time profile ever shows that read-only open dominating.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.incremental.prepare.prepare",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
