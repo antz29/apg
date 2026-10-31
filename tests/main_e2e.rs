@@ -11733,8 +11733,8 @@ mod e2e {
     /// * `apg scan`: the same freshness verdict that makes `is_fresh` false
     ///   sends `run_pipeline` down `force_full_load`, so the splice-seed reuse
     ///   is skipped, `discard_derived_index` removes `db.lbug` with its
-    ///   `.wal`/`.shm` sidecars and `graph.jsonl`, and the full load rebuilds
-    ///   both from the durable `apg/layers/**` node files.
+    ///   `.wal`/`.shm` sidecars, and the full load rebuilds it from the durable
+    ///   `apg/layers/**` node files.
     /// * `apg query`: with no live session `Coordinator::reclaim_stale_socket`
     ///   classifies the database and, for either cause, runs the same
     ///   rebuilding full scan before the read-only open — the recovery the
@@ -11782,6 +11782,19 @@ mod e2e {
         let repo = testutil::Repo::new("scan-query-recovery");
         let wt = repo.start_project("foo");
         let wt_apg = wt.join(specs::LAYOUT);
+
+        // Ordering constraint: `seed_valid_model` is the direct `write_project`
+        // path, and `write_project` validates its code refs against the
+        // worktree database — so seed a minimal current (empty) DB and record
+        // it at the worktree HEAD (still the main HEAD here) BEFORE the seed.
+        // The `reset` scan below then rebuilds that DB over the seeded model.
+        testutil::touch_db(&wt_apg);
+        testutil::write_scan_meta(
+            &wt_apg,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
 
         // The durable system of record: a committed, whole-model-valid
         // `apg/layers/**` tree (the node files ARE the rebuild source).
