@@ -2284,10 +2284,12 @@ mod e2e {
     // Atomic publish + rollback (phase-03 task-3)
     // -----------------------------------------------------------------------
 
-    /// The happy path: the database flips, the published DB answers the spliced
-    /// snapshot, no temp/backup/WAL debris is left behind, and a publish that
-    /// fails before the database swap leaves the previous `db.lbug`
-    /// byte-identical.
+    /// The publish contract's three arms: a failure BEFORE the database swap
+    /// leaves the previous `db.lbug` byte-identical and no debris; a failure
+    /// AFTER the database swap rolls `db.lbug` back byte-identical from its
+    /// backup and never publishes the export; and the happy path flips the
+    /// database, answers the spliced snapshot, and leaves no
+    /// temp/backup/WAL debris.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn publish_swaps_both_artifacts_and_leaves_no_debris() {
@@ -2318,6 +2320,34 @@ mod e2e {
         assert!(
             transient_entries(&dir).is_empty(),
             "an early failure must clean up its temps/backups: {:?}",
+            transient_entries(&dir)
+        );
+
+        // A publish that fails AFTER the database swap (its export rename is
+        // injected to fail) rolls `db.lbug` back from its backup, so the pair is
+        // never new-DB + stale-export: previous bytes return, no export is
+        // published, and every transient is gone.
+        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+        install_publish_hook(PublishStage::BeforeExportRename, || {
+            Err(std::io::Error::other("injected export-rename failure").into())
+        });
+        let err = publish(seeded, &assembled, &export).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("rolled back to its previous bytes"),
+            "a post-swap failure must report the rollback: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read(&prev_path).unwrap(),
+            previous_db,
+            "a failure after the database swap must restore db.lbug byte-identically"
+        );
+        assert!(
+            !export.exists(),
+            "the export rename never happened, so nothing may be published there"
+        );
+        assert!(
+            transient_entries(&dir).is_empty(),
+            "the rollback must clean up its temps/backups: {:?}",
             transient_entries(&dir)
         );
 
