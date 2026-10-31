@@ -4,7 +4,6 @@ use ::parquet::file::reader::{FileReader, SerializedFileReader};
 use apg::graph::{Graph, Location, Node, NodeKind};
 use apg::load::*;
 use apg::splice::query_rows;
-use apg::testutil::read_graph_jsonl;
 use lbug::{Connection, Database, SystemConfig};
 
 fn fixture_graph() -> Graph {
@@ -100,10 +99,10 @@ fn fixture_graph_with_scan() -> Graph {
     g
 }
 
-/// e2e tier -- real I/O: every test here builds parquet load files, opens
-/// `db.lbug` or writes/reads `graph.jsonl` on disk. Each is `#[ignore]`d, so
-/// a plain `cargo test` never runs one; the only entry point is the named
-/// guard `cargo test-e2e` (= `cargo test tests::e2e:: -- --ignored`).
+/// e2e tier -- real I/O: every test here builds parquet load files or opens
+/// `db.lbug` on disk. Each is `#[ignore]`d, so a plain `cargo test` never runs
+/// one; the only entry point is the named guard `cargo test-e2e`
+/// (= `cargo test tests::e2e:: -- --ignored`).
 mod e2e {
     use super::*;
 
@@ -289,12 +288,12 @@ mod e2e {
     }
 
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn graph_jsonl_carries_only_repo_relative_identities() {
-        // fix-module-identity task-14: the export carries repo-relative
+        // fix-module-identity task-14: the database carries repo-relative
         // identities only — no absolute checkout path may appear as a
         // File fqn or a Struct/Function `path`. The graph is assembled by
-        // the real ingestor over a fake repo base, then serialized.
+        // the real ingestor over a fake repo base, then loaded into a DB.
         use apg::schema::Record;
         let abs_base = std::env::temp_dir().join(format!(
             "apg-jsonl-identity-{}-{}",
@@ -350,47 +349,62 @@ mod e2e {
             None,
         );
 
-        let out = std::env::temp_dir().join(format!(
-            "apg-jsonl-identity-out-{}.jsonl",
-            std::process::id()
+        // The identities the assembled graph stores are repo-relative: load
+        // the graph into a database and assert the File fqn and the
+        // Struct/Function paths never carry the absolute scanner path.
+        let dir = std::env::temp_dir().join(format!(
+            "apg-identity-load-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
-        write_graph_jsonl(&graph, &out).unwrap();
-        let text = std::fs::read_to_string(&out).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        build_load_files(&graph, &dir).unwrap();
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &dir).unwrap();
 
-        // The File fqn and the Struct/Function paths are the repo-relative
-        // identity — never the absolute scanner path.
-        assert!(
-            text.contains("\"fqn\":\"pkg/a.go\""),
-            "relative file fqn: {text}"
+        let out = conn
+            .query("MATCH (f:File {fqn: 'pkg/a.go'}) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("1"),
+            "relative file fqn: {out}"
         );
-        assert!(!text.contains(&base_s), "no absolute checkout path: {text}");
-        for line in text.lines() {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            let located = match ty {
-                "file" => v.get("fqn").and_then(|f| f.as_str()).map(str::to_string),
-                "struct" | "function" => v.get("path").and_then(|p| p.as_str()).map(str::to_string),
-                _ => None,
-            };
-            if let Some(p) = located {
-                assert!(!p.starts_with('/'), "{ty} identity has no leading `/`: {p}");
-                assert!(
-                    !p.contains(&base_s),
-                    "{ty} identity embeds no checkout path: {p}"
-                );
-            }
+        for q in [
+            "MATCH (f:File) WHERE f.fqn STARTS WITH '/' RETURN count(*)",
+            "MATCH (s:Struct) WHERE s.path STARTS WITH '/' RETURN count(*)",
+            "MATCH (f:Function) WHERE f.path STARTS WITH '/' RETURN count(*)",
+        ] {
+            let out = conn.query(q).unwrap().to_string();
+            assert_eq!(out.lines().last().map(str::trim), Some("0"), "{q}: {out}");
+        }
+        for q in [
+            "MATCH (f:File) RETURN f.fqn",
+            "MATCH (s:Struct) RETURN s.path",
+            "MATCH (f:Function) RETURN f.path",
+        ] {
+            let out = conn.query(q).unwrap().to_string();
+            assert!(
+                !out.contains(&base_s),
+                "{q} embeds the checkout path: {out}"
+            );
         }
 
-        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The edge-modelled transient task round-trips through a real scan: the
-    /// `Task` row carries only fqn/title/status, its `AssignedTo` /
+    /// `Task` row carries only fqn/title/status, and its `AssignedTo` /
     /// `Implements` / per-kind operation rel rows join the Agent, Component and
-    /// live/planned code targets, and `graph.jsonl` emits the same record and
-    /// edges the database holds.
+    /// live/planned code targets with both endpoints exact.
     #[test]
-    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn spec_plan_schema_roundtrip() {
         use apg::artifacts::ArtifactDb;
         use apg::testutil::{self, Repo};
@@ -405,9 +419,20 @@ mod e2e {
         repo.write("code/seed.scan.jsonl", &code);
         repo.commit_all("seed code");
         let wt = repo.start_project("task-edge-db");
+        let apg_root = wt.join(apg::specs::LAYOUT);
         // A durable Component (with the Requirement/Service spine) gives the
-        // `implements` edge a real Solution node to join.
-        testutil::seed_valid_model(&wt.join(apg::specs::LAYOUT));
+        // `implements` edge a real Solution node to join. The direct write path
+        // resolves its code universes from the worktree database, so a fresh
+        // empty (but current) database is seeded first; the scan below rebuilds
+        // it from the seeded `apg/layers/**` tree and the code payload.
+        testutil::touch_db(&apg_root);
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        testutil::seed_valid_model(&apg_root);
 
         // The transient plan store: a task carries title+status alone; its
         // assignment, implemented Component, operation kinds and renames
@@ -514,76 +539,51 @@ mod e2e {
             out.contains("fixture.mod.Renamed"),
             "renames destination rows: {out}"
         );
-        drop(db);
-
-        // graph.jsonl agrees with the database: the same Task record (no
-        // retired keys) and the same edge rows.
-        let export = wt
-            .join(apg::specs::LAYOUT)
-            .join(apg::specs::TRANS)
-            .join("graph.jsonl");
-        let text = std::fs::read_to_string(&export).unwrap();
-        for line in text.lines() {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            if v.get("type").and_then(|t| t.as_str()) == Some("task") {
-                for retired in ["kind", "tier", "verb", "target", "new_fqn"] {
-                    assert!(
-                        v.get(retired).is_none(),
-                        "exported task carries the retired `{retired}` key: {line}"
-                    );
-                }
-            }
+        // The database holds the Task row and every operation rel row with
+        // both endpoints exact — the live/planned code target and the task
+        // that claims it, plus the renames/moves `Target` destination.
+        let out = db
+            .q("MATCH (t:Task) WHERE t.fqn = 'task-edge-db/plan.phase-01.task-1' RETURN t.title, t.status")
+            .unwrap();
+        assert!(
+            out.contains("Modify live") && out.contains("pending"),
+            "task-1 row: {out}"
+        );
+        let out = db
+            .q("MATCH (p:Struct) WHERE p.fqn = 'fixture.mod.Planned' RETURN p.status")
+            .unwrap();
+        assert!(out.contains("planned"), "planned struct row: {out}");
+        for (kind, task, label, target) in [
+            (
+                "AssignedTo",
+                "task-1",
+                "Agent",
+                "agent.go-frontend-implementer",
+            ),
+            (
+                "Implements",
+                "task-1",
+                "Component",
+                "solution.component.order-handler",
+            ),
+            ("StructModify", "task-1", "Struct", "go.fixture.mod.Store"),
+            ("StructCreate", "task-2", "Struct", "fixture.mod.Planned"),
+            ("StructRename", "task-3", "Struct", "go.fixture.mod.Store"),
+            ("Target", "task-3", "Struct", "fixture.mod.Renamed"),
+        ] {
+            let from = format!("task-edge-db/plan.phase-01.{task}");
+            let out = db
+                .q(&format!(
+                    "MATCH (t:Task {{fqn: '{from}'}})-[:{kind}]->(n:{label} {{fqn: '{target}'}}) RETURN count(*)"
+                ))
+                .unwrap();
+            assert_eq!(
+                out.lines().last().map(str::trim),
+                Some("1"),
+                "{kind} {from} -> {target}: {out}"
+            );
         }
-        let back = read_graph_jsonl(&export).unwrap();
-        let t1 = back
-            .nodes
-            .get("task-edge-db/plan.phase-01.task-1")
-            .expect("task-1 in graph.jsonl");
-        assert_eq!(t1.kind, NodeKind::Task);
-        assert_eq!(t1.title.as_deref(), Some("Modify live"));
-        assert_eq!(t1.status.as_deref(), Some("pending"));
-        assert!(
-            back.assigned_to.contains(&(
-                "task-edge-db/plan.phase-01.task-1".to_string(),
-                "agent.go-frontend-implementer".to_string()
-            )),
-            "assigned-to export edge"
-        );
-        assert!(
-            back.implements.contains(&(
-                "task-edge-db/plan.phase-01.task-1".to_string(),
-                "solution.component.order-handler".to_string()
-            )),
-            "implements export edge"
-        );
-        assert!(
-            back.struct_modify.contains(&(
-                "task-edge-db/plan.phase-01.task-1".to_string(),
-                "go.fixture.mod.Store".to_string()
-            )),
-            "struct_modify export edge"
-        );
-        assert!(
-            back.struct_create.contains(&(
-                "task-edge-db/plan.phase-01.task-2".to_string(),
-                "fixture.mod.Planned".to_string()
-            )),
-            "struct_create export edge"
-        );
-        assert!(
-            back.struct_rename.contains(&(
-                "task-edge-db/plan.phase-01.task-3".to_string(),
-                "go.fixture.mod.Store".to_string()
-            )),
-            "struct_rename export edge"
-        );
-        assert!(
-            back.target.contains(&(
-                "task-edge-db/plan.phase-01.task-3".to_string(),
-                "fixture.mod.Renamed".to_string()
-            )),
-            "target export edge"
-        );
+        drop(db);
 
         testutil::remove(&repo);
     }
@@ -591,11 +591,11 @@ mod e2e {
     /// The edge-modelled task projects end to end: a scanned `Task` row carries
     /// fqn/title/status only, each per-kind operation edge and the
     /// renames/moves `target` destination land as rel rows against live and
-    /// planned code, a target-less task keeps an empty edge set, and
-    /// `graph.jsonl` emits the same record and edges. The retired
-    /// verb/target/new_fqn columns and the pre-verb record fallback are gone.
+    /// planned code, and a target-less task keeps an empty edge set. The
+    /// retired verb/target/new_fqn columns and the pre-verb record fallback
+    /// are gone.
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn scan_projects_task_verb_target_and_new_fqn_into_the_db() {
         use apg::artifacts::ArtifactDb;
         use apg::testutil::{self, Repo};
@@ -758,148 +758,100 @@ mod e2e {
             Some("0"),
             "target-less task keeps an empty edge set: {out}"
         );
-        drop(db);
-
-        // graph.jsonl agrees with the database: the same Task record (no
-        // retired keys) and the same operation/`target` edges.
-        let export = wt
-            .join(apg::specs::LAYOUT)
-            .join(apg::specs::TRANS)
-            .join("graph.jsonl");
-        let text = std::fs::read_to_string(&export).unwrap();
-        for line in text.lines() {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            if v.get("type").and_then(|t| t.as_str()) == Some("task") {
-                for retired in ["kind", "tier", "verb", "target", "new_fqn"] {
-                    assert!(
-                        v.get(retired).is_none(),
-                        "exported task carries the retired `{retired}` key: {line}"
-                    );
-                }
-            }
-        }
-        let back = read_graph_jsonl(&export).unwrap();
-        for i in 1..=6 {
-            let fqn = format!("task-verb-db/plan.phase-01.task-{i}");
-            let node = back.nodes.get(&fqn).expect("task in graph.jsonl");
-            assert_eq!(node.kind, NodeKind::Task, "task node kind: {fqn}");
-            assert_eq!(
-                node.status.as_deref(),
-                Some("pending"),
-                "task status: {fqn}"
-            );
-        }
-        assert_eq!(
-            back.nodes["task-verb-db/plan.phase-01.task-1"]
-                .title
-                .as_deref(),
-            Some("Modify live")
-        );
-        let planned = back
-            .nodes
-            .get("fixture.mod.Planned")
-            .expect("planned struct in graph.jsonl");
-        assert_eq!(planned.kind, NodeKind::Struct);
-        assert_eq!(planned.status.as_deref(), Some("planned"));
-        for (set, task, target) in [
-            (&back.struct_modify, "task-1", "go.fixture.mod.Store"),
-            (&back.struct_create, "task-2", "fixture.mod.Planned"),
-            (&back.struct_delete, "task-3", "go.fixture.mod.Store"),
-            (&back.struct_move, "task-4", "go.fixture.mod.Store"),
-            (&back.struct_rename, "task-5", "go.fixture.mod.Store"),
-            (&back.target, "task-4", "fixture.mod.Moved"),
-            (&back.target, "task-5", "fixture.mod.Renamed"),
+        // The database keeps the same operation/`target` rel rows, with both
+        // endpoints exact: the task that claims each live/planned target.
+        for (kind, task, target) in [
+            ("StructModify", "task-1", "go.fixture.mod.Store"),
+            ("StructCreate", "task-2", "fixture.mod.Planned"),
+            ("StructDelete", "task-3", "go.fixture.mod.Store"),
+            ("StructMove", "task-4", "go.fixture.mod.Store"),
+            ("StructRename", "task-5", "go.fixture.mod.Store"),
+            ("Target", "task-4", "fixture.mod.Moved"),
+            ("Target", "task-5", "fixture.mod.Renamed"),
         ] {
             let from = format!("task-verb-db/plan.phase-01.{task}");
-            assert!(
-                set.contains(&(from.clone(), target.to_string())),
-                "exported {task} edge to {target}"
+            let out = db
+                .q(&format!(
+                    "MATCH (t:Task {{fqn: '{from}'}})-[:{kind}]->(s:Struct {{fqn: '{target}'}}) RETURN count(*)"
+                ))
+                .unwrap();
+            assert_eq!(
+                out.lines().last().map(str::trim),
+                Some("1"),
+                "{kind} {from} -> {target}: {out}"
             );
         }
+        let out = db
+            .q("MATCH (s:Struct) WHERE s.fqn = 'fixture.mod.Planned' RETURN s.status")
+            .unwrap();
+        assert!(out.contains("planned"), "planned struct row: {out}");
+        drop(db);
 
         testutil::remove(&repo);
     }
 
+    /// The scan metadata is one `Scan` node-table row: the recorded git fields
+    /// land in the database exactly once, and the `scan/HEAD` identity is not
+    /// duplicated into any other node-label table.
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
-    fn graph_jsonl_is_valid_and_self_contained() {
-        let dir = std::env::temp_dir().join(format!("apg-test-jsonl-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let graph = fixture_graph();
-        let out_path = dir.join("graph.jsonl");
-        write_graph_jsonl(&graph, &out_path).unwrap();
-
-        let text = std::fs::read_to_string(&out_path).unwrap();
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(
-            lines.len(),
-            graph.nodes.len()
-                + graph.contains.len()
-                + graph.calls.len()
-                + graph.uses.len()
-                + graph.unresolved_calls.len()
-                + graph.unresolved_uses.len()
-        );
-        // Every line is valid JSON with a `type` discriminator.
-        for line in &lines {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            assert!(v.get("type").is_some(), "missing type: {line}");
-        }
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn scan_meta_is_graph_jsonl_line_one() {
         let dir = std::env::temp_dir().join(format!("apg-test-scanmeta-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
         let graph = fixture_graph_with_scan();
-        let out_path = dir.join("graph.jsonl");
-        write_graph_jsonl(&graph, &out_path).unwrap();
+        build_load_files(&graph, &dir).unwrap();
 
-        let text = std::fs::read_to_string(&out_path).unwrap();
-        let lines: Vec<&str> = text.lines().collect();
-        // Line 1 is the scan_meta control record with the git fields.
-        let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-        assert_eq!(first["type"], "scan_meta");
-        assert_eq!(first["git_sha"], "abc123");
-        assert_eq!(first["git_clean"], true);
-        assert_eq!(first["content_key"], "feedface");
-        assert_eq!(first["scanned_at"], "2026-09-07T00:00:00Z");
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &dir).unwrap();
+
+        // The one Scan row carries every recorded git/content field.
+        let out = conn
+            .query(
+                "MATCH (s:Scan) RETURN s.fqn, s.git_sha, s.git_clean, s.content_key, s.scanned_at",
+            )
+            .unwrap()
+            .to_string();
         assert!(
-            first.get("fqn").is_none(),
-            "scan_meta is a control record, not a node"
+            out.contains("scan/HEAD")
+                && out.contains("abc123")
+                && out.contains("true")
+                && out.contains("feedface")
+                && out.contains("2026-09-07T00:00:00Z"),
+            "scan row: {out}"
         );
-        // The Scan node is exported exactly once (line 1), not again as a node.
+        let out = conn
+            .query("MATCH (s:Scan) RETURN count(*)")
+            .unwrap()
+            .to_string();
         assert_eq!(
-            lines.len(),
-            graph.nodes.len()
-                + graph.contains.len()
-                + graph.calls.len()
-                + graph.uses.len()
-                + graph.unresolved_calls.len()
-                + graph.unresolved_uses.len()
+            out.lines().last().map(str::trim),
+            Some("1"),
+            "scan rows: {out}"
         );
-        // No later line is a scan node record.
-        for line in &lines[1..] {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            assert_ne!(v["type"], "scan", "scan node leaked into export: {line}");
-        }
+        // The scan identity is stored once, not projected into another table.
+        let out = conn
+            .query("MATCH (n) WHERE n.fqn = 'scan/HEAD' RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("1"),
+            "scan identity duplicated across node tables: {out}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn graph_jsonl_roundtrips_tier_nodes_and_spine() {
-        // The export is round-trippable: write_graph_jsonl → read_graph_jsonl →
-        // fresh DB, and every §3.1 catalog node + §3.3 spine edge survives. A
-        // real `Scan` node round-trips too (scan_meta control record on line 1).
+        // The database is the artefact: every §3.1 catalog node and both halves
+        // of every §3.3 hierarchy/spine edge land as rows, and a real `Scan`
+        // node loads too.
         let dir =
             std::env::temp_dir().join(format!("apg-test-spine-roundtrip-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1076,58 +1028,11 @@ mod e2e {
             "mod.Gateway".to_string(),
         ));
 
-        let out_path = dir.join("graph.jsonl");
-        write_graph_jsonl(&g, &out_path).unwrap();
-
-        // Re-ingest the export: read_graph_jsonl rebuilds the graph (scan_meta
-        // line 1 → the Scan node, catalog nodes, Contains + every spine edge).
-        let back = read_graph_jsonl(&out_path).unwrap();
-
-        // Every node survives with its kind.
-        for (fqn, node) in &g.nodes {
-            let seen = back
-                .nodes
-                .get(fqn)
-                .unwrap_or_else(|| panic!("{fqn} lost in round-trip"));
-            assert_eq!(seen.kind, node.kind, "{fqn} kind");
-        }
-        assert_eq!(back.nodes.len(), g.nodes.len(), "node count");
-        // The Scan node's content-identity key round-trips through line 1 too.
-        assert_eq!(
-            back.nodes[apg::schema::SCAN_HEAD].content_key.as_deref(),
-            Some("feedface"),
-            "scan_meta content_key lost in round-trip"
-        );
-        // Edge sets are identical — nothing projected away.
-        assert_eq!(back.contains, g.contains, "contains edges");
-        for (name, a, b) in [
-            ("driven-by", &back.driven_by, &g.driven_by),
-            ("represents", &back.represents, &g.represents),
-            ("requires", &back.requires, &g.requires),
-            ("reads", &back.reads, &g.reads),
-            ("is_role", &back.is_role, &g.is_role),
-            ("realises", &back.realises, &g.realises),
-            (
-                "spec_implemented_by",
-                &back.spec_implemented_by,
-                &g.spec_implemented_by,
-            ),
-            ("calls", &back.calls, &g.calls),
-            ("uses", &back.uses, &g.uses),
-            ("unresolved_uses", &back.unresolved_uses, &g.unresolved_uses),
-        ] {
-            assert_eq!(a, b, "{name} edges");
-        }
-        assert_eq!(
-            back.unresolved_calls, g.unresolved_calls,
-            "unresolved_calls edges"
-        );
-
-        // The closed loop lands in a queryable DB: load the re-ingested graph
-        // into a fresh DB and resolve every catalog label + the spine end to end.
+        // The closed loop lands in a queryable DB: load the assembled graph
+        // and resolve every catalog label plus both halves of every edge.
         let ldir = dir.join("load");
         std::fs::create_dir_all(&ldir).unwrap();
-        build_load_files(&back, &ldir).unwrap();
+        build_load_files(&g, &ldir).unwrap();
         let db = Database::in_memory(SystemConfig::default()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
@@ -1154,7 +1059,7 @@ mod e2e {
                 .to_string();
             assert!(
                 !out.contains("(empty)"),
-                "{label} {fqn} missing after round-trip: {out}"
+                "{label} {fqn} missing from the database: {out}"
             );
         }
         let out = conn
@@ -1165,27 +1070,79 @@ mod e2e {
             .to_string();
         assert!(
             out.contains("mod.Gateway"),
-            "spine to code after round-trip: {out}"
+            "spine to code in the database: {out}"
         );
         let out = conn
-            .query("MATCH (s:Scan) RETURN s.git_sha, s.git_clean")
+            .query("MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key")
             .unwrap()
             .to_string();
         assert!(
-            out.contains("abc123") && out.contains("true"),
-            "scan survived round-trip: {out}"
+            out.contains("abc123") && out.contains("true") && out.contains("feedface"),
+            "scan row: {out}"
         );
+
+        // Both halves of every stored edge: each exact (from, to) pair has a
+        // rel row in the database.
+        let check = |rel: &str, from: &str, to: &str| {
+            let out = conn
+                .query(&format!(
+                    "MATCH (a {{fqn: '{from}'}})-[:{rel}]->(b {{fqn: '{to}'}}) RETURN count(*)"
+                ))
+                .unwrap()
+                .to_string();
+            assert_eq!(
+                out.lines().last().map(str::trim),
+                Some("1"),
+                "{rel} {from} -> {to}: {out}"
+            );
+        };
+        for (from, to) in &g.contains {
+            check("Contains", from, to);
+        }
+        for (from, to) in &g.calls {
+            check("Calls", from, to);
+        }
+        for (from, to) in &g.uses {
+            check("Uses", from, to);
+        }
+        for (from, to, _) in &g.unresolved_calls {
+            check("UnresolvedCall", from, to);
+        }
+        for (from, to) in &g.unresolved_uses {
+            check("UnresolvedUse", from, to);
+        }
+        for (from, to) in &g.requires {
+            check("Requires", from, to);
+        }
+        for (from, to) in &g.driven_by {
+            check("DrivenBy", from, to);
+        }
+        for (from, to) in &g.represents {
+            check("Represents", from, to);
+        }
+        for (from, to) in &g.reads {
+            check("Reads", from, to);
+        }
+        for (from, to) in &g.is_role {
+            check("IsRole", from, to);
+        }
+        for (from, to) in &g.realises {
+            check("Realises", from, to);
+        }
+        for (from, to) in &g.spec_implemented_by {
+            check("SpecImplementedBy", from, to);
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn agent_label_projects_to_its_table_and_round_trips_through_the_export() {
         // The tier-4 `Agent` label is fqn-keyed but file-shaped: an
         // `agent.<file-stem>` node located at its definition file's
-        // repo-relative path and 1-based line span. It projects to the `Agent`
-        // node table and round-trips through graph.jsonl's `agent` record.
+        // repo-relative path and 1-based line span. It projects into the
+        // `Agent` node table with that located field set.
         let dir =
             std::env::temp_dir().join(format!("apg-test-agent-roundtrip-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1225,31 +1182,6 @@ mod e2e {
             out.contains(&format!("agent.go-frontend-implementer|{path}|1|274|docs")),
             "agent row: {out}"
         );
-
-        // Export: one `agent` record with the same located field set — not the
-        // fqn-only `language` arm, and not skipped.
-        let out_path = dir.join("graph.jsonl");
-        write_graph_jsonl(&graph, &out_path).unwrap();
-        let text = std::fs::read_to_string(&out_path).unwrap();
-        let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
-        assert_eq!(record["type"], "agent");
-        assert_eq!(record["fqn"], "agent.go-frontend-implementer");
-        assert_eq!(record["path"], path);
-        assert_eq!(record["start_line"], 1);
-        assert_eq!(record["end_line"], 274);
-        assert_eq!(record["code_type"], "docs");
-
-        // Read back: the shared export reader rebuilds the located Agent node.
-        let back = read_graph_jsonl(&out_path).unwrap();
-        let node = back
-            .nodes
-            .get("agent.go-frontend-implementer")
-            .expect("Agent node lost in round-trip");
-        assert_eq!(node.kind, NodeKind::Agent);
-        let location = node.location.as_ref().expect("Agent node is located");
-        assert_eq!(location.path, std::path::PathBuf::from(path));
-        assert_eq!((location.start_line, location.end_line), (1, 274));
-        assert_eq!(node.code_type, "docs");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
