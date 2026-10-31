@@ -107,7 +107,7 @@ mod e2e {
     use super::*;
 
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn parquet_copy_from_roundtrip() {
         let dir = std::env::temp_dir().join(format!("apg-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1187,7 +1187,7 @@ mod e2e {
     }
 
     #[test]
-    #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (parquet/db.lbug/fs); run via cargo test-e2e"]
     fn scan_node_loads_into_db() {
         let dir = std::env::temp_dir().join(format!("apg-test-scandb-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
