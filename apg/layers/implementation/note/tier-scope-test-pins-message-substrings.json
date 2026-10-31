@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "tier-scope-test-pins-message-substrings",
+  "body": "The cumulative-scope unit test pins the production validators' message substrings (`driven-by no Service`, `realised by no Component`, `requires no Requirement`, and the dangling-endpoint phrasing) rather than their full text, so a deliberate reword of any of those messages needs a matching update in this test. Upgrade only when one of those messages is intentionally changed; the assertions are substring matches by design so unrelated wording elsewhere does not couple them.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.spec_lint.tests.unit.tier_scope_hides_other_tiers_violations",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
