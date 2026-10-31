@@ -2434,11 +2434,22 @@ mod unit {
         );
     }
 
-    /// Cardinality scope (SPEC §9.2): a single-tier run reports only that
-    /// tier's violations. A missing `contains` edge leaving a leaf Group with
-    /// no Service is a Domain error and is invisible to the Requirements scope.
+    /// Cardinality scope (SPEC §9.2): a scope is cumulative — the selected
+    /// tier plus every tier above it in the catalog ladder — so the tiers above
+    /// a scope stay fully checked while a tier below it is never judged. The
+    /// two tier-crossing coverage rules are supplied by their more concrete
+    /// downstream tier and run only when that supplier is in scope:
+    /// requirement coverage needs Domain, service realisation needs Solution.
+    /// A missing `contains` edge leaving a leaf Group with no Service is a
+    /// Domain error reported under Domain, Solution and the all-tier run and
+    /// invisible to Requirements; a Requirement with no `driven-by` Service is
+    /// reported under Domain, Solution and all-tier and not under Requirements;
+    /// a Service realised by no Component is reported under Solution and
+    /// all-tier and never under Domain or Requirements.
     #[test]
     fn cardinality_scope_limits_reported_tiers() {
+        // Domain-supplied leaf-Group coverage: the tier above the domain scope
+        // still checks it, while the requirements scope is below its subject.
         let mut nodes = valid_model();
         remove_out(
             &mut nodes,
@@ -2454,6 +2465,12 @@ mod unit {
         let domain =
             validate_cardinalities(&assembled_of(&nodes), Some(Layer::Domain), Context::Lint);
         assert!(domain.iter().any(|e| e.contains(rule)), "{domain:?}");
+        let solution =
+            validate_cardinalities(&assembled_of(&nodes), Some(Layer::Solution), Context::Lint);
+        assert!(
+            solution.iter().any(|e| e.contains(rule)),
+            "the tiers above a scope stay fully checked: {solution:?}"
+        );
         let requirements = validate_cardinalities(
             &assembled_of(&nodes),
             Some(Layer::Requirements),
@@ -2462,6 +2479,80 @@ mod unit {
         assert!(
             requirements.is_empty(),
             "the requirements scope must not report a domain violation: {requirements:?}"
+        );
+
+        // Domain-supplied requirement coverage: a Requirement with no
+        // `driven-by` Service runs once Domain is in scope, so Requirements
+        // alone never reports it.
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "domain",
+            "service",
+            "place-order",
+            "driven-by",
+            "requirements.requirement.place-order",
+        );
+        let rule = "Requirement `requirements.requirement.place-order` is `driven-by` no Service";
+        let all = validate_cardinalities(&assembled_of(&nodes), None, Context::Lint);
+        assert!(all.iter().any(|e| e.contains(rule)), "{all:?}");
+        let domain =
+            validate_cardinalities(&assembled_of(&nodes), Some(Layer::Domain), Context::Lint);
+        assert!(
+            domain.iter().any(|e| e.contains(rule)),
+            "the domain scope supplies requirement coverage: {domain:?}"
+        );
+        let solution =
+            validate_cardinalities(&assembled_of(&nodes), Some(Layer::Solution), Context::Lint);
+        assert!(
+            solution.iter().any(|e| e.contains(rule)),
+            "the solution scope still checks the tiers above it: {solution:?}"
+        );
+        let requirements = validate_cardinalities(
+            &assembled_of(&nodes),
+            Some(Layer::Requirements),
+            Context::Lint,
+        );
+        assert!(
+            !requirements.iter().any(|e| e.contains(rule)),
+            "the requirements scope does not supply requirement coverage: {requirements:?}"
+        );
+
+        // Solution-supplied service realisation: a Service realised by no
+        // Component runs once Solution is in scope, so Domain and Requirements
+        // alone never report it.
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "solution",
+            "component",
+            "order-handler",
+            "realises",
+            "domain.service.place-order",
+        );
+        let rule = "Service `domain.service.place-order` is realised by no Component";
+        let all = validate_cardinalities(&assembled_of(&nodes), None, Context::Lint);
+        assert!(all.iter().any(|e| e.contains(rule)), "{all:?}");
+        let solution =
+            validate_cardinalities(&assembled_of(&nodes), Some(Layer::Solution), Context::Lint);
+        assert!(
+            solution.iter().any(|e| e.contains(rule)),
+            "the solution scope supplies service realisation: {solution:?}"
+        );
+        let domain =
+            validate_cardinalities(&assembled_of(&nodes), Some(Layer::Domain), Context::Lint);
+        assert!(
+            !domain.iter().any(|e| e.contains(rule)),
+            "the domain scope does not supply service realisation: {domain:?}"
+        );
+        let requirements = validate_cardinalities(
+            &assembled_of(&nodes),
+            Some(Layer::Requirements),
+            Context::Lint,
+        );
+        assert!(
+            !requirements.iter().any(|e| e.contains(rule)),
+            "the requirements scope does not supply service realisation: {requirements:?}"
         );
     }
 }
