@@ -27,8 +27,9 @@ pub(crate) enum Phase {
     /// Ingest + graph assembly: the ingestor passes and the `apg/layers` tree
     /// ingestion.
     IngestAssembly,
-    /// The DB build: parquet load files, `Database::new`, `create_schema`,
-    /// `copy_from`, the splice, and the `graph.jsonl` export.
+    /// The DB build: the splice, or a full load (parquet load files,
+    /// `Database::new`, `create_schema`, `copy_from`) — the derived `db.lbug`
+    /// alone, nothing exported.
     DbLoad,
 }
 
@@ -180,7 +181,7 @@ impl TimingReport {
 pub(crate) struct PipelineTimings {
     /// Ingest + graph assembly inside the pipeline.
     pub ingest_assembly: Duration,
-    /// The DB build (splice OR full load) + `graph.jsonl`.
+    /// The DB build (splice OR full load) of the derived `db.lbug`.
     pub db_load: Duration,
 }
 
