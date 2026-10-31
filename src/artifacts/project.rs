@@ -203,15 +203,33 @@ pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTre
     ArtifactDb { db }.code_universes_from_db()
 }
 
-/// The two code-reference universes `layers::validate_change` / `ingest_tree`
-/// validate `implemented-by` targets against, resolved **without opening
-/// `db.lbug`** (phase-02 DB decoupling):
+/// The **export-side twin** of [`code_universes`] (the database read): the two
+/// code-reference universes parsed from the `apg/.trans/graph.jsonl` export
+/// plus the plan store, resolved **without opening `db.lbug`**.
+///
+/// The database is the single code-identity source. Every production consumer —
+/// the flock-guarded plan paths (`plan_cmd`), the scan's previous-scan snapshot
+/// ([`super::db::PreviousScan::capture`]), the merge strength check
+/// (`project_cmd::merge`) and the direct write path
+/// (`layers::write::validate_change` / `write_project_with`) — resolves its
+/// universes through [`code_universes`] / [`ArtifactDb::code_universes_from_db`];
+/// nothing under `src/` calls this reader. It is kept only for the e2e
+/// fixtures that still assert against the export:
+///
+/// - `tests/artifacts_e2e.rs` —
+///   `e2e::code_universes_from_export_classifies_real_planned_absent_without_db`
+///   and `e2e::planned_fqn_states_reflect_and_guard_realized_code`
+/// - `tests/layers_e2e.rs` — `e2e::projection_equals_sources_two_way_nodes_and_edges`
+/// - `tests/plan_cmd_e2e.rs` — `reproject_layers`
+/// - `tests/review_cmd_e2e.rs` — `db_at`
+///
+/// The pair it returns:
 ///
 /// - `scanned` — the real code FQNs from the `apg/.trans/graph.jsonl` export
-///   (the sole code-identity source: a `module`/`file`/`struct`/`function`
-///   record without `status: planned`). `graph.jsonl` is written only by a
-///   scan, so a FQN absent from it is not called drift here while the export is
-///   missing — the caller gates on the export (see `layers::validate_change`).
+///   (a `module`/`file`/`struct`/`function` record without
+///   `status: planned`). `graph.jsonl` is written only by a scan, so a FQN
+///   absent from it is not called drift here while the export is missing — the
+///   caller gates on the export.
 /// - `planned` — the FQNs the plan store declares still awaiting realization
 ///   (`Record::PlannedNode` in every `apg/.trans/plans/<project>.jsonl`), UNION
 ///   any `status: planned` code record already projected into the export. A
