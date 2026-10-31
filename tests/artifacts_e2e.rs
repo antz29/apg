@@ -4049,9 +4049,15 @@ mod e2e {
         let wt = repo.start_project("foo");
         let apg_root = wt.join(specs::LAYOUT);
         // One durable node file: the authored state the rebuild must preserve.
-        layers::write_project(
+        // Authored with the single-file writer, not the validated multi-file
+        // `write_project`: the latter resolves its code universes from the
+        // worktree database, which does not exist before the cold scan — yet the
+        // authored `apg/layers/**` node must already be on disk when that scan
+        // records the shared fact store's `scan.json` baseline, or the forced
+        // rebuild cannot reproduce it byte-identically.
+        layers::write_node(
             &apg_root,
-            &[layers::NodeFile {
+            &layers::NodeFile {
                 layer: "requirements".to_string(),
                 node_type: "requirement".to_string(),
                 name: "keep".to_string(),
@@ -4059,8 +4065,7 @@ mod e2e {
                 properties: std::collections::BTreeMap::new(),
                 out: Vec::new(),
                 in_edges: Vec::new(),
-            }],
-            &[],
+            },
         )
         .unwrap();
 
