@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-free-start-proved-by-log-text",
+  "body": "The clean-start arm proves \"starts without a scan\" from the captured coordinator stderr — it asserts `DB_OPEN_MARKER` is present and neither the rebuild line nor any `[load]` line is — rather than comparing `db.lbug` bytes or mtime, because lbug rewrites `db.lbug` merely on open. Upgrade to a byte- or content-identity-based proof if a scan-free start ever needs evidence independent of log text.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.session_start_discards_a_pending_state_database_with_no_socket",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
