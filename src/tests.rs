@@ -6,7 +6,8 @@ mod unit {
     /// Phase-7 task-7 (gate): the `apg --help` text documents the strict
     /// `add|update|rm` surface for node/edge/plan, no longer names the retired
     /// `plan init`/`plan link` verbs, and leaves the `apg review` line
-    /// unchanged.
+    /// unchanged. It also pins the buffer-free session lifecycle entries and
+    /// the `--force` rebuild text against the database-only artifact.
     #[test]
     fn help_text_documents_strict_surface_and_preserves_review() {
         let help = help_text();
@@ -19,8 +20,9 @@ mod unit {
             "the session block documents the coordinator"
         );
         // phase-04 task-11: the session block pins all four lifecycle entries —
-        // start, save, abort, end — so the save/abort additions travel with the
-        // pre-existing start/end documentation.
+        // start, save, abort, end — against the buffer-free database model:
+        // admitted writes mark node files dirty, deleted identities go to a
+        // pending-deletion ledger, and `save` is the one atomic write + commit.
         let session_block = help
             .lines()
             .skip_while(|l| !l.contains("apg session <sub>"))
@@ -32,16 +34,23 @@ mod unit {
             "the session block documents `start`: {session_block}"
         );
         assert!(
-            session_block.contains("save — make the buffered node-file set durable"),
+            session_block.contains("save — write the database's marked node files"),
             "the session block documents `save`: {session_block}"
         );
         assert!(
-            session_block.contains("abort — discard the buffered node-file set"),
+            session_block.contains("abort — discard the database's pending state"),
             "the session block documents `abort`: {session_block}"
         );
+        let end_line = session_block
+            .lines()
+            .skip_while(|l| !l.contains("end — release the DB/socket and exit"))
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            session_block.contains("end — signal the live session"),
-            "the session block documents `end`: {session_block}"
+            end_line.contains("end — release the DB/socket and exit")
+                && end_line.contains("pending state"),
+            "the session block documents `end` and its refusal reason: {end_line}"
         );
         assert!(help.contains("apg plan <sub>"), "plan block present");
         assert!(
@@ -76,8 +85,9 @@ mod unit {
             "the apg review verbs must be unchanged: {review_block}"
         );
         // scan-force phase-01 task-3: the SCAN OPTIONS block documents `--force`
-        // as the from-scratch rebuild that discards the derived index + export
-        // and re-runs every frontend (never a warm/incremental fact reuse).
+        // as the from-scratch rebuild that discards the database (`db.lbug`)
+        // and re-runs every frontend (never a warm/incremental fact reuse); the
+        // retired `graph.jsonl` export is not named.
         let scan_options = help
             .lines()
             .skip_while(|l| !l.contains("SCAN OPTIONS:"))
@@ -94,8 +104,12 @@ mod unit {
             "the scan options document --force as a from-scratch rebuild: {force_line}"
         );
         assert!(
-            force_line.contains("db.lbug") && force_line.contains("graph.jsonl"),
-            "the --force line names the discarded derived index and export: {force_line}"
+            force_line.contains("db.lbug"),
+            "the --force line names the discarded database: {force_line}"
+        );
+        assert!(
+            !force_line.contains("graph.jsonl"),
+            "the --force line does not name the retired graph.jsonl export: {force_line}"
         );
         assert!(
             force_line.contains("re-run every frontend") && force_line.contains("fact cache"),
