@@ -222,7 +222,7 @@ fn winb_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output
         .output()
 }
 
-/// Parse the export into comparable node/edge/unresolved sets.
+/// Parse the scan database into comparable node/edge/unresolved sets.
 fn winb_graph(
     repo_dir: &Path,
 ) -> (
@@ -230,12 +230,10 @@ fn winb_graph(
     BTreeSet<(String, String)>,
     BTreeSet<String>,
 ) {
-    let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
     let mut nodes = BTreeSet::new();
     let mut edges = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
-    for line in text.lines() {
-        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+    for v in db_records(repo_dir) {
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
             "module" | "file" | "struct" | "function" => {
@@ -269,28 +267,136 @@ fn winb_graph(
 }
 
 // -----------------------------------------------------------------------
-// Phase-05 Rust all-manifest discovery / isolation acceptance helpers
-// (tasks 5, 6, 9). Non-#[test] helpers, so they live at the `mod tests`
-// root.
+// Scan-database readers (the retired `graph.jsonl` export helpers).
+// Non-#[test] helpers, so they live at the `mod tests` root.
 // -----------------------------------------------------------------------
 
-/// Parses a scan's `apg/.trans/graph.jsonl` export into raw JSON records.
-fn export_records(repo_dir: &Path) -> Vec<serde_json::Value> {
-    let path = repo_dir.join("apg/.trans/graph.jsonl");
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
-        .collect()
+/// Runs one read-only Cypher query over a scan's `apg/.trans/db.lbug` and
+/// returns the raw rows (column order preserved, names discarded).
+fn db_query(repo_dir: &Path, query: &str) -> Vec<Vec<String>> {
+    let path = repo_dir.join("apg/.trans/db.lbug");
+    let db = Database::new(&path, SystemConfig::default().read_only(true))
+        .unwrap_or_else(|_| panic!("open {}", path.display()));
+    let conn = Connection::new(&db).unwrap();
+    let (_, rows) = splice::query_rows(&conn, query)
+        .unwrap_or_else(|e| panic!("{query} on {}: {e:#}", path.display()));
+    drop(conn);
+    drop(db);
+    rows
 }
 
-/// Module FQN → number of module records carrying it. A count above 1 means
-/// the same project was emitted twice — the workspace double-count that the
-/// dedup by manifest root must prevent.
-fn export_module_counts(
-    records: &[serde_json::Value],
-) -> std::collections::BTreeMap<String, usize> {
+/// One record in the retired export's shape (`type` + `fqn`), so the
+/// assertion helpers below keep reading the same field names off the DB.
+fn db_record(ty: &str, fqn: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    m.insert("type".to_string(), ty.into());
+    m.insert("fqn".to_string(), fqn.into());
+    m
+}
+
+fn db_text(row: &[String], i: usize) -> String {
+    row.get(i).cloned().unwrap_or_default()
+}
+
+fn db_num(row: &[String], i: usize) -> u64 {
+    row.get(i).and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+}
+
+/// The export omitted an empty status; the placeholder checks rely on that
+/// absence, so only a planned row carries one.
+fn db_status(m: &mut serde_json::Map<String, serde_json::Value>, status: &str) {
+    if !status.is_empty() {
+        m.insert("status".to_string(), status.into());
+    }
+}
+
+/// Reads a scan's `apg/.trans/db.lbug` into the record shape the assertion
+/// helpers use: the code node rows (language/module/file/struct/function/
+/// agent/unresolved target) plus both halves of every code edge.
+fn db_records(repo_dir: &Path) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    for r in db_query(repo_dir, "MATCH (n:Language) RETURN n.fqn") {
+        out.push(serde_json::Value::Object(db_record(
+            "language",
+            &db_text(&r, 0),
+        )));
+    }
+    for r in db_query(repo_dir, "MATCH (n:Module) RETURN n.fqn, n.status") {
+        let mut m = db_record("module", &db_text(&r, 0));
+        db_status(&mut m, &db_text(&r, 1));
+        out.push(serde_json::Value::Object(m));
+    }
+    for r in db_query(
+        repo_dir,
+        "MATCH (n:File) RETURN n.fqn, n.start_line, n.end_line, n.code_type, n.status",
+    ) {
+        let mut m = db_record("file", &db_text(&r, 0));
+        m.insert("start_line".to_string(), db_num(&r, 1).into());
+        m.insert("end_line".to_string(), db_num(&r, 2).into());
+        m.insert("code_type".to_string(), db_text(&r, 3).into());
+        db_status(&mut m, &db_text(&r, 4));
+        out.push(serde_json::Value::Object(m));
+    }
+    for (label, ty) in [("Struct", "struct"), ("Function", "function")] {
+        for r in db_query(
+            repo_dir,
+            &format!(
+                "MATCH (n:{label}) RETURN n.fqn, n.path, n.start_line, n.end_line, n.code_type, n.status"
+            ),
+        ) {
+            let mut m = db_record(ty, &db_text(&r, 0));
+            m.insert("path".to_string(), db_text(&r, 1).into());
+            m.insert("start_line".to_string(), db_num(&r, 2).into());
+            m.insert("end_line".to_string(), db_num(&r, 3).into());
+            m.insert("code_type".to_string(), db_text(&r, 4).into());
+            db_status(&mut m, &db_text(&r, 5));
+            out.push(serde_json::Value::Object(m));
+        }
+    }
+    for r in db_query(
+        repo_dir,
+        "MATCH (n:Agent) RETURN n.fqn, n.path, n.start_line, n.end_line, n.code_type",
+    ) {
+        let mut m = db_record("agent", &db_text(&r, 0));
+        m.insert("path".to_string(), db_text(&r, 1).into());
+        m.insert("start_line".to_string(), db_num(&r, 2).into());
+        m.insert("end_line".to_string(), db_num(&r, 3).into());
+        m.insert("code_type".to_string(), db_text(&r, 4).into());
+        out.push(serde_json::Value::Object(m));
+    }
+    for r in db_query(
+        repo_dir,
+        "MATCH (n:UnresolvedTarget) RETURN n.fqn, n.category",
+    ) {
+        let mut m = db_record("unresolved", &db_text(&r, 0));
+        m.insert("category".to_string(), db_text(&r, 1).into());
+        out.push(serde_json::Value::Object(m));
+    }
+    for (label, ty) in [
+        ("Contains", "contains"),
+        ("Calls", "calls"),
+        ("Uses", "uses"),
+        ("UnresolvedCall", "unresolved_call"),
+        ("UnresolvedUse", "unresolved_use"),
+    ] {
+        for r in db_query(
+            repo_dir,
+            &format!("MATCH (a)-[:{label}]->(b) RETURN a.fqn, b.fqn"),
+        ) {
+            let mut m = serde_json::Map::new();
+            m.insert("type".to_string(), ty.into());
+            m.insert("from".to_string(), db_text(&r, 0).into());
+            m.insert("to".to_string(), db_text(&r, 1).into());
+            out.push(serde_json::Value::Object(m));
+        }
+    }
+    out
+}
+
+/// Module FQN → number of module rows carrying it. A count above 1 means the
+/// same project was emitted twice — the workspace double-count that the dedup
+/// by manifest root must prevent.
+fn db_module_counts(records: &[serde_json::Value]) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::new();
     for r in records {
         if r.get("type").and_then(|t| t.as_str()) == Some("module")
@@ -302,10 +408,10 @@ fn export_module_counts(
     counts
 }
 
-/// Every code-node location in the export (a File's fqn is its absolute
-/// path; a Struct/Function carries `path`), so a caller can assert no node
-/// is drawn from a generated/dependency tree.
-fn export_code_locations(records: &[serde_json::Value]) -> Vec<String> {
+/// Every code-node location in the database (a File's fqn is its repo-relative
+/// path; a Struct/Function carries `path`), so a caller can assert no node is
+/// drawn from a generated/dependency tree.
+fn db_code_locations(records: &[serde_json::Value]) -> Vec<String> {
     let mut out = Vec::new();
     for r in records {
         match r.get("type").and_then(|t| t.as_str()) {
@@ -325,8 +431,8 @@ fn export_code_locations(records: &[serde_json::Value]) -> Vec<String> {
     out
 }
 
-/// The Struct/Function FQNs in the export.
-fn export_symbol_fqns(records: &[serde_json::Value]) -> BTreeSet<String> {
+/// The Struct/Function FQNs in the database.
+fn db_symbol_fqns(records: &[serde_json::Value]) -> BTreeSet<String> {
     records
         .iter()
         .filter(|r| {
@@ -680,19 +786,17 @@ fn java_store(repo_dir: &Path) -> PathBuf {
     repo_dir.join(".git/apg/facts")
 }
 
-/// The enumerated per-rel-type oracle: rel type -> record count for the four
-/// Java rel types the task names (`Calls`/`Uses`/`UnresolvedCall`/
-/// `UnresolvedUse`, i.e. wire `calls`/`uses`/`unresolved_call`/
-/// `unresolved_use`). Every type is present with `0` when it has no records,
-/// so a dropped rel type is a divergence rather than an absent key.
+/// The enumerated per-rel-type oracle: rel type -> row count for the four Java
+/// rel types the task names (`Calls`/`Uses`/`UnresolvedCall`/`UnresolvedUse`,
+/// i.e. wire `calls`/`uses`/`unresolved_call`/`unresolved_use`). Every type is
+/// present with `0` when it has no rows, so a dropped rel type is a divergence
+/// rather than an absent key.
 fn java_rel_counts(repo_dir: &Path) -> std::collections::BTreeMap<String, usize> {
-    let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
     let mut counts = std::collections::BTreeMap::new();
     for ty in ["calls", "uses", "unresolved_call", "unresolved_use"] {
         counts.insert(ty.to_string(), 0usize);
     }
-    for line in text.lines() {
-        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+    for v in db_records(repo_dir) {
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if let Some(c) = counts.get_mut(ty) {
             *c += 1;
@@ -704,23 +808,8 @@ fn java_rel_counts(repo_dir: &Path) -> std::collections::BTreeMap<String, usize>
 /// The `UnresolvedTarget` set by FQN -> category (the task's oracle: the set
 /// must be EQUAL by FQN *with* categories, not by FQN alone).
 fn java_unresolved(repo_dir: &Path) -> std::collections::BTreeMap<String, String> {
-    let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
     let mut out = std::collections::BTreeMap::new();
-    for line in text.lines() {
-        let v: serde_json::Value = serde_json::from_str(line).unwrap();
-        if v.get("type").and_then(|t| t.as_str()) != Some("unresolved") {
-            continue;
-        }
-        let fqn = v
-            .get("fqn")
-            .and_then(|f| f.as_str())
-            .unwrap_or("")
-            .to_string();
-        let cat = v
-            .get("category")
-            .and_then(|c| c.as_str())
-            .unwrap_or("")
-            .to_string();
+    for (fqn, cat) in db_unresolved(&db_records(repo_dir)) {
         if let Some(prev) = out.insert(fqn.clone(), cat.clone()) {
             assert_eq!(prev, cat, "the unresolved target {fqn} has two categories");
         }
@@ -728,42 +817,39 @@ fn java_unresolved(repo_dir: &Path) -> std::collections::BTreeMap<String, String
     out
 }
 
-/// The `(from, to)` endpoints of one edge kind in the export
+/// The `(from, to)` endpoints of one edge kind in the database
 /// (`calls`/`uses`/…) — the positive half of the task-23 extension, where
 /// the re-emitted file's references into the TARGET package must appear as
 /// their real resolved FQNs (never a bare simple name or an error symbol).
 fn java_edges(repo_dir: &Path, kind: &str) -> std::collections::BTreeSet<(String, String)> {
-    let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
-    let mut out = std::collections::BTreeSet::new();
-    for line in text.lines() {
-        let v: serde_json::Value = serde_json::from_str(line).unwrap();
-        if v.get("type").and_then(|t| t.as_str()) != Some(kind) {
-            continue;
-        }
-        let from = v.get("from").and_then(|f| f.as_str()).unwrap_or("");
-        let to = v.get("to").and_then(|t| t.as_str()).unwrap_or("");
-        out.insert((from.to_string(), to.to_string()));
-    }
-    out
+    db_records(repo_dir)
+        .iter()
+        .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some(kind))
+        .map(|r| {
+            (
+                r.get("from")
+                    .and_then(|f| f.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                r.get("to")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        })
+        .collect()
 }
 
 /// The simple names of every project `struct` the scan declared (the
 /// "project class" set the bare-name leak is checked against).
 fn java_project_class_simple_names(repo_dir: &Path) -> std::collections::BTreeSet<String> {
-    let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
-    let mut out = std::collections::BTreeSet::new();
-    for line in text.lines() {
-        let v: serde_json::Value = serde_json::from_str(line).unwrap();
-        if v.get("type").and_then(|t| t.as_str()) != Some("struct") {
-            continue;
-        }
-        if let Some(fqn) = v.get("fqn").and_then(|f| f.as_str())
-            && let Some(simple) = fqn.rsplit('.').next()
-        {
-            out.insert(simple.to_string());
-        }
-    }
-    out
+    db_records(repo_dir)
+        .iter()
+        .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("struct"))
+        .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()))
+        .filter_map(|fqn| fqn.rsplit('.').next())
+        .map(str::to_string)
+        .collect()
 }
 
 /// True when the shared store holds a Java CLASS-cache artifact — the
@@ -1031,8 +1117,8 @@ fn js_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) 
     js_scratch_owned(tag, &owned)
 }
 
-/// The absolute source paths carried by `file` records in a scan export.
-fn export_file_paths(records: &[serde_json::Value]) -> BTreeSet<String> {
+/// The repo-relative source paths carried by `file` rows in the scan database.
+fn db_file_paths(records: &[serde_json::Value]) -> BTreeSet<String> {
     records
         .iter()
         .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
@@ -1040,8 +1126,8 @@ fn export_file_paths(records: &[serde_json::Value]) -> BTreeSet<String> {
         .collect()
 }
 
-/// The module FQNs in a scan export.
-fn export_modules(records: &[serde_json::Value]) -> BTreeSet<String> {
+/// The module FQNs in the scan database.
+fn db_modules(records: &[serde_json::Value]) -> BTreeSet<String> {
     records
         .iter()
         .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("module"))
@@ -1050,7 +1136,7 @@ fn export_modules(records: &[serde_json::Value]) -> BTreeSet<String> {
 }
 
 /// The Struct/Function FQNs whose declared `path` is exactly `path`.
-fn export_symbols_at(records: &[serde_json::Value], path: &str) -> BTreeSet<String> {
+fn db_symbols_at(records: &[serde_json::Value], path: &str) -> BTreeSet<String> {
     records
         .iter()
         .filter(|r| {
@@ -1066,7 +1152,7 @@ fn export_symbols_at(records: &[serde_json::Value], path: &str) -> BTreeSet<Stri
 
 /// The resolve-only edge types (`calls`/`uses`/`unresolved_call`/
 /// `unresolved_use`) whose `from` FQN is one of `sources`.
-fn export_edge_types_from(
+fn db_edge_types_from(
     records: &[serde_json::Value],
     sources: &BTreeSet<String>,
 ) -> BTreeSet<String> {
@@ -1087,11 +1173,11 @@ fn export_edge_types_from(
         .collect()
 }
 
-/// True when the export carries at least one `calls`/`uses` edge whose two
+/// True when the database carries at least one `calls`/`uses` edge whose two
 /// endpoints are both declared project symbols (a resolve-only edge, never
 /// an unresolved target).
 fn has_resolved_project_edge(records: &[serde_json::Value]) -> bool {
-    let project = export_symbol_fqns(records);
+    let project = db_symbol_fqns(records);
     records.iter().any(|r| {
         let ty = r.get("type").and_then(|t| t.as_str());
         if !matches!(ty, Some("calls") | Some("uses")) {
@@ -1104,7 +1190,7 @@ fn has_resolved_project_edge(records: &[serde_json::Value]) -> bool {
 }
 
 /// The `(fqn, category)` pairs of `unresolved` records.
-fn export_unresolved(records: &[serde_json::Value]) -> BTreeSet<(String, String)> {
+fn db_unresolved(records: &[serde_json::Value]) -> BTreeSet<(String, String)> {
     records
         .iter()
         .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("unresolved"))
@@ -1123,8 +1209,8 @@ fn export_unresolved(records: &[serde_json::Value]) -> BTreeSet<(String, String)
         .collect()
 }
 
-/// The `calls`/`uses` edge targets in the export.
-fn export_resolved_edge_targets(records: &[serde_json::Value]) -> BTreeSet<String> {
+/// The `calls`/`uses` edge targets in the database.
+fn db_resolved_edge_targets(records: &[serde_json::Value]) -> BTreeSet<String> {
     records
         .iter()
         .filter(|r| {
@@ -1142,9 +1228,9 @@ fn export_resolved_edge_targets(records: &[serde_json::Value]) -> BTreeSet<Strin
 /// a `File` fqn is now the repo-relative identity (`calc.js`), so a
 /// leading-`/`suffix (`/calc.js`) matches either the relative fqn or an
 /// absolute path.
-fn export_file_ending(records: &[serde_json::Value], suffix: &str) -> Option<String> {
+fn db_file_ending(records: &[serde_json::Value], suffix: &str) -> Option<String> {
     let bare = suffix.trim_start_matches('/');
-    export_file_paths(records)
+    db_file_paths(records)
         .into_iter()
         .find(|f| f.ends_with(suffix) || f.ends_with(bare))
 }
@@ -1499,7 +1585,7 @@ fn py_incremental_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// True when the export carries a resolve-only edge `from --kind--> to`,
+/// True when the database carries a resolve-only edge `from --kind--> to`,
 /// ROOTING-AGNOSTICALLY (a leading `py.`/`python.` root is normalised away
 /// on both endpoints, so the assertion holds pre- and post-P9).
 fn has_edge_between(records: &[serde_json::Value], kind: &str, from: &str, to: &str) -> bool {
@@ -1575,11 +1661,6 @@ mod e2e {
                 "rust",
                 "apg.load.create_schema",
                 "rust.apg.load.create_schema",
-            ),
-            (
-                "rust",
-                "apg.load.write_graph_jsonl",
-                "rust.apg.load.write_graph_jsonl",
             ),
             (
                 "rust",
@@ -4374,9 +4455,9 @@ mod e2e {
             "apg session <sub> …",
             "Session-scoped single-writer coordinator",
             "start — own db.lbug exclusively",
-            "save — make the buffered node-file set durable",
-            "abort — discard the buffered node-file set and",
-            "end — signal the live session to release the",
+            "save — write the database's marked node files",
+            "abort — discard the database's pending state and",
+            "end — release the DB/socket and exit, refusing",
         ] {
             assert!(
                 help.contains(needle),
@@ -4460,11 +4541,11 @@ mod e2e {
             ),
             (
                 "spec-writer.md",
-                "live session the mutation refuses and names `apg session start`.",
+                "session the mutation refuses and names `apg session start`.",
             ),
             (
                 "codebase-navigator.md",
-                "live session the mutation refuses and names `apg session start`.",
+                "With no live session it refuses and names",
             ),
             (
                 "agent-builder.md",
@@ -4695,22 +4776,24 @@ mod e2e {
         layers::write_project(&wt_apg, &[owner, anchor, svc, grp, cmp, rl], &[]).unwrap();
 
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
-        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
         let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
         let inode_before = std::fs::metadata(&db_path).unwrap().ino();
-        let scanned_at = |graph: &Path| -> String {
-            let text = std::fs::read_to_string(graph).unwrap();
-            let first = text.lines().next().unwrap_or_default().to_string();
-            serde_json::from_str::<serde_json::Value>(&first)
-                .ok()
-                .and_then(|v| {
-                    v.get("scanned_at")
-                        .and_then(|s| s.as_str())
-                        .map(str::to_string)
-                })
+        // Routed read: a live session owns the database, so the scan's
+        // recorded `scanned_at` is read through `apg query`.
+        let scanned_at = || -> String {
+            let out = testutil::spawn_apg(&["query", "MATCH (s:Scan) RETURN s.scanned_at"], &wt);
+            assert!(
+                out.status.success(),
+                "read the Scan row: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .map(|l| l.trim().to_string())
                 .unwrap_or_default()
         };
-        let scan_meta_before = scanned_at(&graph_path);
+        let scan_meta_before = scanned_at();
         // A scan would recreate this; a metadata mutation never enters the scan
         // pipeline.
         let _ = std::fs::remove_file(&log_path);
@@ -4856,7 +4939,7 @@ mod e2e {
             "db.lbug must never be re-created by a metadata mutation"
         );
         assert_eq!(
-            scanned_at(&graph_path),
+            scanned_at(),
             scan_meta_before,
             "a metadata mutation must never restamp the scan_meta (no scan ran)"
         );
@@ -5028,7 +5111,7 @@ mod e2e {
             "db.lbug must never be re-created by a metadata mutation"
         );
         assert_eq!(
-            scanned_at(&graph_path),
+            scanned_at(),
             scan_meta_before,
             "a metadata mutation must never restamp the scan_meta (no scan ran)"
         );
@@ -5061,22 +5144,24 @@ mod e2e {
         let home = repo.root.join("home");
 
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
-        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
         let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
-        let scanned_at = |graph: &Path| -> String {
-            let text = std::fs::read_to_string(graph).unwrap();
-            let first = text.lines().next().unwrap_or_default().to_string();
-            serde_json::from_str::<serde_json::Value>(&first)
-                .ok()
-                .and_then(|v| {
-                    v.get("scanned_at")
-                        .and_then(|s| s.as_str())
-                        .map(str::to_string)
-                })
+        // Routed read: a live session owns the database, so the scan's
+        // recorded `scanned_at` is read through `apg query`.
+        let scanned_at = || -> String {
+            let out = testutil::spawn_apg(&["query", "MATCH (s:Scan) RETURN s.scanned_at"], &wt);
+            assert!(
+                out.status.success(),
+                "read the Scan row: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .map(|l| l.trim().to_string())
                 .unwrap_or_default()
         };
         let inode_before = std::fs::metadata(&db_path).unwrap().ino();
-        let scan_meta_before = scanned_at(&graph_path);
+        let scan_meta_before = scanned_at();
         // A scan would recreate this; a metadata mutation never enters the scan
         // pipeline.
         let _ = std::fs::remove_file(&log_path);
@@ -5214,7 +5299,7 @@ mod e2e {
             "db.lbug must never be re-created by a metadata mutation"
         );
         assert_eq!(
-            scanned_at(&graph_path),
+            scanned_at(),
             scan_meta_before,
             "a metadata mutation must never restamp the scan_meta (no scan ran)"
         );
@@ -6238,7 +6323,6 @@ mod e2e {
             // Oracle: a fresh FULL scan of the SAME tree with the fast-path,
             // the DB, AND the shared fact cache cleared — no reuse/splice.
             std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-            std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
             let store = repo_dir.join(".git/apg/facts");
             let _ = std::fs::remove_dir_all(&store);
             let full = winb_run(&repo_dir, &home, &["scan", "."]);
@@ -6290,10 +6374,10 @@ mod e2e {
     }
 
     /// Regression (reused-facts full-universe seam): a reused file whose
-    /// cached facts are newer than THIS checkout's local export must still be
+    /// cached facts are newer than THIS checkout's local database must still be
     /// in the code-FQN universe `ingest_tree` validates `implemented-by`
     /// against. Reproduces the multi-worktree lag (a shared-store record
-    /// ahead of the local export) that made a merged code change look like
+    /// ahead of the local database) that made a merged code change look like
     /// `spec drift` on main's rebuild.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/fact store); run via cargo test-e2e"]
@@ -6309,13 +6393,12 @@ mod e2e {
             String::from_utf8_lossy(&cold.stderr)
         );
 
-        // Snapshot the L0 local export (its code universe has no `New`).
+        // Snapshot the L0 local database (its code universe has no `New`).
         let trans = repo_dir.join("apg/.trans");
         let db0 = std::fs::read(trans.join("db.lbug")).unwrap();
-        let graph0 = std::fs::read(trans.join("graph.jsonl")).unwrap();
 
         // L1: add a new code unit and scan, so the SHARED store records its
-        // FQN (and the local export advances too).
+        // FQN (and the local database advances too).
         std::fs::write(
                 repo_dir.join("a/a.go"),
                 "package a\n\ntype A struct {\n\tX int\n}\n\nfunc Leaf() int { return 1 }\n\nfunc New() int { return 2 }\n",
@@ -6329,11 +6412,9 @@ mod e2e {
             String::from_utf8_lossy(&l1.stderr)
         );
 
-        // The code FQN the store now carries but the L0 export does not.
-        let graph = std::fs::read_to_string(trans.join("graph.jsonl")).unwrap();
-        let new_fqn = graph
-            .lines()
-            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        // The code FQN the store now carries but the L0 database does not.
+        let new_fqn = db_records(&repo_dir)
+            .into_iter()
             .find_map(|v| {
                 let t = v.get("type").and_then(|t| t.as_str())?;
                 let fqn = v.get("fqn").and_then(|f| f.as_str())?;
@@ -6342,7 +6423,7 @@ mod e2e {
             .expect("the L1 scan must carry the new function FQN");
 
         // L2: an authored `implemented-by` to `New` plus a non-code change
-        // only, then rewind the LOCAL export to L0 (the shared store stays at
+        // only, then rewind the LOCAL database to L0 (the shared store stays at
         // L1 — the multi-worktree lag).
         std::fs::create_dir_all(repo_dir.join("apg/layers/solution/component")).unwrap();
         std::fs::write(
@@ -6355,11 +6436,10 @@ mod e2e {
         std::fs::write(repo_dir.join("notes.txt"), "non-code change\n").unwrap();
         scratch_commit_all(&repo_dir, "authored component + note");
         std::fs::write(trans.join("db.lbug"), &db0).unwrap();
-        std::fs::write(trans.join("graph.jsonl"), &graph0).unwrap();
 
         // The delta is non-code only, so `a/a.go` is REUSED from the store
         // (it carries `New`); without the reused-facts union the universe
-        // would fall back to the L0 export and bail `spec drift`.
+        // would fall back to the L0 database and bail `spec drift`.
         let inc = winb_run(&repo_dir, &home, &["scan", "."]);
         let err = String::from_utf8_lossy(&inc.stderr);
         assert!(
@@ -6386,14 +6466,13 @@ mod e2e {
         let _ = winb_run(&repo_dir, &home, &["init", "."]);
         scratch_commit_all(&repo_dir, "apg init");
 
-        // The cold full scan records the reference graph + the shared cache.
+        // The cold full scan records the reference database + the shared cache.
         let cold = winb_run(&repo_dir, &home, &["scan", "."]);
         assert!(
             cold.status.success(),
             "cold scan: {}",
             String::from_utf8_lossy(&cold.stderr)
         );
-        let reference = std::fs::read(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
         let store = repo_dir.join(".git/apg/facts");
         assert!(store.is_dir(), "the shared store must exist after a scan");
         assert!(
@@ -6477,7 +6556,6 @@ mod e2e {
             f_unres, r_unres,
             "cross-worktree unresolved sets must be equal"
         );
-        let _ = &reference;
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -6685,7 +6763,7 @@ mod e2e {
                     .any(|s| s == ".git" || s == "target" || s == "build-out")
         };
         let assert_hygienic = |checkout: &Path, tag: &str| {
-            let records = export_records(checkout);
+            let records = db_records(checkout);
             let files: BTreeSet<String> = records
                 .iter()
                 .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
@@ -6877,13 +6955,6 @@ mod e2e {
         assert!(
             head.contains("new"),
             "the Scan head must be refreshed: {head}"
-        );
-
-        // The export is published in the same atomic swap.
-        let export = std::fs::read_to_string(splice::export_path(&apg_root)).unwrap();
-        assert!(
-            export.contains("mod.A.g"),
-            "graph.jsonl must carry the new unit"
         );
 
         let _ = std::fs::remove_dir_all(&base);
@@ -7114,8 +7185,9 @@ mod e2e {
     /// forced from-scratch FULL scan of the same tree. The enumerated oracle
     /// is the per-rel-type counts (`Calls`/`Uses`/`UnresolvedCall`/
     /// `UnresolvedUse`) AND the `UnresolvedTarget` set by FQN-with-categories
-    /// — the exact divergence class note-87 measured on jgrapht (graph.jsonl
-    /// missing 1 914 / extra 2 145, all resolved -> unresolved), scaled down.
+    /// — the exact divergence class note-87 measured on jgrapht (the recorded
+    /// graph missing 1 914 / extra 2 145, all resolved -> unresolved), scaled
+    /// down.
     /// It additionally rejects the javac error-symbol leak: no
     /// `UnresolvedTarget` may carry a project-class simple name or an error
     /// symbol. Candidate binary only, scratch /tmp repo, java-only frontend.
@@ -7206,11 +7278,10 @@ mod e2e {
                  bytecode classpath"
         );
 
-        // Forced from-scratch FULL scan of the SAME tree: db.lbug +
-        // graph.jsonl + the shared fact store cleared — never the
-        // incremental run compared against itself.
+        // Forced from-scratch FULL scan of the SAME tree: db.lbug + the
+        // shared fact store cleared — never the incremental run compared
+        // against itself.
         std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-        std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
         let _ = std::fs::remove_dir_all(java_store(&repo_dir));
         let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
@@ -7379,7 +7450,6 @@ mod e2e {
 
         // (b) forced from-scratch FULL scan oracle of the same changed tree.
         std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-        std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
         let _ = std::fs::remove_dir_all(&store);
         let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
@@ -7434,8 +7504,8 @@ mod e2e {
         if !nongit_log.contains("running java frontend") {
             c_failures.push("(c) the no-hand-off scan never ran the java frontend".to_string());
         }
-        if !nongit_repo.join("apg/.trans/graph.jsonl").is_file() {
-            c_failures.push("(c) the no-hand-off scan wrote no graph.jsonl".to_string());
+        if !nongit_repo.join("apg/.trans/db.lbug").is_file() {
+            c_failures.push("(c) the no-hand-off scan wrote no db.lbug".to_string());
         }
         // (i) no seeding line (there was no --cache-dir/--cache-key flag).
         if nongit_log.contains("seeding java class cache for") {
@@ -7526,7 +7596,7 @@ mod e2e {
 
         // The graph view: the `java` Language root, the default-package
         // module, the package-less File and the top-level structs.
-        let records = export_records(&repo_dir);
+        let records = db_records(&repo_dir);
         let nodes: BTreeSet<(String, String)> = records
             .iter()
             .filter_map(|r| {
@@ -7568,7 +7638,7 @@ mod e2e {
         );
 
         // The package-less File hangs under the non-empty module: the
-        // File's parent is the Module→File Contains edge (the export carries
+        // File's parent is the Module→File Contains edge (the database carries
         // the repo-relative File fqn, never the absolute checkout path).
         let widget_file = nodes
             .iter()
@@ -7685,8 +7755,8 @@ mod e2e {
             "(a) nested non-workspace scan failed:\n{}",
             String::from_utf8_lossy(&scan.stderr)
         );
-        let recs = export_records(&nested.root);
-        let modules = export_module_counts(&recs);
+        let recs = db_records(&nested.root);
+        let modules = db_module_counts(&recs);
         assert_eq!(
             modules.get("rust.nested-app"),
             Some(&1),
@@ -7697,7 +7767,7 @@ mod e2e {
             Some(&1),
             "(a) root module: {modules:?}"
         );
-        let symbols = export_symbol_fqns(&recs);
+        let symbols = db_symbol_fqns(&recs);
         assert!(
             symbols.contains("rust.nested-app.NestedThing")
                 && symbols.contains("rust.nested-app.nested_fn"),
@@ -7733,8 +7803,8 @@ mod e2e {
             "(b) workspace scan failed:\n{}",
             String::from_utf8_lossy(&scan.stderr)
         );
-        let recs = export_records(&ws.root);
-        let modules = export_module_counts(&recs);
+        let recs = db_records(&ws.root);
+        let modules = db_module_counts(&recs);
         assert_eq!(
             modules.get("rust.crate-a"),
             Some(&1),
@@ -7759,7 +7829,7 @@ mod e2e {
             rust_project_total, 2,
             "(b) discovered Rust projects must equal the workspace's 2 projects: {modules:?}"
         );
-        let symbols = export_symbol_fqns(&recs);
+        let symbols = db_symbol_fqns(&recs);
         assert!(
             symbols.contains("rust.crate-a.AThing") && symbols.contains("rust.crate-b.BThing"),
             "(b) each member's symbols must appear: {symbols:?}"
@@ -7786,13 +7856,13 @@ mod e2e {
             "(c) .worktrees scan failed:\n{}",
             String::from_utf8_lossy(&scan.stderr)
         );
-        let recs = export_records(&wt.root);
-        let modules = export_module_counts(&recs);
+        let recs = db_records(&wt.root);
+        let modules = db_module_counts(&recs);
         assert!(
             !modules.contains_key("hidden-app"),
             "(c) a crate under .worktrees/ must not be discovered: {modules:?}"
         );
-        let symbols = export_symbol_fqns(&recs);
+        let symbols = db_symbol_fqns(&recs);
         assert!(
             !symbols.iter().any(|f| f.contains("HiddenThing")),
             "(c) a .worktrees/ crate's symbols must be absent: {symbols:?}"
@@ -7842,8 +7912,8 @@ mod e2e {
             "(d) generated-tree scan failed:\n{}",
             String::from_utf8_lossy(&scan.stderr)
         );
-        let recs = export_records(&gen_repo.root);
-        let symbols = export_symbol_fqns(&recs);
+        let recs = db_records(&gen_repo.root);
+        let symbols = db_symbol_fqns(&recs);
         // Non-vacuous: the crate BESIDE the generated tree was loaded, so
         // the exclusion is exercised against a live scan, not an empty one.
         assert!(
@@ -7852,7 +7922,7 @@ mod e2e {
                 .any(|f| f == "rust.rustlib-fixture.RustlibThing"),
             "(d) the crate beside the generated tree must be discovered: {symbols:?}"
         );
-        let leaked: Vec<String> = export_code_locations(&recs)
+        let leaked: Vec<String> = db_code_locations(&recs)
             .into_iter()
             .filter(|p| under_component(&gen_repo.root, p, "target"))
             .collect();
@@ -7867,7 +7937,7 @@ mod e2e {
             );
         }
         assert!(
-            !export_module_counts(&recs).contains_key("target-crate"),
+            !db_module_counts(&recs).contains_key("target-crate"),
             "(d) a Cargo project under target/ must not be discovered"
         );
         let _ = std::fs::remove_dir_all(&gen_repo.root);
@@ -7957,8 +8027,8 @@ mod e2e {
         // root away, then assert the nested crate's identity is
         // `apg-rustfrontend` exactly once, disjoint from the root package's
         // `apg`, with each crate's symbols under its own identity.
-        let recs = export_records(&repo.root);
-        let modules: std::collections::BTreeMap<String, usize> = export_module_counts(&recs)
+        let recs = db_records(&repo.root);
+        let modules: std::collections::BTreeMap<String, usize> = db_module_counts(&recs)
             .into_iter()
             .map(|(k, v)| (strip_lang_root(&k), v))
             .collect();
@@ -7972,7 +8042,7 @@ mod e2e {
             Some(&1),
             "(3) the root package's identity must be present exactly once: {modules:?}"
         );
-        let symbols: BTreeSet<String> = export_symbol_fqns(&recs)
+        let symbols: BTreeSet<String> = db_symbol_fqns(&recs)
             .into_iter()
             .map(|f| strip_lang_root(&f))
             .collect();
@@ -8109,21 +8179,21 @@ mod e2e {
         let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
         assert!(scan.status.success(), "scan failed: {stderr}");
 
-        let records = export_records(&repo_dir);
-        let files = export_file_paths(&records);
+        let records = db_records(&repo_dir);
+        let files = db_file_paths(&records);
         // fix-module-identity phase-02: a package-less repo identifies its
         // one module from the repo-relative base (`root`), never the
         // checkout/scan-root directory basename (`repo`). The old synthetic
         // `js.repo` module is gone
         // (`requirements.constraint.no-checkout-named-module`).
         assert!(
-            !export_modules(&records).contains("js.repo"),
+            !db_modules(&records).contains("js.repo"),
             "no module may be named after the checkout/scan-root basename: {:?}",
-            export_modules(&records)
+            db_modules(&records)
         );
 
         for rel in ["calc.js", "widget.jsx", "esm.mjs", "cjs.cjs"] {
-            let abs = export_file_ending(&records, &format!("/{rel}"))
+            let abs = db_file_ending(&records, &format!("/{rel}"))
                 .unwrap_or_else(|| panic!("{rel} must be accepted as a File node: {files:?}"));
             // Exactly ONE module identity parents each source file: no file
             // is emitted twice (once per recursive package walk).
@@ -8138,9 +8208,9 @@ mod e2e {
                 1,
                 "{rel} must be emitted under exactly one module identity: {parents:?}"
             );
-            let syms = export_symbols_at(&records, &abs);
+            let syms = db_symbols_at(&records, &abs);
             assert!(!syms.is_empty(), "{rel} must declare symbols: {syms:?}");
-            let edges = export_edge_types_from(&records, &syms);
+            let edges = db_edge_types_from(&records, &syms);
             assert!(
                 !edges.is_empty(),
                 "{rel} must emit a resolve-only edge (Calls/Uses/Unresolved*): {edges:?}"
@@ -8192,8 +8262,8 @@ mod e2e {
             "js must be suppressed when ts is present: {stderr}"
         );
 
-        let records = export_records(&repo_dir);
-        let symbols = export_symbol_fqns(&records);
+        let records = db_records(&repo_dir);
+        let symbols = db_symbol_fqns(&records);
         assert!(
             records.iter().any(|r| {
                 r.get("type").and_then(|t| t.as_str()) == Some("calls")
@@ -8253,8 +8323,8 @@ mod e2e {
             "the nested package's files must not be re-emitted under the recursive root: {symbols:?}"
         );
         // The nested package's File node is contained by exactly one module.
-        let lib_file = export_file_ending(&records, "/lib/index.js")
-            .expect("lib/index.js must be a File node");
+        let lib_file =
+            db_file_ending(&records, "/lib/index.js").expect("lib/index.js must be a File node");
         let lib_parents: BTreeSet<String> = records
             .iter()
             .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
@@ -8281,7 +8351,7 @@ mod e2e {
         // `.d.ts` handling: the declaration is a File node and its interface
         // is a project symbol used by the `.ts` consumer.
         assert!(
-            export_file_ending(&records, "/src/types.d.ts").is_some(),
+            db_file_ending(&records, "/src/types.d.ts").is_some(),
             "the .d.ts declaration file must be scanned"
         );
         assert!(
@@ -8289,7 +8359,7 @@ mod e2e {
             "the .d.ts interface must be a project symbol: {symbols:?}"
         );
         assert!(
-            export_resolved_edge_targets(&records).contains("ts.mixed.src.types.Config"),
+            db_resolved_edge_targets(&records).contains("ts.mixed.src.types.Config"),
             "the .d.ts interface must be a resolved uses target: {records:?}"
         );
 
@@ -8310,12 +8380,12 @@ mod e2e {
         let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
         assert!(scan.status.success(), "scan failed: {stderr}");
 
-        let records = export_records(&repo_dir);
+        let records = db_records(&repo_dir);
         let dyn_file =
-            export_file_ending(&records, "/dynamic.js").expect("dynamic.js must be a File node");
-        let syms = export_symbols_at(&records, &dyn_file);
+            db_file_ending(&records, "/dynamic.js").expect("dynamic.js must be a File node");
+        let syms = db_symbols_at(&records, &dyn_file);
         assert!(!syms.is_empty(), "dynamic.js must declare symbols");
-        let edges = export_edge_types_from(&records, &syms);
+        let edges = db_edge_types_from(&records, &syms);
         assert!(
             !edges.is_empty(),
             "the dynamic constructs must emit an edge"
@@ -8325,7 +8395,7 @@ mod e2e {
             "only unresolved edges may leave untyped dynamic JS, got {edges:?}"
         );
 
-        let unresolved = export_unresolved(&records);
+        let unresolved = db_unresolved(&records);
         assert!(
             !unresolved.is_empty(),
             "the dynamic constructs must be unresolved targets"
@@ -8356,15 +8426,15 @@ mod e2e {
         let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
         assert!(scan.status.success(), "scan failed: {stderr}");
 
-        let records = export_records(&repo_dir);
+        let records = db_records(&repo_dir);
         assert!(
-            export_modules(&records).contains("ts.apg-tsfrontend"),
+            db_modules(&records).contains("ts.apg-tsfrontend"),
             "the copied package module must be present: {:?}",
-            export_modules(&records)
+            db_modules(&records)
         );
-        let _ = export_file_ending(&records, "/tslib/scanner.ts")
-            .expect("scanner.ts must be a File node");
-        let syms = export_symbol_fqns(&records);
+        let _ =
+            db_file_ending(&records, "/tslib/scanner.ts").expect("scanner.ts must be a File node");
+        let syms = db_symbol_fqns(&records);
         for fqn in [
             "ts.apg-tsfrontend.declarations.collectFile",
             "ts.apg-tsfrontend.declarations.registerStruct",
@@ -8453,7 +8523,7 @@ mod e2e {
             "no module/function may be shadowed: {stderr}"
         );
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         let root = std::fs::canonicalize(&repo_dir).unwrap();
         // The graph stores repo-relative identities: a File's fqn is its
         // `/`-separated path under the git toplevel, and an md module
@@ -8463,7 +8533,7 @@ mod e2e {
 
         // ---- (1) one Module per directory, FQN = `md.<directory absolute
         // path>` (post-P9), each emitted exactly once ----
-        let module_counts = export_module_counts(&recs);
+        let module_counts = db_module_counts(&recs);
         for dir in ["docs", "docs/deep", "guides", "notes", "gen"] {
             assert_eq!(
                 module_counts.get(&md_at(dir)).copied(),
@@ -8642,9 +8712,9 @@ mod e2e {
         // its File node; no synthesized document-root anchors it. ----
         let empty = at("docs/empty.md");
         assert!(
-            export_symbols_at(&recs, &empty).is_empty(),
+            db_symbols_at(&recs, &empty).is_empty(),
             "a heading-less document must declare NO section Struct: {:?}",
-            export_symbols_at(&recs, &empty)
+            db_symbols_at(&recs, &empty)
         );
         assert!(
             !struct_fqns.contains(&empty),
@@ -8794,14 +8864,14 @@ mod e2e {
             "no module/function may be shadowed: {stderr}"
         );
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         let root = std::fs::canonicalize(&repo_dir).unwrap();
         // The graph stores repo-relative identities: a `.py` File's fqn is
         // its `/`-separated path under the git toplevel.
         let at = |rel: &str| rel.to_string();
 
         // (1) Module identities, rooting-agnostic.
-        let modules: BTreeSet<String> = export_modules(&recs)
+        let modules: BTreeSet<String> = db_modules(&recs)
             .iter()
             .map(|m| strip_lang_prefix(m))
             .collect();
@@ -8813,7 +8883,7 @@ mod e2e {
         }
 
         // (2) `.py` and `.pyi` File nodes, each parented to its module.
-        // Containment is a `contains` edge (the export's File record has no
+        // Containment is a `contains` edge (the database's File row has no
         // `parent` field), so the File's parent is the `from` of the
         // `module -> file path` edge.
         let parent_of = |path: &str| -> Option<String> {
@@ -8951,7 +9021,7 @@ mod e2e {
         let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
         assert!(scan.status.success(), "scan failed: {stderr}");
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         assert!(
             has_edge_between(&recs, "calls", "pkg.a.call", "pkg.b.helper"),
             "a.py calling b.py's function must be a Calls edge: {recs:?}"
@@ -8965,7 +9035,7 @@ mod e2e {
             "a constructor call on a project class must be a Uses edge: {recs:?}"
         );
 
-        let unresolved = export_unresolved(&recs);
+        let unresolved = db_unresolved(&recs);
         assert!(
             unresolved.contains(&("os.getcwd".to_string(), "stdlib".to_string())),
             "a stdlib/typeshed reference must be stdlib: {unresolved:?}"
@@ -9094,7 +9164,7 @@ mod e2e {
 
             // The changed caller must not vanish: its resolved `Calls` edge
             // into the unchanged, un-emitted module survives.
-            let recs = export_records(&repo_dir);
+            let recs = db_records(&repo_dir);
             assert!(
                 has_edge_between(&recs, "calls", "pkg.a.call", "pkg.b.helper"),
                 "{tag}: a re-scanned caller's call into the unchanged module must \
@@ -9102,10 +9172,9 @@ mod e2e {
             );
             let (inc_nodes, inc_edges, inc_unres) = winb_graph(&repo_dir);
 
-            // Oracle: a fresh FULL scan with the DB, the export, AND the
-            // shared fact cache cleared — no reuse/splice.
+            // Oracle: a fresh FULL scan with the DB AND the shared fact cache
+            // cleared — no reuse/splice.
             std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-            std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
             let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
             let full = winb_run(&repo_dir, &home, &["scan", "."]);
             assert!(
@@ -9329,7 +9398,6 @@ mod e2e {
             // Force a re-scan (the fast-path would otherwise reuse the DB),
             // then install the real pyfrontend and re-run.
             let _ = std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug"));
-            let _ = std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl"));
             let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
             let real = testutil::apg_bin()
                 .parent()
@@ -9424,11 +9492,10 @@ mod e2e {
                     .map(|l| l.split(", ").map(str::to_string).collect())
                     .unwrap_or_default()
             };
-            // The fast path would reuse a recorded DB; drop the scan record so
+            // The fast path would reuse a recorded DB; drop the database so
             // each probe re-runs the language selection.
             let force_rescan = || {
                 let _ = std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug"));
-                let _ = std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl"));
                 let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
             };
 
@@ -9552,13 +9619,13 @@ mod e2e {
             "both the structural md and the agent frontend must run: {stderr}"
         );
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         let agent_module = "agent..opencode/agents";
         assert_eq!(
-            export_module_counts(&recs).get(agent_module).copied(),
+            db_module_counts(&recs).get(agent_module).copied(),
             Some(1),
             "the agent directory module must be emitted exactly once: {:?}",
-            export_modules(&recs)
+            db_modules(&recs)
         );
         let file_counts: std::collections::BTreeMap<String, usize> = recs
             .iter()
@@ -9612,9 +9679,9 @@ mod e2e {
                 "the agent frontend must be the sole claimant of `{path}`"
             );
             assert!(
-                export_symbols_at(&recs, path).is_empty(),
+                db_symbols_at(&recs, path).is_empty(),
                 "the md stream must not claim `{path}`: {:?}",
-                export_symbols_at(&recs, path)
+                db_symbols_at(&recs, path)
             );
             // One Agent node per definition file, `agent.<file-stem>`, located
             // at the definition's path and 1..line-count span, `docs`.
@@ -9656,7 +9723,7 @@ mod e2e {
             "`.opencode/README.md` must stay an md File node: {file_counts:?}"
         );
         assert!(
-            !export_symbols_at(&recs, ".opencode/README.md").is_empty(),
+            !db_symbols_at(&recs, ".opencode/README.md").is_empty(),
             "the md stream must still claim `.opencode/README.md`"
         );
 
@@ -9706,12 +9773,12 @@ mod e2e {
             "no module/function may be shadowed in the merged graph: {stderr}"
         );
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         assert!(
-            export_file_ending(&recs, "/main.go").is_some(),
+            db_file_ending(&recs, "/main.go").is_some(),
             "the go file must be in the merged graph: {recs:?}"
         );
-        let symbols = export_symbol_fqns(&recs);
+        let symbols = db_symbol_fqns(&recs);
         assert!(
             symbols
                 .iter()
@@ -9810,14 +9877,10 @@ mod e2e {
             !stderr.contains("panicked") && !stderr.contains("Failed to run frontend"),
             "the missing tool must never surface as a cryptic panic: {stderr}"
         );
-        // No empty graph: the scan bailed before writing one.
+        // No empty database: the scan bailed before writing one.
         assert!(
             !repo.root.join("apg/.trans/db.lbug").exists(),
-            "a preflight failure must not leave an empty graph"
-        );
-        assert!(
-            !repo.root.join("apg/.trans/graph.jsonl").exists(),
-            "a preflight failure must not leave an empty graph export"
+            "a preflight failure must not leave an empty database"
         );
 
         testutil::remove(&repo);
@@ -9911,10 +9974,10 @@ mod e2e {
             "both the go and the structural frontend must run: {stderr}"
         );
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         // (1) every tracked file the structural scanner claims has a File
         // node (the repo-relative path is the File FQN).
-        let files = export_file_paths(&recs);
+        let files = db_file_paths(&recs);
         for rel in [
             "run.sh",
             "ci.yaml",
@@ -9960,7 +10023,7 @@ mod e2e {
             "the go frontend must keep `main.go` (code_type src): {file_type:?}"
         );
         // (3) the structural scanner declares structure for its formats.
-        let symbols = export_symbol_fqns(&recs);
+        let symbols = db_symbol_fqns(&recs);
         assert!(
             symbols.contains("sh.run.sh.hello"),
             "the shell function must be a Struct: {symbols:?}"
@@ -9979,9 +10042,9 @@ mod e2e {
         );
         // (4) the residual `misc` stream emits a File only.
         assert!(
-            export_symbols_at(&recs, "LICENSE").is_empty(),
+            db_symbols_at(&recs, "LICENSE").is_empty(),
             "a misc file must declare no Struct: {:?}",
-            export_symbols_at(&recs, "LICENSE")
+            db_symbols_at(&recs, "LICENSE")
         );
 
         let _ = std::fs::remove_dir_all(&base);
@@ -10043,10 +10106,10 @@ mod e2e {
             "the structural md stream must run: {stderr}"
         );
 
-        let recs = export_records(&repo_dir);
+        let recs = db_records(&repo_dir);
         // (1) the repo-root module renders the bare `md.` root, and the
         // non-root directory keeps its `md.*` identity.
-        let modules = export_modules(&recs);
+        let modules = db_modules(&recs);
         assert!(
             modules.contains("md."),
             "the repo-root module must render `md.`: {modules:?}"
@@ -10062,7 +10125,7 @@ mod e2e {
             "the repo-root module must not be checkout-named `md.{basename}`: {modules:?}"
         );
         // (2) the heading Structs are unchanged.
-        let symbols = export_symbol_fqns(&recs);
+        let symbols = db_symbol_fqns(&recs);
         for f in ["md.README.md.root-heading", "md.docs/guide.md.guide"] {
             assert!(
                 symbols.contains(f),
@@ -10795,8 +10858,8 @@ mod e2e {
     /// inherently location-less (SPEC §4), so its realization is status + kind
     /// only.
     ///
-    /// The scan is forced onto the FULL-LOAD path (the branch's seeded export
-    /// and DB are removed first), which is the seam this matrix evidence-gates:
+    /// The scan is forced onto the FULL-LOAD path (the branch's seeded
+    /// database is removed first), which is the seam this matrix evidence-gates:
     /// the incremental splice is a different path, covered by
     /// `splice_e2e::planned_node_realizes_on_the_splice_for_every_kind`.
     ///
@@ -10842,7 +10905,7 @@ mod e2e {
             ));
             let Some(_) = rec else {
                 failures.push(format!(
-                    "{kind} `{fqn}`: FQN not kept — the node is absent from the export"
+                    "{kind} `{fqn}`: FQN not kept — the node is absent from the database"
                 ));
                 return;
             };
@@ -10926,14 +10989,12 @@ mod e2e {
         let wt = repo_dir.join("apg").join(".worktrees").join("demo");
         assert!(wt.is_dir(), "the project worktree must exist");
 
-        // Drop the branch's seeded export/DB. This is the fresh-branch state a
+        // Drop the branch's seeded database. This is the fresh-branch state a
         // plan is authored in — nothing at these FQNs is scanned code yet — so
         // the four declarations are a plan of the delta, not the present; it
         // also forces the evidence scan onto the FULL-LOAD path (without a
-        // previous export the incremental preparation cannot splice).
-        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
-            let _ = std::fs::remove_file(wt.join(rel));
-        }
+        // previous database the incremental preparation cannot splice).
+        let _ = std::fs::remove_file(wt.join("apg/.trans/db.lbug"));
 
         // Declare the four planned nodes through the real authoring surface —
         // exactly the records a scan reads out of `.trans/plans/<project>.jsonl`.
@@ -10961,11 +11022,11 @@ mod e2e {
         .unwrap();
         scratch_commit_all(&wt, "implement the planned nodes");
 
-        // A full load: the branch has no seeded export/DB, so the scanner
+        // A full load: the branch has no seeded database, so the scanner
         // re-emits the whole tree and the ingestor assembles from scratch.
         run(&wt, &["scan", ".", "--language", "rust"]);
 
-        let recs = export_records(&wt);
+        let recs = db_records(&wt);
         let mut matrix = Vec::new();
         let mut failures = Vec::new();
         check(
@@ -11032,13 +11093,13 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
     fn planned_node_in_a_separate_cargo_project_realizes_like_the_root_crate() {
-        /// Asserts the pre-code export holds `fqn` only as a planned,
+        /// Asserts the pre-code database holds `fqn` only as a planned,
         /// location-less placeholder.
         fn assert_planned(recs: &[serde_json::Value], fqn: &str, kind: &str, located: bool) {
             let rec = recs
                 .iter()
                 .find(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(fqn))
-                .unwrap_or_else(|| panic!("planned `{fqn}` must be in the pre-code export"));
+                .unwrap_or_else(|| panic!("planned `{fqn}` must be in the pre-code database"));
             assert_eq!(
                 rec.get("type").and_then(|v| v.as_str()),
                 Some(kind),
@@ -11060,7 +11121,7 @@ mod e2e {
 
         /// Asserts one authored FQN's realized record and returns
         /// `(evidence row, realized shape)`. A realized record carries NO
-        /// `status` key (the export skips the empty status) and a filled
+        /// `status` key (an empty status is omitted) and a filled
         /// location; the planned placeholder is `status: planned` + no span.
         fn realized_row(
             recs: &[serde_json::Value],
@@ -11098,7 +11159,7 @@ mod e2e {
             let shape = format!("type={ty} status_key={status_key} located={located}");
             if rec.is_none() {
                 failures.push(format!(
-                    "{label} `{fqn}`: FQN not kept — the node is absent from the export"
+                    "{label} `{fqn}`: FQN not kept — the node is absent from the database"
                 ));
                 return (row, shape);
             }
@@ -11245,11 +11306,9 @@ mod e2e {
         );
 
         // A FULL load while no code exists at those FQNs: the placeholders the
-        // realization must replace. Dropping the DB, the export and the shared
-        // fact store forces the full path (the plan store survives).
-        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
-            let _ = std::fs::remove_file(wt.join(rel));
-        }
+        // realization must replace. Dropping the database and the shared fact
+        // store forces the full path (the plan store survives).
+        let _ = std::fs::remove_file(wt.join("apg/.trans/db.lbug"));
         let _ = std::fs::remove_dir_all(&facts);
         let pre = run(&wt, &["scan", ".", "--language", "rust"]);
         assert!(
@@ -11257,7 +11316,7 @@ mod e2e {
             "the pre-code scan must be a full load: {}",
             stderr_of(&pre)
         );
-        let planned = export_records(&wt);
+        let planned = db_records(&wt);
         assert_planned(&planned, MODULE_FQN, "module", false);
         assert_planned(&planned, SEPARATE_FQN, "function", true);
         assert_planned(&planned, ROOT_FQN, "function", true);
@@ -11288,7 +11347,7 @@ mod e2e {
                 && splice_err.contains("full load skipped"),
             "the post-code scan must take the incremental splice path: {splice_err}"
         );
-        let recs = export_records(&wt);
+        let recs = db_records(&wt);
         let (root_row, root_shape) =
             realized_row(&recs, ROOT_FQN, ROOT_PATH, "splice/root", &mut failures);
         let (sep_row, sep_shape) = realized_row(
@@ -11307,22 +11366,21 @@ mod e2e {
         assert!(
             recs.iter()
                 .any(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(MODULE_FQN)),
-            "splice: the separate crate's Module `{MODULE_FQN}` must be in the export"
+            "splice: the separate crate's Module `{MODULE_FQN}` must be in the database"
         );
 
-        // (b) A FULL load from the same planned state: artifacts + shared fact
-        // store dropped, then re-scanned. The planned records still arrive (the
-        // plan store survives) and the scanned declarations must still win.
-        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
-            let _ = std::fs::remove_file(wt.join(rel));
-        }
+        // (b) A FULL load from the same planned state: the database and the
+        // shared fact store dropped, then re-scanned. The planned records still
+        // arrive (the plan store survives) and the scanned declarations must
+        // still win.
+        let _ = std::fs::remove_file(wt.join("apg/.trans/db.lbug"));
         let _ = std::fs::remove_dir_all(&facts);
         let full_err = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
         assert!(
             !full_err.contains("full load skipped"),
             "the post-splice scan must be a full load: {full_err}"
         );
-        let full_recs = export_records(&wt);
+        let full_recs = db_records(&wt);
         let (root_row, full_root_shape) =
             realized_row(&full_recs, ROOT_FQN, ROOT_PATH, "full/root", &mut failures);
         let (sep_row, full_sep_shape) = realized_row(
@@ -11364,20 +11422,17 @@ mod e2e {
     /// source file) leaves `src/lib.rs` byte-identical, so the follow-on scan
     /// reuses its cached fact unit instead of re-emitting it. The plan store
     /// still declares the FQN planned, so the assembly re-admits that
-    /// placeholder before the cached declaration supersedes it — and BOTH
-    /// published artifacts must still carry the REAL node: the `graph.jsonl`
-    /// export record (no `status` key, location filled, FQN kept) AND the
-    /// `db.lbug` row (`status` cleared, location filled, FQN kept), agreeing on
-    /// the path and the span. That export-versus-DB parity is the divergence
-    /// check: an assembly that let the placeholder win would publish a
-    /// still-planned export next to a real DB row (or the reverse).
+    /// placeholder before the cached declaration supersedes it — and the
+    /// published `db.lbug` must still carry the REAL row (`status` cleared,
+    /// location filled, FQN kept). A still-planned row is the divergence
+    /// check: an assembly that let the placeholder win would publish it.
     ///
-    /// A force-full-load variant then drops the seed DB and export while
-    /// keeping the shared fact store warm: the warm-cache assembly still
-    /// splices the cached declaration, the missing seed makes the DB build take
-    /// the full-load branch, and both artifacts must agree with the splice.
-    /// The unchanged-tree follow-on then takes the freshness fast path and must
-    /// leave both artifacts untouched.
+    /// A force-full-load variant then drops the seed database while keeping
+    /// the shared fact store warm: the warm-cache assembly still splices the
+    /// cached declaration, the missing seed makes the DB build take the
+    /// full-load branch, and the database must agree with the splice. The
+    /// unchanged-tree follow-on then takes the freshness fast path and must
+    /// leave the database untouched.
     ///
     /// Scratch /tmp repo + candidate binary only
     /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
@@ -11389,151 +11444,79 @@ mod e2e {
         const FUNCTION_FQN: &str = "rust.reuse-demo.compute";
         const FUNCTION_PATH: &str = "src/lib.rs";
 
-        /// Asserts the export record AND the DB row at `FUNCTION_FQN` are the
-        /// SAME realized `Function` — status cleared on both sides, location
-        /// filled, FQN kept — and that they agree on the path and span. Returns
-        /// the shared `(start_line, end_line)`; appends one evidence row.
-        fn assert_real_both(
+        /// Asserts the database row at `FUNCTION_FQN` is the realized
+        /// `Function` — status cleared, location filled, FQN kept, path and
+        /// span right. Returns the `(start_line, end_line)`; appends one
+        /// evidence row.
+        fn assert_real_db(
             wt: &Path,
             label: &str,
             evidence: &mut Vec<String>,
             failures: &mut Vec<String>,
         ) -> (u64, u64) {
-            let recs = export_records(wt);
-            let export: Vec<&serde_json::Value> = recs
-                .iter()
+            let rows: Vec<serde_json::Value> = db_records(wt)
+                .into_iter()
                 .filter(|r| r.get("fqn").and_then(|v| v.as_str()) == Some(FUNCTION_FQN))
                 .collect();
-            let db_path = wt.join("apg/.trans/db.lbug");
-            let db = Database::new(&db_path, SystemConfig::default().read_only(true)).unwrap();
-            let conn = Connection::new(&db).unwrap();
-            let (_, rows) = splice::query_rows(
-                &conn,
-                &format!(
-                    "MATCH (n:Function {{fqn: '{FUNCTION_FQN}'}}) \
-                     RETURN n.status AS status, n.path AS path, \
-                     n.start_line AS sl, n.end_line AS el"
-                ),
-            )
-            .unwrap();
-            drop(conn);
-            drop(db);
-
-            let exp = export.first().map(|rec| {
-                (
-                    rec.get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    rec.get("status")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    rec.get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    rec.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0),
-                    rec.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0),
-                )
-            });
-            let dbr = rows.first().map(|r| {
-                (
-                    r.first().cloned().unwrap_or_default(),
-                    r.get(1).cloned().unwrap_or_default(),
-                    r.get(2)
-                        .and_then(|c| c.trim().parse::<u64>().ok())
-                        .unwrap_or(0),
-                    r.get(3)
-                        .and_then(|c| c.trim().parse::<u64>().ok())
-                        .unwrap_or(0),
-                )
-            });
+            let rec = rows.first();
+            let ty = rec
+                .and_then(|r| r.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let status = rec.and_then(|r| r.get("status")).and_then(|v| v.as_str());
+            let path = rec
+                .and_then(|r| r.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let start_line = rec
+                .and_then(|r| r.get("start_line"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let end_line = rec
+                .and_then(|r| r.get("end_line"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             evidence.push(format!(
-                "{label}: export records={} type={:?} status={:?} path={:?} lines={:?}..{:?}; \
-                 db rows={} status={:?} path={:?} lines={:?}..{:?}",
-                export.len(),
-                exp.as_ref().map(|e| e.0.as_str()),
-                exp.as_ref().and_then(|e| e.1.as_deref()),
-                exp.as_ref().map(|e| e.2.as_str()),
-                exp.as_ref().map(|e| e.3),
-                exp.as_ref().map(|e| e.4),
-                rows.len(),
-                dbr.as_ref().map(|r| r.0.as_str()),
-                dbr.as_ref().map(|r| r.1.as_str()),
-                dbr.as_ref().map(|r| r.2),
-                dbr.as_ref().map(|r| r.3),
+                "{label}: database rows={} type={ty:?} status={status:?} path={path:?} \
+                 lines={start_line}..{end_line}",
+                rows.len()
             ));
 
-            if export.len() != 1 {
-                failures.push(format!(
-                    "{label}: the export must carry exactly ONE record at `{FUNCTION_FQN}` (got {})",
-                    export.len()
-                ));
-            }
             if rows.len() != 1 {
                 failures.push(format!(
-                    "{label}: the DB must carry exactly ONE Function row at `{FUNCTION_FQN}` (got {})",
+                    "{label}: the database must carry exactly ONE row at `{FUNCTION_FQN}` (got {})",
                     rows.len()
                 ));
             }
-            match &exp {
+            match rec {
                 None => failures.push(format!(
-                    "{label}: `{FUNCTION_FQN}` absent from the export — FQN not kept"
+                    "{label}: `{FUNCTION_FQN}` absent from the database — FQN not kept"
                 )),
-                Some((ty, status, path, sl, el)) => {
-                    if ty.as_str() != "function" {
+                Some(_) => {
+                    if ty != "function" {
                         failures.push(format!(
-                            "{label}: export `{FUNCTION_FQN}` realized as `{ty}`, not `function`"
+                            "{label}: `{FUNCTION_FQN}` realized as `{ty}`, not `function`"
                         ));
                     }
                     if status.is_some() {
                         failures.push(format!(
-                            "{label}: the export record still carries a `status` ({status:?}) — \
+                            "{label}: the row still carries a `status` ({status:?}) — \
                              the planned placeholder won the cached declaration"
                         ));
                     }
-                    if path.as_str() != FUNCTION_PATH {
+                    if path != FUNCTION_PATH {
                         failures.push(format!(
-                            "{label}: export path `{path}`, want `{FUNCTION_PATH}`"
+                            "{label}: database path `{path}`, want `{FUNCTION_PATH}`"
                         ));
                     }
-                    if *sl == 0 || el < sl {
-                        failures.push(format!("{label}: export location not filled ({sl}..{el})"));
+                    if start_line == 0 || end_line < start_line {
+                        failures.push(format!(
+                            "{label}: database location not filled ({start_line}..{end_line})"
+                        ));
                     }
                 }
             }
-            match &dbr {
-                None => failures.push(format!(
-                    "{label}: `{FUNCTION_FQN}` absent from the DB — FQN not kept"
-                )),
-                Some((status, path, sl, el)) => {
-                    if !status.is_empty() {
-                        failures.push(format!(
-                            "{label}: the DB row still carries status {status:?} — \
-                             the planned placeholder won the cached declaration"
-                        ));
-                    }
-                    if path.as_str() != FUNCTION_PATH {
-                        failures.push(format!("{label}: DB path `{path}`, want `{FUNCTION_PATH}`"));
-                    }
-                    if *sl == 0 || el < sl {
-                        failures.push(format!("{label}: DB location not filled ({sl}..{el})"));
-                    }
-                }
-            }
-
-            match (&exp, &dbr) {
-                (Some((_, _, exp_path, exp_sl, exp_el)), Some((_, db_path_s, db_sl, db_el))) => {
-                    if exp_path != db_path_s || exp_sl != db_sl || exp_el != db_el {
-                        failures.push(format!(
-                            "{label}: export-vs-DB DIVERGENCE — export `{exp_path}` \
-                             {exp_sl}..{exp_el} vs DB `{db_path_s}` {db_sl}..{db_el}"
-                        ));
-                    }
-                    (*exp_sl, *exp_el)
-                }
-                _ => (0, 0),
-            }
+            (start_line, end_line)
         }
 
         let base = std::env::temp_dir().join(format!("apg-planned-reuse-{}", std::process::id()));
@@ -11645,8 +11628,7 @@ mod e2e {
         );
         let mut evidence = Vec::new();
         let mut failures = Vec::new();
-        let landing_span =
-            assert_real_both(&wt, "landing/incremental", &mut evidence, &mut failures);
+        let landing_span = assert_real_db(&wt, "landing/incremental", &mut evidence, &mut failures);
 
         // The UNRELATED commit: only `src/other.rs` changes (its body, so the
         // signature early cutoff pulls no dependents). `src/lib.rs` is reused
@@ -11671,19 +11653,17 @@ mod e2e {
             !reused.contains("[load] writing parquet load files"),
             "the reuse scan must not full-load: {reused}"
         );
-        let reused_span = assert_real_both(&wt, "reuse/splice", &mut evidence, &mut failures);
+        let reused_span = assert_real_db(&wt, "reuse/splice", &mut evidence, &mut failures);
         assert_eq!(
             landing_span, reused_span,
             "the reused declaration must keep the realized node's span"
         );
 
-        // Force-full-load variant: drop the seed DB + export but KEEP the
-        // warm fact store. The assembly still splices the cached declaration
-        // (warm cache, zero frontends) and the missing seed makes the DB build
-        // full-load — both artifacts must agree with the splice.
-        for rel in ["apg/.trans/db.lbug", "apg/.trans/graph.jsonl"] {
-            let _ = std::fs::remove_file(wt.join(rel));
-        }
+        // Force-full-load variant: drop the seed database but KEEP the warm
+        // fact store. The assembly still splices the cached declaration (warm
+        // cache, zero frontends) and the missing seed makes the DB build
+        // full-load — both paths must agree with the splice.
+        let _ = std::fs::remove_file(wt.join("apg/.trans/db.lbug"));
         let warm_full = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
         assert!(
             warm_full.contains("[scan] warm cache:")
@@ -11699,16 +11679,14 @@ mod e2e {
             warm_full.contains("[load] writing parquet load files"),
             "the variant must take the full-load branch: {warm_full}"
         );
-        let warm_span = assert_real_both(&wt, "warm/full", &mut evidence, &mut failures);
+        let warm_span = assert_real_db(&wt, "warm/full", &mut evidence, &mut failures);
         assert_eq!(
             reused_span, warm_span,
             "the full load must realize the same span as the splice"
         );
 
         // Unchanged-tree follow-on: the freshness fast path returns before any
-        // rebuild, so the export bytes and the DB row stay exactly as they are.
-        let export_path = wt.join("apg/.trans/graph.jsonl");
-        let export_before = std::fs::read(&export_path).unwrap();
+        // rebuild, so the database row stays exactly as it is.
         let db_before = std::fs::metadata(wt.join("apg/.trans/db.lbug"))
             .unwrap()
             .modified()
@@ -11719,11 +11697,6 @@ mod e2e {
             "an unchanged tree must take the freshness fast path: {fast}"
         );
         assert_eq!(
-            export_before,
-            std::fs::read(&export_path).unwrap(),
-            "the fast path must not rewrite the export"
-        );
-        assert_eq!(
             db_before,
             std::fs::metadata(wt.join("apg/.trans/db.lbug"))
                 .unwrap()
@@ -11731,7 +11704,7 @@ mod e2e {
                 .unwrap(),
             "the fast path must not rewrite db.lbug"
         );
-        let fast_span = assert_real_both(&wt, "unchanged/fast-path", &mut evidence, &mut failures);
+        let fast_span = assert_real_db(&wt, "unchanged/fast-path", &mut evidence, &mut failures);
         assert_eq!(
             reused_span, fast_span,
             "the fast path must leave the realized row untouched"
