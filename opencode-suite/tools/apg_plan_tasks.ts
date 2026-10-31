@@ -11,6 +11,20 @@ const OPERATION_EDGES: [table: string, kind: string, verb: string][] = [
   ),
 ]
 
+/** The task listing Cypher: every task under the project's phases with its
+ *  optional assigned Agent and implemented Component. The status predicate
+ *  joins the phase-prefix predicate in the one WHERE, so the LIMIT bounds the
+ *  filtered set instead of a pre-filter page. */
+export function tasksQuery(project: string, status: string | undefined, limit: number): string {
+  const where = [`pp.fqn STARTS WITH ${lit(`${project}/plan.`)}`]
+  if (status) where.push(`t.status = ${lit(status)}`)
+  return `MATCH (pp:PlanPhase)-[:Contains]->(t:Task)
+ WHERE ${where.join(" AND ")}
+ OPTIONAL MATCH (t)-[:AssignedTo]->(a:Agent)
+ OPTIONAL MATCH (t)-[:Implements]->(c:Component)
+ RETURN pp.fqn, t.fqn, t.title, t.status, a.fqn, c.fqn ORDER BY t.fqn LIMIT ${limit}`
+}
+
 /** Every task's operation rel rows plus its `Target` destination rows, as one
  *  relation set (the DB has no `type()` function, so each table is named). */
 function operationQuery(): string {
@@ -59,22 +73,13 @@ export default Plugin.define({
           }
           const project = input.project
           if (!project) return { content: "Error: project is required" }
-          const pfx = `${project}/plan.`
           const limit = input.limit ? Math.max(1, Math.min(1000, Number(input.limit))) : 500
 
           let tasks: string[][]
           let edges: string[][]
           try {
             tasks = csvToRows(
-              await runCypher(
-                merged,
-                `MATCH (pp:PlanPhase)-[:Contains]->(t:Task)
-                 WHERE pp.fqn STARTS WITH ${lit(pfx)}
-                 OPTIONAL MATCH (t)-[:AssignedTo]->(a:Agent)
-                 OPTIONAL MATCH (t)-[:Implements]->(c:Component)
-                 RETURN pp.fqn, t.fqn, t.title, t.status, a.fqn, c.fqn ORDER BY t.fqn LIMIT ${limit}`,
-                input.directory,
-              ),
+              await runCypher(merged, tasksQuery(project, input.status, limit), input.directory),
             )
             edges = csvToRows(await runCypher(merged, operationQuery(), input.directory))
           } catch (e) {
@@ -98,7 +103,6 @@ export default Plugin.define({
 
           const lines = ["task,phase,title,status,assignedTo,implements,operations"]
           for (const [phase, fqn, title, status, assigned, component] of tasks.slice(1)) {
-            if (input.status && status !== input.status) continue
             const short = fqn.replace(`${project}/`, "")
             const phaseShort = phase.replace(`${project}/`, "")
             // The projection drops an AssignedTo edge whose Agent is absent
