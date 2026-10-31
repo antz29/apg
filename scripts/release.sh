@@ -69,8 +69,9 @@ git commit -m "Point formula revisions at the $TAG release HEAD
 
 Formula/scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp,
 apg-py: tag -> $TAG, revision -> $RELEASE_SHA (the release HEAD),
-bottle root_url -> releases/download/$TAG, rebuild bumped. Bottle sha256s +
-rebuild stay for the CI bottle rebuild at tag time."
+bottle root_url -> releases/download/$TAG, and rebuild bumped by one. This
+writes no bottle sha256; the CI publish job's brew bottle --merge --write
+writes every bottle checksum from the build JSON."
 
 echo "==> Creating annotated tag $TAG -> $RELEASE_SHA"
 git tag -a "$TAG" -m "apg $NEW_VERSION" "$RELEASE_SHA"
