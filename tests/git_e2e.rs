@@ -21,6 +21,28 @@ fn open_worktree_sha(wt: &Path) -> String {
         .to_string()
 }
 
+/// The live database's own single `Scan` row, as
+/// `(git_sha, git_clean, content_key, scanned_at)` — the recorded state the DB
+/// accounts for itself. `apg::git::db_recorded_scan` reads the same row; this
+/// also exposes the scan's `scanned_at`, which a re-anchor must preserve.
+fn db_scan_row(apg: &Path) -> (String, String, String, String) {
+    let db = apg::artifacts::ArtifactDb::open(apg).unwrap();
+    let conn = db.conn().unwrap();
+    let (_, rows) = apg::splice::seed::query_rows(
+        &conn,
+        "MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key, s.scanned_at",
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1, "the database carries exactly one Scan row");
+    let row = &rows[0];
+    (
+        apg::splice::seed::cell(row, 0),
+        apg::splice::seed::cell(row, 1),
+        apg::splice::seed::cell(row, 2),
+        apg::splice::seed::cell(row, 3),
+    )
+}
+
 /// e2e tier -- real I/O: every test here creates scratch git repos/DBs
 /// under the temp dir, writes files, runs git2/libgit2 operations or spawns
 /// the `apg` binary. Each is `#[ignore]`d, so a plain `cargo test` never
@@ -123,12 +145,19 @@ mod e2e {
         let repo = fixture_repo("norec");
         let apg = repo.apg_root();
         testutil::touch_db(&apg);
-        // DB exists in a git repo, but no graph.jsonl / no scan_meta record:
+        // DB exists in a git repo, but its own `Scan` row records no scan:
         // freshness cannot be verified.
         assert!(is_stale(&apg));
         let msg = refusal_message(&apg).unwrap();
         assert!(msg.contains("recorded -@-"), "{msg}");
         assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
+        // A blank `Scan` row (empty sha) is the same absent record.
+        testutil::write_scan_meta_keyed(&apg, None, false, "2026-09-07T00:00:00Z", None);
+        assert!(is_stale(&apg), "a blank Scan row records no scan");
+        assert!(
+            refusal_message(&apg).unwrap().contains("recorded -@-"),
+            "a blank row still reads as no recorded state"
+        );
         testutil::remove(&repo);
     }
 
@@ -159,8 +188,8 @@ mod e2e {
     fn no_db_is_never_stale() {
         let repo = fixture_repo("nodb");
         let apg = repo.apg_root();
-        // Even a recorded mismatch is irrelevant when there is no DB to guard.
-        testutil::write_scan_meta(&apg, Some("stale-sha"), false, "2026-09-07T00:00:00Z");
+        // There is no DB to carry a `Scan` row, so no recorded state can
+        // disagree with the tree.
         assert!(!is_stale(&apg));
         // No DB → the fast-path is NOT fresh (nothing to reuse): is_stale !=
         // !is_fresh for this N/A gate case.
@@ -176,19 +205,18 @@ mod e2e {
     // Phase-01 task-9: content-identity freshness (win A)
     // ------------------------------------------------------------------
 
-    /// The DB-existence precondition: with no `db.lbug`, or a `graph.jsonl`
-    /// without its DB, the fast-path is NOT fresh (there is nothing to reuse) —
-    /// even when the recorded scan_meta matches the tree. With the DB present
-    /// it must ALSO carry the agreeing `Scan` row (`db_recorded_scan`).
+    /// The DB-existence precondition: with no `db.lbug` the fast-path is NOT
+    /// fresh (there is nothing to reuse) — even when a scan would otherwise
+    /// agree. With the DB present it must ALSO carry the agreeing `Scan` row
+    /// (`db_recorded_scan`); an absent or blank row records no scan.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn is_fresh_requires_the_live_db() {
         let repo = fixture_repo("freshdb");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
-        // A graph.jsonl without its DB → not fresh (nothing to reuse); the
-        // gate is N/A without a DB (is_stale != !is_fresh).
-        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        // No DB → not fresh (nothing to reuse); the gate is N/A without a DB
+        // (is_stale != !is_fresh).
         assert!(!is_fresh(&apg), "no db.lbug → not fresh");
         assert!(
             !is_stale(&apg),
@@ -198,20 +226,20 @@ mod e2e {
         testutil::touch_db(&apg);
         assert!(
             !is_fresh(&apg),
-            "a DB with no Scan row cannot agree with the export → not fresh"
+            "a DB with no Scan row records no scan → not fresh"
         );
         // The DB's own Scan row brought into agreement makes it fresh.
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
         assert!(is_fresh(&apg), "matching recorded state + DB → fresh");
         assert!(!is_stale(&apg));
-        // A DB but no recorded scan_meta (graph.jsonl removed) → not fresh.
-        std::fs::remove_file(apg.join(specs::TRANS).join("graph.jsonl")).unwrap();
+        // A blank Scan row (empty sha) records no scan → not fresh.
+        testutil::write_scan_meta_keyed(&apg, None, false, "2026-09-07T00:00:00Z", None);
         assert!(!is_fresh(&apg), "no recorded scan → not fresh");
         assert!(is_stale(&apg), "DB in a repo with no recorded scan → stale");
         testutil::remove(&repo);
     }
 
-    /// A pre-hardening scan_meta (no content-identity key) cannot be verified:
+    /// A pre-hardening `Scan` row (no content-identity key) cannot be verified:
     /// it is NOT fresh and the gate treats it as stale.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
@@ -353,10 +381,20 @@ mod e2e {
             &testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
         );
         repo.commit_all("scan fixture");
-        // `seed_valid_model` writes through the project-context path, so the
-        // scanned worktree is a real linked worktree on its own branch.
+        // The scanned worktree is a real linked worktree on its own branch:
+        // `seed_valid_model` writes through the project-context path, which
+        // hard-requires the worktree's database. Seed the minimal recorded
+        // state first (the phase-8 task-17/20 convention); the scan below
+        // rebuilds the database from the tree.
         let wt = repo.start_project("fresh-dirty-row");
         let apg = wt.join(apg::specs::LAYOUT);
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(
+            &apg,
+            Some(&open_worktree_sha(&wt)),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
         testutil::seed_valid_model(&apg);
         testutil::scan_checkout(&wt).unwrap();
         assert!(is_fresh(&apg), "the scanned worktree starts fresh");
@@ -965,6 +1003,10 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// A durable commit re-anchors the staleness gate's recorded state: the
+    /// database's own `Scan` row is rewritten to the post-commit git state
+    /// (sha, clean, content-identity key), while the scan's `scanned_at` is
+    /// preserved — a re-anchor never re-scans.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn reanchor_rewrites_graph_jsonl_line_one() {
@@ -972,7 +1014,9 @@ mod e2e {
         repo.start_project("foo");
         let apg = repo.project_apg_root("foo");
         let sha0 = repo.head_sha();
+        testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha0), true, "2026-09-07T00:00:00Z");
+        let scanned_at = db_scan_row(&apg).3;
         let new_sha = "abcd1234";
         reanchor_scan_meta(
             &apg,
@@ -983,26 +1027,20 @@ mod e2e {
             },
         )
         .unwrap();
-        let first = std::fs::read_to_string(apg.join(specs::TRANS).join("graph.jsonl"))
-            .unwrap()
-            .lines()
-            .next()
-            .unwrap()
-            .to_string();
-        assert!(first.contains(new_sha), "line 1: {first}");
-        assert!(first.contains("\"git_clean\":false"), "line 1: {first}");
-        assert!(
-            first.contains("\"scanned_at\":\"2026-09-07T00:00:00Z\""),
-            "line 1: {first}"
+        let (sha, clean, key, at) = db_scan_row(&apg);
+        assert_eq!(sha, new_sha, "the row records the re-anchored sha");
+        assert_eq!(
+            clean, "false",
+            "the row records the re-anchored clean state"
         );
-        // The content-identity key is preserved across the re-anchor.
-        assert!(
-            first.contains("\"content_key\":\"reanchored-key\""),
-            "line 1: {first}"
+        assert_eq!(
+            key, "reanchored-key",
+            "the content-identity key is rewritten across the re-anchor"
         );
+        assert_eq!(at, scanned_at, "a re-anchor preserves the scan's timestamp");
         // The recorded state now matches the new state → fresh.
         assert_eq!(
-            recorded_scan(&apg),
+            db_recorded_scan(&apg),
             Some(RecordedScan {
                 sha: new_sha.to_string(),
                 clean: false,
@@ -1275,12 +1313,12 @@ mod e2e {
     // here — `dead_session_socket_makes_the_graph_unfresh` (a
     // present-but-dead `session.sock`) and
     // `db_scan_row_diverging_from_the_export_is_unfresh` (the DB `Scan` row
-    // against `graph.jsonl`'s `scan_meta`) — neither authored anew.
+    // against the worktree git state) — neither authored anew.
     // Retained coverage (NOT duplicated here):
     //   * `dirty_tree_at_same_sha_is_stale` — the dirty-tree arm;
     //   * `content_identity_byte_edit_invalidates` — the changed-bytes arm;
     //   * `is_fresh_requires_the_live_db` — absent DB / a DB with no `Scan`
-    //     row / no export;
+    //     row / a blank row;
     //   * `diverged_authored_rows_are_not_fast_pathed` (tests/splice_e2e.rs) —
     //     the DB↔tree authored-digest arm.
     // ------------------------------------------------------------------
@@ -1289,7 +1327,7 @@ mod e2e {
     /// on-disk DB reflects only the last saved state while a phantom
     /// projection may exist, so `is_fresh` is false and `is_stale` true.
     /// Removing the dead socket restores freshness — which discriminates this
-    /// arm from the recorded-state half (both halves here agree throughout).
+    /// arm from the recorded `Scan` row (the row and the tree agree throughout).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug/socket); run via cargo test-e2e"]
     #[cfg(unix)]
@@ -1299,7 +1337,7 @@ mod e2e {
         let apg = repo.apg_root();
         testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
-        assert!(is_fresh(&apg), "the agreeing pair starts fresh");
+        assert!(is_fresh(&apg), "the agreeing row starts fresh");
 
         // Bind then drop the listener: the socket PATH survives with no
         // process behind it — exactly the unclean-exit shape.
@@ -1326,11 +1364,11 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// The DB↔export agreement arm is fail-closed: a DB whose own `Scan` row
-    /// disagrees with `graph.jsonl`'s `scan_meta` makes `is_fresh` false and
-    /// `is_stale` true — for a divergent content key AND a divergent sha — and
-    /// bringing both halves to one state restores freshness. No authored rows
-    /// are involved, so the authored-digest arm stays with
+    /// The recorded-row divergence arm is fail-closed: a DB whose own `Scan`
+    /// row disagrees with the worktree's current git state makes `is_fresh`
+    /// false and `is_stale` true — for a divergent content key AND a divergent
+    /// sha — and re-anchoring the row to the tree restores freshness. No
+    /// authored rows are involved, so the authored-digest arm stays with
     /// `diverged_authored_rows_are_not_fast_pathed`.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug); run via cargo test-e2e"]
@@ -1340,20 +1378,20 @@ mod e2e {
         let apg = repo.apg_root();
         testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
-        assert!(is_fresh(&apg), "the two agreeing halves start fresh");
+        assert!(is_fresh(&apg), "the agreeing row starts fresh");
 
-        // Re-anchor ONLY the DB half: a content key the export does not name.
+        // Re-anchor the row to a content key the worktree does not have.
         let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
         db.refresh_scan_row(Some(&sha), Some(true), Some("diverged-content-key"))
             .unwrap();
         drop(db);
         assert!(
             !is_fresh(&apg),
-            "a DB content key that disagrees with the export must not be fresh"
+            "a DB content key that disagrees with the worktree git state must not be fresh"
         );
         assert!(is_stale(&apg));
 
-        // Re-anchor ONLY the DB half again: the export's sha, a foreign sha.
+        // Re-anchor the row again: the worktree's key, a foreign sha.
         let key = git_state(&apg).content_key;
         let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
         db.refresh_scan_row(
@@ -1365,13 +1403,13 @@ mod e2e {
         drop(db);
         assert!(
             !is_fresh(&apg),
-            "a DB sha that disagrees with the export must not be fresh"
+            "a DB sha that disagrees with the worktree git state must not be fresh"
         );
         assert!(is_stale(&apg));
 
-        // Re-anchoring BOTH halves to one state restores freshness.
+        // Re-anchoring the row to the worktree's state restores freshness.
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
-        assert!(is_fresh(&apg), "an agreeing pair is fresh again");
+        assert!(is_fresh(&apg), "an agreeing row is fresh again");
         assert!(!is_stale(&apg));
         testutil::remove(&repo);
     }
