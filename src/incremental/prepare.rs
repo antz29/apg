@@ -318,18 +318,18 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     }
 
     // FULL-UNIVERSE SEAM (feedback-92): the incremental path derives the full
-    // code-FQN universe from the PREVIOUS export. With a non-empty target set
+    // code-FQN universe from the PREVIOUS database. With a non-empty target set
     // the frontends emission-filter, so the target-only spool would shrink the
     // universe (and `validate_code_refs` would falsely bail `spec drift`) — the
-    // task body pins "no previous export ⇒ full scan". A fresh worktree that
-    // reuses the shared store but has no local `graph.jsonl` therefore full-
-    // scans. An EMPTY target set emits every fact (no filter), so the full
-    // spool is already the universe and reuse stays available.
+    // task body pins "no usable previous database ⇒ full scan". An absent
+    // `db.lbug`, an unreadable one, or one carrying pending state (a dirty row
+    // or a pending-removal identity, `db_has_pending_state`'s fail-closed
+    // answer) therefore full-scans: no unsaved or stale row may seed a splice.
+    // An EMPTY target set emits every fact (no filter), so the full spool is
+    // already the universe and reuse stays available.
+    let previous_db = apg_root.join(crate::specs::TRANS).join("db.lbug");
     if !targets_rel.is_empty()
-        && !apg_root
-            .join(crate::specs::TRANS)
-            .join("graph.jsonl")
-            .exists()
+        && (!previous_db.exists() || crate::artifacts::db::db_has_pending_state(apg_root))
     {
         return Prepared {
             store_root,
