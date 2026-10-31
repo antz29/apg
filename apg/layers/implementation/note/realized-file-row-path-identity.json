@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "realized-file-row-path-identity",
+  "body": "The separate-crate realization matrix asserts a File row's FQN as its path identity because File nodes carry no `path` column; upgrade that comparison to the real path property if the File schema ever gains one.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.planned_node_in_a_separate_cargo_project_realizes_like_the_root_crate",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
