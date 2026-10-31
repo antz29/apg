@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "release-script-header-formula-count",
+  "body": "scripts/release.sh's header comment at line 6 still reads \"Repoints the 7 Homebrew formulae\" while the `for f in Formula/*.rb` loop covers eight formulae (scanner plus the seven per-language formulae). The staleness pre-dates the macos-15 change-set and was deliberately left outside task 2's diff-freeze, which confined that task to the formula-revision commit message. Limit: a reader of the script's header is told there are seven formulae. Upgrade: fold the one-word correction (7 to 8) into the next scripts/** cleanup task, or into any change that reopens scripts/release.sh.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "scripts/release.sh",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
