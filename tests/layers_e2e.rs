@@ -1528,6 +1528,58 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-04 task-1: the dedicated MULTI-file home of the scan-first
+    /// refusal. A freshly started project worktree has no `db.lbug`; a
+    /// two-node-file validated model (a component `implemented-by` scanned code
+    /// plus the service it `realises`) must refuse through `write_project`'s
+    /// `validate_change` → `artifacts::code_universes` read, naming the missing
+    /// database and the remedy, and leave neither node file nor commit behind.
+    /// This is the explicit deleted-`db.lbug` probe, distinct from the
+    /// fresh-worktree warm/cold ordering regression.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
+    fn validated_multi_file_write_without_a_database_refuses_scan_first() {
+        let (wt_apg, repo, wt) = mutation_fixture("multi-file-no-db");
+        std::fs::remove_file(wt_apg.join(apg::specs::TRANS).join("db.lbug")).unwrap();
+        let head_before = testutil::commit_count(&wt);
+
+        let mut sys = node("solution", "component", "no-db-multi-sys");
+        sys.out
+            .push(out_edge("implemented-by", "go.fixture.mod.Store"));
+        sys.out
+            .push(out_edge("realises", "domain.service.no-db-multi-svc"));
+        let mut svc = node("domain", "service", "no-db-multi-svc");
+        svc.in_edges
+            .push(in_edge("realises", "solution.component.no-db-multi-sys"));
+
+        let err = write_project(&wt_apg, &[sys, svc], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("db.lbug"),
+            "the refusal must name the missing database: {msg}"
+        );
+        assert!(
+            msg.contains("run `apg scan` first"),
+            "the refusal must name the remedy: {msg}"
+        );
+        for path in [
+            node_file_path(&wt_apg, Layer::Solution, "component", "no-db-multi-sys"),
+            node_file_path(&wt_apg, Layer::Domain, "service", "no-db-multi-svc"),
+        ] {
+            assert!(
+                !path.exists(),
+                "a refused no-database write must not land {}",
+                path.display()
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            head_before,
+            "a refused no-database write must not commit"
+        );
+        testutil::remove(&repo);
+    }
+
     /// Phase-05 task-14 (int): commit-then-project ordering — the SINGLE
     /// ordering-test home (phase-02 task-5 points here). An injectable one-shot
     /// hook fires at the commit→project boundary; a returned `Err` stands in
