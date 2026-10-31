@@ -249,11 +249,14 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// targets) and [`check_edge_pairing`], every written constraint passes
 /// [`eval_constraint`]'s structure rules (a constraint's scope is its layer,
 /// and an implementation-layer constraint may narrow tier 4 with one
-/// `applies-to` edge per Language it binds), and — when
-/// the `graph.jsonl` export exists —
-/// every assembled `implemented-by` target is Real or Pending against the
-/// exported scanned graph ([`validate_code_refs`]; a Drift target aborts before
-/// the write). Validation never opens `db.lbug`. Pure read — no write.
+/// `applies-to` edge per Language it binds), and every assembled
+/// `implemented-by` target is Real or Pending against the worktree database's
+/// scanned/planned code universes
+/// ([`code_universes`](crate::artifacts::code_universes);
+/// [`validate_code_refs`]; a Drift target aborts before the write). The
+/// database is the one code-identity source: an absent database refuses the
+/// write with its own `run \`apg scan\` first` error rather than recording the
+/// refs unvalidated. Pure read — no write.
 pub fn validate_change(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -263,24 +266,10 @@ pub fn validate_change(
     // body is shared with the overlay path via [`validate_change_over`].
     let base = read_existing_nodes(apg_root)?;
 
-    // The direct path's code-identity source is the `graph.jsonl` export
-    // ([`code_universes_from_export`]); the session's admission supplies the
-    // held `db.lbug`'s universes instead. When the export is absent, the
-    // pre-decoupling behaviour recorded code-FQN refs UNVALIDATED (never
-    // drift): seed `planned` with every `implemented-by` target in the base +
-    // written set so each classifies Pending. The next scan re-validates.
-    // (Mirrors `write_project_with`'s export-absent fallback.)
-    let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
-    let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
-    if !graph_jsonl.exists() {
-        for n in base.iter().chain(writes.iter()) {
-            for oe in &n.out {
-                if oe.kind == "implemented-by" {
-                    planned.insert(oe.target.clone());
-                }
-            }
-        }
-    }
+    // The direct path's code-identity source is the worktree database
+    // ([`artifacts::code_universes`]); the session's admission supplies the
+    // held database's universes instead.
+    let (scanned, planned) = artifacts::code_universes(apg_root)?;
 
     validate_change_over(apg_root, &base, writes, deletes, &scanned, &planned)
 }
@@ -292,10 +281,10 @@ pub fn validate_change(
 /// session passes the effective base it reconstructs from the held database.
 /// `scanned`/`planned` are the two code-FQN universes the `implemented-by`
 /// drift check resolves against, supplied by the caller so this entry point
-/// performs no file I/O: the direct path ([`validate_change`]) passes
-/// [`code_universes_from_export`](crate::artifacts::code_universes_from_export)
-/// (the `graph.jsonl` export), while the session's admission passes the held
-/// database's
+/// performs no file I/O: the direct path ([`validate_change`]) passes the
+/// worktree database's
+/// [`code_universes`](crate::artifacts::code_universes), while the session's
+/// admission passes the held database's
 /// [`code_universes_from_db`](crate::artifacts::ArtifactDb::code_universes_from_db)
 /// — neither opens a second handle nor reads `apg/.trans/graph.jsonl`. Every
 /// check is otherwise identical to [`validate_change`] — per-node uniqueness,
@@ -380,11 +369,9 @@ pub fn validate_change_over(
     // scanned graph must abort BEFORE anything is written — otherwise the
     // file lands and commits and only the step-5 re-merge fails (a committed
     // partial mutation). The code-identity source is the caller-supplied
-    // `scanned`/`planned` universes — the direct path resolves them from
-    // `graph.jsonl`, the session from the `db.lbug` it already holds — so this
-    // admission check performs NO file I/O and never opens `db.lbug`. A caller
-    // with no code-identity source supplies universes that classify its refs
-    // Pending, mirroring the export-absent fallback.
+    // `scanned`/`planned` universes — the direct path resolves them from the
+    // worktree database, the session from the `db.lbug` it already holds — so
+    // this admission check performs NO file I/O and never opens `db.lbug`.
     let refs: Vec<&str> = assembled
         .values()
         .flat_map(|n| n.out.iter())
