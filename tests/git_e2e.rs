@@ -1009,7 +1009,7 @@ mod e2e {
     /// preserved — a re-anchor never re-scans.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
-    fn reanchor_rewrites_graph_jsonl_line_one() {
+    fn reanchor_rewrites_the_database_scan_row() {
         let repo = fixture_repo("reanchor");
         repo.start_project("foo");
         let apg = repo.project_apg_root("foo");
