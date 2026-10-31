@@ -10,7 +10,7 @@ text/config/packaging files the code frontends don't claim — Markdown, shell,
 YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files.
 
 ```
-Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/graph.jsonl
+Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
 ```
 
 ## Features
@@ -182,7 +182,7 @@ In your project directory:
 
 ```sh
 apg init    # creates apg/ (committed config + gitignored .trans/), installs the opencode apg tool suite + nine agents
-apg scan    # scans the project, writes apg/.trans/db.lbug and apg/.trans/graph.jsonl
+apg scan    # scans the project, writes apg/.trans/db.lbug
 apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 ```
 
@@ -256,7 +256,7 @@ apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
 apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
 apg scan --no-progress                   # silence the live progress stream
-apg scan --force                         # true rebuild: discard db.lbug + graph.jsonl, bypass the fast path and fact cache, re-run every frontend (sources and apg/layers untouched)
+apg scan --force                         # true rebuild: discard db.lbug, bypass the fast path and fact cache, re-run every frontend (sources and apg/layers untouched)
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
 
@@ -275,12 +275,12 @@ redirected; `--no-progress` turns it off.
 
 Outputs (all under the gitignored `apg/.trans/` directory; the committed
 `apg/` dir holds `config.json` plus the durable `apg/layers/` node files —
-one JSON file per authored spec node, FQN `<layer>.<type>.<name>`):
+one JSON file per authored spec node, FQN `<layer>.<type>.<name>` — the
+system of record at rest):
 
 | File | Contents |
 |---|---|
-| `db.lbug` | LadybugDB graph index (queryable) |
-| `graph.jsonl` | Self-contained export (canonical FQNs, no opaque ids) |
+| `db.lbug` | Derived LadybugDB graph index, rebuilt by a scan from `apg/layers/**` and the scanned code (queryable) |
 | `apg-frontend.log` | Full scanner + ingestor log |
 
 ### 3. `apg query "<cypher>"`
@@ -676,7 +676,7 @@ first failure; `scripts/gate.sh --e2e` appends the e2e tier. It is run-only
 ```
 src/main.rs          apg CLI (init / scan / query / node / edge / plan / project / review) + pipeline driver
 src/ingest.rs        two-pass ingestion, canonical FQN rendering
-src/load.rs          PARQUET load files → db.lbug, graph.jsonl export
+src/load/            PARQUET load files → db.lbug
 src/classify.rs      code_type classification
 src/layers.rs        node-file model: layers, validation, ingestion of apg/layers/
 src/node_cmd.rs      durable node-file mutations (apg node / apg edge)
