@@ -224,10 +224,9 @@ pub fn live_session(apg_root: &Path) -> bool {
     live_session_at(&socket_path(apg_root))
 }
 
-/// Fully discards a `.trans` directory's derived index: the query database
-/// (`db.lbug`) **and its `.wal`/`.shm` sidecars** (the suffixes
-/// [`crate::splice::publish`] asserts on), plus the `graph.jsonl` export.
-/// Best-effort — an absent artifact is not an error.
+/// Discards a `.trans` directory's derived database: `db.lbug` **and its
+/// `.wal`/`.shm` sidecars** (the suffixes [`crate::splice::publish`] asserts
+/// on), and nothing else. Best-effort — an absent artifact is not an error.
 ///
 /// Removing only `db.lbug` is not enough: a `db.lbug.wal` left behind by an
 /// unclean exit makes the next `Database::new("db.lbug")` panic with a
@@ -236,11 +235,11 @@ pub fn live_session(apg_root: &Path) -> bool {
 /// [`Coordinator::force_full_scan`], and `run_pipeline`'s stale-socket guard and
 /// full-load branch. No caller keeps a second deletion list.
 ///
-/// The node files under `apg/layers/**` are the system of record and are never
-/// touched here; the caller rebuilds the index from them (plus a fresh scan of
-/// the code).
+/// The `graph.jsonl` export is not part of this discard (its deletion is
+/// phase 10's cut). The node files under `apg/layers/**` and every source file
+/// are never touched here; the caller rebuilds the database from them.
 pub(crate) fn discard_derived_index(trans_dir: &Path) {
-    for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm", "graph.jsonl"] {
+    for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm"] {
         let _ = std::fs::remove_file(trans_dir.join(name));
     }
 }
