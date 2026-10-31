@@ -819,13 +819,16 @@ mod e2e {
         assert_eq!(src_back.out[0].kind, "requires");
         assert_eq!(src_back.out[0].target, "requirements.requirement.r1");
         assert_eq!(dst_back.in_edges.len(), 2);
-        assert_eq!(dst_back.in_edges[0].kind, "requires");
+        // `node_files_from_db` sorts `in_edges` by `(kind, source)`, so locate
+        // the `requires` half rather than assuming insertion order.
+        let requires_in = dst_back
+            .in_edges
+            .iter()
+            .find(|e| e.kind == "requires")
+            .expect("r1's requires in-half must be durable");
+        assert_eq!(requires_in.source, "requirements.stakeholder.owner");
         assert_eq!(
-            dst_back.in_edges[0].source,
-            "requirements.stakeholder.owner"
-        );
-        assert_eq!(
-            src_back.out[0].properties, dst_back.in_edges[0].properties,
+            src_back.out[0].properties, requires_in.properties,
             "the out half and its matching in half must carry identical properties"
         );
 
@@ -1489,7 +1492,14 @@ mod e2e {
         let b =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "gap-b").unwrap();
         assert_eq!(b.in_edges.len(), 2, "gap-b's in-half must be durable");
-        assert_eq!(b.in_edges[0].source, "requirements.stakeholder.gap-a");
+        // `node_files_from_db` sorts `in_edges` by `(kind, source)`, so locate
+        // the `requires` half rather than assuming insertion order.
+        let requires_in = b
+            .in_edges
+            .iter()
+            .find(|e| e.kind == "requires")
+            .expect("gap-b's requires in-half must be durable");
+        assert_eq!(requires_in.source, "requirements.stakeholder.gap-a");
 
         // (6) After the session ends the read-write DB is free again, but a
         // durable mutation still refuses (mandatory session).
