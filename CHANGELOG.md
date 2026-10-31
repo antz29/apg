@@ -9,6 +9,75 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.28.0
+
+Minor release: the derived graph is one database — `graph.jsonl` is retired —
+the session database is the live working state (the in-memory node-file buffer
+is gone), `apg spec lint --tier` is cumulative, `apg_plan_tasks` reports
+truncated pages, and validated authoring always resolves `implemented-by`
+against the scanned database.
+
+**One derived database.** `apg/.trans/graph.jsonl` is retired: `apg scan` writes
+only `db.lbug` — the graph assembled from the durable `apg/layers/**` node files
+plus the scanned code — the export module and every `*_from_export` reader are
+deleted, and freshness is judged from the database's own `Scan` row rather than
+an export lead. `apg scan --force` now discards only the derived database and
+its `wal`/`shm` sidecars, and the e2e oracle suite reads its graph state from the
+database.
+
+**The session database is the working state.** Each `apg node`/`apg edge`
+mutation is applied to the worktree `db.lbug` at admission — projected so a
+routed read sees it, with exactly the node files it changes marked dirty and a
+deleted node's row gone with its identity on a pending-removal ledger — while
+`apg/layers/**` and git stay at the last saved state. The in-memory node-file
+overlay and `Context::Save` are deleted. `apg session save` writes exactly the
+dirty rows at their node-file paths and removes each pending-deletion file in
+one atomic write plus exactly one commit; `apg session end` refuses while the
+database carries pending state (which it lists), and `apg session abort`
+discards it.
+
+**Save-boundary scope.** `apg session save` validates the dirty rows' structure
+and the held model's edge pairing — never the whole model — so an unchanged
+row's pre-existing violation cannot refuse an unrelated save, and the
+whole-model cardinalities belong to `apg spec lint` and `apg project merge`.
+Admission no longer pairs edges (pairing is enforced at the save boundary), so a
+cross-endpoint write whose matching half lands in a later mutation is admitted,
+and an already-absent delete path is idempotent.
+
+**Pending-state recovery and freshness.** `apg session start` recovers a database
+left with pending state or an unrecognised shape (discarding it rather than
+migrating it), direct `apg query` runs the same recovery, and `is_fresh` fails
+closed on pending state and shape so stale or in-flight state is never reported
+fresh.
+
+**Cumulative `apg spec lint --tier`.** The named tier is now checked together
+with every tier above it, and each coverage rule runs when its supplying tier is
+in scope; the cardinalities are gated on the supplying tier as well.
+
+**Plan and suite tooling.** `apg_plan_tasks` filters task status in the
+phase-prefix predicate before `ORDER BY`/`LIMIT` and reports a truncated or
+zero-match page from a `LIMIT+1` probe; `apg_plan_add` forwards `--assigned-to`
+when adding a task; and the shipped suite tools' descriptions are pinned to the
+live SPEC §4 edge-kind vocabulary (`driven-by`, not the retired `drives`).
+
+**Validated authoring requires a scanned database.** `apg node`/`apg edge`
+resolve `implemented-by` against the worktree database's scanned/planned code
+universes and refuse an absent one with its own *run `apg scan` first* error
+instead of recording code refs unvalidated; e2e fixtures author pre-scan nodes
+through the single-file writer and seed a minimal database where a write path
+needs one.
+
+**Planned-node realisation.** A nested package's planned nodes are realised on
+the incremental splice as well as on a full scan, and separate-crate realisation
+is pinned for every implementation kind.
+
+**Documentation.** README, AGENTS.md, SCHEMA.md and the distributed agent
+templates state the two-representation model (the node files are the system of
+record at rest; `db.lbug` is the one derived representation), and
+`opencode.json` is untracked and gitignored.
+
+No durable-spec model change.
+
 ## v0.27.0
 
 Minor release: `apg scan` now graphs the agent definitions apg distributes, the
