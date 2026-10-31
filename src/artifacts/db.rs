@@ -544,8 +544,19 @@ impl ArtifactDb {
 
     /// Does the **held handle** carry **pending state** — a durable node row
     /// flagged `updated = 1`, or at least one identity on the pending-removal
-    /// ledger? This is the read the save boundary, `end` refusal, `abort` and
-    /// freshness consult, answered over the one open connection.
+    /// ledger? This is the held-handle twin of the path-level
+    /// [`db_has_pending_state`]: the same question, the same shared fold and
+    /// fail-closed contract, for a caller that already holds the connection
+    /// instead of naming an `apg/` root.
+    ///
+    /// Its first planned consumer is phase 6's `PreviousScan::capture` — the
+    /// scan's one read-only handle on the previous database, which returns
+    /// `None` when that database carries a dirty row or a pending-removal
+    /// identity, so a mutation admitted but not yet saved never seeds the
+    /// rebuild. Nothing calls it today: `Coordinator::save`, the `Request::End`
+    /// refusal and `abort` read [`dirty_node_files_from_db`](Self::dirty_node_files_from_db)
+    /// and [`pending_removals`](Self::pending_removals) directly (they need the
+    /// listings), and freshness goes through the path-level twin.
     ///
     /// Reads the ledger (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`)
     /// and then asks each durable node table ([`DURABLE_NODE_TABLES`], the same
