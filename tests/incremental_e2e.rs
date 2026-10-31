@@ -98,70 +98,167 @@ mod e2e {
     }
 
     #[test]
-    #[ignore = "e2e tier: real I/O (temp dir/state files/git); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (temp dir/state files/git/database); run via cargo test-e2e"]
     fn no_previous_export_forces_full_scan_only_when_filtering() {
-        // A scratch git repo with a recorded scan (manifest + scan record) but
-        // NO local `apg/.trans/graph.jsonl`: with a non-empty target set the
-        // full-universe seam cannot be derived, so the correctness fallback
-        // forces a full scan (feedback-92). With an EMPTY target set nothing is
-        // emission-filtered, so reuse stays available.
+        // Eligibility is the previous DATABASE rule (feedback-92), asserted
+        // where `prepare` decides it: with a non-empty target set an absent
+        // `db.lbug`, an unreadable one, or one carrying pending state (a dirty
+        // row or a pending-removal identity) forces the full scan — no
+        // unusable previous database may seed the full-universe seam. An EMPTY
+        // target set emits every fact, so the full spool is already the
+        // universe and reuse stays available; a clean database keeps the
+        // ordinary delta.
         use apg::cache::{CacheKey, Manifest, ScanConfigKey};
         use apg::delta::{FullScanReason, ScanRecord};
 
-        let dir = std::env::temp_dir().join(format!("apg-noexport-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let repo_dir = dir.join("repo");
-        std::fs::create_dir_all(&repo_dir).unwrap();
-        let repo = git2::Repository::init(&repo_dir).unwrap();
-        {
-            let mut cfg = repo.config().unwrap();
-            cfg.set_str("user.name", "apg test").unwrap();
-            cfg.set_str("user.email", "t@example.com").unwrap();
-        }
-        std::fs::write(repo_dir.join(".gitignore"), "apg/.trans/\n").unwrap();
-        std::fs::write(repo_dir.join("a.go"), "package a\n").unwrap();
-        let mut index = repo.index().unwrap();
-        index
-            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
-            .unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig = repo.signature().unwrap();
-        let sha = repo
-            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
-            .unwrap()
-            .to_string();
-
-        // The shared store carries a recorded scan + an empty manifest (so the
-        // current tree looks changed), but the worktree has no export.
-        let apg_root = repo_dir.join("apg");
-        std::fs::create_dir_all(&apg_root).unwrap();
-        let store = FactStore::resolve(&apg_root).unwrap().root;
-        std::fs::create_dir_all(&store).unwrap();
         let config = ScanConfigKey {
             languages: vec!["go".into()],
             ..Default::default()
         };
         let key = CacheKey::compute(&config);
-        Manifest::default().save(&store).unwrap();
-        ScanRecord {
-            sha,
-            cache_key: key.clone(),
-            manifest: Manifest::default(),
-            content_key: None,
+
+        // A fresh scratch git repo per case, so the four previous-database
+        // states cannot leak into each other. An EMPTY recorded manifest makes
+        // the unrecorded `a.go` a changed target; the recorded manifest is
+        // supplied per case.
+        let fixture = |tag: &str| {
+            let dir =
+                std::env::temp_dir().join(format!("apg-previous-db-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let repo_dir = dir.join("repo");
+            std::fs::create_dir_all(&repo_dir).unwrap();
+            let repo = git2::Repository::init(&repo_dir).unwrap();
+            {
+                let mut cfg = repo.config().unwrap();
+                cfg.set_str("user.name", "apg test").unwrap();
+                cfg.set_str("user.email", "t@example.com").unwrap();
+            }
+            std::fs::write(repo_dir.join(".gitignore"), "apg/.trans/\n").unwrap();
+            std::fs::write(repo_dir.join("a.go"), "package a\n").unwrap();
+            let mut index = repo.index().unwrap();
+            index
+                .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = repo.signature().unwrap();
+            let sha = repo
+                .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+                .unwrap()
+                .to_string();
+
+            let apg_root = repo_dir.join("apg");
+            std::fs::create_dir_all(&apg_root).unwrap();
+            let store = FactStore::resolve(&apg_root).unwrap().root;
+            (dir, repo_dir, apg_root, store, sha)
+        };
+        let record = |store: &std::path::Path, sha: &str, manifest: Manifest| {
+            std::fs::create_dir_all(store).unwrap();
+            manifest.save(store).unwrap();
+            ScanRecord {
+                sha: sha.to_string(),
+                cache_key: key.clone(),
+                manifest,
+                content_key: None,
+            }
+            .save(store)
+            .unwrap();
+        };
+
+        // (1) No `db.lbug` at all + a non-empty target set: there is no
+        // previous database to derive the full universe from, so the scan
+        // full-scans.
+        {
+            let (dir, repo_dir, apg_root, store, sha) = fixture("no-db");
+            record(&store, &sha, Manifest::default());
+
+            let prepared = prepare(&repo_dir, &apg_root, &config, false);
+            assert!(
+                matches!(prepared.full_scan, Some(FullScanReason::NoPreviousExport)),
+                "an absent previous database with a non-empty target set must full-scan: {:?}",
+                prepared.full_scan
+            );
+            assert!(
+                prepared.targets_rel.is_empty(),
+                "the fallback must clear the target set: {:?}",
+                prepared.targets_rel
+            );
+            let _ = std::fs::remove_dir_all(&dir);
         }
-        .save(&store)
-        .unwrap();
 
-        let prepared = prepare(&repo_dir, &apg_root, &config, false);
-        assert!(
-            matches!(prepared.full_scan, Some(FullScanReason::NoPreviousExport)),
-            "a non-empty target set with no previous export must full-scan: {:?}",
-            prepared.full_scan
-        );
+        // (2) `db.lbug` carrying a dirty row + a non-empty target set: an
+        // admitted-but-unsaved row must never seed the splice — the
+        // pending-state half of the same rule.
+        {
+            let (dir, repo_dir, apg_root, store, sha) = fixture("dirty-db");
+            record(&store, &sha, Manifest::default());
+            apg::testutil::touch_db(&apg_root);
+            {
+                let db = apg::artifacts::ArtifactDb::open(&apg_root).unwrap();
+                db.conn()
+                    .unwrap()
+                    .query(
+                        "CREATE (n:Requirement {fqn: 'requirements.requirement.probe', updated: 1})",
+                    )
+                    .unwrap();
+            }
 
-        let _ = std::fs::remove_dir_all(&dir);
+            let prepared = prepare(&repo_dir, &apg_root, &config, false);
+            assert!(
+                matches!(prepared.full_scan, Some(FullScanReason::NoPreviousExport)),
+                "a previous database carrying pending state with a non-empty target set must full-scan: {:?}",
+                prepared.full_scan
+            );
+            assert!(
+                prepared.targets_rel.is_empty(),
+                "the fallback must clear the target set: {:?}",
+                prepared.targets_rel
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // (3) A clean `db.lbug` + a non-empty target set: the database is a
+        // usable previous universe, so the ordinary delta keeps reuse.
+        {
+            let (dir, repo_dir, apg_root, store, sha) = fixture("clean-db");
+            record(&store, &sha, Manifest::default());
+            apg::testutil::touch_db(&apg_root);
+
+            let prepared = prepare(&repo_dir, &apg_root, &config, false);
+            assert!(
+                prepared.full_scan.is_none(),
+                "a clean previous database keeps the delta: {:?}",
+                prepared.full_scan
+            );
+            assert!(
+                prepared.targets_rel.contains("a.go"),
+                "the unrecorded a.go change must stay a target: {:?}",
+                prepared.targets_rel
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // (4) An EMPTY target set with no `db.lbug`: nothing is emission-
+        // filtered, so the full spool is already the universe and reuse stays
+        // available despite the absent database.
+        {
+            let (dir, repo_dir, apg_root, store, sha) = fixture("no-targets");
+            record(&store, &sha, Manifest::build(&repo_dir));
+
+            let prepared = prepare(&repo_dir, &apg_root, &config, false);
+            assert!(
+                prepared.full_scan.is_none(),
+                "an empty target set keeps reuse available without a database: {:?}",
+                prepared.full_scan
+            );
+            assert!(
+                prepared.targets_rel.is_empty(),
+                "a recorded manifest matching the tree yields no targets: {:?}",
+                prepared.targets_rel
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     /// phase-04 task-21: an incremental scan records ONLY the target files'
