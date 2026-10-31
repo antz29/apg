@@ -2232,7 +2232,7 @@ mod e2e {
     /// identity) captures as absent, never as a partial snapshot.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn code_universes_from_db_match_the_export_universes_for_a_real_scan() {
+    fn previous_scan_capture_yields_a_real_scan_snapshot() {
         let (repo, wt, wt_apg) = testutil::project_with_db("code-universes-from-db");
 
         // A planned Implementation node declared in the plan store: the next
