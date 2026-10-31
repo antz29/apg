@@ -7259,4 +7259,273 @@ mod e2e {
         );
         testutil::remove(&repo);
     }
+
+    /// Phase-04 task-12 (session-start-recovery): with **no session socket**,
+    /// `apg session start` classifies the database it is about to own and, when
+    /// it carries pending state — a dirty durable row
+    /// ([`apg::artifacts::db::db_has_pending_state`]) or a pending-removal
+    /// ledger identity — discards it and rebuilds it from the durable
+    /// `apg/layers/**` node files BEFORE it admits anything; a clean,
+    /// shape-compatible database starts without a scan.
+    ///
+    /// Three starts over one scratch worktree, no socket before any of them:
+    ///
+    /// 1. an admitted-but-unsaved durable row plus a dirty mark on a committed
+    ///    one — rebuilt, so the unsaved row is never served and the committed
+    ///    pair is;
+    /// 2. only a phantom `PendingRemoval` ledger identity — rebuilt, so the
+    ///    ledger drains yet the named committed requirement survives (the
+    ///    rebuild sources the node files, not the discarded index);
+    /// 3. a clean, shape-compatible database — starts without a scan and never
+    ///    prints the rebuild line.
+    ///
+    /// The rebuild touches only derived artifacts: `apg/layers/**` stays
+    /// byte-identical to its pre-injection snapshot and no commit lands.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn session_start_discards_a_pending_state_database_with_no_socket() {
+        // The recovery classification `reclaim_stale_socket` prints.
+        const REBUILD: &str = "carries pending state — rebuilding it from apg/layers/**";
+        const UNSAVED: &str = "requirements.requirement.unsaved";
+        const KEEP_A: &str = "requirements.requirement.keep-a";
+        const KEEP_B: &str = "requirements.requirement.keep-b";
+
+        let (wt_apg, repo, wt) = node_store_fixture("session-start-pending");
+        let home = repo.root.join("home");
+
+        // The durable system of record: two committed node files, projected
+        // into a genuinely fresh `db.lbug` — the rebuild's only source.
+        layers::write_project(
+            &wt_apg,
+            &[
+                node("requirements", "requirement", "keep-a"),
+                node("requirements", "requirement", "keep-b"),
+            ],
+            &[],
+        )
+        .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
+
+        let socket = apg::session::socket_path(&wt_apg);
+        let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
+        let before_commits = testutil::commit_count(&wt);
+        assert!(
+            apg::git::is_fresh(&wt_apg),
+            "the baseline DB must be fresh before anything is injected"
+        );
+        assert!(
+            !socket.exists(),
+            "the fixture must start with no session socket"
+        );
+
+        let last = |out: &str| {
+            out.lines()
+                .last()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string()
+        };
+        // A routed read goes through the live session's held DB.
+        let routed = |q: &str| -> String {
+            let out = spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let csv_rows = |csv: &str| -> Vec<String> {
+            csv.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        };
+        let committed_rows = |csv: &str| -> Vec<String> {
+            assert_eq!(
+                csv_rows(csv),
+                vec!["n.fqn".to_string(), KEEP_A.to_string(), KEEP_B.to_string()],
+                "the session must serve exactly the two committed requirements: {csv}"
+            );
+            assert!(
+                !csv.contains("unsaved"),
+                "the session must never serve the unsaved row: {csv}"
+            );
+            csv_rows(csv)
+        };
+
+        // ---- (1) DIRTY ROW + UNSAVED ROW, no socket ----------------------
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            db.conn()
+                .unwrap()
+                .query(&format!(
+                    "MATCH (n:Requirement {{fqn: '{KEEP_A}'}}) SET n.updated = 1"
+                ))
+                .unwrap();
+            db.conn()
+                .unwrap()
+                .query(&format!(
+                    "CREATE (n:Requirement {{fqn: '{UNSAVED}', body: 'admitted-but-unsaved', updated: 1}})"
+                ))
+                .unwrap();
+        }
+        assert!(
+            apg::artifacts::db_has_pending_state(&wt_apg),
+            "the fixture must carry the injected dirty + unsaved rows"
+        );
+        assert!(!apg::git::is_fresh(&wt_apg), "pending state is never fresh");
+        assert!(!socket.exists(), "the recovering start gets no socket");
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a pending-state start must rebuild and then serve"
+        );
+        let rows = routed("MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn");
+        committed_rows(&rows);
+        assert_eq!(
+            last(&routed(
+                "MATCH (n:Requirement) WHERE n.updated = 1 RETURN count(*)"
+            )),
+            "0",
+            "the rebuilt DB must leave no dirty requirement row"
+        );
+        assert_eq!(
+            last(&routed("MATCH (n:PendingRemoval) RETURN count(*)")),
+            "0",
+            "the rebuilt DB must leave no pending-removal ledger identity"
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "unsaved")
+                .exists(),
+            "the unsaved row never had a node file, and the rebuild writes none"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(REBUILD),
+            "start must classify the dirty row as pending state and rebuild: {stderr}"
+        );
+        assert!(!socket.exists(), "end must release the session socket");
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the recovered session must end cleanly"
+        );
+        assert!(
+            !apg::artifacts::db_has_pending_state(&wt_apg),
+            "the rebuilt DB must carry no pending state"
+        );
+
+        // ---- (2) LEDGER IDENTITY ONLY, no socket -------------------------
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            db.record_pending_removal(KEEP_B).unwrap();
+        }
+        assert!(
+            apg::artifacts::db_has_pending_state(&wt_apg),
+            "a lone ledger identity is pending state"
+        );
+        assert!(!apg::git::is_fresh(&wt_apg), "pending state is never fresh");
+        assert!(!socket.exists(), "the recovering start gets no socket");
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a ledger-only start must rebuild and then serve"
+        );
+        assert_eq!(
+            last(&routed("MATCH (n:PendingRemoval) RETURN count(*)")),
+            "0",
+            "the rebuild must drain the phantom ledger identity"
+        );
+        // The rebuild reads the node files, so the requirement the phantom
+        // ledger named survives despite that ledger entry.
+        let rows = routed("MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn");
+        committed_rows(&rows);
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(REBUILD),
+            "start must classify the ledger identity as pending state and rebuild: {stderr}"
+        );
+        assert!(!socket.exists(), "end must release the session socket");
+
+        // ---- (3) CLEAN DB, no socket: start WITHOUT a scan ---------------
+        assert!(
+            !apg::artifacts::db_has_pending_state(&wt_apg),
+            "the rebuilt DB must be clean before the last start"
+        );
+        assert!(
+            apg::git::is_fresh(&wt_apg),
+            "the rebuild must re-anchor the scan so the DB stays fresh"
+        );
+        assert!(!socket.exists(), "the clean start gets no socket");
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a clean, shape-compatible DB must start without a scan"
+        );
+        let rows = routed("MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn");
+        committed_rows(&rows);
+        assert_eq!(
+            last(&routed(
+                "MATCH (n:Requirement) WHERE n.updated = 1 RETURN count(*)"
+            )),
+            "0",
+            "a scan-free start must leave the committed rows clean"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(apg::session::DB_OPEN_MARKER),
+            "the clean start must open the existing DB: {stderr}"
+        );
+        assert!(
+            !stderr.contains("rebuilding it from apg/layers/**"),
+            "a clean, shape-compatible DB must start without a rebuild: {stderr}"
+        );
+        assert!(
+            !stderr.contains("[load]"),
+            "a clean, shape-compatible DB must start without a scan: {stderr}"
+        );
+
+        // ---- the rebuild never touched the durable store -----------------
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            before_store,
+            "the rebuilds must leave apg/layers/** byte-for-byte at its snapshot"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "the rebuilds must create no commit"
+        );
+        assert!(
+            apg::git::is_fresh(&wt_apg),
+            "the re-anchored scan must leave the DB fresh after all three starts"
+        );
+
+        testutil::remove(&repo);
+    }
 }
