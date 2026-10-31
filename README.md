@@ -459,8 +459,9 @@ R3/R4 violations, the tier-1-3 body-budget rule, and the shared mechanical
 validator set — the edge-kind matrix, the event-only `publishes`/`subscribes`
 target rule, and the model cardinalities, the same functions the write path
 calls — as blocking errors, plus the non-blocking tier-1-3 wording advisories.
-It never writes. `--tier` narrows the per-node rules and advisories to one
-layer; omitted, it checks all tiers. Change-set delta coverage is not a lint
+It never writes. `--tier` is cumulative: the named tier is checked together
+with every tier above it, including each coverage rule whose supplying tier is
+in scope; omitted, it checks all tiers. Change-set delta coverage is not a lint
 rule — that is the `apg plan verify` gate.
 
 ### Sessions (caller-controlled durability)
