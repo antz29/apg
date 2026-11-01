@@ -412,11 +412,15 @@ default gate. **e2e is the FINAL gate only** and obeys
 `global.constraint.no-real-project-test`: the candidate binary is exercised
 against a scratch `/tmp` git repo, never a real project (see below).
 
-**The repo gate is `scripts/gate.sh`** — the single gate command. It runs the
-exact sequence `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
---all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
-unit+int suite) → `bun test` (in `opencode-suite/`) → `node --test` (in
-`src/tslib/`), stopping at the first failure; `scripts/gate.sh --e2e` appends
+**The repo gate is `scripts/gate.sh`** — the single gate command. It runs,
+stopping at the first failure: `actionlint` over `.github/workflows/*.yml`
+(skipped with a warning where the dev-machine tool is absent), a per-file
+`ruby -c` over `Formula/*.rb`, `cargo fmt --check` → `cargo check
+--all-targets` → `cargo clippy --all-targets -- -D warnings` → `cargo build` →
+`cargo test` (the default unit+int suite) → the `opencode-suite/node_modules`
+bootstrap from the committed `opencode-suite/bun.lock` (skipped when the
+directory is present) → `bun test` (in `opencode-suite/`) → `node --test` (in
+`src/tslib/`); `scripts/gate.sh --e2e` appends
 the cargo e2e tier (`cargo test e2e:: -- --ignored`, thread-bounded by
 `E2E_THREADS`, default 1) and the opencode-suite boundary e2e
 (`bun test tests/boundary.e2e.test.ts` against the `cargo build` candidate;
@@ -561,15 +565,22 @@ on the old version, ships stale `OLD-version` bottles.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
-1. **Gate green**: first install the suite's deps — `bun install` inside
-   `opencode-suite/` (`node_modules` is untracked, and the gate's `bun test`
-   step needs `@opencode/plugin`; the env-prefixed form is not granted, so this
-   one command is the runnable entry point). Then run
-   `scripts/gate.sh --e2e` — the single gate command
-   (`scripts/gate.sh` = `cargo fmt --check` → `check --all-targets` → `clippy
-   --all-targets -D warnings` → `build` → `test` → the `bun test`/`node --test`
-   JS/TS suites; `--e2e` appends the cargo e2e tier and the opencode-suite
-   boundary e2e) — i.e. `cargo build` first, then **`cargo test` AND
+1. **Gate green**: run `scripts/gate.sh --e2e` — the single gate command and
+   the runnable entry point (the gate is one granted command; env-prefixed
+   variants of a step match no allow rule). It provisions the untracked
+   `opencode-suite/node_modules` — which the `bun test` step's
+   `@opencode/plugin` dependency needs — from the committed
+   `opencode-suite/bun.lock` when the directory is absent, so no prior install
+   is required; to run the JS suites outside the gate, `bun install` inside
+   `opencode-suite/` is the documented alternative. The gate runs, stopping at
+   the first failure: `actionlint` over `.github/workflows/*.yml` (skipped with
+   a warning where the dev-machine tool is absent) → a per-file `ruby -c` over
+   `Formula/*.rb` → `cargo fmt --check` → `cargo check --all-targets` → `cargo
+   clippy --all-targets -D warnings` → `cargo build` → `cargo test` (the
+   unit+int default suite) → the `opencode-suite/node_modules` bootstrap →
+   `bun test` (in `opencode-suite/`) → `node --test` (in `src/tslib/`), and
+   `--e2e` appends the cargo e2e tier and the opencode-suite boundary e2e. In
+   practice that means `cargo build` first, then **`cargo test` AND
    `cargo test-e2e`** pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
