@@ -32,6 +32,8 @@ mod unit {
     /// future-tense (`will`/`shall`) and time-relative
     /// (`today`/`now`/`currently`/`no longer`/`was`) — returning the shared
     /// [`WORDING_ADVISORY`], and is silent on plain present-tense prose.
+    /// Words match as whole tokens, so only edge punctuation is stripped: `(no)`
+    /// flags while the literal `--no-progress` does not.
     #[test]
     fn wording_warning_flags_negation_future_and_time_words() {
         // Negation.
@@ -39,6 +41,7 @@ mod unit {
             "The system does not store passwords.",
             "Never delete a record.",
             "No customer sees another customer's data.",
+            "The cache holds (no) stale entries.",
         ] {
             assert_eq!(
                 wording_warning(body),
@@ -74,12 +77,16 @@ mod unit {
             );
         }
 
-        // Plain present-tense prose is silent.
+        // Plain present-tense prose is silent — including a literal flag name
+        // and words that merely contain `no`.
         for body in [
             "A customer places an order.",
             "The service stores the record.",
             "Each order carries a total.",
             "The system reuses the cached value.",
+            "The scan accepts the --no-progress flag.",
+            "A note describes one code node.",
+            "A non-note record is rejected.",
             "",
         ] {
             assert_eq!(
