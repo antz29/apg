@@ -66,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             arch: x86_64
           - os: ubuntu-24.04-arm
             arch: aarch64
@@ -86,10 +86,11 @@ jobs:
       # compiler), and Node/npm (stages the TypeScript frontend).
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27.1"
-      - uses: actions/setup-node@v4
+          cache-dependency-path: src/golib/go.sum
+      - uses: actions/setup-node@v7
         with:
           node-version: "26.9.0"
       - uses: actions/setup-dotnet@v6
@@ -98,7 +99,7 @@ jobs:
       # Pin JDK 21: the Java frontend is compiled with `javac --release 21`, and
       # the runner's default `javac` is older (a pre-installed JDK wins PATH
       # over any apt-installed one), which would silently fail the build.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
