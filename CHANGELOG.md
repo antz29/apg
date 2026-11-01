@@ -9,6 +9,47 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.28.2
+
+Patch release: the gate validates the workflow and formula files it ships and
+bootstraps its own suite dependencies, the release pipeline stops relying on
+Homebrew's deprecated tap-trust variable, and the agent-builder scaffold gains
+two generic Build-gate rules.
+
+**The gate validates what it ships.** `scripts/gate.sh` runs `actionlint` over
+`.github/workflows/*.yml` (skipped with a warning where the dev-machine tool is
+absent) and a per-file `ruby -c` over `Formula/*.rb`, so a malformed workflow or
+formula fails locally instead of at tag time.
+
+**The gate bootstraps its suite dependencies.** The `bun test` step's
+`@opencode/plugin` dependency needs an untracked `opencode-suite/node_modules`;
+the gate now installs it from the committed `opencode-suite/bun.lock` when the
+directory is absent, so a fresh or clean worktree's gate needs no prior
+`bun install`.
+
+**Explicit tap trust in the release pipeline.** `.github/workflows/release.yml`
+drops the deprecated `HOMEBREW_NO_REQUIRE_TAP_TRUST` and runs
+`brew trust antz29/apg` after `brew tap` in both macOS jobs. The `publish` job
+needs it specifically because `brew bottle --merge` reaches the formula trust
+check with no install-time auto-trust. **This release run is the first to
+exercise the `brew trust` change** — that job has no prior produced-bottle run
+on this path.
+
+**Two generic Build-gate rules in the agent-builder scaffold.**
+`opencode-suite/agents/agent-builder.md` now requires an exact validation-command
+grant for file types the gate does not reach, and requires that an untracked
+dependency directory be bootstrapped in the gate or granted as its own exact
+command. **These regenerated rules take effect only after a repo re-runs
+`apg init` and then `agent-builder` on this version** — existing projects keep
+their previously generated agents until they do.
+
+**Gate prose reconciled.** `README.md` and `AGENTS.md` now describe the gate's
+workflow/formula validation and suite-dependency bootstrap steps, and the apg
+repo's own `apg/config.json` layout version was brought to 0.28.1 ahead of this
+release.
+
+No durable-spec model change.
+
 ## v0.28.1
 
 Patch release: republishes the v0.28.0 content, which was tagged but never
