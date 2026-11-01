@@ -423,7 +423,7 @@ above: a durable node/edge mutation is a session act.
   claim (fixed/wont-fix) to the coordinator, who performs the shallow claim-vs-change check and then actions it.
 - **git: `add` + `commit` only** — no `push`/`tag` grant (absent verbs are denied by deny-by-default); git runs
   with cwd inside the worktree via the allowed `cd *`.
-- **Build gates** as exact, verified `shell` patterns (the repo's real commands), plus three rules:
+- **Build gates** as exact, verified `shell` patterns (the repo's real commands), plus five rules:
   - **A documented invocation must be runnable.** Grant each documented cargo alias name explicitly — a
     hyphenated name is NOT matched by `cargo test *`, and an agent whose documented command is denied burns a turn
     and then improvises. Grant the bare name and its `… *` argument variant.
@@ -436,6 +436,10 @@ above: a durable node/edge mutation is a session act.
     exact `shell` pattern (`scripts/gate.sh`, `scripts/gate.sh *`) — granting **run, not edit**: the script's
     directory stays out of the agent's edit scope, so the sequence cannot be rewritten. Chaining is banned, so
     without this the agent runs N separate calls and nothing proves it ran them all.
+  - **Cover every file type the steps touch.** Grant the exact validation command patterns for the file
+    types its existing steps do not reach — never a vague wildcard, never a broad glob that admits unrelated commands.
+  - **An untracked dependency directory is bootstrapped, not assumed.** Bootstrap it inside the gate, or grant that
+    bootstrap as its own exact command, so a generated implementer in a fresh worktree reaches a green gate unaided.
 - The read-only apg suite — `apg_query`, `apg_find_symbol`, `apg_modules`, `apg_module_files`,
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`, `apg_struct`, `apg_callers`,
   `apg_callees`, `apg_uses`, `apg_unresolved`, `apg_hunk` — plus the plan read tools `apg_plan`,
