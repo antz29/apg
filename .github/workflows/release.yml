@@ -9,9 +9,6 @@ permissions:
   contents: write
 
 env:
-  # GitHub Actions runners can't satisfy Homebrew's tap-trust check (it needs a
-  # user-scoped token); the taps here are our own first-party tap.
-  HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
   # gh doesn't auto-read GITHUB_TOKEN in Actions.
   GH_TOKEN: ${{ github.token }}
 
@@ -32,7 +29,9 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - name: Tap apg
-        run: brew tap antz29/apg "https://github.com/${GITHUB_REPOSITORY}.git"
+        run: |
+          brew tap antz29/apg "https://github.com/${GITHUB_REPOSITORY}.git"
+          brew trust antz29/apg
 
       - name: Build and install formulae with --build-bottle
         run: |
@@ -206,7 +205,9 @@ jobs:
           path: bottles
 
       - name: Tap apg
-        run: brew tap antz29/apg "https://github.com/${GITHUB_REPOSITORY}.git"
+        run: |
+          brew tap antz29/apg "https://github.com/${GITHUB_REPOSITORY}.git"
+          brew trust antz29/apg
 
       - name: Merge bottle blocks into formulae
         run: |
