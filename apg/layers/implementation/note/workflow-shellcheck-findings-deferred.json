@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "workflow-shellcheck-findings-deferred",
+  "body": "The gate's workflow step runs `actionlint -shellcheck=` so embedded-shell style findings are not gated. Limit: three pre-existing shellcheck findings in this workflow stay unsurfaced — SC2035 twice around line 239 and SC2001 around line 246 — and a real shell defect in the workflow would not be caught by the gate either. The flag is deliberate: linting the embedded shell would turn those pre-existing findings into a red gate for every agent on a machine with shellcheck installed, and a machine-dependent pass/fail (shellcheck is ambient, not a repo dependency). Upgrade by fixing the three findings, then dropping `-shellcheck=` from the gate step so the workflow's embedded shell is linted.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": ".github/workflows/release.yml",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
