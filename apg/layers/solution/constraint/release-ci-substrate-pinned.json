@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "release-ci-substrate-pinned",
+  "body": "The release workflow resolves every job to an explicit runner image, uses only action majors whose declared runtime the hosted runner provides, and keys the Go module cache on the Go module's dependency file.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
