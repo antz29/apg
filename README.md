@@ -665,11 +665,17 @@ also runs the release-version guard (which reads `Cargo.toml`/`Cargo.lock`/
 `README.md` and is therefore e2e), so a release gate is `scripts/gate.sh --e2e`
 (`cargo build` + `cargo test` + `cargo test-e2e`).
 
-The gate is `scripts/gate.sh` — the single command that runs `cargo fmt --check`,
-`cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`,
-`cargo build`, then `cargo test` (the fast unit+int default), stopping at the
-first failure; `scripts/gate.sh --e2e` appends the e2e tier. It is run-only
-(`scripts/**` is not editable by agents).
+The gate is `scripts/gate.sh` — the single command that runs, stopping at the
+first failure, `actionlint` over `.github/workflows/*.yml` (skipped with a
+warning where the dev-machine tool is absent), a per-file `ruby -c` over
+`Formula/*.rb`, `cargo fmt --check`, `cargo check --all-targets`,
+`cargo clippy --all-targets -- -D warnings`, `cargo build`, `cargo test`
+(the fast unit+int default), the `opencode-suite/node_modules` bootstrap from
+the committed `opencode-suite/bun.lock` (skipped when the directory is
+present), `bun test` (in `opencode-suite/`) and `node --test` (in
+`src/tslib/`). `scripts/gate.sh --e2e` appends the cargo e2e tier and the
+opencode-suite boundary e2e. It is run-only for every agent except
+`build-implementer`, which owns `scripts/**`.
 
 ## Project layout
 
