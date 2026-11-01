@@ -193,7 +193,10 @@ pub fn wording_warning(body: &str) -> Option<&'static str> {
     const FUTURE: [&str; 5] = ["will", "shall", "must", "should", "would"];
     const TIME_RELATIVE: [&str; 5] = ["today", "now", "currently", "was", "previously"];
     let lowered = body.to_lowercase();
-    let flagged = lowered.split(|c: char| !c.is_alphanumeric()).any(|tok| {
+    let flagged = lowered.split_whitespace().any(|word| {
+        // Edge punctuation is stripped, interior punctuation is not: `(no)` is
+        // the token `no`, while `--no-progress` stays one token.
+        let tok = word.trim_matches(|c: char| !c.is_alphanumeric());
         NEGATION.contains(&tok) || FUTURE.contains(&tok) || TIME_RELATIVE.contains(&tok)
     });
     if flagged {
