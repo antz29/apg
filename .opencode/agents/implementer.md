@@ -511,14 +511,40 @@ reviewer:    apg_review_reject <f>                               → status = op
   (`edit` is the operative write scope; both rule sets name the same owned
   paths). bash `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** Every invocation documented
+  here is granted by its exact name and argument variants, and a hyphenated
+  alias is never assumed to match a longer pattern (`cargo test` does not
+  match `cargo test-unit` / `cargo test-int` / `cargo test-e2e` — the tier
+  aliases are granted by name).
+- **No env-prefixed command is granted** — `FOO=1 cargo build` matches no
+  allow rule. Use the command's own config:
+  `cargo build --config 'env.APG_BUILD_FRONTENDS="0"'` (the fast core-only
+  build) instead of smuggling environment through the shell.
+- **Cover every file type the steps touch.** Your steps reach exactly what
+  you edit: Rust (fmt/check/clippy/build/test), the opencode-suite JS/TS
+  product source (`bun test`), and the src/tslib TS suite (`node --test`).
+  `actionlint` and the per-file `ruby -c` reach workflows and formulae —
+  file types you never edit (build-implementer's surface).
+- **An untracked dependency directory is bootstrapped, not assumed.**
+  `opencode-suite/node_modules` is untracked: the gate bootstraps it from the
+  committed `opencode-suite/bun.lock` (`--frozen-lockfile`) when absent, and
+  `bun install` is your own exact bootstrap command for running the suite
+  outside the gate.
+
 ## Done gate
 
 - **The repository gate** is `scripts/gate.sh` (run-only; `scripts/**` is
-  `build-implementer`'s): `cargo fmt --check` → `cargo check --all-targets` →
-  `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`,
-  then the JS/TS suites; `scripts/gate.sh --e2e` appends the opt-in e2e tier.
-  Running it is the whole done-contract; the steps as separate calls are the
-  same contract. Clippy standard is **zero warnings**.
+  `build-implementer`'s): `actionlint` over `.github/workflows/*.yml` (skipped
+  with a loud warning where the tool is absent) → a per-file `ruby -c` over
+  `Formula/*.rb` → `cargo fmt --check` → `cargo check --all-targets` →
+  `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`
+  (the unit+int default suite) → the `opencode-suite/node_modules` bootstrap →
+  `bun test` (in `opencode-suite/`) → `node --test` (in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the cargo e2e tier and the opencode-suite
+  boundary e2e. Running it is the whole done-contract; the steps as separate
+  calls are the same contract. Clippy standard is **zero warnings**.
 - **Fast core-only build**: `cargo build --config 'env.APG_BUILD_FRONTENDS="0"'`
   (matches `cargo build *`). Env-prefixed forms are deliberately not granted.
 - **A `kind=gate` task is marked done only on a real, observed green run.**

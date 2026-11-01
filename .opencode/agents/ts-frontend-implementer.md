@@ -254,6 +254,23 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   variants allowed), run from inside your crate (`cd src/tslib` first).
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** `npm` (including
+  `npm ci`), `node` (including `node --test`), and `npx tsc` are granted by
+  exact name and argument variants, run from inside `src/tslib`
+  (`cd src/tslib` first).
+- **No env-prefixed command is granted** — `NODE_OPTIONS=… node` matches no
+  allow rule; pass options explicitly.
+- **Cover every file type the steps touch.** Your edits are the scanner TS,
+  `identity.mjs`, the `*.test.ts` harnesses, and the manifest/lockfile;
+  `npx tsc` reaches the TS, `node --test` the harnesses, and `npm ci` the
+  manifest/lockfile.
+- **An untracked dependency directory is bootstrapped, not assumed.**
+  `src/tslib/node_modules` is npm-installed and untracked: `npm ci` from the
+  committed `package-lock.json` bootstraps it — run it first in a fresh
+  worktree. `node_modules/**` itself stays edit-denied.
+
 ## Done gate
 
 - `npm ci`, `node --test`, and `npx tsc` (or `node

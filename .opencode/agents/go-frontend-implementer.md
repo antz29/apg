@@ -250,6 +250,19 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   variants allowed), run from inside your crate (`cd src/golib` first).
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** `go build`/`go vet`/
+  `go test`/`go fmt`/`gofmt` are granted by exact name and argument variants,
+  run from inside `src/golib` (`cd src/golib` first).
+- **No env-prefixed command is granted** — `GOFLAGS=… go build` matches no
+  allow rule; pass flags as explicit arguments.
+- **Cover every file type the steps touch.** Your edits are Go source and
+  `go.mod`/`go.sum`; build, vet, test and fmt reach exactly those.
+- **An untracked dependency directory is bootstrapped, not assumed.** None in
+  your crate: the modules named in `go.sum` are fetched by the first
+  `go build`/`go test` itself, and nothing else is untracked.
+
 ## Done gate
 
 - Run `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .` as

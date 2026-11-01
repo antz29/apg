@@ -257,6 +257,21 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   (argument variants allowed), run from inside your crate (`cd src/csharplib`).
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** `dotnet build`/`test`/
+  `run`/`restore` (argument variants) are granted, run from inside
+  `src/csharplib` (`cd src/csharplib` first).
+- **No env-prefixed command is granted** — `DOTNET_…=… dotnet build` matches
+  no allow rule; pass the switches to dotnet itself.
+- **Cover every file type the steps touch.** Your edits are `Program.cs`, the
+  two `.csproj` manifests, and the tests project; `dotnet build` and
+  `dotnet test` reach every one.
+- **An untracked dependency directory is bootstrapped, not assumed.** NuGet
+  packages are restored by the granted `dotnet build`/`dotnet restore` into
+  the user package cache — no committed store to bootstrap; `bin/` and
+  `obj/` stay edit-denied build outputs.
+
 ## Done gate
 
 - `dotnet build` (clean) and `dotnet test` against `tests/`, as separate calls;

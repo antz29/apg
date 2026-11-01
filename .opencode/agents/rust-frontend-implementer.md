@@ -257,6 +257,23 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   worktree root. A bare `cargo` (the root crate) is not granted.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** Rooted to your manifest —
+  `cargo build`/`check`/`fmt`/`clippy`/`test --manifest-path
+  src/rustlib/Cargo.toml` (+ arguments), run from the worktree root; a bare
+  `cargo` (the root crate) is not granted.
+- **No env-prefixed command is granted** — `RUSTFLAGS=… cargo build` matches
+  no allow rule; use the command's own config form,
+  `cargo build --config 'env.…="…"'`.
+- **Cover every file type the steps touch.** Your edits are crate Rust plus
+  its own `Cargo.toml`/`Cargo.lock`/`build.rs`; fmt/check/clippy/test on the
+  manifest reach every one.
+- **An untracked dependency directory is bootstrapped, not assumed.** None:
+  the pinned rust-analyzer `ra_ap_*`-era engine crates (tag `2026-08-17`,
+  0.0.348) are fetched into the registry cache by the first cargo command
+  itself — no pre-step exists or is needed.
+
 ## Done gate
 
 - Run `cargo fmt`/`check`/`clippy` (zero warnings)/`test` with

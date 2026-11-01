@@ -252,6 +252,21 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   crate (`cd src/cpplib` first), reproducing what `build.rs` does.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** `g++` and `gcc` (with
+  argument variants) are granted by exact name, run from inside
+  `src/cpplib` (`cd src/cpplib` first), reproducing what `build.rs` does —
+  the vendored tree-sitter under `src/cpplib/vendor/` is compile input, never
+  edited.
+- **No env-prefixed command is granted** — `CXX=… g++` matches no allow
+  rule; name the compiler and its flags explicitly in one command.
+- **Cover every file type the steps touch.** Your edits are scanner C++
+  sources; the compile exercises them (and the vendored headers, read-only).
+- **An untracked dependency directory is bootstrapped, not assumed.** None:
+  the tree-sitter sources are vendored and tracked, and no package store is
+  consulted.
+
 ## Done gate
 
 - Compile the scanner with `g++`/`gcc` (fix every error/warning) and exercise

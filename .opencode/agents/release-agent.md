@@ -137,6 +137,28 @@ git trick to reach a denied path or verb).
   files directly.
 - You write only the six release surfaces above, and only with `edit`.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** `scripts/gate.sh` (+ `--e2e`),
+  `scripts/release.sh`, `bun install`, `bun test`, and `gh release view *` are
+  granted by exact patterns; `git push *` and `git tag *` are `ask` — every
+  run prompts for explicit human approval. A step that cannot fit the
+  one-command rule runs through `scripts/release.sh` (granted with arguments),
+  never by chaining.
+- **No env-prefixed command is granted** — `FOO=1 …` matches no allow rule;
+  the gate's own boundary-e2e step is the sanctioned env-carrying form.
+- **Cover every file type the steps touch.** The gate reaches everything you
+  edit: `actionlint` (workflows), per-file `ruby -c` (`Formula/*.rb`), the
+  Rust suites, and — under `--e2e` — the cargo e2e tier whose release-version
+  guard tests read your version surfaces (`Cargo.toml`, `Cargo.lock`, the
+  `tests/main_e2e.rs` const, README.md's pins), plus the opencode-suite
+  boundary e2e.
+- **An untracked dependency directory is bootstrapped, not assumed.**
+  `opencode-suite/node_modules` is untracked on a clean main: the gate
+  bootstraps it from the committed `opencode-suite/bun.lock`
+  (`--frozen-lockfile`) when absent, and `bun install` is your own exact
+  bootstrap command.
+
 ## Release procedure (one command per shell call — no chaining)
 
 Exactly one command runs per shell call: no allowed pattern contains `&&`,
@@ -153,12 +175,12 @@ Exactly one command runs per shell call: no allowed pattern contains `&&`,
    summarizing the release. Include a `### Migration` subsection ONLY when the
    release changes the durable-spec model; otherwise state that there is no
    durable-spec model change.
-3. **Gate green.** First ensure the suite's dependencies are installed: the
-   gate's `bun test` step (opencode-suite) needs `@opencode/plugin`, and
-   `opencode-suite/node_modules` is untracked and absent/stale on a fresh or
-   clean main. Run `bun install` inside `opencode-suite/` (`cd opencode-suite`,
-   then `bun install`) before the gate. Then run `scripts/gate.sh --e2e`. If it
-   fails, stop and report.
+3. **Gate green.** Run `scripts/gate.sh --e2e`. Its `opencode-suite`
+   bootstrap installs `opencode-suite/node_modules` from the committed
+   `opencode-suite/bun.lock` (`--frozen-lockfile`) when the directory is
+   absent, so a clean main needs no prior install; if that bootstrap step
+   fails, `cd opencode-suite` then `bun install` (both granted) and re-run
+   the gate. Any other failing step: stop and report.
 4. **Commit the release content.** Run `git add` on the changed surfaces, then
    `git commit`. This commit is the **release HEAD**.
 5. **`scripts/release.sh X.Y.Z`.** It re-runs the gate, rewrites every

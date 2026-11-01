@@ -326,11 +326,36 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   `edit`-scope assert (`edit` is the operative write scope; both rule sets
   name the same owned paths); shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** The gate, the root-cargo
+  commands, and the standalone crates' `--manifest-path
+  src/{rustlib,pylib,structlib,agentlib}/Cargo.toml` invocations are granted
+  by exact name and argument variants — never assumed to match a longer
+  pattern (a hyphenated alias is granted by name if you grant it).
+- **No env-prefixed command is granted** — `FOO=1 cargo build` matches no
+  allow rule; use `cargo build --config 'env.…="…"'` forms.
+- **Cover every file type the steps touch.** Your gate reaches everything you
+  edit: `actionlint` (`.github/workflows/*.yml`, skipped with a loud warning
+  where the tool is absent), per-file `ruby -c` (`Formula/*.rb`), the Rust
+  suites, the four standalone cargo crates, and the JS/TS suites (`bun test`,
+  `node --test`). You own `scripts/**` and may change a step — keep every
+  file type you edit inside the gate it belongs to.
+- **An untracked dependency directory is bootstrapped, not assumed.** The
+  gate's `opencode-suite/node_modules` bootstrap installs from the committed
+  `opencode-suite/bun.lock` (`--frozen-lockfile`) only when the directory is
+  absent — keep that bootstrap inside the gate you own.
+
 ## Done gate — the repo-green contract
 
-- **`scripts/gate.sh`** runs `cargo fmt --check` → `cargo check --all-targets`
-  → `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`,
-  stopping at the first failure; `--e2e` appends the opt-in e2e tier.
+- **`scripts/gate.sh`** runs `actionlint` over `.github/workflows/*.yml`
+  (skipped with a loud warning where the tool is absent) → a per-file
+  `ruby -c` over `Formula/*.rb` → `cargo fmt --check` →
+  `cargo check --all-targets` → `cargo clippy --all-targets -- -D warnings` →
+  `cargo build` → `cargo test` (the unit+int default suite) → the
+  `opencode-suite/node_modules` bootstrap → `bun test` → `node --test`,
+  stopping at the first failure; `--e2e` appends the cargo e2e tier and the
+  opencode-suite boundary e2e.
 - **Also run the standalone crates' tests** (`cargo test --manifest-path
   src/{rustlib,pylib,structlib,agentlib}/Cargo.toml`).
 - **A `kind=gate` task is done only on a real, observed green run.**

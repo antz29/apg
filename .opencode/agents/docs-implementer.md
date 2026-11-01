@@ -230,6 +230,22 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   tool's own action rules, then the tool's `edit`-scope assert (`edit` is the
   operative write scope; both rule sets name the same path).
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- You run **no build steps** and hold no gate/cargo/bun/npm/dotnet grant:
+  your verification floor is the graph plus the config files each documented
+  claim restates. A claim that can only be verified by a build is reported to
+  the coordinator with the exact command instead of run.
+- **Documented invocations are runnable grants; never env-prefixed** — no
+  allow rule anywhere admits `FOO=1 <cmd>`, so any gate command you report to
+  the coordinator is the repo's granted form (`scripts/gate.sh`).
+- **Cover every file type the steps touch.** You touch no steps; Markdown is
+  graphed by the structural scanner, so every claim you write anchors to a
+  graph node or a file the graph carries.
+- **An untracked dependency directory is bootstrapped, not assumed.** None of
+  yours; if documentation must describe one, the bootstrap lives in
+  `scripts/gate.sh` (build-implementer's).
+
 ## Workflow
 
 1. Graph first. 2. Read the task's verb + target (`apg_plan_tasks`). 3. Scope,

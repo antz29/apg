@@ -244,6 +244,19 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   your crate (`cd src/javalib` first), reproducing what `build.rs` does.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
+## Build-gate contract (coverage, bootstrap, exact names)
+
+- **Documented invocations are runnable grants.** `javac` and `java` (with
+  argument variants) are granted by exact name, run from inside
+  `src/javalib` (`cd src/javalib` first) — there is no build manifest, so you
+  reproduce what `build.rs` does.
+- **No env-prefixed command is granted** — `JAVA_TOOL_OPTIONS=… javac`
+  matches no allow rule; pass options as explicit `javac` arguments.
+- **Cover every file type the steps touch.** Your edits are Java source under
+  `src/javalib/`; the compile/run cycle reaches exactly it.
+- **An untracked dependency directory is bootstrapped, not assumed.** None:
+  the JDK ≥ 21 toolchain and the single source tree are all there is.
+
 ## Done gate
 
 - Compile with `javac` (fix every error/warning) and exercise the scanner with
