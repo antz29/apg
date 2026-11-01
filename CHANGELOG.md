@@ -9,6 +9,35 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.28.3
+
+Patch release: the release workflow's CI substrate is pinned to an explicit
+linux runner image and current action majors, so GitHub's `ubuntu-latest`
+image migration cannot turn a tag build into a scheduling failure.
+
+**Explicit linux x86_64 runner image.** The linux matrix's x86_64 leg moves from
+`ubuntu-latest` to `ubuntu-24.04` for the duration of the `ubuntu-latest`
+24.04→26.04 migration; the arm leg stays `ubuntu-24.04-arm`. Every job in the
+workflow now resolves to a named image, including the `macos-15` bottle and
+publish jobs.
+
+**Action majors whose runtime the hosted runners provide.**
+`actions/setup-go` v5 → v7, `actions/setup-node` v4 → v7, and
+`actions/setup-java` v4 → v6 — three majors that declare a node24 runtime —
+with `node-version 26.9.0` and `java-version 21` (temurin) unchanged. The Go
+job's `cache-dependency-path` now names `src/golib/go.sum`: the repo root holds
+neither `go.mod` nor `go.sum`, so the Go module's own dependency file is what
+the cache key must resolve.
+
+**Durable delta.** One solution constraint,
+`solution.constraint.release-ci-substrate-pinned`, records the law — an explicit
+runner image per job, action majors whose runtime the hosted runner provides,
+and a Go cache key on the module's dependency file — and the
+`implementation.note.workflow-shellcheck-findings-deferred` note was updated to
+match the shipped workflow.
+
+No durable-spec model change.
+
 ## v0.28.2
 
 Patch release: the gate validates the workflow and formula files it ships and
