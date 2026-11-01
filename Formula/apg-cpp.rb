@@ -6,14 +6,14 @@ class ApgCpp < Formula
   desc "C++ scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.28.2",
-      revision: "bed2e0afee5711d105533dc5a28c43d04996321a"
+      tag:      "v0.28.3",
+      revision: "f35ae1ad56d83c113b866e7434ba1179d8a97905"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.28.2"
-    rebuild 1
+    root_url "https://github.com/antz29/apg/releases/download/v0.28.3"
+    rebuild 2
     sha256 cellar: :any_skip_relocation, arm64_sequoia: "0cdd75ca0f24ee81cea94203e7913444d0dfa22965f219f94ff3ad1be3a2dbb2"
   end
 
