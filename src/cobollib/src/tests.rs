@@ -3537,11 +3537,318 @@ mod int {
             let mut want = vec![
                 serde_json::json!({"type":"uses","from":main_id,"to":format!("{prefix}PROG.REC-CB")}),
                 serde_json::json!({"type":"uses","from":main_id,"to":format!("{prefix}SUB-B")}),
+                serde_json::json!({"type":"uses","from":id_of(&recs,"PROG"),"to":"/root/REC.cpy","properties":{"kind":"copy"}}),
             ];
             want.sort_by_key(|v| v.to_string());
             assert_eq!(edges(&recs, &["uses"]), want, "{recs:?}");
             assert!(!recs.iter().any(|r| r["name"] == "REC-CB"), "{recs:?}");
         }
+    }
+
+    /// The in-memory copybook store of `files`, read by path.
+    fn store_of(files: &[(&str, &str)]) -> std::collections::HashMap<std::path::PathBuf, String> {
+        files
+            .iter()
+            .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
+            .collect()
+    }
+
+    /// A COPY site as (including file, line, col, copybook path).
+    type SiteRow = (String, usize, usize, String);
+
+    /// `preprocess_with_copies` of `text` as `name` over the in-memory `files`: each COPY site,
+    /// the token texts and the diagnostics.
+    fn copy_sites(
+        name: &str,
+        text: &str,
+        files: &[(&str, &str)],
+    ) -> (Vec<SiteRow>, Vec<String>, Vec<crate::diag::Diagnostic>) {
+        let store = store_of(files);
+        let lookup = |p: &std::path::Path| store.get(p).cloned();
+        let mut map = SourceMap::default();
+        let (tokens, diags, copies) = crate::preprocess::preprocess_with_copies(
+            &mut map,
+            name,
+            text,
+            Dialect::Cobol85,
+            &search(),
+            &lookup,
+        );
+        let sites = copies
+            .iter()
+            .map(|c| {
+                (
+                    map.name(c.origin.file).to_string(),
+                    c.origin.line,
+                    c.origin.col,
+                    c.path.display().to_string(),
+                )
+            })
+            .collect();
+        let texts = tokens.iter().map(|t| t.token.text.clone()).collect();
+        (sites, texts, diags)
+    }
+
+    #[test]
+    fn preprocess_with_copies_records_one_site_per_resolved_copy() {
+        let main = [
+            at(12, "COPY REC."),
+            at(12, "COPY REC."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let copy = at(12, "DISPLAY X.");
+        let (sites, _, diags) = copy_sites("/root/prog.cob", &main, &[("/root/REC.cpy", &copy)]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            sites,
+            [
+                (
+                    "/root/prog.cob".to_string(),
+                    1,
+                    12,
+                    "/root/REC.cpy".to_string()
+                ),
+                (
+                    "/root/prog.cob".to_string(),
+                    2,
+                    12,
+                    "/root/REC.cpy".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_copy_records_its_own_site_at_the_copybook() {
+        let main = at(12, "COPY REC.");
+        let rec = [at(12, "COPY INNER."), at(12, "DISPLAY X.")].join("\n");
+        let inner = at(12, "DISPLAY Y.");
+        let files = [
+            ("/root/REC.cpy", rec.as_str()),
+            ("/root/INNER.cpy", inner.as_str()),
+        ];
+        let (sites, _, diags) = copy_sites("/root/prog.cob", &main, &files);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            sites,
+            [
+                (
+                    "/root/prog.cob".to_string(),
+                    1,
+                    12,
+                    "/root/REC.cpy".to_string()
+                ),
+                (
+                    "/root/REC.cpy".to_string(),
+                    1,
+                    12,
+                    "/root/INNER.cpy".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn unresolved_and_circular_copies_record_no_site() {
+        let main = [
+            at(12, "COPY NOPE."),
+            at(12, "COPY SELF."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let self_copy = at(12, "COPY SELF.");
+        let (sites, _, diags) =
+            copy_sites("/root/prog.cob", &main, &[("/root/SELF.cpy", &self_copy)]);
+        // Only the outer, resolved `COPY SELF.` has a site; the inner circular one has none.
+        assert_eq!(
+            sites,
+            [(
+                "/root/prog.cob".to_string(),
+                2,
+                12,
+                "/root/SELF.cpy".to_string()
+            )]
+        );
+        assert_eq!(diags.len(), 2, "{diags:?}");
+        assert!(
+            diags.iter().any(|d| d.message.contains("not found")),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| d.message.contains("circular")),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn preprocess_with_copies_expands_like_preprocess() {
+        let main = [
+            at(12, "COPY REC."),
+            at(12, "COPY NOPE."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let copy = at(12, "DISPLAY X.");
+        let files = [("/root/REC.cpy", copy.as_str())];
+        let (_, texts, diags) = copy_sites("/root/prog.cob", &main, &files);
+        let store = store_of(&files);
+        let lookup = |p: &std::path::Path| store.get(p).cloned();
+        let mut map = SourceMap::default();
+        let (tokens, plain) = crate::preprocess::preprocess(
+            &mut map,
+            "/root/prog.cob",
+            &main,
+            Dialect::Cobol85,
+            &search(),
+            &lookup,
+        );
+        let plain_texts: Vec<String> = tokens.iter().map(|t| t.token.text.clone()).collect();
+        assert_eq!(texts, plain_texts);
+        assert_eq!(format!("{diags:?}"), format!("{plain:?}"));
+    }
+
+    /// Program `name` whose PROCEDURE DIVISION holds one `COPY` line per `copybooks` entry.
+    fn copy_prog(name: &str, copybooks: &[&str]) -> String {
+        let mut lines = vec![
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, &format!("PROGRAM-ID. {name}.")),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+        ];
+        lines.extend(copybooks.iter().map(|cb| at(12, &format!("COPY {cb}."))));
+        lines.push(at(12, "STOP RUN."));
+        lines.join("\n")
+    }
+
+    /// The `copy` uses edge from record `from` to the copybook File at `to`.
+    fn copy_edge(from: &str, to: &str) -> serde_json::Value {
+        serde_json::json!({"type":"uses","from":from,"to":to,"properties":{"kind":"copy"}})
+    }
+
+    #[test]
+    fn copy_emits_one_uses_edge_for_a_repeated_copy() {
+        let text = copy_prog("PROG", &["REC", "REC"]);
+        let copy = at(12, "DISPLAY X.");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[("/root/REC.cpy", &copy)]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [copy_edge(&id_of(&recs, "PROG"), "/root/REC.cpy")]
+        );
+        assert!(recs
+            .iter()
+            .any(|r| r["type"] == "file" && r["path"] == "/root/REC.cpy"));
+    }
+
+    #[test]
+    fn nested_copy_gives_the_outer_program_an_edge_to_each_copybook() {
+        let text = copy_prog("PROG", &["REC"]);
+        let rec = [at(12, "COPY INNER."), at(12, "DISPLAY X.")].join("\n");
+        let inner = at(12, "DISPLAY Y.");
+        let (recs, diags) = scan_text(
+            "/root/prog.cob",
+            &text,
+            &[("/root/REC.cpy", &rec), ("/root/INNER.cpy", &inner)],
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        let prog = id_of(&recs, "PROG");
+        let mut want = vec![
+            copy_edge(&prog, "/root/REC.cpy"),
+            copy_edge(&prog, "/root/INNER.cpy"),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+    }
+
+    #[test]
+    fn two_programs_copying_one_copybook_each_get_an_edge() {
+        let (one, two) = (copy_prog("ONE", &["REC"]), copy_prog("TWO", &["REC"]));
+        let rec = at(12, "DISPLAY X.");
+        let tree = [
+            ("/root/one.cob", one.as_str()),
+            ("/root/two.cob", two.as_str()),
+            ("/root/REC.cpy", rec.as_str()),
+        ];
+        let recs = jsonl(&scan_tree(&tree));
+        let mut want = vec![
+            copy_edge(&id_of(&recs, "ONE"), "/root/REC.cpy"),
+            copy_edge(&id_of(&recs, "TWO"), "/root/REC.cpy"),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+    }
+
+    #[test]
+    fn copy_in_a_contained_program_belongs_to_the_innermost_program() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. OUTER."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "COPY OUTCB."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. INNER."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "IN-PARA."),
+            at(12, "COPY INCB."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM INNER."),
+            at(8, "END PROGRAM OUTER."),
+        ]
+        .join("\n");
+        let (outcb, incb) = (at(12, "DISPLAY X."), at(12, "DISPLAY Y."));
+        let files = [
+            ("/root/OUTCB.cpy", outcb.as_str()),
+            ("/root/INCB.cpy", incb.as_str()),
+        ];
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &files);
+        assert!(diags.is_empty(), "{diags:?}");
+        let mut want = vec![
+            copy_edge(&id_of(&recs, "OUTER"), "/root/OUTCB.cpy"),
+            copy_edge(&id_of(&recs, "INNER"), "/root/INCB.cpy"),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+    }
+
+    #[test]
+    fn copy_in_a_file_without_a_program_draws_no_edge() {
+        let text = at(12, "COPY REC.");
+        let rec = at(12, "DISPLAY X.");
+        let (recs, _) = scan_text("/root/only.cob", &text, &[("/root/REC.cpy", &rec)]);
+        assert!(edges(&recs, &["uses"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn unresolved_copy_draws_no_edge_and_a_diagnostic() {
+        let text = copy_prog("PROG", &["NOPE"]);
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(edges(&recs, &["uses"]).is_empty(), "{recs:?}");
+        assert!(
+            diags.iter().any(|d| d.message.contains("not found")),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn copy_edge_survives_targets_only_from_a_target_program() {
+        let rec = at(12, "DISPLAY X.");
+        let tree = [
+            ("/root/prog.cob", copy_prog("PROG", &["REC"])),
+            ("/root/REC.cpy", rec),
+            ("/root/other.cob", copy_prog("OTHER", &["REC"])),
+        ];
+        let tree: Vec<(&str, &str)> = tree.iter().map(|(p, t)| (*p, t.as_str())).collect();
+        let mut emitter = scan_tree(&tree);
+        let target: std::collections::HashSet<String> =
+            ["/root/prog.cob".to_string()].into_iter().collect();
+        emitter.retain_targets(&target);
+        let recs = jsonl(&emitter);
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [copy_edge(&id_of(&recs, "PROG"), "/root/REC.cpy")]
+        );
     }
 
     /// OUTER's MAIN-PARA makes each of `calls` (fixed-format lines), then STOPs.

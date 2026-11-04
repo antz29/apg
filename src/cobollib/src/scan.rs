@@ -16,7 +16,7 @@ use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
 use crate::lexer::TokenKind;
 use crate::parser::parse_compilation_unit;
-use crate::preprocess::{preprocess, read_file, Search};
+use crate::preprocess::{preprocess_with_copies, read_file, CopySite, Search};
 use crate::resolve::{
     declared, declares, global_data, resolve_call, scopes, CallResolution, Declared, ProcKind,
     Resolution, Scope,
@@ -68,9 +68,12 @@ pub enum Rec {
         properties: BTreeMap<String, String>,
     },
     /// A `PERFORM` or `GO TO` naming a section, or a data reference to a record: the target's Struct.
+    /// A `COPY` is a program's `uses` of the copybook's File, `properties.kind` `copy`.
     Uses {
         from: String,
         to: String,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+        properties: BTreeMap<String, String>,
     },
     UnresolvedCall {
         from: String,
@@ -289,6 +292,31 @@ fn module_of(base: &Path, path: &Path) -> String {
     )
 }
 
+/// The span of every program in `programs`, nested ones included, in pre-order (a program before
+/// its nested programs), matching the order the emitter records program ids in.
+fn program_spans(programs: &[Program], out: &mut Vec<Span>) {
+    for p in programs {
+        out.push(p.span);
+        program_spans(&p.nested, out);
+    }
+}
+
+/// The innermost program whose span holds `at`, a site in the main file. `owners` is pre-order,
+/// so the last containing span is the innermost. A span end outside the main file (a copybook's
+/// text) is open-ended: its line numbers belong to another file.
+fn enclosing(owners: &[(Span, String)], map: &SourceMap, main: &str, at: Origin) -> Option<String> {
+    let pos = (at.line, at.col);
+    let key = |o: Origin| (map.name(o.file) == main).then_some((o.line, o.col));
+    owners
+        .iter()
+        .rev()
+        .find(|(span, _)| {
+            key(span.start).unwrap_or((0, 0)) <= pos
+                && pos <= key(span.end).unwrap_or((usize::MAX, 0))
+        })
+        .map(|(_, id)| id.clone())
+}
+
 impl Emitter {
     /// An emitter whose module identities are relative to `base` and whose ids start `prefix`.
     pub fn new(base: &Path, prefix: &str) -> Self {
@@ -455,7 +483,11 @@ impl Emitter {
                 Resolution::One(i) => {
                     let Some((from, to)) = edge(i) else { continue };
                     if scope.procs[i].kind == ProcKind::Section {
-                        self.recs.push(Rec::Uses { from, to });
+                        self.recs.push(Rec::Uses {
+                            from,
+                            to,
+                            properties: BTreeMap::new(),
+                        });
                     } else {
                         self.push_call(from, to, kind);
                     }
@@ -528,7 +560,11 @@ impl Emitter {
             match record {
                 Some(to) => {
                     if linked.insert((r.from.clone(), to.clone())) {
-                        self.recs.push(Rec::Uses { from: r.from, to });
+                        self.recs.push(Rec::Uses {
+                            from: r.from,
+                            to,
+                            properties: BTreeMap::new(),
+                        });
                     }
                 }
                 None => {
@@ -556,6 +592,46 @@ impl Emitter {
             to,
             properties,
         });
+    }
+
+    /// Emits a `copy` uses from the program holding each COPY to its copybook, deduplicated. A
+    /// COPY in the main file belongs to the program enclosing it; a nested COPY (in a copybook)
+    /// belongs to the program of the outermost COPY that pulled that copybook in. Sites are in
+    /// expansion order, so the owner of a copybook is set before its nested COPYs are seen.
+    fn copy_uses(
+        &mut self,
+        map: &SourceMap,
+        main: &str,
+        sites: &[CopySite],
+        owners: &[(Span, String)],
+    ) {
+        let mut owner: BTreeMap<String, String> = BTreeMap::new();
+        let mut linked = BTreeSet::new();
+        for site in sites {
+            let including = map.name(site.origin.file);
+            let program = if including == main {
+                enclosing(owners, map, main, site.origin)
+            } else {
+                owner.get(including).cloned()
+            };
+            let to = site.path.display().to_string();
+            match program {
+                Some(from) => {
+                    owner.insert(to.clone(), from.clone());
+                    if linked.insert((from.clone(), to.clone())) {
+                        let properties = BTreeMap::from([("kind".to_string(), "copy".to_string())]);
+                        self.recs.push(Rec::Uses {
+                            from,
+                            to,
+                            properties,
+                        });
+                    }
+                }
+                None => {
+                    owner.remove(&to);
+                }
+            }
+        }
     }
 
     /// Resolves every queued `CALL` against the programs of the whole tree, so a call into
@@ -588,6 +664,7 @@ impl Emitter {
                     self.recs.push(Rec::Uses {
                         from: call.from,
                         to,
+                        properties: BTreeMap::new(),
                     });
                     continue;
                 }
@@ -639,7 +716,8 @@ impl Emitter {
             Some(text)
         };
         let mut map = SourceMap::default();
-        let (tokens, mut diags) = preprocess(&mut map, path, text, dialect, search, &read);
+        let (tokens, mut diags, copies) =
+            preprocess_with_copies(&mut map, path, text, dialect, search, &read);
         let (unit, more) = parse_compilation_unit(&map, dialect, &tokens);
         // A file with no IDENTIFICATION DIVISION (a copybook) has no standalone parse errors.
         if has_identification(&tokens) {
@@ -664,10 +742,18 @@ impl Emitter {
             file,
             diags: Vec::new(),
         };
+        let first = self.programs.len();
         for program in &unit.programs {
             self.program(&mut loc, program, &module, None);
         }
+        let mut spans = Vec::new();
+        program_spans(&unit.programs, &mut spans);
+        let owners: Vec<(Span, String)> = spans
+            .into_iter()
+            .zip(self.programs[first..].iter().map(|(_, id)| id.clone()))
+            .collect();
         self.transfer_facts(&mut loc);
+        self.copy_uses(&map, path, &copies, &owners);
         diags.extend(loc.diags);
         self.calls.extend(loc.calls);
         self.maps.push(map);
@@ -759,7 +845,7 @@ impl Emitter {
             })
             .collect();
         for r in &mut self.recs {
-            if let Rec::Calls { from, to, .. } | Rec::Uses { from, to } = r {
+            if let Rec::Calls { from, to, .. } | Rec::Uses { from, to, .. } = r {
                 if ids.contains(from.as_str()) && !ids.contains(to.as_str()) {
                     if let Some(fqn) = fqns.get(to.as_str()) {
                         *to = fqn.clone();
