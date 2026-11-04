@@ -5080,4 +5080,337 @@ mod int {
         want.sort_by_key(|v| v.to_string());
         assert_eq!(edges(&recs, &["unresolved_use"]), want);
     }
+
+    /// The `calls` record of an INVOKE from `from` to `to`.
+    fn invoke_call(from: &str, to: &str) -> serde_json::Value {
+        serde_json::json!({"type":"calls","from":from,"to":to,"properties":{"kind":"invoke"}})
+    }
+
+    /// The Function `name` under `parent` with `params` (`Null` for an interface prototype).
+    fn method_fn(
+        recs: &[serde_json::Value],
+        parent: &str,
+        name: &str,
+        params: serde_json::Value,
+    ) -> String {
+        let found: Vec<&serde_json::Value> = recs
+            .iter()
+            .filter(|r| {
+                r["type"] == "function"
+                    && r["parent"] == parent
+                    && r["name"] == name
+                    && r.get("params").cloned().unwrap_or_default() == params
+            })
+            .collect();
+        match found.as_slice() {
+            [one] => one["id"].as_str().expect("id").to_string(),
+            _ => panic!("{parent}.{name} {params}: {recs:?}"),
+        }
+    }
+
+    #[test]
+    fn invoke_self_resolves_to_the_method_of_its_own_section() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "FACTORY."),
+            at(8, "METHOD-ID. Helper."),
+            at(8, "END METHOD Helper."),
+            at(8, "METHOD-ID. Make."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAKE-PARA."),
+            at(12, "INVOKE SELF \"Helper\"."),
+            at(8, "END METHOD Make."),
+            at(8, "END FACTORY."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Helper."),
+            at(8, "END METHOD Helper."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RUN-PARA."),
+            at(12, "INVOKE SELF \"Helper\"."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let make = method_fn(&recs, "Foo", "Make", serde_json::json!(["factory"]));
+        let run = method_fn(&recs, "Foo", "Run", serde_json::json!(["instance"]));
+        let mut want = vec![
+            invoke_call(
+                &make,
+                &method_fn(&recs, "Foo", "Helper", serde_json::json!(["factory"])),
+            ),
+            invoke_call(
+                &run,
+                &method_fn(&recs, "Foo", "Helper", serde_json::json!(["instance"])),
+            ),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["calls"]), want);
+    }
+
+    #[test]
+    fn invoke_super_walks_the_inherits_chain_to_the_first_parent_that_has_the_method() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Root."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Go."),
+            at(8, "END METHOD Go."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Root."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base INHERITS FROM Root."),
+            at(8, "END CLASS Base."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo INHERITS FROM Base."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RUN-PARA."),
+            at(12, "INVOKE SUPER \"Go\"."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            edges(&recs, &["calls"]),
+            [invoke_call(
+                &method_fn(&recs, "Foo", "Run", serde_json::json!(["instance"])),
+                &method_fn(&recs, "Root", "Go", serde_json::json!(["instance"])),
+            )]
+        );
+    }
+
+    #[test]
+    fn invoke_on_typed_receivers_resolves_to_the_instance_factory_or_prototype_method() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 R OBJECT REFERENCE Base."),
+            at(8, "01 I OBJECT REFERENCE Bar."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "INVOKE R \"Run\"."),
+            at(12, "INVOKE I \"Stop\"."),
+            at(12, "INVOKE Base \"Make\"."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "FACTORY."),
+            at(8, "METHOD-ID. Make."),
+            at(8, "END METHOD Make."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "END METHOD Run."),
+            at(8, "END FACTORY."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Base."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "INTERFACE-ID. Bar."),
+            at(8, "METHOD-ID. Stop."),
+            at(8, "END METHOD Stop."),
+            at(8, "END INTERFACE Bar."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        let mut want = vec![
+            invoke_call(
+                &main,
+                &method_fn(&recs, "Base", "Run", serde_json::json!(["instance"])),
+            ),
+            invoke_call(
+                &main,
+                &method_fn(&recs, "Bar", "Stop", serde_json::Value::Null),
+            ),
+            invoke_call(
+                &main,
+                &method_fn(&recs, "Base", "Make", serde_json::json!(["factory"])),
+            ),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["calls"]), want);
+        assert!(edges(&recs, &["unresolved_call"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn external_and_unknown_invoke_targets_are_unresolved_calls_by_category() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "ENVIRONMENT DIVISION."),
+            at(8, "CONFIGURATION SECTION."),
+            at(8, "REPOSITORY."),
+            at(12, "CLASS Lib."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 R OBJECT REFERENCE Ext."),
+            at(8, "01 U OBJECT REFERENCE."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "INVOKE Lib \"Make\"."),
+            at(12, "INVOKE R \"Run\"."),
+            at(12, "INVOKE U \"Poke\"."),
+            at(12, "INVOKE NULL \"Nul\"."),
+            at(12, "INVOKE Ghost \"Ghost-m\"."),
+            at(12, "INVOKE R Run-Method."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        assert!(edges(&recs, &["calls"]).is_empty(), "{recs:?}");
+        let mut want: Vec<serde_json::Value> =
+            ["Make", "Run", "Poke", "Nul", "Ghost-m", "Run-Method"]
+                .iter()
+                .map(|m| serde_json::json!({"type":"unresolved_call","from":main,"to":m}))
+                .collect();
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["unresolved_call"]), want);
+        for (fqn, category) in [
+            ("Make", "external"),
+            ("Run", "external"),
+            ("Poke", "unknown"),
+            ("Nul", "unknown"),
+            ("Ghost-m", "unknown"),
+            ("Run-Method", "unknown"),
+        ] {
+            assert!(
+                recs.contains(
+                    &serde_json::json!({"type":"unresolved","fqn":fqn,"category":category})
+                ),
+                "{fqn}: {recs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_invokes_link_one_target_and_report_one_unresolved_call() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 R OBJECT REFERENCE Base."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "INVOKE R \"Run\"."),
+            at(12, "INVOKE R \"Run\"."),
+            at(12, "INVOKE Ghost \"Poke\"."),
+            at(12, "INVOKE Ghost \"Poke\"."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Base."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        assert_eq!(
+            edges(&recs, &["calls"]),
+            [invoke_call(
+                &main,
+                &method_fn(&recs, "Base", "Run", serde_json::json!(["instance"])),
+            )]
+        );
+        assert_eq!(
+            edges(&recs, &["unresolved_call"]),
+            [serde_json::json!({"type":"unresolved_call","from":main,"to":"Poke"})]
+        );
+    }
+
+    #[test]
+    fn raise_adds_no_calls_or_uses_edge_in_a_program_or_a_method() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 OBJ OBJECT REFERENCE Base."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "RAISE EXCEPTION Bad-Cond."),
+            at(12, "RAISE OBJ."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RUN-PARA."),
+            at(12, "RAISE EXCEPTION Bad-Cond."),
+            at(12, "RAISE OBJ."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Base."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(
+            edges(&recs, &["calls", "unresolved_call"]).is_empty(),
+            "{recs:?}"
+        );
+        // Only the OBJECT REFERENCE declaration of OBJ (from its record) names Base.
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":id_of(&recs,"OBJ"),"to":id_of(&recs,"Base")})]
+        );
+    }
+
+    #[test]
+    fn method_body_reference_to_a_program_record_uses_it_and_a_77_item_draws_nothing() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 WS-R PIC X."),
+            at(8, "77 WS-S PIC X."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RUN-PARA."),
+            at(12, "MOVE WS-R TO WS-S."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+            at(8, "END PROGRAM P."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({
+                "type":"uses",
+                "from":method_fn(&recs, "P.Foo", "Run", serde_json::json!(["instance"])),
+                "to":id_of(&recs,"WS-R"),
+            })]
+        );
+    }
 }
