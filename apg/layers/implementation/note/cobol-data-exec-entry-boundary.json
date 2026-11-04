@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-data-exec-entry-boundary",
+  "body": "The DATA DIVISION exec_block skip runs only at a data-entry boundary, and the section split in parse_data_division does not skip EXEC blocks. Limit: an EXEC block inside one data entry, between its clauses, is not recognised, and a block containing a WORD SECTION. sequence would be misread as a section header. Upgrade when a corpus shows mid-entry EXEC or such text inside a block.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.data.Parser.exec_block",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

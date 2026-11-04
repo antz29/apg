@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-exec-cics-operand-scope",
+  "body": "cics reads only the PROGRAM operand of LINK and XCTL and the SERVICE or WEBSERVICE operand of INVOKE; a PROGRAM(identifier) is a func-value call target and not also a data reference, and every other CICS operand (COMMAREA, INTO, FROM and the like) yields no reference, since SPEC is silent on them. Limit: data items passed to CICS draw no uses edge. Upgrade when SPEC or an IBM source decides CICS operand references.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.procedure.Parser.cics",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
