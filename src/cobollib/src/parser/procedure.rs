@@ -111,77 +111,128 @@ const BRANCHES: &[&[&str]] = &[
     &["INVALID"],
 ];
 
-/// Words that are phrase keywords or operand noise, never data names in a reference.
+/// Words that are phrase keywords, class or category words, or special registers, never data
+/// names in a reference. One set serves every verb: none is a data name in its operands.
 const KEYWORDS: &[&str] = &[
+    "ADVANCING",
     "AFTER",
     "ALL",
+    "ALPHABETIC",
+    "ALPHABETIC-LOWER",
+    "ALPHABETIC-UPPER",
+    "ALPHANUMERIC",
+    "ALPHANUMERIC-EDITED",
     "ALSO",
     "AND",
+    "ANY",
     "AT",
     "ASCENDING",
     "BEFORE",
     "BY",
+    "CHARACTERS",
+    "COLLATING",
     "CONTENT",
+    "CONVERTING",
+    "CORR",
     "CORRESPONDING",
+    "COUNT",
+    "DATA",
+    "DATE",
+    "DAY",
+    "DAY-OF-WEEK",
+    "DELIMITED",
+    "DELIMITER",
     "DEPENDING",
     "DESCENDING",
+    "DOWN",
+    "DUPLICATES",
     "ELSE",
     "EOP",
     "EQUAL",
     "ERROR",
     "EXCEPTION",
+    "EXTEND",
     "FALSE",
+    "FIRST",
+    "FOR",
     "FROM",
+    "FUNCTION",
     "GIVING",
     "GREATER",
     "HIGH-VALUE",
     "HIGH-VALUES",
+    "I-O",
     "IN",
+    "INITIAL",
     "INPUT",
     "INTO",
     "INVALID",
     "IS",
     "KEY",
+    "LEADING",
     "LESS",
     "LINE",
     "LINES",
+    "LOCK",
     "LOW-VALUE",
     "LOW-VALUES",
+    "NEGATIVE",
+    "NO",
     "NOT",
+    "NUMERIC",
+    "NUMERIC-EDITED",
     "OF",
+    "OFF",
     "ON",
     "OR",
+    "ORDER",
     "OTHER",
     "OUTPUT",
     "OVERFLOW",
     "PAGE",
+    "POINTER",
+    "POSITIVE",
     "PROCEED",
     "PROCEDURE",
+    "PROGRAM",
     "QUOTE",
     "QUOTES",
     "RECORD",
+    "REEL",
     "REFERENCE",
+    "REMAINDER",
+    "REMOVAL",
+    "REPLACING",
     "RETURNING",
+    "REVERSED",
+    "REWIND",
     "ROUNDED",
+    "RUN",
     "SECTION",
     "SENTENCE",
+    "SEQUENCE",
     "SIZE",
     "SPACE",
     "SPACES",
     "STANDARD",
+    "TALLYING",
     "TEST",
     "THAN",
     "THEN",
     "THROUGH",
     "THRU",
+    "TIME",
     "TIMES",
     "TO",
     "TRUE",
+    "UNIT",
     "UNTIL",
+    "UP",
     "UPON",
     "USING",
     "VALUE",
     "VARYING",
+    "WHEN-COMPILED",
     "WITH",
     "ZERO",
     "ZEROS",
@@ -242,6 +293,7 @@ pub fn parse_procedure_division(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Plain,
+    Alter,
     Call,
     SortMerge,
     Resume,
@@ -504,8 +556,13 @@ impl Parser<'_> {
         )
     }
 
-    /// Adds the name at `k` to `refs` when it is one; the index after the token consumed.
+    /// Adds the name at `k` to `refs` when it is one; the index after the token consumed. The
+    /// name after `FUNCTION` is an intrinsic function, so it is skipped; its arguments still count.
     fn ref_at(&self, k: usize, end: usize, refs: &mut Vec<QualifiedName>) -> usize {
+        let t = self.tokens;
+        if is(&t[k], "FUNCTION") && k + 1 < end && t[k + 1].token.kind == TokenKind::Word {
+            return k + 2;
+        }
         if self.is_name(k) {
             let (name, next) = self.qualified(k, end);
             refs.push(name);
@@ -573,7 +630,7 @@ impl Parser<'_> {
                 if !self.feature(i, Feature::Alter, "ALTER") {
                     return (None, end);
                 }
-                self.generic(i, end, Kind::Plain)
+                self.generic(i, end, Kind::Alter)
             }
             "ENTRY" => {
                 if !self.feature(i, Feature::Entry, "ENTRY") {
@@ -828,7 +885,12 @@ impl Parser<'_> {
             if self.closes(k, end) || self.is_verb(k) {
                 break;
             }
-            k = self.ref_at(k, end, &mut refs);
+            // ALTER operands are procedure names, which are not data references: dropped here.
+            k = if kind == Kind::Alter {
+                k + 1
+            } else {
+                self.ref_at(k, end, &mut refs)
+            };
         }
         let mut scope_end = None;
         let end_word = format!("END-{verb}");
@@ -837,7 +899,7 @@ impl Parser<'_> {
             k += 1;
         }
         let transfer = match kind {
-            Kind::Plain => None,
+            Kind::Plain | Kind::Alter => None,
             Kind::Call => call.map(Transfer::Call),
             Kind::SortMerge => Some(Transfer::SortMerge {
                 input: sort.0,

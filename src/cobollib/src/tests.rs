@@ -223,6 +223,79 @@ mod unit {
         }
 
         #[test]
+        fn alter_procedure_names_are_not_data_refs() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    ALTER B-PARA IN Q TO PROCEED TO C-PARA, D-PARA TO E-PARA.\n";
+            let (div, _) = parse_procedure(text).unwrap();
+            let statement = &div.paragraphs[0].sentences[0].statements[0];
+            assert!(statement.refs.is_empty(), "{:?}", statement.refs);
+        }
+
+        #[test]
+        fn operand_keywords_and_function_names_never_enter_refs() {
+            let cases: &[(&str, &[&str])] = &[
+                ("DISPLAY X WITH NO ADVANCING.", &["X"]),
+                ("ACCEPT X FROM DAY-OF-WEEK.", &["X"]),
+                ("EXIT PROGRAM.", &[]),
+                ("STOP RUN.", &[]),
+                ("OPEN I-O F EXTEND G.", &["F", "G"]),
+                ("CLOSE F WITH LOCK REEL FOR REMOVAL.", &["F"]),
+                ("CALL 'S' USING BY REFERENCE A BY CONTENT B.", &["A", "B"]),
+                ("DIVIDE A BY B GIVING C REMAINDER D.", &["A", "B", "C", "D"]),
+                (
+                    "INSPECT X TALLYING C FOR ALL Y REPLACING CHARACTERS BY Z BEFORE INITIAL W.",
+                    &["X", "C", "Y", "Z", "W"],
+                ),
+                ("INSPECT X CONVERTING A TO B.", &["X", "A", "B"]),
+                (
+                    "STRING A DELIMITED BY SIZE INTO B WITH POINTER P.",
+                    &["A", "B", "P"],
+                ),
+                (
+                    "UNSTRING A DELIMITED BY ALL SPACE INTO B DELIMITER IN D COUNT IN C.",
+                    &["A", "B", "D", "C"],
+                ),
+                ("SET I UP BY 1.", &["I"]),
+                ("SET X TO TRUE.", &["X"]),
+                (
+                    "SORT S ON ASCENDING KEY K WITH DUPLICATES IN ORDER USING F GIVING G.",
+                    &["S", "K", "F", "G"],
+                ),
+                ("START F KEY IS EQUAL TO K.", &["F", "K"]),
+                (
+                    "INITIALIZE A REPLACING ALPHANUMERIC BY SPACE NUMERIC-EDITED BY ZERO.",
+                    &["A"],
+                ),
+                ("MOVE FUNCTION MAX (A B) TO C.", &["A", "B", "C"]),
+                ("MOVE FUNCTION CURRENT-DATE TO D.", &["D"]),
+                ("MOVE WHEN-COMPILED TO W.", &["W"]),
+            ];
+            for (stmt, expected) in cases {
+                let text = format!("PROCEDURE DIVISION.\nA-PARA.\n    {stmt}\n");
+                let (div, diags) = parse_procedure(&text).unwrap();
+                assert!(diags.is_empty(), "{stmt}: {diags:?}");
+                let refs: Vec<&str> = div.paragraphs[0].sentences[0].statements[0]
+                    .refs
+                    .iter()
+                    .map(|r| r.name.text.as_str())
+                    .collect();
+                assert_eq!(refs, *expected, "{stmt}");
+            }
+        }
+
+        #[test]
+        fn if_condition_class_and_sign_words_are_not_refs() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    IF X ALPHABETIC AND Y POSITIVE DISPLAY Z END-IF.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let refs: Vec<&str> = div.paragraphs[0].sentences[0].statements[0]
+                .refs
+                .iter()
+                .map(|r| r.name.text.as_str())
+                .collect();
+            assert_eq!(refs, ["X", "Y"]);
+        }
+
+        #[test]
         fn entry_is_silent() {
             let (_, diags) =
                 parse_procedure("PROCEDURE DIVISION.\nA-PARA.\n    ENTRY 'E' USING X.\n").unwrap();
