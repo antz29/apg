@@ -6098,4 +6098,78 @@ mod int {
         assert_eq!(edges(&recs, &["calls"]), want);
         assert!(edges(&recs, &["unresolved_call"]).is_empty(), "{recs:?}");
     }
+
+    /// OBJECT, METHOD and INVOKE as 01 data names, used in MOVE, IF and DISPLAY.
+    fn oo_word_data_names_prog() -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 OBJECT PIC X."),
+            at(8, "01 METHOD PIC X."),
+            at(8, "01 INVOKE PIC X."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "MOVE OBJECT TO METHOD."),
+            at(12, "IF OBJECT = 'A'"),
+            at(16, "DISPLAY METHOD"),
+            at(12, "END-IF."),
+            at(12, "DISPLAY INVOKE."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn ibm_oo_words_as_data_names_match_cobol85() {
+        let text = oo_word_data_names_prog();
+        let (ibm, ibm_diags) = scan_text_in(Dialect::Ibm, "/root/prog.cob", &text, &[]);
+        assert!(ibm_diags.is_empty(), "{ibm_diags:?}");
+        let (c85, c85_diags) = scan_text_in(Dialect::Cobol85, "/root/prog.cob", &text, &[]);
+        assert!(c85_diags.is_empty(), "{c85_diags:?}");
+        assert_eq!(ibm, c85);
+        let main = id_of(&ibm, "MAIN-PARA");
+        let mut want: Vec<serde_json::Value> = ["OBJECT", "METHOD", "INVOKE"]
+            .iter()
+            .map(|n| serde_json::json!({"type":"uses","from":main,"to":id_of(&ibm,n)}))
+            .collect();
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&ibm, &["uses"]), want);
+    }
+
+    #[test]
+    fn ibm_oo_word_data_names_keep_a_real_invoke_statement() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 R OBJECT REFERENCE Base."),
+            at(8, "01 OBJECT PIC X."),
+            at(8, "01 METHOD PIC X."),
+            at(8, "01 INVOKE PIC X."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "MOVE OBJECT TO METHOD."),
+            at(12, "INVOKE R \"Run\""),
+            at(12, "DISPLAY INVOKE."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Base."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        let run = method_fn(&recs, "Base", "Run", serde_json::json!(["instance"]));
+        assert_eq!(edges(&recs, &["calls"]), vec![invoke_call(&main, &run)]);
+        assert!(edges(&recs, &["unresolved_call"]).is_empty(), "{recs:?}");
+    }
 }
