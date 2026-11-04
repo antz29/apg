@@ -9,6 +9,7 @@ pub mod parser;
 pub mod preprocess;
 pub mod replace;
 pub mod resolve;
+pub mod scan;
 pub mod source_map;
 
 #[cfg(test)]

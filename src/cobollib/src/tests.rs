@@ -2730,4 +2730,112 @@ mod int {
         let got = resolve_calls(&text);
         assert_eq!(got[0].0, crate::resolve::CallResolution::Ambiguous);
     }
+
+    /// Scans `text` as `path` against the in-memory `files`; returns the JSONL records as
+    /// values and the diagnostics.
+    fn scan_text(
+        path: &str,
+        text: &str,
+        files: &[(&str, &str)],
+    ) -> (Vec<serde_json::Value>, Vec<crate::diag::Diagnostic>) {
+        let store: std::collections::HashMap<std::path::PathBuf, String> = files
+            .iter()
+            .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
+            .collect();
+        let lookup = |p: &std::path::Path| store.get(p).cloned();
+        let mut emitter = crate::scan::Emitter::default();
+        let diags = emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
+        let mut out = Vec::new();
+        emitter.write_jsonl(&mut out).unwrap();
+        let recs = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        (recs, diags)
+    }
+
+    #[test]
+    fn scan_emits_module_file_program_paragraph_and_contains_lines() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let len = text.len();
+        let para = text.find("MAIN-PARA").unwrap();
+        assert_eq!(
+            recs,
+            [
+                serde_json::json!({"type":"module","fqn":"/root"}),
+                serde_json::json!({"type":"file","path":"/root/prog.cob","parent":"/root","start_line":1,"end_line":5}),
+                serde_json::json!({"type":"struct","id":"n1","parent":"/root","name":"PROG","path":"/root/prog.cob","start":7,"end":len,"start_line":1,"end_line":5}),
+                serde_json::json!({"type":"function","id":"n2","parent":"/root.PROG","name":"MAIN-PARA","file":"/root/prog.cob","path":"/root/prog.cob","start":para,"end":len,"start_line":4,"end_line":5}),
+                serde_json::json!({"type":"contains","from":"n1","to":"n2"}),
+            ]
+        );
+    }
+
+    #[test]
+    fn copybook_record_offsets_index_the_copybook_text() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC X.")].join("\n");
+        let main = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(12, "COPY REC."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text("/root/prog.cob", &main, &[("/root/REC.cpy", &copy)]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let rec = recs
+            .iter()
+            .find(|r| r["type"] == "struct" && r["name"] == "REC-CB")
+            .expect("REC-CB struct");
+        assert_eq!(rec["path"], "/root/REC.cpy");
+        assert_eq!(rec["parent"], "/root.PROG");
+        assert_eq!(
+            (rec["start_line"].as_u64(), rec["end_line"].as_u64()),
+            (Some(1), Some(1))
+        );
+        let (start, end) = (rec["start"].as_u64().unwrap(), rec["end"].as_u64().unwrap());
+        assert_eq!(&copy[start as usize..end as usize], "01 REC-CB.");
+        assert!(recs
+            .iter()
+            .any(|r| r["type"] == "contains" && r["from"] == "n1" && r["to"] == rec["id"]));
+    }
+
+    #[test]
+    fn non_ascii_before_a_column_is_counted_in_characters() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 F-E PIC X VALUE \"é\". 01 REC-C PIC X."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let rec = recs
+            .iter()
+            .find(|r| r["type"] == "struct" && r["name"] == "REC-C")
+            .expect("REC-C struct");
+        let start = rec["start"].as_u64().unwrap() as usize;
+        assert_eq!(start, text.find("01 REC-C").unwrap());
+        assert!(text[..start].chars().count() < start, "é is two bytes");
+        assert_eq!(&text[start..start + 8], "01 REC-C");
+    }
 }
