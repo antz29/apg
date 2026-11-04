@@ -732,6 +732,48 @@ mod unit {
         assert_eq!((diags[0].line, diags[0].col), (1, 8));
     }
 
+    #[test]
+    fn source_map_names_each_file_and_keeps_token_positions() {
+        let mut map = crate::source_map::SourceMap::default();
+        let main = map.add_file("prog.cob");
+        let copy = map.add_file("copy.cpy");
+        assert_eq!(map.name(copy), "copy.cpy");
+        let (tokens, _) = lex_all(&at(8, "DISPLAY X."), fixed(), Dialect::Cobol85);
+        let mapped = map.map(copy, tokens);
+        assert_eq!(mapped.len(), 3);
+        assert_eq!(
+            mapped[1].origin,
+            crate::source_map::Origin {
+                file: copy,
+                line: 1,
+                col: 16
+            }
+        );
+        assert_ne!(mapped[0].origin.file, main);
+    }
+
+    #[test]
+    fn source_map_locates_a_diagnostic_in_the_copybook_file() {
+        let mut map = crate::source_map::SourceMap::default();
+        map.add_file("prog.cob");
+        let copy = map.add_file("copy.cpy");
+        let at_copy = crate::source_map::Origin {
+            file: copy,
+            line: 3,
+            col: 9,
+        };
+        let diag = map.diagnostic(at_copy, "unknown word FOO");
+        assert_eq!(
+            diag,
+            crate::diag::Diagnostic {
+                file: "copy.cpy".to_string(),
+                line: 3,
+                col: 9,
+                message: "unknown word FOO".to_string(),
+            }
+        );
+    }
+
     fn diag(message: &str) -> crate::diag::Diagnostic {
         crate::diag::Diagnostic {
             file: "prog.cob".to_string(),

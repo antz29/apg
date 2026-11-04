@@ -5,6 +5,7 @@ pub mod dialect;
 pub mod format;
 pub mod lexer;
 pub mod replace;
+pub mod source_map;
 
 #[cfg(test)]
 mod tests;
