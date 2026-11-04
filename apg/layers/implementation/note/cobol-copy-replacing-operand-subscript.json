@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-copy-replacing-operand-subscript",
+  "body": "pairs wraps a non-pseudo-text COPY REPLACING operand (a word or literal with its OF/IN qualifiers and an optional parenthesised subscript) as one pseudo-text, consuming from an opening parenthesis to the next closing one. Limit: unbalanced or nested parentheses in an operand swallow tokens to the end of the clause. Upgrade to balanced parenthesis matching when a corpus uses nested subscripts or reference modification in REPLACING operands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.preprocess.Pre.pairs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
