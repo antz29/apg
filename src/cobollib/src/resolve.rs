@@ -4,8 +4,8 @@
 //! are local to a program.
 
 use crate::ast::{
-    CallTarget, CompilationUnit, DataDivision, DataEntry, ProcedureDivision, Program,
-    QualifiedName, Section,
+    CallTarget, CompilationUnit, DataDivision, DataEntry, FileName, Name, ProcedureDivision,
+    Program, QualifiedName, Section,
 };
 use crate::diag::Diagnostic;
 use crate::source_map::SourceMap;
@@ -71,6 +71,48 @@ fn add_scope(out: &mut Vec<Scope>, program: &Program, parent: Option<usize>) {
     });
     for nested in &program.nested {
         add_scope(out, nested, Some(at));
+    }
+}
+
+/// The non-data names one program declares, parallel to [`scopes`]: ENVIRONMENT names, FD/SD
+/// files and the index names of its entries. Only [`declares`] reads it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Declared {
+    pub names: Vec<Name>,
+    pub files: Vec<FileName>,
+    pub indexes: Vec<Name>,
+}
+
+/// One [`Declared`] per program of `unit`, in the same pre-order as [`scopes`].
+pub fn declared(unit: &CompilationUnit) -> Vec<Declared> {
+    let mut out = Vec::new();
+    for program in &unit.programs {
+        add_declared(&mut out, program);
+    }
+    out
+}
+
+fn add_declared(out: &mut Vec<Declared>, program: &Program) {
+    let mut d = Declared {
+        names: program.declared.clone(),
+        ..Declared::default()
+    };
+    if let Some(data) = &program.data {
+        d.files = data.files.clone();
+        for section in &data.sections {
+            index_names(&mut d.indexes, &section.entries);
+        }
+    }
+    out.push(d);
+    for nested in &program.nested {
+        add_declared(out, nested);
+    }
+}
+
+fn index_names(out: &mut Vec<Name>, entries: &[DataEntry]) {
+    for entry in entries {
+        out.extend(entry.indexes.iter().cloned());
+        index_names(out, &entry.children);
     }
 }
 
@@ -160,7 +202,7 @@ impl Scope {
     /// are not storage and never resolve. Zero or several records give `None`, never a guess.
     pub fn data(&self, name: &QualifiedName) -> Option<usize> {
         let hits: Vec<usize> = (0..self.records.len())
-            .filter(|&i| holds(&self.records[i], name, &[]))
+            .filter(|&i| holds(&self.records[i], name, &[], false, false))
             .collect();
         match hits.as_slice() {
             [one] => Some(*one),
@@ -246,15 +288,82 @@ fn call_hit(hits: &[usize]) -> CallResolution {
     }
 }
 
+/// Resolves `name` as seen from scope `idx` when its own records do not hold it: the GLOBAL
+/// record or GLOBAL item of the nearest containing program that holds it, as `(scope, record)`.
+/// A name the scope declares itself (see [`declares`]) shadows the inherited one, and so does a
+/// local record holding it; an ambiguous match gives `None`, never a guess.
+pub fn global_data(
+    scopes: &[Scope],
+    decls: &[Declared],
+    idx: usize,
+    name: &QualifiedName,
+) -> Option<(usize, usize)> {
+    let own = &scopes[idx];
+    if declares(scopes, decls, idx, name)
+        || own
+            .records
+            .iter()
+            .any(|r| holds(r, name, &[], false, false))
+    {
+        return None;
+    }
+    let mut at = own.parent;
+    while let Some(a) = at {
+        let hits: Vec<usize> = (0..scopes[a].records.len())
+            .filter(|&i| holds(&scopes[a].records[i], name, &[], true, false))
+            .collect();
+        match hits.as_slice() {
+            [] => at = scopes[a].parent,
+            [one] => return Some((a, *one)),
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Whether scope `idx` declares `name` as a non-data name: its own ENVIRONMENT name, file or
+/// index, or a GLOBAL file of a containing program. A qualified reference is never one.
+pub fn declares(scopes: &[Scope], decls: &[Declared], idx: usize, name: &QualifiedName) -> bool {
+    let text = &name.name.text;
+    let named = |n: &Name| n.text.eq_ignore_ascii_case(text);
+    if !name.qualifiers.is_empty() {
+        return false;
+    }
+    let own = &decls[idx];
+    if own.names.iter().any(named)
+        || own.indexes.iter().any(named)
+        || own.files.iter().any(|f| named(&f.name))
+    {
+        return true;
+    }
+    let mut at = scopes[idx].parent;
+    while let Some(a) = at {
+        if decls[a].files.iter().any(|f| f.global && named(&f.name)) {
+            return true;
+        }
+        at = scopes[a].parent;
+    }
+    false
+}
+
 /// Whether `entry` or an item beneath it is named `name`, with every qualifier among the names
-/// `enclosing` (the entries above it, `entry` itself excluded).
-fn holds(entry: &DataEntry, name: &QualifiedName, enclosing: &[&str]) -> bool {
+/// `enclosing` (the entries above it, `entry` itself excluded). With `global_only`, an entry
+/// counts only when it is GLOBAL or lies beneath a GLOBAL entry (`under_global`).
+fn holds(
+    entry: &DataEntry,
+    name: &QualifiedName,
+    enclosing: &[&str],
+    global_only: bool,
+    under_global: bool,
+) -> bool {
     let own = entry
         .name
         .as_ref()
         .filter(|_| entry.level != 88)
         .map(|n| n.text.as_str());
-    if own.is_some_and(|n| n.eq_ignore_ascii_case(&name.name.text))
+    let visible = !global_only || under_global || entry.global;
+    if visible
+        && own.is_some_and(|n| n.eq_ignore_ascii_case(&name.name.text))
         && name
             .qualifiers
             .iter()
@@ -263,5 +372,9 @@ fn holds(entry: &DataEntry, name: &QualifiedName, enclosing: &[&str]) -> bool {
         return true;
     }
     let below: Vec<&str> = enclosing.iter().copied().chain(own).collect();
-    entry.children.iter().any(|c| holds(c, name, &below))
+    let inside = under_global || entry.global;
+    entry
+        .children
+        .iter()
+        .any(|c| holds(c, name, &below, global_only, inside))
 }

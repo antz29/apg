@@ -2853,6 +2853,73 @@ mod int {
         }
     }
 
+    /// A bare name as a reference, for the GLOBAL and declared-name lookups.
+    fn bare(span: crate::ast::Span, text: &str) -> crate::ast::QualifiedName {
+        crate::ast::QualifiedName {
+            name: crate::ast::Name {
+                text: text.to_string(),
+                span,
+            },
+            qualifiers: Vec::new(),
+        }
+    }
+
+    /// OUTER holds GLOBAL 01 G-REC (item G-F) and a local OUTER-REC; MID holds nothing; GRAND
+    /// holds LOCAL-REC and sits two levels below OUTER.
+    const NESTED_GLOBAL: &str = "IDENTIFICATION DIVISION.\nPROGRAM-ID. OUTER.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 G-REC GLOBAL.\n    05 G-F PIC X.\n01 OUTER-REC PIC X.\nPROCEDURE DIVISION.\nO-PARA.\n    STOP RUN.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. MID.\nPROCEDURE DIVISION.\nM-PARA.\n    STOP RUN.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. GRAND.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 LOCAL-REC PIC X.\nPROCEDURE DIVISION.\nG-PARA.\n    STOP RUN.\nEND PROGRAM GRAND.\nEND PROGRAM MID.\nEND PROGRAM OUTER.\n";
+
+    #[test]
+    fn grandchild_sees_the_global_record_and_its_items_through_the_chain() {
+        let (unit, diags) = parse_file(NESTED_GLOBAL);
+        assert!(diags.is_empty(), "{diags:?}");
+        let scopes = crate::resolve::scopes(&unit);
+        let decls = crate::resolve::declared(&unit);
+        let span = unit.programs[0].name.span;
+        let global = |scope: usize, name: &str| {
+            crate::resolve::global_data(&scopes, &decls, scope, &bare(span, name))
+        };
+        assert_eq!(global(2, "G-REC"), Some((0, 0)));
+        assert_eq!(global(2, "G-F"), Some((0, 0)));
+        assert_eq!(global(1, "G-F"), Some((0, 0)));
+        // A local record of an outer program is not GLOBAL, so it does not reach the grandchild.
+        assert_eq!(global(2, "OUTER-REC"), None);
+        assert_eq!(global(2, "NOPE"), None);
+    }
+
+    #[test]
+    fn a_local_redeclaration_shadows_the_global_name() {
+        let text = NESTED_GLOBAL.replace("01 LOCAL-REC PIC X.", "01 G-REC PIC X.");
+        let (unit, diags) = parse_file(&text);
+        assert!(diags.is_empty(), "{diags:?}");
+        let scopes = crate::resolve::scopes(&unit);
+        let decls = crate::resolve::declared(&unit);
+        let span = unit.programs[0].name.span;
+        assert_eq!(scopes[2].data(&bare(span, "G-REC")), Some(0));
+        assert_eq!(
+            crate::resolve::global_data(&scopes, &decls, 2, &bare(span, "G-REC")),
+            None
+        );
+    }
+
+    #[test]
+    fn declared_names_are_visible_to_their_program_and_global_files_to_contained_ones() {
+        let text = "IDENTIFICATION DIVISION.\nPROGRAM-ID. OUTER.\nENVIRONMENT DIVISION.\nINPUT-OUTPUT SECTION.\nFILE-CONTROL.\n    SELECT CARD-FILE ASSIGN TO CARDS.\nDATA DIVISION.\nFILE SECTION.\nFD TEST-FILE GLOBAL.\n01 TR PIC X.\nWORKING-STORAGE SECTION.\n01 HOLDER.\n    05 IDX-OWN OCCURS 3 TIMES INDEXED BY IDX-1 PIC X.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. INNER.\nPROCEDURE DIVISION.\nIN-PARA.\n    STOP RUN.\nEND PROGRAM INNER.\nEND PROGRAM OUTER.\n";
+        let (unit, diags) = parse_file(text);
+        assert!(diags.is_empty(), "{diags:?}");
+        let scopes = crate::resolve::scopes(&unit);
+        let decls = crate::resolve::declared(&unit);
+        let span = unit.programs[0].name.span;
+        let declares = |scope: usize, name: &str| {
+            crate::resolve::declares(&scopes, &decls, scope, &bare(span, name))
+        };
+        assert!(declares(0, "CARD-FILE"));
+        assert!(declares(0, "IDX-1"));
+        assert!(!declares(1, "CARD-FILE"));
+        assert!(!declares(1, "IDX-1"));
+        assert!(declares(1, "TEST-FILE"));
+        assert!(!declares(0, "NOPE"));
+    }
+
     /// Every CALL target of `statements`, nested branches included, in source order.
     fn call_targets(statements: &[crate::ast::Statement], out: &mut Vec<CallTarget>) {
         for statement in statements {
