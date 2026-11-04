@@ -1171,14 +1171,23 @@ fn ingest_records(
                     from,
                     to,
                     properties,
-                } => write_edge(
-                    &mut sw,
-                    Record::Uses {
-                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
-                        to: root_edge_endpoint(&lang, &to, &module_identities, base),
-                        properties,
-                    },
-                ),
+                } => {
+                    // A COBOL COPY target is a copybook File identity, not a symbol: leave it unrooted.
+                    let copy = properties.get("kind").map(String::as_str) == Some("copy");
+                    let to = if copy {
+                        to
+                    } else {
+                        root_edge_endpoint(&lang, &to, &module_identities, base)
+                    };
+                    write_edge(
+                        &mut sw,
+                        Record::Uses {
+                            from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                            to,
+                            properties,
+                        },
+                    )
+                }
                 Record::UnresolvedCall {
                     from,
                     to,
