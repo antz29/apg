@@ -44,6 +44,11 @@ pub struct ScanConfigKey {
     /// scope), or the distinct sentinel when no config is present — see
     /// [`classification_digest`]. The binary-managed `version` is excluded.
     pub classification: String,
+    /// The effective COBOL dialect (`--std`, else `cobol.dialect`, else
+    /// `cobol85`) when a `cobol` language is selected; `None` otherwise, so a
+    /// non-COBOL key is unchanged. Folded into the key so a dialect change
+    /// rebuilds the COBOL facts.
+    pub cobol_dialect: Option<String>,
 }
 
 /// The classification-config identity digest folded into the cache key: a
@@ -126,6 +131,9 @@ impl CacheKey {
             }
         }
         parts.push(format!("classify={}", config.classification));
+        if let Some(dialect) = &config.cobol_dialect {
+            parts.push(format!("cobol_dialect={dialect}"));
+        }
         CacheKey {
             binary_version: env!("CARGO_PKG_VERSION").to_string(),
             jsonl_schema: JSONL_SCHEMA_VERSION.to_string(),

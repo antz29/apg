@@ -274,6 +274,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         excludes: path_excludes.clone(),
         modules: module_dirs.clone(),
         classification: cache::classification_digest(config.as_ref()),
+        cobol_dialect: None, // task 24 sets the effective dialect when `cobol` is selected
     };
 
     // Win-B incremental preparation (phase-02 task-8): the content manifest,
