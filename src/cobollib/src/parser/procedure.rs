@@ -571,6 +571,29 @@ impl Parser<'_> {
         self.is_verb(k) || is(t, "INVOKE") || (self.dialect.oo_enabled() && is(t, "RAISE"))
     }
 
+    /// Whether an OO `INVOKE` or `RAISE` at `k` has a statement's shape, so an operand or
+    /// condition scan stops before it. Only under OO recognition; a data name fails the shape
+    /// check and stays an operand (`MOVE INVOKE TO X`).
+    fn oo_statement_at(&self, k: usize, end: usize) -> bool {
+        if !self.dialect.oo_enabled() || k + 1 >= end {
+            return false;
+        }
+        let t = self.tokens;
+        if is(&t[k], "INVOKE") {
+            let method = if word_in(&t[k + 1], &["SELF", "SUPER", "NULL"]) {
+                k + 2
+            } else if self.is_name(k + 1) {
+                self.qualified(k + 1, end).1
+            } else {
+                return false;
+            };
+            return method < end
+                && (matches!(t[method].token.kind, TokenKind::Alnum | TokenKind::National)
+                    || self.is_name(method));
+        }
+        is(&t[k], "RAISE") && (is(&t[k + 1], "EXCEPTION") || self.is_name(k + 1))
+    }
+
     /// A data or procedure name: a word that is neither a keyword nor a verb.
     fn is_name(&self, k: usize) -> bool {
         let t = &self.tokens[k];
@@ -621,7 +644,7 @@ impl Parser<'_> {
 
     /// Collects the references in operands up to a verb or a statement-closing token.
     fn refs_until(&self, mut k: usize, end: usize, refs: &mut Vec<QualifiedName>) -> usize {
-        while k < end && !self.is_verb(k) && !self.closes(k, end) {
+        while k < end && !self.is_verb(k) && !self.oo_statement_at(k, end) && !self.closes(k, end) {
             k = self.ref_at(k, end, refs);
         }
         k
@@ -755,7 +778,12 @@ impl Parser<'_> {
         }
         let mut refs = Vec::new();
         let mut h = k;
-        while h < end && !self.is_verb(h) && !self.closes(h, end) && !is(&t[h], "TIMES") {
+        while h < end
+            && !self.is_verb(h)
+            && !self.oo_statement_at(h, end)
+            && !self.closes(h, end)
+            && !is(&t[h], "TIMES")
+        {
             h = self.ref_at(h, end, &mut refs);
         }
         if h < end && is(&t[h], "TIMES") {
@@ -882,7 +910,7 @@ impl Parser<'_> {
         let mut returning = None;
         let mut refs = Vec::new();
         let mut after_returning = false;
-        while k < end && !self.is_verb(k) && !self.closes(k, end) {
+        while k < end && !self.is_verb(k) && !self.oo_statement_at(k, end) && !self.closes(k, end) {
             if is(&t[k], "RETURNING") {
                 after_returning = true;
                 k += 1;
@@ -1037,7 +1065,7 @@ impl Parser<'_> {
                 k = next;
                 continue;
             }
-            if self.closes(k, end) || self.is_verb(k) {
+            if self.closes(k, end) || self.is_verb(k) || self.oo_statement_at(k, end) {
                 break;
             }
             // ALTER operands are procedure names, which are not data references: dropped here.
