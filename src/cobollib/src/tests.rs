@@ -1,8 +1,11 @@
 //! Unit tests for the dialect table. The table is a single unit, so the tests live in
 //! `tests::unit` alone (no `int` tier: nothing here wires two units together).
 
+use crate::ast::{DataDivision, DataEntry};
 use crate::dialect::{Dialect, Feature, FeatureLevel, Limits, SourceFormat, OO_WORDS};
 use crate::lexer::{lex, Token, TokenKind};
+use crate::parser::data::parse_data_division;
+use crate::source_map::SourceMap;
 
 const ALL_DIALECTS: [Dialect; 4] = [
     Dialect::Cobol85,
@@ -38,6 +41,27 @@ fn fixed() -> crate::format::Layout {
 /// Each token as its kind and text.
 fn shape(tokens: &[Token]) -> Vec<(TokenKind, &str)> {
     tokens.iter().map(|t| (t.kind, t.text.as_str())).collect()
+}
+
+/// Lexes free-format `text` as `p.cob`, maps its tokens and parses its DATA DIVISION under cobol85.
+fn parse_data(text: &str) -> Option<(DataDivision, Vec<crate::diag::Diagnostic>)> {
+    let mut map = SourceMap::default();
+    let file = map.add_file("p.cob");
+    let (mut cursor, _) = lex("p.cob", text, crate::format::Layout::Free, Dialect::Cobol85);
+    let mut tokens = Vec::new();
+    while let Some(token) = cursor.bump() {
+        tokens.push(token);
+    }
+    let mapped = map.map(file, tokens);
+    parse_data_division(&map, Dialect::Cobol85, &mapped)
+}
+
+/// The data-name text of each entry in order, `FILLER` for an unnamed one.
+fn names(entries: &[DataEntry]) -> Vec<&str> {
+    entries
+        .iter()
+        .map(|e| e.name.as_ref().map_or("FILLER", |n| n.text.as_str()))
+        .collect()
 }
 
 mod unit {
@@ -1076,5 +1100,151 @@ mod unit {
             String::from_utf8(out).unwrap(),
             "cobol: prog.cob:12:7: first\ncobol: prog.cob:12:7: second\n"
         );
+    }
+
+    mod parser_data {
+        use super::*;
+
+        #[test]
+        fn levels_nest_by_number() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 REC. 05 A PIC X. 05 B. 10 C PIC 9. 05 D PIC X. 01 OTHER PIC X.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let entries = &division.sections[0].entries;
+            assert_eq!(names(entries), ["REC", "OTHER"]);
+            let rec = &entries[0].children;
+            assert_eq!(names(rec), ["A", "B", "D"]);
+            assert_eq!(names(&rec[1].children), ["C"]);
+            assert_eq!(rec[1].children[0].level, 10);
+        }
+
+        #[test]
+        fn level_77_66_and_88_attach_as_the_spec_places_them() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 77 W PIC X. 01 R. 05 F PIC X. 88 F-ON VALUE 'Y'. 66 ALIAS RENAMES F.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let entries = &division.sections[0].entries;
+            assert_eq!(names(entries), ["W", "R"]);
+            assert_eq!(entries[0].level, 77);
+            let record = &entries[1].children;
+            assert_eq!(names(record), ["F", "ALIAS"]);
+            assert!(record[1].renames);
+            assert_eq!(names(&record[0].children), ["F-ON"]);
+            assert_eq!(record[0].children[0].level, 88);
+        }
+
+        #[test]
+        fn filler_redefines_and_occurs_are_recorded() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 R. 05 FILLER PIC X. 05 X1 REDEFINES FILLER PIC 9. 05 T OCCURS 3 TIMES PIC X VALUE 'A'.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let kids = &division.sections[0].entries[0].children;
+            assert_eq!(names(kids), ["FILLER", "X1", "T"]);
+            assert!(kids[0].name.is_none());
+            assert!(kids[1].redefines);
+            assert!(kids[2].occurs);
+            assert_eq!(kids[2].pic.as_ref().map(|p| p.text.as_str()), Some("X"));
+        }
+
+        #[test]
+        fn picture_strings_are_read_whole() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 R. 05 A PIC S9(5)V99 VALUE 0. 05 E PIC ZZ,ZZ9.99.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let kids = &division.sections[0].entries[0].children;
+            assert_eq!(
+                kids[0].pic.as_ref().map(|p| p.text.as_str()),
+                Some("S9(5)V99")
+            );
+            assert_eq!(
+                kids[1].pic.as_ref().map(|p| p.text.as_str()),
+                Some("ZZ,ZZ9.99")
+            );
+        }
+
+        #[test]
+        fn picture_over_the_dialect_limit_is_a_diagnostic_and_keeps_the_entry() {
+            let text = format!(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 R PIC {}.",
+                "9".repeat(31)
+            );
+            let (division, diags) = parse_data(&text).unwrap();
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert!(
+                diags[0].message.contains("over the dialect limit of 30"),
+                "{diags:?}"
+            );
+            assert_eq!(names(&division.sections[0].entries), ["R"]);
+        }
+
+        #[test]
+        fn a_broken_entry_loses_only_itself() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 R. 05 A PIC. 05 B PIC X. 01 S PIC X.",
+            )
+            .unwrap();
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            let entries = &division.sections[0].entries;
+            assert_eq!(names(entries), ["R", "S"]);
+            assert_eq!(names(&entries[0].children), ["B"]);
+        }
+
+        #[test]
+        fn sections_are_kept_and_screen_report_communication_are_skipped() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. FILE SECTION. FD F1 RECORD CONTAINS 80. 01 FR PIC X. WORKING-STORAGE SECTION. 01 W PIC X. SCREEN SECTION. 01 S PIC X VALUE 'a'. LINKAGE SECTION. 01 L PIC X.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let kinds: Vec<_> = division.sections.iter().map(|s| s.kind).collect();
+            assert_eq!(
+                kinds,
+                [
+                    crate::ast::DataSectionKind::File,
+                    crate::ast::DataSectionKind::WorkingStorage,
+                    crate::ast::DataSectionKind::Linkage
+                ]
+            );
+            let entry_names: Vec<Vec<&str>> = division
+                .sections
+                .iter()
+                .map(|s| names(&s.entries))
+                .collect();
+            assert_eq!(entry_names, [vec!["FR"], vec!["W"], vec!["L"]]);
+        }
+
+        #[test]
+        fn an_entry_missing_its_period_is_kept_with_a_diagnostic() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 A PIC X LINKAGE SECTION. 01 L PIC X.",
+            )
+            .unwrap();
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(names(&division.sections[0].entries), ["A"]);
+            assert_eq!(division.sections.len(), 2);
+        }
+
+        #[test]
+        fn text_before_the_first_section_is_one_diagnostic() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. 01 X PIC X. 05 Y PIC X. WORKING-STORAGE SECTION. 01 W PIC X.",
+            )
+            .unwrap();
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(names(&division.sections[0].entries), ["W"]);
+        }
+
+        #[test]
+        fn text_that_is_not_a_data_division_parses_to_none() {
+            assert!(parse_data("PROCEDURE DIVISION. STOP RUN.").is_none());
+        }
     }
 }
