@@ -436,6 +436,7 @@ pub fn parse_interface(
             span: span(tokens, 0, used - 1),
             identification: span(tokens, 0, h.period),
             inherits: h.inherits,
+            using: Vec::new(),
             prototypes,
         }),
         used,

@@ -237,6 +237,8 @@ pub struct Interface {
     pub span: Span,
     pub identification: Span,
     pub inherits: Vec<Name>,
+    /// Parameter class and interface names of `INTERFACE-ID … USING Param`.
+    pub using: Vec<Name>,
     pub prototypes: Vec<MethodPrototype>,
 }
 
