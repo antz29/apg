@@ -177,7 +177,7 @@ impl Parser<'_> {
             if is(&tokens[i], "FD") || is(&tokens[i], "SD") {
                 // File and sort descriptions are not AST entries; they close the open records.
                 let next = self.skip_entry(i, end);
-                if let Some(t) = tokens.get(i + 1).filter(|t| i + 1 < end) {
+                if let Some(t) = tokens.get(i + 1).filter(|_| i + 1 < end) {
                     if t.token.kind == TokenKind::Word && !is_clause(t) {
                         let name = self.name(i + 1);
                         let global = (i + 2..next).any(|j| is(&tokens[j], "GLOBAL"));
