@@ -211,7 +211,10 @@ impl Parser<'_> {
             None => None,
             Some(t) => {
                 let at = t.origin;
-                self.diag(at, &format!("expected a data name, found `{}`", t.token.text));
+                self.diag(
+                    at,
+                    &format!("expected a data name, found `{}`", t.token.text),
+                );
                 return (None, self.skip_entry(j, end));
             }
         };
@@ -279,19 +282,20 @@ impl Parser<'_> {
         let t = &tokens[j];
         match t.token.kind {
             TokenKind::Word => !is_clause(t),
-            TokenKind::Numeric
-            | TokenKind::LParen
-            | TokenKind::RParen
-            | TokenKind::Symbol(_) => true,
+            TokenKind::Numeric | TokenKind::LParen | TokenKind::RParen | TokenKind::Symbol(_) => {
+                true
+            }
             TokenKind::Comma => {
-                let joined = |a: &Mapped, b: &Mapped| {
-                    a.token.offset + a.token.text.len() == b.token.offset
-                };
+                let joined =
+                    |a: &Mapped, b: &Mapped| a.token.offset + a.token.text.len() == b.token.offset;
                 j > 0
                     && j + 1 < tokens.len()
                     && joined(&tokens[j - 1], t)
                     && joined(t, &tokens[j + 1])
-                    && matches!(tokens[j + 1].token.kind, TokenKind::Word | TokenKind::Numeric)
+                    && matches!(
+                        tokens[j + 1].token.kind,
+                        TokenKind::Word | TokenKind::Numeric
+                    )
                     && self.pic_part(j + 1)
             }
             _ => false,

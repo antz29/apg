@@ -324,8 +324,7 @@ impl Parser<'_> {
                 span: self.span(a, a + 1),
                 paragraphs: Vec::new(),
             });
-        } else if words.len() == 1 && words[0].token.kind == TokenKind::Word && !self.is_verb(a)
-        {
+        } else if words.len() == 1 && words[0].token.kind == TokenKind::Word && !self.is_verb(a) {
             if self.in_decl && self.section.is_none() {
                 let at = self.origin(a);
                 self.diag(at, "expected a section header in DECLARATIVES");
@@ -555,9 +554,8 @@ impl Parser<'_> {
             self.diag(at, "PERFORM without a target or statements");
             return (None, end);
         }
-        let outline = self.is_name(k)
-            && !self.closes(k, end)
-            && !(k + 1 < end && is(&t[k + 1], "TIMES"));
+        let outline =
+            self.is_name(k) && !self.closes(k, end) && !(k + 1 < end && is(&t[k + 1], "TIMES"));
         if outline {
             if let Some((range, next)) = self.proc_range(k, end) {
                 let mut refs = Vec::new();
@@ -631,17 +629,17 @@ impl Parser<'_> {
             k += 1;
         }
         let mut targets = Vec::new();
-        while k < end
-            && self.is_name(k)
-            && !self.closes(k, end)
-            && !is(&t[k], "DEPENDING")
-        {
+        while k < end && self.is_name(k) && !self.closes(k, end) && !is(&t[k], "DEPENDING") {
             let (name, next) = self.qualified(k, end);
             targets.push(name);
             k = next;
         }
         if targets.is_empty()
-            && !self.feature(i, Feature::GoToWithoutName, "GO TO without a procedure name")
+            && !self.feature(
+                i,
+                Feature::GoToWithoutName,
+                "GO TO without a procedure name",
+            )
         {
             return (None, end);
         }
@@ -789,7 +787,10 @@ fn word_in(t: &Mapped, list: &[&str]) -> bool {
 /// Whether `t` is a scope terminator (`END-IF`, `END-PERFORM`, ...).
 fn is_end_word(t: &Mapped) -> bool {
     matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved)
-        && t.token.text.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("END-"))
+        && t.token
+            .text
+            .get(..4)
+            .is_some_and(|p| p.eq_ignore_ascii_case("END-"))
 }
 
 /// Whether `words` are exactly the words in `list`.

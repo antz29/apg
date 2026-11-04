@@ -70,6 +70,21 @@ fn parse_procedure(text: &str) -> Option<(ProcedureDivision, Vec<crate::diag::Di
     parse_procedure_division(&map, Dialect::Cobol85, &mapped)
 }
 
+/// Parses free-format `text` as `p.cob` under cobol85, with no copybooks.
+fn parse_file(text: &str) -> (crate::ast::CompilationUnit, Vec<crate::diag::Diagnostic>) {
+    let search = crate::preprocess::Search {
+        scan_root: std::path::PathBuf::new(),
+        copy_paths: Vec::new(),
+    };
+    crate::parser::parse_source(
+        "p.cob",
+        &format!(">>SOURCE FREE\n{text}"),
+        Dialect::Cobol85,
+        &search,
+        &|_| None,
+    )
+}
+
 /// The data-name text of each entry in order, `FILLER` for an unnamed one.
 fn names(entries: &[DataEntry]) -> Vec<&str> {
     entries
@@ -1414,6 +1429,80 @@ mod unit {
         #[test]
         fn text_that_is_not_a_data_division_parses_to_none() {
             assert!(parse_data("PROCEDURE DIVISION. STOP RUN.").is_none());
+        }
+    }
+
+    mod parser_entry {
+        use super::*;
+        use std::path::{Path, PathBuf};
+
+        #[test]
+        fn nested_program_is_a_child_and_end_program_closes_each() {
+            let (unit, diags) = parse_file(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. OUTER.\nPROCEDURE DIVISION.\nMAIN.\n    DISPLAY 'X'.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. INNER.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\nEND PROGRAM INNER.\nEND PROGRAM OUTER.\n",
+            );
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(unit.programs.len(), 1);
+            let outer = &unit.programs[0];
+            assert_eq!(outer.name.text, "OUTER");
+            assert_eq!(outer.nested[0].name.text, "INNER");
+            assert!(outer.procedure.is_some() && outer.nested[0].procedure.is_some());
+        }
+
+        #[test]
+        fn programs_in_sequence_keep_their_own_divisions() {
+            let (unit, diags) = parse_file(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. ONE.\nENVIRONMENT DIVISION.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\nEND PROGRAM ONE.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. TWO.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 A PIC X.\nEND PROGRAM TWO.\n",
+            );
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(unit.programs.len(), 2);
+            assert!(unit.programs[0].environment.is_some());
+            assert!(unit.programs[1].data.is_some() && unit.programs[1].procedure.is_none());
+        }
+
+        #[test]
+        fn declarations_are_kept_around_a_syntax_error() {
+            let (unit, diags) = parse_file(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 A PIC X.\nPROCEDURE DIVISION.\nP1.\n    FOO BAR.\nP2.\n    DISPLAY 'X'.\nEND PROGRAM P.\n",
+            );
+            assert!(!diags.is_empty());
+            let program = &unit.programs[0];
+            let data = program.data.as_ref().unwrap();
+            assert_eq!(names(&data.sections[0].entries), ["A"]);
+            assert_eq!(program.procedure.as_ref().unwrap().paragraphs.len(), 2);
+        }
+
+        #[test]
+        fn program_without_program_id_is_one_diagnostic_naming_the_file() {
+            let (unit, diags) = parse_file(
+                "IDENTIFICATION DIVISION.\nAUTHOR. X.\nPROCEDURE DIVISION.\n    STOP RUN.\n",
+            );
+            assert!(unit.programs.is_empty());
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(diags[0].file, "p.cob");
+        }
+
+        #[test]
+        fn copybook_text_is_part_of_the_program() {
+            let search = crate::preprocess::Search {
+                scan_root: PathBuf::new(),
+                copy_paths: Vec::new(),
+            };
+            let lookup = |p: &Path| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("CB"))
+                    .then(|| "       01 W PIC X.\n".to_string())
+            };
+            let (unit, diags) = crate::parser::parse_source(
+                "p.cob",
+                ">>SOURCE FREE\nIDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\nCOPY CB.\nPROCEDURE DIVISION.\nEND PROGRAM P.\n",
+                Dialect::Cobol85,
+                &search,
+                &lookup,
+            );
+            assert!(diags.is_empty(), "{diags:?}");
+            let data = unit.programs[0].data.as_ref().unwrap();
+            assert_eq!(names(&data.sections[0].entries), ["W"]);
         }
     }
 }

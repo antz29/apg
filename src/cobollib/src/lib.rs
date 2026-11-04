@@ -5,6 +5,7 @@ pub mod diag;
 pub mod dialect;
 pub mod format;
 pub mod lexer;
+pub mod parser;
 pub mod preprocess;
 pub mod replace;
 pub mod source_map;
