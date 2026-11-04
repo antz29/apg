@@ -26,8 +26,9 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// would assemble (and export) a graph missing that scaffolding. Bumping the
 /// projection version changes the cache-key token, every `1` unit and its
 /// missing scaffolding miss, and the drift forces one correctness full scan
-/// that records the scaffolding before any reuse can happen.
-pub const PROJECTION_RULES_VERSION: &str = "2";
+/// that records the scaffolding before any reuse can happen. v3: Struct→File
+/// kind=copy `uses` edges are admitted, so `2` projections lack them.
+pub const PROJECTION_RULES_VERSION: &str = "3";
 
 /// The scan config identity folded into the global cache key: the exact set of
 /// languages, path excludes, and module restrictions a scan ran with, plus the
