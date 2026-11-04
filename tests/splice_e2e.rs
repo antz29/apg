@@ -4889,4 +4889,184 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Task-55 (e2e): a re-scan SPLICE keeps a program Struct's Struct-to-File
+    /// `copy` Uses edge to a statement-only copybook. `lib/STMTS.cpy` holds
+    /// procedure statements only (no declarations), so `CODE_REL_PAIRS` must
+    /// admit the Struct→File pair for the edge to survive the splice. Both
+    /// programs COPY it: a copybook-only edit re-emits both edges through the
+    /// splice, a program-only edit leaves the other program's edge untouched,
+    /// and every spliced state equals a `--force` full rebuild.
+    ///
+    /// Scratch /tmp repo + candidate binary + spawned cobol frontend: real I/O,
+    /// so this is `#[ignore]`d e2e (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/cobol frontend/db.lbug); run via cargo test-e2e"]
+    fn copy_uses_edge_survives_a_splice_rescan() {
+        use apg::testutil::{ApgCommand, Repo, wt_commit};
+
+        /// One `apg` invocation in `dir` with an isolated `HOME`; returns its
+        /// output, failing loudly on a non-zero exit.
+        fn apg_cli(dir: &Path, home: &str, args: &[&str]) -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", home).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        /// `apg scan . --language cobol --copy-path lib` (plus `extra`) in
+        /// `dir`; returns its stderr log (the `[load]` decision lines).
+        fn scan_log(dir: &Path, home: &str, extra: &[&str]) -> String {
+            let mut args = vec!["scan", ".", "--language", "cobol", "--copy-path", "lib"];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_cli(dir, home, &args).stderr).into_owned()
+        }
+
+        /// Every program Struct's Uses edge to a File, as sorted
+        /// `"<struct> -> <file> <properties>"` lines.
+        fn uses_rows(dir: &Path, home: &str) -> Vec<String> {
+            let cypher = "MATCH (s:Struct)-[r:Uses]->(f:File) RETURN s.fqn AS s, f.fqn AS f, r.properties AS p";
+            let out = apg_cli(dir, home, &["query", "--json", cypher]);
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_slice(&out.stdout).expect("json rows");
+            let mut lines: Vec<String> = rows
+                .iter()
+                .map(|r| format!("{} -> {} {}", r["s"], r["f"], r["p"]))
+                .collect();
+            lines.sort();
+            lines
+        }
+
+        /// The copy edges of both programs to `lib/STMTS.cpy`, each carrying
+        /// `kind=copy` and never a NULL property.
+        fn assert_copy_edges(label: &str, rows: &[String]) {
+            assert_eq!(
+                rows.len(),
+                2,
+                "{label}: one copy Uses edge per program: {rows:#?}"
+            );
+            for prog in ["PROGA", "PROGB"] {
+                assert!(
+                    rows.iter().any(|r| r.contains(prog)
+                        && r.contains("\"lib/STMTS.cpy\"")
+                        && r.contains("copy")),
+                    "{label}: {prog} must keep its copy edge to lib/STMTS.cpy: {rows:#?}"
+                );
+            }
+            assert!(
+                rows.iter().all(|r| !r.contains("null")),
+                "{label}: NULL properties: {rows:#?}"
+            );
+        }
+
+        /// True only when the splice path ran: the success line ends in
+        /// `full load skipped` (the fallbacks also print `[load] splice:`).
+        fn spliced(log: &str) -> bool {
+            log.contains("full load skipped")
+        }
+
+        fn only_progb(rows: &[String]) -> Vec<String> {
+            rows.iter()
+                .filter(|r| r.contains("PROGB"))
+                .cloned()
+                .collect()
+        }
+
+        const PROG_A: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGA.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+        const PROG_B: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGB.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+
+        let repo = Repo::new("cobol-splice-copy");
+        // The isolated HOME lives outside the scanned repo (suite install).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-cobol-splice-copy-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        repo.write(
+            ".gitignore",
+            "/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write("A.cob", PROG_A);
+        repo.write("B.cob", PROG_B);
+        repo.write("lib/STMTS.cpy", "           DISPLAY 'S'.\n");
+        repo.commit_all("init source");
+
+        apg_cli(&repo.root, &home_s, &["init", "."]);
+        repo.commit_all("apg init");
+        // Main's full scan: the branch DB is seeded from it on `project start`.
+        scan_log(&repo.root, &home_s, &[]);
+        assert_copy_edges("main full scan", &uses_rows(&repo.root, &home_s));
+
+        apg_cli(&repo.root, &home_s, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+        assert_copy_edges("branch seed", &uses_rows(&wt, &home_s));
+
+        // (1) Copybook-only edit: the re-scan takes the splice and keeps both
+        // copy edges to the statement-only copybook.
+        std::fs::write(
+            wt.join("lib/STMTS.cpy"),
+            "           DISPLAY 'S'.\n           DISPLAY 'T'.\n",
+        )
+        .unwrap();
+        wt_commit(
+            &wt,
+            &["lib/STMTS.cpy"],
+            "append a statement to the copybook",
+        );
+        let log1 = scan_log(&wt, &home_s, &[]);
+        assert!(
+            spliced(&log1),
+            "copybook re-scan must take the splice path: {log1}"
+        );
+        let after_copybook = uses_rows(&wt, &home_s);
+        assert_copy_edges("copybook splice", &after_copybook);
+
+        // (2) Program-only edit to A.cob: the re-scan splices again, and B's
+        // copy edge is untouched.
+        std::fs::write(
+            wt.join("A.cob"),
+            PROG_A.replace(
+                "       COPY STMTS.",
+                "           DISPLAY 'A'.\n       COPY STMTS.",
+            ),
+        )
+        .unwrap();
+        wt_commit(&wt, &["A.cob"], "edit only the first program");
+        let log2 = scan_log(&wt, &home_s, &[]);
+        assert!(
+            spliced(&log2),
+            "program re-scan must take the splice path: {log2}"
+        );
+        let after_program = uses_rows(&wt, &home_s);
+        assert_copy_edges("program splice", &after_program);
+        assert_eq!(
+            only_progb(&after_copybook),
+            only_progb(&after_program),
+            "B's copy edge must be untouched by an A-only edit"
+        );
+
+        // (3) The spliced state equals a `--force` full rebuild.
+        let log3 = scan_log(&wt, &home_s, &["--force"]);
+        assert!(
+            !spliced(&log3),
+            "--force must full-rebuild, not splice: {log3}"
+        );
+        assert_eq!(
+            after_program,
+            uses_rows(&wt, &home_s),
+            "spliced copy edges must equal a --force rebuild"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
