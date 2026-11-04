@@ -705,8 +705,31 @@ impl Emitter {
     /// records located in them). A Module stays when a kept File sits in it; a `contains`
     /// edge stays when both ends do; a control-transfer or data `uses` edge stays when both
     /// ends do, and an unresolved-use edge when its source does; an `unresolved` target when a
-    /// kept `unresolved_call` or `unresolved_use` names it.
+    /// kept `unresolved_call` or `unresolved_use` names it. A control-transfer or data `uses`
+    /// edge whose source stays but whose target declaration is dropped keeps its endpoint as
+    /// that declaration's unrooted FQN (`parent.name`, the module identity verbatim).
     pub fn retain_targets(&mut self, targets: &HashSet<String>) {
+        // Read before the first pass drops the non-target declarations.
+        let fqns: BTreeMap<String, String> = self
+            .recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Struct {
+                    id, parent, name, ..
+                }
+                | Rec::Function {
+                    id, parent, name, ..
+                } => {
+                    let fqn = if parent.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{parent}.{name}")
+                    };
+                    Some((id.clone(), fqn))
+                }
+                _ => None,
+            })
+            .collect();
         self.recs.retain(|r| match r {
             Rec::File { path, .. } | Rec::Struct { path, .. } | Rec::Function { path, .. } => {
                 targets.contains(path)
@@ -735,12 +758,19 @@ impl Emitter {
                 _ => None,
             })
             .collect();
+        for r in &mut self.recs {
+            if let Rec::Calls { from, to, .. } | Rec::Uses { from, to } = r {
+                if ids.contains(from.as_str()) && !ids.contains(to.as_str()) {
+                    if let Some(fqn) = fqns.get(to.as_str()) {
+                        *to = fqn.clone();
+                    }
+                }
+            }
+        }
         self.recs.retain(|r| match r {
             Rec::Module { fqn } => parents.contains(fqn),
             Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
-            Rec::Calls { from, to, .. } | Rec::Uses { from, to } => {
-                ids.contains(from) && ids.contains(to)
-            }
+            Rec::Calls { from, .. } | Rec::Uses { from, .. } => ids.contains(from),
             Rec::UnresolvedCall { from, .. } | Rec::UnresolvedUse { from, .. } => {
                 ids.contains(from)
             }

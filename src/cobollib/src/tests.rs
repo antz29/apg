@@ -3497,6 +3497,53 @@ mod int {
         assert_eq!(calls[0]["from"], main_a.as_str());
     }
 
+    /// Under `--targets`, a `uses` edge from a target paragraph into declarations of non-target
+    /// files keeps its endpoint as the declaration's unrooted FQN: `module/dir.PROG.REC-CB` for
+    /// a copybook record, `module/dir.SUB-B` for a called program, `PROG.REC-CB` at the root.
+    #[test]
+    fn targets_keep_cross_file_edges_with_fqn_endpoints() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC X.")].join("\n");
+        let main = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(12, "COPY REC."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "ACCEPT REC-CB FROM DATE."),
+            at(12, "CALL 'SUB-B'."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let b = prog("SUB-B");
+        let cases = [
+            ("/root/src/cobol/prog.cob", "src/cobol."),
+            ("/root/prog.cob", ""),
+        ];
+        for (main_path, prefix) in cases {
+            let sub_path = main_path.replace("prog.cob", "b.cob");
+            let tree = [
+                (main_path, main.as_str()),
+                ("/root/REC.cpy", copy.as_str()),
+                (sub_path.as_str(), b.as_str()),
+            ];
+            let mut emitter = scan_tree(&tree);
+            let target: std::collections::HashSet<String> =
+                [main_path.to_string()].into_iter().collect();
+            emitter.retain_targets(&target);
+            let recs = jsonl(&emitter);
+            let main_id = id_of(&recs, "MAIN-PARA");
+            let mut want = vec![
+                serde_json::json!({"type":"uses","from":main_id,"to":format!("{prefix}PROG.REC-CB")}),
+                serde_json::json!({"type":"uses","from":main_id,"to":format!("{prefix}SUB-B")}),
+            ];
+            want.sort_by_key(|v| v.to_string());
+            assert_eq!(edges(&recs, &["uses"]), want, "{recs:?}");
+            assert!(!recs.iter().any(|r| r["name"] == "REC-CB"), "{recs:?}");
+        }
+    }
+
     /// OUTER's MAIN-PARA makes each of `calls` (fixed-format lines), then STOPs.
     fn caller_at(calls: &[&str]) -> String {
         let mut lines = vec![
