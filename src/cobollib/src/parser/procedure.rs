@@ -6,8 +6,8 @@
 //! to the end of the program's procedure text.
 
 use crate::ast::{
-    CallTarget, Name, Paragraph, ProcRange, ProcedureDivision, QualifiedName, Section, Sentence,
-    Span, Statement, Transfer,
+    CallTarget, Name, Paragraph, ProcRange, ProcedureDivision, QualifiedName, RaiseTarget,
+    Receiver, Section, Sentence, Span, Statement, Transfer,
 };
 use crate::diag::Diagnostic;
 use crate::dialect::{Dialect, Feature};
@@ -41,7 +41,6 @@ const VERBS: &[&str] = &[
     "INITIALIZE",
     "INITIATE",
     "INSPECT",
-    "INVOKE",
     "MERGE",
     "MOVE",
     "MULTIPLY",
@@ -441,7 +440,7 @@ impl Parser<'_> {
                 span: self.span(a, a + 1),
                 paragraphs: Vec::new(),
             });
-        } else if words.len() == 1 && is_header_word(&words[0]) && !self.is_verb(a) {
+        } else if words.len() == 1 && is_header_word(&words[0]) && !self.starts_statement(a) {
             if self.in_decl && self.section.is_none() {
                 let at = self.origin(a);
                 self.diag(at, "expected a section header in DECLARATIVES");
@@ -522,6 +521,13 @@ impl Parser<'_> {
 
     fn is_verb(&self, k: usize) -> bool {
         word_in(&self.tokens[k], VERBS)
+    }
+
+    /// Whether token `k` starts a statement. `INVOKE` always does (as it did when it was a verb);
+    /// `RAISE` only under OO recognition. Elsewhere both are data names.
+    fn starts_statement(&self, k: usize) -> bool {
+        let t = &self.tokens[k];
+        self.is_verb(k) || is(t, "INVOKE") || (self.dialect.oo_enabled() && is(t, "RAISE"))
     }
 
     /// A data or procedure name: a word that is neither a keyword nor a verb.
@@ -609,7 +615,7 @@ impl Parser<'_> {
     /// the caller decides what that token means.
     fn statements(&mut self, mut i: usize, end: usize) -> (Vec<Statement>, usize) {
         let mut out = Vec::new();
-        while i < end && self.is_verb(i) {
+        while i < end && self.starts_statement(i) {
             let (statement, next) = self.statement(i, end);
             out.extend(statement);
             i = next;
@@ -641,6 +647,8 @@ impl Parser<'_> {
             "CALL" => self.generic(i, end, Kind::Call),
             "SORT" | "MERGE" => self.generic(i, end, Kind::SortMerge),
             "RESUME" => self.generic(i, end, Kind::Resume),
+            "INVOKE" if self.dialect.oo_enabled() => self.invoke(i, end),
+            "RAISE" if self.dialect.oo_enabled() => self.raise(i, end),
             _ => self.generic(i, end, Kind::Plain),
         }
     }
@@ -786,6 +794,112 @@ impl Parser<'_> {
             scope_end: None,
             transfer: Some(Transfer::GoTo(targets)),
             refs,
+            children: Vec::new(),
+        };
+        (Some(statement), k)
+    }
+
+    /// `INVOKE receiver method [USING ...] [RETURNING name]` (OO COBOL). `SELF`, `SUPER` and
+    /// `NULL` are receivers of their own; a name is a class or an object, which resolve decides.
+    /// The method is a literal or an identifier, as a `CALL` target is; the receiver is not a
+    /// data reference. USING and RETURNING names are references.
+    fn invoke(&mut self, i: usize, end: usize) -> (Option<Statement>, usize) {
+        let t = self.tokens;
+        let mut k = i + 1;
+        let receiver = if k < end && is(&t[k], "SELF") {
+            k += 1;
+            Receiver::Self_
+        } else if k < end && is(&t[k], "SUPER") {
+            k += 1;
+            Receiver::Super
+        } else if k < end && is(&t[k], "NULL") {
+            k += 1;
+            Receiver::Null
+        } else if k < end && self.is_name(k) {
+            let (name, next) = self.qualified(k, end);
+            k = next;
+            Receiver::Name(name)
+        } else {
+            let at = self.origin(i);
+            self.diag(at, "INVOKE without a receiver");
+            return (None, end);
+        };
+        let method = if k < end && matches!(t[k].token.kind, TokenKind::Alnum | TokenKind::National)
+        {
+            k += 1;
+            CallTarget::Literal(self.name(k - 1))
+        } else if k < end && self.is_name(k) {
+            let (name, next) = self.qualified(k, end);
+            k = next;
+            CallTarget::Identifier(name)
+        } else {
+            let at = self.origin(i);
+            self.diag(at, "INVOKE without a method name");
+            return (None, end);
+        };
+        let mut using = Vec::new();
+        let mut returning = None;
+        let mut refs = Vec::new();
+        let mut after_returning = false;
+        while k < end && !self.is_verb(k) && !self.closes(k, end) {
+            if is(&t[k], "RETURNING") {
+                after_returning = true;
+                k += 1;
+            } else if after_returning && self.is_name(k) {
+                let (name, next) = self.qualified(k, end);
+                refs.push(name.clone());
+                returning = Some(name);
+                k = next;
+            } else {
+                let before = refs.len();
+                k = self.ref_at(k, end, &mut refs);
+                using.extend(refs[before..].iter().cloned());
+            }
+        }
+        let statement = Statement {
+            span: self.span(i, k),
+            scope_end: None,
+            transfer: Some(Transfer::Invoke {
+                receiver,
+                method,
+                using,
+                returning,
+            }),
+            refs,
+            children: Vec::new(),
+        };
+        (Some(statement), k)
+    }
+
+    /// `RAISE EXCEPTION condition-name` or `RAISE object` (Micro Focus). Neither operand is a
+    /// data reference: the statement carries only its target.
+    fn raise(&mut self, i: usize, end: usize) -> (Option<Statement>, usize) {
+        let t = self.tokens;
+        let mut k = i + 1;
+        let target = if k < end && is(&t[k], "EXCEPTION") {
+            k += 1;
+            if k < end && self.is_name(k) {
+                k += 1;
+                RaiseTarget::ExceptionName(self.name(k - 1))
+            } else {
+                let at = self.origin(i);
+                self.diag(at, "RAISE EXCEPTION without a condition name");
+                return (None, end);
+            }
+        } else if k < end && self.is_name(k) {
+            let (name, next) = self.qualified(k, end);
+            k = next;
+            RaiseTarget::Object(name)
+        } else {
+            let at = self.origin(i);
+            self.diag(at, "RAISE without an exception name or object");
+            return (None, end);
+        };
+        let statement = Statement {
+            span: self.span(i, k),
+            scope_end: None,
+            transfer: Some(Transfer::Raise(target)),
+            refs: Vec::new(),
             children: Vec::new(),
         };
         (Some(statement), k)
