@@ -2309,6 +2309,70 @@ mod unit {
 
     mod parser_oo {
         use super::*;
+        use crate::ast::{CompilationUnit, Name, QualifiedName, RaiseTarget, Receiver, Statement};
+
+        /// The statements of the first paragraph of the first program's PROCEDURE DIVISION.
+        fn statements(unit: &CompilationUnit) -> Vec<&Statement> {
+            let div = unit.programs[0].procedure.as_ref().unwrap();
+            div.paragraphs[0]
+                .sentences
+                .iter()
+                .flat_map(|s| &s.statements)
+                .collect()
+        }
+
+        /// The first program's DATA DIVISION entries of its first section.
+        fn working(unit: &CompilationUnit) -> &[DataEntry] {
+            let data = unit.programs[0].data.as_ref().unwrap();
+            &data.sections[0].entries
+        }
+
+        /// `text` as the PROCEDURE DIVISION body of program `P`.
+        fn with_procedure(body: &str) -> String {
+            format!("IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nPROCEDURE DIVISION.\nMAIN-PARA.\n{body}END PROGRAM P.\n")
+        }
+
+        /// `text` as the WORKING-STORAGE entries of program `P`.
+        fn with_data(body: &str) -> String {
+            format!("IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n{body}END PROGRAM P.\n")
+        }
+
+        fn texts(names: &[Name]) -> Vec<&str> {
+            names.iter().map(|n| n.text.as_str()).collect()
+        }
+
+        fn qnames(names: &[QualifiedName]) -> Vec<&str> {
+            names.iter().map(|q| q.name.text.as_str()).collect()
+        }
+
+        fn object_class(entry: &DataEntry) -> Option<&str> {
+            entry
+                .object_reference
+                .as_ref()
+                .and_then(|o| o.class.as_ref())
+                .map(|n| n.text.as_str())
+        }
+
+        /// The receiver, method, USING names and RETURNING name of an INVOKE statement.
+        fn invoke(
+            stmt: &Statement,
+        ) -> (
+            &Receiver,
+            &CallTarget,
+            &[QualifiedName],
+            Option<&QualifiedName>,
+        ) {
+            let Some(Transfer::Invoke {
+                receiver,
+                method,
+                using,
+                returning,
+            }) = &stmt.transfer
+            else {
+                panic!("not an INVOKE: {:?}", stmt.transfer);
+            };
+            (receiver, method, using, returning.as_ref())
+        }
 
         /// Parses free-format `text` under `dialect`, with no copybooks.
         fn parse_oo(
@@ -2366,6 +2430,252 @@ mod unit {
             let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
             assert!(diags.is_empty(), "{diags:?}");
             assert_eq!(unit.programs[0].repository[0].name.text, "Foo");
+        }
+
+        #[test]
+        fn class_header_keeps_its_external_name_inherits_and_implements() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. Foo AS \"org.Foo\" INHERITS FROM Base IMPLEMENTS IfaceA.\nEND CLASS Foo.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let class = &unit.classes[0];
+            assert_eq!(class.name.text, "Foo");
+            assert!(class
+                .external
+                .as_ref()
+                .is_some_and(|n| n.text.contains("org.Foo")));
+            assert_eq!(texts(&class.inherits), ["Base"]);
+            assert_eq!(texts(&class.implements), ["IfaceA"]);
+        }
+
+        #[test]
+        fn class_factory_and_object_methods_keep_their_section() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. C.\nFACTORY.\nMETHOD-ID. Make.\nEND METHOD Make.\nEND FACTORY.\nOBJECT.\nMETHOD-ID. Get.\nEND METHOD Get.\nEND OBJECT.\nEND CLASS C.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let class = &unit.classes[0];
+            let factory = class.factory.as_ref().unwrap();
+            assert_eq!(factory.methods[0].name.text, "Make");
+            assert!(factory.methods[0].factory);
+            let object = class.object.as_ref().unwrap();
+            assert_eq!(object.methods[0].name.text, "Get");
+            assert!(!object.methods[0].factory);
+        }
+
+        #[test]
+        fn class_missing_end_class_is_one_diagnostic_and_keeps_the_class() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. A.\nOBJECT.\nEND OBJECT.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert_eq!(unit.classes[0].name.text, "A");
+            assert!(unit.classes[0].object.is_some());
+            assert_eq!(diags.len(), 1, "{diags:?}");
+        }
+
+        #[test]
+        fn interface_inherits_from_and_using_params() {
+            let text = "IDENTIFICATION DIVISION.\nINTERFACE-ID. Bar INHERITS FROM Base1 Base2 USING Param1 Param2.\nEND INTERFACE Bar.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let interface = &unit.interfaces[0];
+            assert_eq!(interface.name.text, "Bar");
+            assert_eq!(texts(&interface.inherits), ["Base1", "Base2"]);
+            assert_eq!(texts(&interface.using), ["Param1", "Param2"]);
+        }
+
+        #[test]
+        fn interface_prototypes_are_its_method_ids() {
+            let text = "IDENTIFICATION DIVISION.\nINTERFACE-ID. Bar.\nMETHOD-ID. Run.\nEND METHOD Run.\nMETHOD-ID. Stop.\nEND METHOD Stop.\nEND INTERFACE Bar.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let protos: Vec<&str> = unit.interfaces[0]
+                .prototypes
+                .iter()
+                .map(|p| p.name.text.as_str())
+                .collect();
+            assert_eq!(protos, ["Run", "Stop"]);
+        }
+
+        #[test]
+        fn repository_entries_in_a_class_and_a_program() {
+            let class = "IDENTIFICATION DIVISION.\nCLASS-ID. C.\nENVIRONMENT DIVISION.\nCONFIGURATION SECTION.\nREPOSITORY.\n    CLASS Foo AS \"x.Foo\"\n    INTERFACE Bar.\nEND CLASS C.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, class);
+            assert!(diags.is_empty(), "{diags:?}");
+            let repo = &unit.classes[0].repository;
+            assert_eq!(
+                texts(&repo.iter().map(|r| r.name.clone()).collect::<Vec<_>>()),
+                ["Foo", "Bar"]
+            );
+            assert!(repo[0].external.is_some() && repo[1].external.is_none());
+
+            let program = "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nENVIRONMENT DIVISION.\nCONFIGURATION SECTION.\nREPOSITORY.\n    CLASS Foo AS \"x.Foo\"\n    INTERFACE Bar.\nEND PROGRAM P.\n";
+            let (unit, _) = parse_oo(Dialect::Cobol2002, program);
+            let repo = &unit.programs[0].repository;
+            assert_eq!(
+                texts(&repo.iter().map(|r| r.name.clone()).collect::<Vec<_>>()),
+                ["Foo", "Bar"]
+            );
+            let (unit, _) = parse_oo(Dialect::Cobol85, program);
+            assert!(unit.programs[0].repository.is_empty());
+        }
+
+        #[test]
+        fn object_reference_is_typed_or_untyped_at_01_and_77() {
+            let text = with_data("01 R OBJECT REFERENCE Foo.\n01 U OBJECT REFERENCE.\n77 S OBJECT REFERENCE Bar.\n77 T OBJECT REFERENCE.\n");
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let entries = working(&unit);
+            assert_eq!(names(entries), ["R", "U", "S", "T"]);
+            assert_eq!(object_class(&entries[0]), Some("Foo"));
+            assert!(entries[1]
+                .object_reference
+                .as_ref()
+                .is_some_and(|o| o.class.is_none()));
+            assert_eq!(object_class(&entries[2]), Some("Bar"));
+            assert!(entries[3]
+                .object_reference
+                .as_ref()
+                .is_some_and(|o| o.class.is_none()));
+        }
+
+        #[test]
+        fn property_clause_before_pic_in_either_as_and_no_set_order() {
+            let text = with_data("01 P PROPERTY AS \"pname\" WITH NO SET PIC X.\n01 Q PROPERTY WITH NO SET AS \"qname\" PIC X.\n01 N PROPERTY PIC X.\n");
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let entries = working(&unit);
+            let p = entries[0].property.as_ref().unwrap();
+            assert!(p.as_name.as_ref().is_some_and(|n| n.text.contains("pname")));
+            assert!(p.no_set);
+            let q = entries[1].property.as_ref().unwrap();
+            assert!(q.as_name.as_ref().is_some_and(|n| n.text.contains("qname")));
+            assert!(q.no_set);
+            let n = entries[2].property.as_ref().unwrap();
+            assert!(n.as_name.is_none() && !n.no_set);
+            assert!(entries[0].pic.is_some() && entries[1].pic.is_some());
+        }
+
+        #[test]
+        fn invoke_receivers_are_self_super_null_and_a_name() {
+            let text = with_procedure("    INVOKE SELF \"Run\".\n    INVOKE SUPER \"Run\".\n    INVOKE NULL \"Run\".\n    INVOKE Obj \"Run\".\n");
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 4);
+            assert!(matches!(invoke(stmts[0]).0, Receiver::Self_));
+            assert!(matches!(invoke(stmts[1]).0, Receiver::Super));
+            assert!(matches!(invoke(stmts[2]).0, Receiver::Null));
+            assert!(matches!(invoke(stmts[3]).0, Receiver::Name(q) if q.name.text == "Obj"));
+            assert!(matches!(invoke(stmts[0]).1, CallTarget::Literal(m) if m.text.contains("Run")));
+        }
+
+        #[test]
+        fn invoke_method_may_be_an_identifier() {
+            let text = with_procedure("    INVOKE Obj Run-Method.\n");
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert!(
+                matches!(invoke(stmts[0]).1, CallTarget::Identifier(q) if q.name.text == "Run-Method")
+            );
+        }
+
+        #[test]
+        fn invoke_using_and_returning_names_are_references_but_the_receiver_is_not() {
+            let text = with_procedure("    INVOKE Obj \"Run\" USING A B RETURNING R.\n");
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmt = statements(&unit)[0];
+            let (_, _, using, returning) = invoke(stmt);
+            assert_eq!(qnames(using), ["A", "B"]);
+            assert_eq!(returning.map(|q| q.name.text.as_str()), Some("R"));
+            let refs = qnames(&stmt.refs);
+            assert!(refs.contains(&"A") && refs.contains(&"B") && refs.contains(&"R"));
+            assert!(!refs.contains(&"Obj"));
+        }
+
+        #[test]
+        fn invoke_as_an_operand_is_an_ordinary_name_under_every_dialect() {
+            let text = with_procedure("    MOVE INVOKE TO X.\n");
+            for dialect in ALL_DIALECTS {
+                let (unit, diags) = parse_oo(dialect, &text);
+                assert!(diags.is_empty(), "{dialect:?} {diags:?}");
+                let stmts = statements(&unit);
+                assert_eq!(stmts.len(), 1, "{dialect:?}");
+                assert_eq!(qnames(&stmts[0].refs), ["INVOKE", "X"], "{dialect:?}");
+            }
+        }
+
+        #[test]
+        fn raise_names_a_condition_or_an_object_and_takes_no_refs() {
+            let text = with_procedure("    RAISE EXCEPTION Bad-Cond.\n    RAISE Obj.\n");
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(
+                &stmts[0].transfer,
+                Some(Transfer::Raise(RaiseTarget::ExceptionName(n))) if n.text == "Bad-Cond"
+            ));
+            assert!(matches!(
+                &stmts[1].transfer,
+                Some(Transfer::Raise(RaiseTarget::Object(q))) if q.name.text == "Obj"
+            ));
+            assert!(stmts[0].refs.is_empty() && stmts[1].refs.is_empty());
+        }
+
+        #[test]
+        fn raise_and_invoke_carry_no_oo_transfer_under_cobol85() {
+            let text = with_procedure("    INVOKE Obj \"Run\".\n    RAISE EXCEPTION Bad-Cond.\n");
+            let (unit, _) = parse_oo(Dialect::Cobol85, &text);
+            for stmt in statements(&unit) {
+                assert!(!matches!(
+                    stmt.transfer,
+                    Some(Transfer::Invoke { .. } | Transfer::Raise(_))
+                ));
+            }
+        }
+
+        #[test]
+        fn oo_clauses_are_not_parsed_under_cobol85() {
+            let text = with_data("01 R OBJECT REFERENCE Foo.\n01 P PROPERTY AS \"x\" PIC X.\n");
+            let (unit, _) = parse_oo(Dialect::Cobol85, &text);
+            let entries = working(&unit);
+            assert!(entries[0].object_reference.is_none());
+            assert!(entries[1].property.is_none());
+            assert!(entries[1].pic.is_some());
+        }
+
+        #[test]
+        fn oo_units_are_recognised_on_every_oo_dialect_and_not_under_cobol85() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. Foo.\nEND CLASS Foo.\nIDENTIFICATION DIVISION.\nINTERFACE-ID. Bar.\nEND INTERFACE Bar.\n";
+            for dialect in ALL_DIALECTS {
+                let (unit, _) = parse_oo(dialect, text);
+                if dialect == Dialect::Cobol85 {
+                    assert!(unit.classes.is_empty() && unit.interfaces.is_empty());
+                } else {
+                    assert_eq!(unit.classes.len(), 1, "{dialect:?}");
+                    assert_eq!(unit.interfaces.len(), 1, "{dialect:?}");
+                }
+            }
+        }
+
+        #[test]
+        fn oo_words_are_data_names_under_every_dialect() {
+            let text = with_data(
+                "01 OBJECT PIC X.\n01 METHOD PIC X.\n01 PROPERTY PIC X.\n01 INVOKE PIC X.\n",
+            );
+            for dialect in ALL_DIALECTS {
+                let (unit, diags) = parse_oo(dialect, &text);
+                assert!(diags.is_empty(), "{dialect:?} {diags:?}");
+                let entries = working(&unit);
+                assert_eq!(
+                    names(entries),
+                    ["OBJECT", "METHOD", "PROPERTY", "INVOKE"],
+                    "{dialect:?}"
+                );
+                assert!(entries
+                    .iter()
+                    .all(|e| e.property.is_none() && e.object_reference.is_none()));
+            }
         }
     }
 }
