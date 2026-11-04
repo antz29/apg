@@ -3251,6 +3251,150 @@ mod unit {
             }
         }
     }
+
+    mod resolve_within {
+        use super::*;
+        use crate::resolve::{Proc, ProcKind, Resolution, Scope};
+
+        /// A program scope of `procs` (kind, name, owning section); a section's block ends at the next section.
+        fn scope(procs: &[(ProcKind, &str, Option<usize>)]) -> Scope {
+            let mut out: Vec<Proc> = procs
+                .iter()
+                .map(|&(kind, name, section)| Proc {
+                    kind,
+                    name: name.to_string(),
+                    section,
+                    last: 0,
+                })
+                .collect();
+            let mut next = out.len();
+            for i in (0..out.len()).rev() {
+                if out[i].kind == ProcKind::Section {
+                    out[i].last = next - 1;
+                    next = i;
+                } else {
+                    out[i].last = i;
+                }
+            }
+            Scope {
+                name: "PROG".to_string(),
+                parent: None,
+                procs: out,
+                records: Vec::new(),
+            }
+        }
+
+        /// SAME is a paragraph of both S-ONE and S-TWO; S-THREE holds no SAME.
+        fn duplicated() -> Scope {
+            scope(&[
+                (ProcKind::Paragraph, "U-PARA", None),
+                (ProcKind::Section, "S-ONE", None),
+                (ProcKind::Paragraph, "SAME", Some(1)),
+                (ProcKind::Section, "S-TWO", None),
+                (ProcKind::Paragraph, "SAME", Some(3)),
+                (ProcKind::Section, "S-THREE", None),
+            ])
+        }
+
+        /// A procedure name as written, with its qualifiers.
+        fn qn(text: &str, quals: &[&str]) -> crate::ast::QualifiedName {
+            let mut map = SourceMap::default();
+            let file = map.add_file("p.cob");
+            let at = crate::source_map::Origin {
+                file,
+                line: 1,
+                col: 1,
+            };
+            let span = crate::ast::Span { start: at, end: at };
+            let word = |t: &str| crate::ast::Name {
+                text: t.to_string(),
+                span,
+            };
+            crate::ast::QualifiedName {
+                name: word(text),
+                qualifiers: quals.iter().map(|q| word(q)).collect(),
+            }
+        }
+
+        #[test]
+        fn duplicate_resolves_to_its_own_section_for_perform_and_go_to() {
+            let s = duplicated();
+            // PERFORM and GO TO both resolve through resolve_within (resolve is the None case).
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &[]), Some(1)),
+                Resolution::One(2)
+            );
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &[]), Some(3)),
+                Resolution::One(4)
+            );
+        }
+
+        #[test]
+        fn thru_endpoint_duplicate_resolves_within_the_section() {
+            let s = duplicated();
+            assert_eq!(
+                s.range_within(&qn("SAME", &[]), &qn("SAME", &[]), Some(3)),
+                Resolution::Range(vec![4])
+            );
+            // U-PARA THRU SAME from S-ONE covers U-PARA and SAME's paragraph, not S-ONE itself.
+            assert_eq!(
+                s.range_within(&qn("U-PARA", &[]), &qn("SAME", &[]), Some(1)),
+                Resolution::Range(vec![0, 2])
+            );
+        }
+
+        #[test]
+        fn duplicate_stays_ambiguous_outside_both_sections_and_unsectioned() {
+            let s = duplicated();
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &[]), None),
+                Resolution::Ambiguous
+            );
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &[]), Some(5)),
+                Resolution::Ambiguous
+            );
+            assert_eq!(
+                s.range_within(&qn("SAME", &[]), &qn("SAME", &[]), None),
+                Resolution::Ambiguous
+            );
+            assert_eq!(
+                s.range_within(&qn("SAME", &[]), &qn("SAME", &[]), Some(5)),
+                Resolution::Ambiguous
+            );
+        }
+
+        #[test]
+        fn qualified_names_resolve_as_before() {
+            let s = duplicated();
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &["S-TWO"]), Some(1)),
+                Resolution::One(4)
+            );
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &["S-ONE"]), Some(3)),
+                Resolution::One(2)
+            );
+            assert_eq!(
+                s.resolve_within(&qn("SAME", &["S-THREE"]), Some(1)),
+                Resolution::Undefined
+            );
+        }
+
+        #[test]
+        fn undefined_stays_undefined() {
+            let s = duplicated();
+            assert_eq!(
+                s.resolve_within(&qn("NOPE", &[]), Some(1)),
+                Resolution::Undefined
+            );
+            assert_eq!(
+                s.resolve_within(&qn("NOPE", &[]), None),
+                Resolution::Undefined
+            );
+        }
+    }
 }
 
 fn search() -> crate::preprocess::Search {
