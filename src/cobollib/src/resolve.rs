@@ -156,8 +156,8 @@ impl Scope {
     }
 
     /// Resolves a data name to the index in `records` of the record holding it: a record's own
-    /// name, or an item beneath it whose qualifiers name enclosing entries. Zero or several
-    /// records give `None`, never a guess.
+    /// name, or an item beneath it whose qualifiers name enclosing entries. Condition names (88)
+    /// are not storage and never resolve. Zero or several records give `None`, never a guess.
     pub fn data(&self, name: &QualifiedName) -> Option<usize> {
         let hits: Vec<usize> = (0..self.records.len())
             .filter(|&i| holds(&self.records[i], name, &[]))
@@ -249,7 +249,11 @@ fn call_hit(hits: &[usize]) -> CallResolution {
 /// Whether `entry` or an item beneath it is named `name`, with every qualifier among the names
 /// `enclosing` (the entries above it, `entry` itself excluded).
 fn holds(entry: &DataEntry, name: &QualifiedName, enclosing: &[&str]) -> bool {
-    let own = entry.name.as_ref().map(|n| n.text.as_str());
+    let own = entry
+        .name
+        .as_ref()
+        .filter(|_| entry.level != 88)
+        .map(|n| n.text.as_str());
     if own.is_some_and(|n| n.eq_ignore_ascii_case(&name.name.text))
         && name
             .qualifiers

@@ -7,7 +7,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
-use crate::ast::{CallTarget, Paragraph, ProcRange, Program, Section, Span, Statement, Transfer};
+use crate::ast::{
+    CallTarget, DataEntry, Paragraph, ProcRange, Program, QualifiedName, Section, Span, Statement,
+    Transfer,
+};
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
 use crate::parser::parse_compilation_unit;
@@ -59,12 +62,17 @@ pub enum Rec {
         to: String,
         properties: BTreeMap<String, String>,
     },
-    /// A `PERFORM` or `GO TO` naming a section: the section's Struct.
+    /// A `PERFORM` or `GO TO` naming a section, or a data reference to a record: the target's Struct.
     Uses {
         from: String,
         to: String,
     },
     UnresolvedCall {
+        from: String,
+        to: String,
+    },
+    /// A data name a statement references that is neither a record nor declared in its program.
+    UnresolvedUse {
         from: String,
         to: String,
     },
@@ -119,6 +127,14 @@ struct Pending {
     range: ProcRange,
 }
 
+/// A data name a statement references, awaiting resolution against its program's records: its
+/// enclosing paragraph's id, its program's scope index, and the name as written.
+struct PendingRef {
+    scope: usize,
+    from: String,
+    name: QualifiedName,
+}
+
 /// One file's text with its line-start offsets, for `(line, col)` to byte conversion.
 struct Text {
     src: String,
@@ -171,6 +187,11 @@ struct Locate<'a> {
     ids: Vec<Vec<Option<String>>>,
     pending: Vec<Pending>,
     calls: Vec<PendingCall>,
+    /// Per scope, the emitted id of each 01-level record by its upper-cased name (first kept).
+    data_ids: Vec<BTreeMap<String, String>>,
+    /// Per scope, every data name its DATA DIVISION declares at any level, upper-cased.
+    declared: Vec<BTreeSet<String>>,
+    data_refs: Vec<PendingRef>,
     /// This file's index in `Emitter::maps`.
     file: usize,
     diags: Vec<Diagnostic>,
@@ -318,13 +339,22 @@ impl Emitter {
         loc.enter();
         let (id, scope) = self.structure(loc, &p.name.text, p.span, parent, up);
         self.programs.push((p.name.text.clone(), id.clone()));
+        let mut records = BTreeMap::new();
+        let mut declared = BTreeSet::new();
         if let Some(data) = &p.data {
-            for entry in data.sections.iter().flat_map(|s| &s.entries) {
-                if let (1, Some(name)) = (entry.level, &entry.name) {
-                    self.structure(loc, &name.text, entry.span, &scope, Some(&id));
+            for section in &data.sections {
+                declared_names(&section.entries, &mut declared);
+                for entry in &section.entries {
+                    if let (1, Some(name)) = (entry.level, &entry.name) {
+                        let (rec, _) =
+                            self.structure(loc, &name.text, entry.span, &scope, Some(&id));
+                        records.entry(name.text.to_ascii_uppercase()).or_insert(rec);
+                    }
                 }
             }
         }
+        loc.data_ids.push(records);
+        loc.declared.push(declared);
         if let Some(proc) = &p.procedure {
             for section in proc.declaratives.iter().chain(&proc.sections) {
                 self.section(loc, section, &scope, &id);
@@ -438,6 +468,41 @@ impl Emitter {
                 }
             }
         }
+        let mut linked = BTreeSet::new();
+        let mut reported = BTreeSet::new();
+        for r in std::mem::take(&mut loc.data_refs) {
+            let scope = &loc.scopes[r.scope];
+            let record = scope.data(&r.name).and_then(|i| {
+                let key = scope.records[i].name.as_ref()?.text.to_ascii_uppercase();
+                loc.data_ids[r.scope].get(&key)
+            });
+            let name = &r.name.name.text;
+            match record {
+                Some(to) => {
+                    if linked.insert((r.from.clone(), to.clone())) {
+                        self.recs.push(Rec::Uses {
+                            from: r.from,
+                            to: to.clone(),
+                        });
+                    }
+                }
+                None if loc.declared[r.scope].contains(&name.to_ascii_uppercase()) => {}
+                None => {
+                    if reported.insert((r.from.clone(), name.clone())) {
+                        if self.unresolved.insert(name.clone()) {
+                            self.recs.push(Rec::Unresolved {
+                                fqn: name.clone(),
+                                category: "unknown".to_string(),
+                            });
+                        }
+                        self.recs.push(Rec::UnresolvedUse {
+                            from: r.from,
+                            to: name.clone(),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     fn push_call(&mut self, from: String, to: String, kind: &str) {
@@ -543,6 +608,9 @@ impl Emitter {
             ids: Vec::new(),
             pending: Vec::new(),
             calls: Vec::new(),
+            data_ids: Vec::new(),
+            declared: Vec::new(),
+            data_refs: Vec::new(),
             file,
             diags: Vec::new(),
         };
@@ -563,8 +631,9 @@ impl Emitter {
 
     /// Keeps only the facts of the `targets` files (File records and the Struct/Function
     /// records located in them). A Module stays when a kept File sits in it; a `contains`
-    /// edge stays when both ends do; a control-transfer edge stays when its source does, and
-    /// an `unresolved` target when a kept `unresolved_call` names it.
+    /// edge stays when both ends do; a control-transfer or data `uses` edge stays when both
+    /// ends do, and an unresolved-use edge when its source does; an `unresolved` target when a
+    /// kept `unresolved_call` or `unresolved_use` names it.
     pub fn retain_targets(&mut self, targets: &HashSet<String>) {
         self.recs.retain(|r| match r {
             Rec::File { path, .. } | Rec::Struct { path, .. } | Rec::Function { path, .. } => {
@@ -575,6 +644,7 @@ impl Emitter {
             | Rec::Calls { .. }
             | Rec::Uses { .. }
             | Rec::UnresolvedCall { .. }
+            | Rec::UnresolvedUse { .. }
             | Rec::Unresolved { .. } => true,
         });
         let ids: BTreeSet<String> = self
@@ -599,19 +669,21 @@ impl Emitter {
             Rec::Calls { from, to, .. } | Rec::Uses { from, to } => {
                 ids.contains(from) && ids.contains(to)
             }
-            Rec::UnresolvedCall { from, .. } => ids.contains(from),
+            Rec::UnresolvedCall { from, .. } | Rec::UnresolvedUse { from, .. } => {
+                ids.contains(from)
+            }
             _ => true,
         });
-        let called: BTreeSet<String> = self
+        let named: BTreeSet<String> = self
             .recs
             .iter()
             .filter_map(|r| match r {
-                Rec::UnresolvedCall { to, .. } => Some(to.clone()),
+                Rec::UnresolvedCall { to, .. } | Rec::UnresolvedUse { to, .. } => Some(to.clone()),
                 _ => None,
             })
             .collect();
         self.recs.retain(|r| match r {
-            Rec::Unresolved { fqn, .. } => called.contains(fqn),
+            Rec::Unresolved { fqn, .. } => named.contains(fqn),
             _ => true,
         });
     }
@@ -692,10 +764,16 @@ fn value_flag(arg: &str) -> bool {
 /// Queues the `PERFORM`, `SORT`/`MERGE` procedure and `GO TO` names of `statements`, branches
 /// included, from the paragraph `from` of the current scope. A `PERFORM` without a target is
 /// inline; `RESUME AT` queues kind `resume`; `RESUME NEXT STATEMENT` has no transfer. A `CALL`
-/// is queued as a [`PendingCall`].
+/// is queued as a [`PendingCall`]; each operand data name as a [`PendingRef`].
 fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
     let scope = loc.scope;
     for statement in statements {
+        loc.data_refs
+            .extend(statement.refs.iter().map(|name| PendingRef {
+                scope,
+                from: from.to_string(),
+                name: name.clone(),
+            }));
         match &statement.transfer {
             Some(Transfer::Perform(Some(range))) => loc.pending.push(Pending {
                 scope,
@@ -751,6 +829,16 @@ fn absolutize(path: &Path) -> PathBuf {
             std::env::current_dir().map_or_else(|_| path.to_path_buf(), |d| d.join(path))
         }
     })
+}
+
+/// Adds the upper-cased name of each entry in `entries`, and beneath it, to `out`.
+fn declared_names(entries: &[DataEntry], out: &mut BTreeSet<String>) {
+    for entry in entries {
+        if let Some(name) = &entry.name {
+            out.insert(name.text.to_ascii_uppercase());
+        }
+        declared_names(&entry.children, out);
+    }
 }
 
 /// The COBOL source extensions, in any letter case.

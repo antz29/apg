@@ -3326,4 +3326,97 @@ mod int {
             "{diags:?}"
         );
     }
+
+    /// Program `name` with records `REC` (items `F`, `F2`) and `CODES` (condition `ON-CODE`),
+    /// a 77 `LONE`, and MAIN-PARA holding `body`, one statement per line.
+    fn data_prog(name: &str, body: &[&str]) -> String {
+        let mut lines = vec![
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, &format!("PROGRAM-ID. {name}.")),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 REC."),
+            at(12, "05 F PIC X."),
+            at(12, "05 F2 PIC X."),
+            at(8, "77 LONE PIC X."),
+            at(8, "01 CODES PIC X."),
+            at(12, "88 ON-CODE VALUE 'Y'."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+        ];
+        lines.extend(body.iter().map(|b| at(12, b)));
+        lines.join("\n")
+    }
+
+    #[test]
+    fn data_refs_use_their_record_qualified_or_not() {
+        let text = data_prog(
+            "PROG",
+            &[
+                "MOVE F OF REC TO F2.",
+                "MOVE F2 IN REC TO LONE.",
+                "ACCEPT CODES FROM DATE.",
+                "STOP RUN.",
+            ],
+        );
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        let mut want = vec![
+            serde_json::json!({"type":"uses","from":main,"to":id_of(&recs,"REC")}),
+            serde_json::json!({"type":"uses","from":main,"to":id_of(&recs,"CODES")}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+        assert!(
+            !recs.iter().any(|r| r["type"] == "unresolved_use"),
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_data_name_is_an_unresolved_use_of_its_procedure() {
+        let text = data_prog("PROG", &["MOVE NOPE TO CODES."]);
+        let (recs, _) = scan_text("/root/prog.cob", &text, &[]);
+        let main = id_of(&recs, "MAIN-PARA");
+        assert!(recs
+            .contains(&serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"unknown"})));
+        assert!(
+            recs.contains(&serde_json::json!({"type":"unresolved_use","from":main,"to":"NOPE"}))
+        );
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":main,"to":id_of(&recs,"CODES")})]
+        );
+    }
+
+    #[test]
+    fn declared_77_and_condition_names_draw_no_edge() {
+        let text = data_prog("PROG", &["MOVE LONE TO ON-CODE."]);
+        let (recs, _) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(
+            edges(&recs, &["uses", "unresolved_use"]).is_empty(),
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn targets_keep_an_unresolved_use_only_with_its_procedure() {
+        let a = data_prog("A", &["MOVE NOPE TO F2."]);
+        let b = data_prog("B", &["MOVE NOPE2 TO F2."]);
+        let tree = [("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())];
+        let mut emitter = scan_tree(&tree);
+        let target: std::collections::HashSet<String> =
+            ["/root/a.cob".to_string()].into_iter().collect();
+        emitter.retain_targets(&target);
+        let recs = jsonl(&emitter);
+        let main_a = id_of(&recs, "MAIN-PARA");
+        assert_eq!(
+            edges(&recs, &["unresolved_use"]),
+            [serde_json::json!({"type":"unresolved_use","from":main_a,"to":"NOPE"})]
+        );
+        assert!(recs
+            .contains(&serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"unknown"})));
+        assert!(!recs.iter().any(|r| r["fqn"] == "NOPE2"));
+    }
 }
