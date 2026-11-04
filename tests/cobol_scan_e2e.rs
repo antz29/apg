@@ -251,4 +251,59 @@ mod e2e {
             );
         }
     }
+
+    /// Programs in a subdirectory (`app/`) that COPY a statement-only copybook
+    /// (`lib/STMTS.cpy`) each get a `copy` Uses edge to the copybook File; a
+    /// copybook-only edit followed by a plain re-scan keeps both rows identical.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg); run via cargo test-e2e"]
+    fn copybook_impact_edges_survive_a_copybook_only_rescan() {
+        let repo = Repo::new("cobol-impact");
+        let program = |id: &str| {
+            format!(
+                "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n"
+            )
+        };
+        repo.write("app/A.cob", &program("A"));
+        repo.write("app/B.cob", &program("B"));
+        repo.write("lib/STMTS.cpy", "           DISPLAY 'S'.\n");
+        repo.commit_all("fixture");
+
+        let cypher =
+            "MATCH (s:Struct)-[r:Uses]->(f:File) RETURN s.fqn, f.fqn, r.properties ORDER BY s.fqn";
+        let edges = |rows: &[serde_json::Value]| -> Vec<(String, String, String)> {
+            rows.iter()
+                .map(|r| {
+                    (
+                        r["s.fqn"].as_str().unwrap_or_default().to_string(),
+                        r["f.fqn"].as_str().unwrap_or_default().to_string(),
+                        r["r.properties"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        };
+
+        let (out, log) = scan(&repo, &["--language", "cobol", "--copy-path", "lib"]);
+        assert!(out.status.success(), "scan: {log}");
+        let first = edges(&query_rows(&repo, cypher));
+        let expected = vec![
+            (
+                "cobol.app.A".to_string(),
+                "lib/STMTS.cpy".to_string(),
+                "{\"kind\":\"copy\"}".to_string(),
+            ),
+            (
+                "cobol.app.B".to_string(),
+                "lib/STMTS.cpy".to_string(),
+                "{\"kind\":\"copy\"}".to_string(),
+            ),
+        ];
+        assert_eq!(first, expected, "copy edges after first scan");
+
+        repo.write("lib/STMTS.cpy", "           DISPLAY 'T'.\n");
+        let (out, log) = scan(&repo, &["--language", "cobol", "--copy-path", "lib"]);
+        assert!(out.status.success(), "re-scan: {log}");
+        let second = edges(&query_rows(&repo, cypher));
+        assert_eq!(second, expected, "copybook-only re-scan keeps both rows");
+    }
 }
