@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-dialect-messages-duplicated",
+  "body": "validate_dialect repeats the dialect names and the cobol2023 refusal text of cobolfrontend's Dialect::from_name, because the root crate does not depend on the frontend crate. Limit: a dialect added or renamed in the frontend must be changed here too. Upgrade by sharing one dialect table between the crates if the dialect set grows.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cobol.validate_dialect",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
