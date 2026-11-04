@@ -8,6 +8,7 @@ pub mod lexer;
 pub mod parser;
 pub mod preprocess;
 pub mod replace;
+pub mod resolve;
 pub mod source_map;
 
 #[cfg(test)]

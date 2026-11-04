@@ -2493,4 +2493,113 @@ mod int {
         let paragraphs = &unit.programs[0].procedure.as_ref().unwrap().paragraphs;
         assert_eq!(paragraphs[0].name.text, "MAIN-PARA");
     }
+
+    use crate::resolve::{ProcKind, Resolution};
+
+    /// Sections, unsectioned paragraphs and PERFORMs; the procs are U-PARA, S-ONE{P-ONE,P-TWO}, S-TWO{P-THREE}.
+    const SECTIONED: &str = "IDENTIFICATION DIVISION.\nPROGRAM-ID. PROG.\nPROCEDURE DIVISION.\nU-PARA.\n    PERFORM S-TWO.\n    PERFORM P-ONE THRU P-THREE.\n    PERFORM S-ONE THRU S-TWO.\n    PERFORM P-TWO OF S-ONE.\n    PERFORM NOPE.\nS-ONE SECTION.\nP-ONE.\n    DISPLAY X.\nP-TWO.\n    DISPLAY X.\nS-TWO SECTION.\nP-THREE.\n    DISPLAY X.\n";
+
+    /// The PERFORM ranges of a program's procedure division, in source order.
+    fn performs(program: &crate::ast::Program) -> Vec<crate::ast::ProcRange> {
+        let Some(div) = &program.procedure else {
+            return Vec::new();
+        };
+        let declaratives = div.declaratives.iter().flat_map(|s| s.paragraphs.iter());
+        let sectioned = div.sections.iter().flat_map(|s| s.paragraphs.iter());
+        declaratives
+            .chain(div.paragraphs.iter())
+            .chain(sectioned)
+            .flat_map(|p| p.sentences.iter().flat_map(|s| s.statements.iter()))
+            .filter_map(|st| match &st.transfer {
+                Some(Transfer::Perform(Some(range))) => Some(range.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn section_paragraph_index_owns_paragraphs_in_source_order() {
+        let (unit, diags) = parse_file(SECTIONED);
+        assert!(diags.is_empty(), "{diags:?}");
+        let scopes = crate::resolve::scopes(&unit);
+        let procs = &scopes[0].procs;
+        let index: Vec<(&str, ProcKind, Option<usize>)> = procs
+            .iter()
+            .map(|p| (p.name.as_str(), p.kind, p.section))
+            .collect();
+        assert_eq!(
+            index,
+            [
+                ("U-PARA", ProcKind::Paragraph, None),
+                ("S-ONE", ProcKind::Section, None),
+                ("P-ONE", ProcKind::Paragraph, Some(1)),
+                ("P-TWO", ProcKind::Paragraph, Some(1)),
+                ("S-TWO", ProcKind::Section, None),
+                ("P-THREE", ProcKind::Paragraph, Some(4)),
+            ]
+        );
+        assert_eq!((procs[1].last, procs[4].last), (3, 5));
+    }
+
+    #[test]
+    fn perform_resolves_one_paragraph_or_section_and_qualified_names() {
+        let (unit, _) = parse_file(SECTIONED);
+        let scope = &crate::resolve::scopes(&unit)[0];
+        let targets: Vec<Resolution> = performs(&unit.programs[0])
+            .iter()
+            .map(|r| scope.resolve(&r.from))
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                Resolution::One(4),
+                Resolution::One(2),
+                Resolution::One(1),
+                Resolution::One(3),
+                Resolution::Undefined,
+            ]
+        );
+    }
+
+    #[test]
+    fn perform_thru_spans_paragraphs_across_section_boundaries() {
+        let (unit, _) = parse_file(SECTIONED);
+        let scope = &crate::resolve::scopes(&unit)[0];
+        let ranges = performs(&unit.programs[0]);
+        let thru = |i: usize| scope.range(&ranges[i].from, ranges[i].thru.as_ref().unwrap());
+        // P-ONE THRU P-THREE crosses S-ONE into S-TWO; S-ONE THRU S-TWO covers both sections' paragraphs.
+        assert_eq!(thru(1), Resolution::Range(vec![2, 3, 5]));
+        assert_eq!(thru(2), Resolution::Range(vec![2, 3, 5]));
+    }
+
+    #[test]
+    fn duplicate_unqualified_name_is_ambiguous_and_qualifying_picks_one() {
+        let (unit, diags) = parse_file(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. DUP.\nPROCEDURE DIVISION.\nU-PARA.\n    PERFORM SAME.\n    PERFORM SAME OF S-TWO.\nS-ONE SECTION.\nSAME.\n    DISPLAY X.\nS-TWO SECTION.\nSAME.\n    DISPLAY X.\n",
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        let scope = &crate::resolve::scopes(&unit)[0];
+        let ranges = performs(&unit.programs[0]);
+        assert_eq!(scope.resolve(&ranges[0].from), Resolution::Ambiguous);
+        assert_eq!(scope.resolve(&ranges[1].from), Resolution::One(4));
+    }
+
+    #[test]
+    fn nested_program_names_stay_in_their_own_scope() {
+        let (unit, diags) = parse_file(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. OUTER.\nPROCEDURE DIVISION.\nO-PARA.\n    PERFORM IN-PARA.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. INNER.\nPROCEDURE DIVISION.\nIN-PARA.\n    PERFORM O-PARA.\nEND PROGRAM INNER.\nEND PROGRAM OUTER.\n",
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        let scopes = crate::resolve::scopes(&unit);
+        assert_eq!(scopes.len(), 2);
+        assert_eq!(
+            (scopes[1].name.as_str(), scopes[1].parent),
+            ("INNER", Some(0))
+        );
+        let outer_call = &performs(&unit.programs[0])[0].from;
+        assert_eq!(scopes[0].resolve(outer_call), Resolution::Undefined);
+        let inner_call = &performs(&unit.programs[0].nested[0])[0].from;
+        assert_eq!(scopes[1].resolve(inner_call), Resolution::Undefined);
+        assert_eq!(scopes[1].procs[0].name, "IN-PARA");
+    }
 }
