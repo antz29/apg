@@ -160,8 +160,11 @@ mod unit {
             "md./abs/docs"
         );
         // An empty parent is left empty — never the bare `<language>.` root.
-        assert_eq!(rooted_scope("rust", "", base), "");
-        assert_eq!(rooted_scope("rust", "apg", base), "rust.apg");
+        assert_eq!(rooted_scope("rust", "", &HashMap::new(), base), "");
+        assert_eq!(
+            rooted_scope("rust", "apg", &HashMap::new(), base),
+            "rust.apg"
+        );
     }
 
     /// cobol-frontend task-31: a COBOL program in a root-level file has an
@@ -172,12 +175,12 @@ mod unit {
     #[test]
     fn cobol_root_level_declarations_root_under_cobol() {
         let base = Path::new("/repo");
-        assert_eq!(rooted_scope("cobol", "", base), "cobol.");
+        assert_eq!(rooted_scope("cobol", "", &HashMap::new(), base), "cobol.");
         assert_eq!(
-            format!("{}.PROG", rooted_scope("cobol", "", base)),
+            format!("{}.PROG", rooted_scope("cobol", "", &HashMap::new(), base)),
             "cobol..PROG"
         );
-        assert_eq!(rooted_scope("rust", "", base), "");
+        assert_eq!(rooted_scope("rust", "", &HashMap::new(), base), "");
         let modules: HashMap<String, HashSet<String>> = HashMap::from([(
             "cobol".to_string(),
             HashSet::from(["".to_string(), "src/cobol".to_string()]),
@@ -196,6 +199,43 @@ mod unit {
         );
         assert_eq!(root_edge_endpoint("cobol", "cb12", &modules, base), "cb12");
         assert_eq!(root_edge_endpoint("rust", "PROG", &modules, base), "PROG");
+    }
+
+    /// cobol-frontend task-34: with `""` a known COBOL identity, a root-level
+    /// scope parent (`PROG`, `ACCT`, `PROG.SEC`) roots under the empty root
+    /// module (`cobol..PROG`), while a subdirectory scope with a known module
+    /// prefix (`geo.POINT`) and an empty parent keep their rendering. Without a
+    /// known `""` identity a COBOL parent roots as before, and rust/go scopes
+    /// are unchanged.
+    #[test]
+    fn cobol_root_level_scope_parents_root_under_empty_module() {
+        let base = Path::new("/repo");
+        let modules: HashMap<String, HashSet<String>> = HashMap::from([(
+            "cobol".to_string(),
+            HashSet::from(["".to_string(), "geo".to_string()]),
+        )]);
+        assert_eq!(rooted_scope("cobol", "PROG", &modules, base), "cobol..PROG");
+        assert_eq!(rooted_scope("cobol", "ACCT", &modules, base), "cobol..ACCT");
+        assert_eq!(
+            rooted_scope("cobol", "PROG.SEC", &modules, base),
+            "cobol..PROG.SEC"
+        );
+        assert_eq!(
+            rooted_scope("cobol", "geo.POINT", &modules, base),
+            "cobol.geo.POINT"
+        );
+        assert_eq!(rooted_scope("cobol", "", &modules, base), "cobol.");
+        // No known `""` identity: a COBOL parent roots as before.
+        let no_root: HashMap<String, HashSet<String>> =
+            HashMap::from([("cobol".to_string(), HashSet::from(["geo".to_string()]))]);
+        assert_eq!(rooted_scope("cobol", "PROG", &no_root, base), "cobol.PROG");
+        // Rust and Go scopes never take the root-level path.
+        let rust_go: HashMap<String, HashSet<String>> = HashMap::from([
+            ("rust".to_string(), HashSet::from(["".to_string()])),
+            ("go".to_string(), HashSet::from(["".to_string()])),
+        ]);
+        assert_eq!(rooted_scope("rust", "PROG", &rust_go, base), "rust.PROG");
+        assert_eq!(rooted_scope("go", "", &rust_go, base), "");
     }
 
     /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
@@ -623,7 +663,7 @@ mod int {
             "md.docs"
         );
         // An empty scope stays empty — never a bare `<language>.` root.
-        assert_eq!(rooted_scope("go", "", base), "");
+        assert_eq!(rooted_scope("go", "", &HashMap::new(), base), "");
     }
 
     /// apg-0.17.0 phase-03 task-9: the structural streams' identity chain

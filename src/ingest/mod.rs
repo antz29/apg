@@ -634,7 +634,10 @@ fn ingest_records(
                     start_line,
                     end_line,
                 } => {
-                    let fqn = format!("{}.{name}", rooted_scope(&lang, &parent, base));
+                    let fqn = format!(
+                        "{}.{name}",
+                        rooted_scope(&lang, &parent, &module_identities, base)
+                    );
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     let identity = repo_relative_identity(base, &path);
@@ -675,7 +678,7 @@ fn ingest_records(
                     end_line,
                 } => funcs.push(FuncDecl {
                     id,
-                    parent: rooted_scope(&lang, &parent, base),
+                    parent: rooted_scope(&lang, &parent, &module_identities, base),
                     name,
                     params,
                     file,
@@ -708,7 +711,7 @@ fn ingest_records(
                         if parent.is_empty() && crate::classify::is_structural_language(&lang) {
                             root_module_fqn(&lang, "", base)
                         } else {
-                            rooted_scope(&lang, &parent, base)
+                            rooted_scope(&lang, &parent, &module_identities, base)
                         };
                     let identity = repo_relative_identity(base, &path);
                     if is_blacklisted(&parent, Some(&identity), &lang, opts) {
