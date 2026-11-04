@@ -4566,6 +4566,62 @@ mod int {
             .any(|d| format!("{d:?}").contains("goto NOPE names no procedure")));
     }
 
+    /// The NC208A shape: S-ONE and S-TWO each hold a paragraph PAR-3C, and P-START in S-ONE
+    /// runs `stmt`. The SAME expectations for an unsectioned caller stay in the tests above.
+    fn same_section_text(stmt: &str) -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "S-ONE SECTION."),
+            at(8, "P-START."),
+            at(12, stmt),
+            at(8, "PAR-3C."),
+            at(12, "DISPLAY X."),
+            at(8, "S-TWO SECTION."),
+            at(8, "PAR-3C."),
+            at(12, "DISPLAY X."),
+        ]
+        .join("\n")
+    }
+
+    /// `stmt` from P-START in S-ONE gives one `kind` calls edge to S-ONE's PAR-3C, with no
+    /// diagnostic and no unresolved record naming PAR-3C.
+    fn assert_same_section(stmt: &str, kind: &str) {
+        let (recs, diags) = scan_text("/root/prog.cob", &same_section_text(stmt), &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(!recs.iter().any(
+            |r| r["type"].as_str().unwrap_or("").starts_with("unresolved")
+                && (r["fqn"] == "PAR-3C" || r["to"] == "PAR-3C")
+        ));
+        let pars: Vec<String> = recs
+            .iter()
+            .filter(|r| r["name"] == "PAR-3C")
+            .filter_map(|r| r["id"].as_str().map(str::to_string))
+            .collect();
+        assert_eq!(pars.len(), 2, "one PAR-3C per section");
+        let p = id_of(&recs, "P-START");
+        let want = vec![
+            serde_json::json!({"type":"calls","from":p,"to":pars[0],"properties":{"kind":kind}}),
+        ];
+        assert_eq!(edges(&recs, &["calls", "uses"]), want);
+    }
+
+    #[test]
+    fn go_to_inside_a_section_resolves_to_its_own_section_paragraph() {
+        assert_same_section("GO TO PAR-3C.", "goto");
+    }
+
+    #[test]
+    fn perform_inside_a_section_resolves_to_its_own_section_paragraph() {
+        assert_same_section("PERFORM PAR-3C.", "perform");
+    }
+
+    #[test]
+    fn perform_thru_with_a_duplicated_endpoint_inside_a_section_resolves_within_it() {
+        assert_same_section("PERFORM PAR-3C THRU PAR-3C.", "perform");
+    }
+
     /// A one-paragraph-performing program `name`, its MAIN-PARA calling P-A.
     fn perform_prog(name: &str) -> String {
         [
