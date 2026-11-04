@@ -576,6 +576,162 @@ mod unit {
         assert!(cursor.at_end());
     }
 
+    /// Lexes `text` under cobol85 and applies its REPLACE statements.
+    fn replaced(text: &str) -> (Vec<Token>, Vec<crate::diag::Diagnostic>) {
+        let (tokens, _) = lex_all(text, fixed(), Dialect::Cobol85);
+        crate::replace::replace("p.cob", tokens)
+    }
+
+    #[test]
+    fn replace_swaps_a_matching_pseudo_text() {
+        let (tokens, diags) = replaced(&at(8, "REPLACE ==A== BY ==B==. DISPLAY A."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn replace_matches_words_case_insensitively() {
+        let (tokens, _) = replaced(&at(8, "REPLACE ==display== BY ==SHOW==. DISPLAY X."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "SHOW"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn replace_ignores_separators_in_the_source_and_the_pattern() {
+        let (tokens, _) = replaced(&at(8, "REPLACE ==A B== BY ==C==. MOVE A, B TO X."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "MOVE"),
+                (TokenKind::Word, "C"),
+                (TokenKind::Word, "TO"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn replaced_token_keeps_the_position_of_the_token_it_replaces() {
+        let text = [at(8, "REPLACE ==A== BY ==B==."), at(8, "DISPLAY A.")].join("\n");
+        let (tokens, _) = replaced(&text);
+        let b = tokens.iter().find(|t| t.text == "B").unwrap();
+        assert_eq!(
+            (b.offset, b.line, b.col),
+            (text.rfind("A.").unwrap(), 2, 16)
+        );
+    }
+
+    #[test]
+    fn replace_applies_only_to_the_text_after_its_statement() {
+        let (tokens, _) = replaced(&at(8, "DISPLAY A. REPLACE ==A== BY ==B==. DISPLAY A."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "A"),
+                (TokenKind::Period, "."),
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn replace_off_stops_replacing() {
+        let (tokens, _) = replaced(&at(
+            8,
+            "REPLACE ==A== BY ==B==. DISPLAY A. REPLACE OFF. DISPLAY A.",
+        ));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Period, "."),
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "A"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_later_replace_statement_replaces_the_earlier_pairs() {
+        let (tokens, _) = replaced(&at(
+            8,
+            "REPLACE ==A== BY ==B==. REPLACE ==C== BY ==D==. DISPLAY A C.",
+        ));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "A"),
+                (TokenKind::Word, "D"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn one_statement_may_hold_several_pairs_and_an_empty_replacement() {
+        let (tokens, _) = replaced(&at(
+            8,
+            "REPLACE ==A== BY ==X== ==C== BY ====. DISPLAY A C B.",
+        ));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_pattern_matches_nothing() {
+        let (tokens, _) = replaced(&at(8, "REPLACE ==,== BY ==B==. DISPLAY A."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "A"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_replace_is_a_diagnostic_and_skips_its_sentence() {
+        let (tokens, diags) = replaced(&at(8, "REPLACE ==A== DISPLAY A. DISPLAY B."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!((diags[0].line, diags[0].col), (1, 8));
+    }
+
     fn diag(message: &str) -> crate::diag::Diagnostic {
         crate::diag::Diagnostic {
             file: "prog.cob".to_string(),
