@@ -150,9 +150,16 @@ impl Pre<'_> {
                 i += 1;
                 continue;
             }
+            // A period inside ==pseudo-text== belongs to the operand, not the statement.
+            let mut quoted = false;
             let end = tokens[i..]
                 .iter()
-                .position(|t| t.kind == TokenKind::Period)
+                .position(|t| {
+                    if t.kind == TokenKind::PseudoDelim {
+                        quoted = !quoted;
+                    }
+                    !quoted && t.kind == TokenKind::Period
+                })
                 .map_or(tokens.len(), |p| i + p + 1);
             out.extend(self.copy(&tokens[i..end], stack));
             i = end;
@@ -252,10 +259,28 @@ impl Pre<'_> {
                 out.push(t.clone());
                 i += 1;
             } else {
-                out.push(self.synth(file, at, TokenKind::PseudoDelim, "=="));
-                out.push(t.clone());
-                out.push(self.synth(file, at, TokenKind::PseudoDelim, "=="));
+                // A word or literal operand, with its OF/IN qualifiers and a subscript.
+                let start = i;
                 i += 1;
+                loop {
+                    if clause
+                        .get(i)
+                        .is_some_and(|q| is_word(q, "OF") || is_word(q, "IN"))
+                    {
+                        i += 2;
+                    } else if clause.get(i).is_some_and(|q| q.kind == TokenKind::LParen) {
+                        while i < clause.len() && clause[i].kind != TokenKind::RParen {
+                            i += 1;
+                        }
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let end = i.min(clause.len());
+                out.push(self.synth(file, at, TokenKind::PseudoDelim, "=="));
+                out.extend_from_slice(&clause[start..end]);
+                out.push(self.synth(file, at, TokenKind::PseudoDelim, "=="));
             }
         }
         out

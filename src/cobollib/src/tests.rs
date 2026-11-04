@@ -1603,6 +1603,54 @@ mod unit {
     }
 
     #[test]
+    fn copy_replacing_keeps_periods_inside_pseudo_text_and_empty_by() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A REPLACING ==A. == BY ====.", "STOP RUN."]),
+            &[("/root/A.cpy", &src(&["DISPLAY A. B."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "B", ".", "STOP", "RUN", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn copy_replacing_takes_multi_line_pseudo_text() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A REPLACING ==DISPLAY X. ==", "BY ==DISPLAY Y. ==."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "Y", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn copy_replacing_takes_qualified_identifier_operands() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A REPLACING X OF Q BY Y IN R COPY-W BY Z."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X OF Q COPY-W."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "Y", "IN", "R", "Z", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn copy_replacing_takes_literal_pairs() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A REPLACING 'X' BY 'Y'."]),
+            &[("/root/A.cpy", &src(&["DISPLAY 'X'."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "Y", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
     fn main_replace_applies_to_copied_text() {
         let (tokens, _) = run(
             "/root/prog.cob",
