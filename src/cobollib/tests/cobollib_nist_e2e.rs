@@ -97,6 +97,34 @@ fn parse_program(path: &Path, dir: &Path) -> Vec<Diagnostic> {
     diags
 }
 
+/// Groups a diagnostic message into one rule: backtick, double- and single-quoted spans become
+/// `` `_` ``/`"_"`/`'_'` and each digit run becomes `N`, so `` `WS-A1` `` and `` `WS-B2` ``
+/// share one rule.
+fn normalise(message: &str) -> String {
+    let mut out = String::new();
+    let mut chars = message.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '`' | '"' | '\'' => {
+                for d in chars.by_ref() {
+                    if d == c {
+                        break;
+                    }
+                }
+                out.extend([c, '_', c]);
+            }
+            '0'..='9' => {
+                while chars.peek().is_some_and(char::is_ascii_digit) {
+                    chars.next();
+                }
+                out.push('N');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 mod e2e {
     use super::*;
 
@@ -107,14 +135,21 @@ mod e2e {
         let programs = corpus(&dir);
         let mut failures = Vec::new();
         let mut obsolete: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut per_module: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut rules: BTreeMap<String, (usize, String)> = BTreeMap::new();
         let mut total_errors = 0;
         for path in &programs {
+            *per_module.entry(group(path)).or_default() += 1;
             let diags = parse_program(path, &dir);
             let (warnings, errors): (Vec<_>, Vec<_>) = diags.iter().partition(|d| is_obsolete(d));
             *obsolete.entry(group(path)).or_default() += warnings.len();
             if !errors.is_empty() {
                 total_errors += errors.len();
-                let first: Vec<String> = errors.iter().take(5).map(|d| d.to_string()).collect();
+                for d in &errors {
+                    let example = format!("{}:{}:{}", d.file, d.line, d.col);
+                    rules.entry(normalise(&d.message)).or_insert((0, example)).0 += 1;
+                }
+                let first: Vec<String> = errors.iter().take(3).map(|d| d.to_string()).collect();
                 failures.push(format!(
                     "{} ({} error-level):\n  {}",
                     path.display(),
@@ -123,13 +158,36 @@ mod e2e {
                 ));
             }
         }
-        assert!(
-            failures.is_empty(),
-            "{} of {} NIST programs have error-level diagnostics ({total_errors} in total):\n{}",
-            failures.len(),
-            programs.len(),
-            failures.join("\n")
+        let mut top: Vec<(String, (usize, String))> = rules.into_iter().collect();
+        top.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then_with(|| a.0.cmp(&b.0)));
+        let modules: Vec<String> = per_module.iter().map(|(m, n)| format!("{m}={n}")).collect();
+        let mut report = vec![
+            format!("NIST summary: {} programs parsed", programs.len()),
+            format!("per module: {}", modules.join(" ")),
+            format!(
+                "programs with errors: {} of {}; error-level diagnostics: {total_errors}",
+                failures.len(),
+                programs.len()
+            ),
+            "top 25 messages (count, normalised rule, example file:line:col):".to_string(),
+        ];
+        report.extend(
+            top.iter()
+                .take(25)
+                .map(|(rule, (n, example))| format!("  {n:>5}  {rule}  e.g. {example}")),
         );
+        report.push(format!(
+            "--- per-program detail (first 40 of {} failing programs, 3 diagnostics each) ---",
+            failures.len()
+        ));
+        report.extend(failures.iter().take(40).cloned());
+        if failures.len() > 40 {
+            report.push(format!(
+                "... {} more failing programs not shown",
+                failures.len() - 40
+            ));
+        }
+        assert!(failures.is_empty(), "{}", report.join("\n"));
         for name in ["OB", "SG"] {
             assert!(
                 obsolete.get(name).copied().unwrap_or(0) > 0,
