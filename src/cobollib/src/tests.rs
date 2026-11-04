@@ -2645,4 +2645,89 @@ mod int {
             assert_eq!(scope.data(&name), want, "{name:?}");
         }
     }
+
+    /// Every CALL target of `statements`, nested branches included, in source order.
+    fn call_targets(statements: &[crate::ast::Statement], out: &mut Vec<CallTarget>) {
+        for statement in statements {
+            if let Some(Transfer::Call(target)) = &statement.transfer {
+                out.push(target.clone());
+            }
+            call_targets(&statement.children, out);
+        }
+    }
+
+    /// Parses free-format `text` and resolves each CALL of its programs, in source order,
+    /// against all of them.
+    fn resolve_calls(
+        text: &str,
+    ) -> Vec<(
+        crate::resolve::CallResolution,
+        Option<crate::diag::Diagnostic>,
+    )> {
+        let (unit, _, map) = expand("prog.cob", &format!(">>SOURCE FREE\n{text}"), &[]);
+        let scopes = crate::resolve::scopes(&unit);
+        let mut targets = Vec::new();
+        for program in &unit.programs {
+            if let Some(div) = &program.procedure {
+                for paragraph in div
+                    .paragraphs
+                    .iter()
+                    .chain(div.sections.iter().flat_map(|s| &s.paragraphs))
+                {
+                    for sentence in &paragraph.sentences {
+                        call_targets(&sentence.statements, &mut targets);
+                    }
+                }
+            }
+        }
+        targets
+            .iter()
+            .map(|t| crate::resolve::resolve_call(&scopes, &map, t))
+            .collect()
+    }
+
+    /// `OUTER` makes the CALLs in `calls`; `SUB-ONE` is a second program beside it.
+    fn caller(calls: &str) -> String {
+        format!(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. OUTER.\nPROCEDURE DIVISION.\nMAIN-PARA.\n    {calls}\nEND PROGRAM OUTER.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. SUB-ONE.\nPROCEDURE DIVISION.\nSUB-PARA.\n    STOP RUN.\n"
+        )
+    }
+
+    #[test]
+    fn literal_call_matching_a_program_id_exactly_has_no_warning() {
+        let got = resolve_calls(&caller("CALL 'SUB-ONE'."));
+        assert_eq!(got, [(crate::resolve::CallResolution::Program(1), None)]);
+    }
+
+    #[test]
+    fn literal_call_matching_case_insensitively_warns_at_the_literal() {
+        let got = resolve_calls(&caller("CALL 'sub-one'."));
+        let (resolution, diag) = &got[0];
+        assert_eq!(*resolution, crate::resolve::CallResolution::Program(1));
+        let diag = diag.as_ref().expect("a case-insensitive match warns");
+        assert_eq!(diag.file, "prog.cob");
+        assert!(diag.message.contains("case-insensitively"), "{diag:?}");
+    }
+
+    #[test]
+    fn literal_naming_no_program_is_external_and_data_name_is_dynamic() {
+        let got = resolve_calls(&caller("CALL 'NOPE'.\n    CALL P-NAME."));
+        assert_eq!(
+            got,
+            [
+                (crate::resolve::CallResolution::External, None),
+                (crate::resolve::CallResolution::Dynamic, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_program_id_is_ambiguous_not_a_guess() {
+        let text = format!(
+            "{}IDENTIFICATION DIVISION.\nPROGRAM-ID. SUB-ONE.\nPROCEDURE DIVISION.\nSUB-PARA.\n    STOP RUN.\n",
+            caller("CALL 'SUB-ONE'.")
+        );
+        let got = resolve_calls(&text);
+        assert_eq!(got[0].0, crate::resolve::CallResolution::Ambiguous);
+    }
 }

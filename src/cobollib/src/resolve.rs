@@ -4,8 +4,11 @@
 //! are local to a program.
 
 use crate::ast::{
-    CompilationUnit, DataDivision, DataEntry, ProcedureDivision, Program, QualifiedName, Section,
+    CallTarget, CompilationUnit, DataDivision, DataEntry, ProcedureDivision, Program,
+    QualifiedName, Section,
 };
+use crate::diag::Diagnostic;
+use crate::source_map::SourceMap;
 
 /// Whether a procedure name is a section or a paragraph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +182,67 @@ impl Scope {
         name.qualifiers
             .iter()
             .all(|q| ancestors.any(|a| a.eq_ignore_ascii_case(&q.text)))
+    }
+}
+
+/// What a `CALL` target names. `Program` indexes [`scopes`]; `Ambiguous` is several programs
+/// sharing the name; `External` is a literal naming no program of the unit; `Dynamic` is a data
+/// name, which is never resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallResolution {
+    Program(usize),
+    Ambiguous,
+    External,
+    Dynamic,
+}
+
+/// Resolves a `CALL` target against the programs of one unit. A literal matches a PROGRAM-ID
+/// exactly; failing that, case-insensitively, which draws a warning at the literal.
+pub fn resolve_call(
+    scopes: &[Scope],
+    map: &SourceMap,
+    target: &CallTarget,
+) -> (CallResolution, Option<Diagnostic>) {
+    let name = match target {
+        CallTarget::Literal(name) => name,
+        CallTarget::Identifier(_) => return (CallResolution::Dynamic, None),
+    };
+    let named = |exact: bool| -> Vec<usize> {
+        scopes
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                if exact {
+                    s.name == name.text
+                } else {
+                    s.name.eq_ignore_ascii_case(&name.text)
+                }
+            })
+            .map(|(i, _)| i)
+            .collect()
+    };
+    let exact = named(true);
+    if !exact.is_empty() {
+        return (call_hit(&exact), None);
+    }
+    let loose = named(false);
+    let warning = (!loose.is_empty()).then(|| {
+        map.diagnostic(
+            name.span.start,
+            &format!(
+                "CALL '{}' matches a PROGRAM-ID only case-insensitively",
+                name.text
+            ),
+        )
+    });
+    (call_hit(&loose), warning)
+}
+
+fn call_hit(hits: &[usize]) -> CallResolution {
+    match hits {
+        [] => CallResolution::External,
+        [one] => CallResolution::Program(*one),
+        _ => CallResolution::Ambiguous,
     }
 }
 
