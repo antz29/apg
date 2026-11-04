@@ -159,4 +159,35 @@ mod unit {
         assert_eq!(Dialect::Cobol2002.default_format(), SourceFormat::Fixed);
         assert_eq!(Dialect::Cobol2014.default_format(), SourceFormat::Fixed);
     }
+
+    fn diag(message: &str) -> crate::diag::Diagnostic {
+        crate::diag::Diagnostic {
+            file: "prog.cob".to_string(),
+            line: 12,
+            col: 7,
+            message: message.to_string(),
+        }
+    }
+
+    #[test]
+    fn diagnostic_prints_as_one_cobol_line() {
+        let mut out = Vec::new();
+        crate::diag::write_diagnostic(&mut out, &diag("unknown word FOO")).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "cobol: prog.cob:12:7: unknown word FOO\n"
+        );
+    }
+
+    #[test]
+    fn each_diagnostic_is_its_own_line_and_the_scan_order_is_kept() {
+        let mut out = Vec::new();
+        for message in ["first", "second"] {
+            crate::diag::write_diagnostic(&mut out, &diag(message)).unwrap();
+        }
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "cobol: prog.cob:12:7: first\ncobol: prog.cob:12:7: second\n"
+        );
+    }
 }
