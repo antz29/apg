@@ -226,6 +226,23 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        // COBOL: copybooks (`.cpy`) are hand-written source, so they stay `src`.
+        "cobol" => {
+            if filename_lower.starts_with("test_")
+                || filename_lower.contains("_test.")
+                || filename_lower.contains("-test.")
+                || has_seg(&["test", "tests"])
+            {
+                return "test";
+            }
+            if has_seg(&["gen", "generated"]) {
+                return "generated";
+            }
+            if has_seg(&["vendor", "third_party", "thirdparty"]) {
+                return "external";
+            }
+            "src"
+        }
         "ts" => {
             if filename_lower.ends_with("_test.ts")
                 || filename_lower.ends_with("_test.tsx")
