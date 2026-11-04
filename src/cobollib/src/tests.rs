@@ -2803,7 +2803,8 @@ mod int {
             .collect();
         let lookup = |p: &std::path::Path| store.get(p).cloned();
         let mut emitter = crate::scan::Emitter::new(std::path::Path::new("/root"), "n");
-        let diags = emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
+        let mut diags = emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
+        diags.extend(emitter.finish());
         (jsonl(&emitter), diags)
     }
 
@@ -2819,6 +2820,7 @@ mod int {
         for (path, text) in tree {
             emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
         }
+        emitter.finish();
         emitter
     }
 
@@ -3170,5 +3172,85 @@ mod int {
         let calls = edges(&recs, &["calls"]);
         assert_eq!(calls.len(), 1, "{calls:?}");
         assert_eq!(calls[0]["from"], main_a.as_str());
+    }
+
+    /// OUTER's MAIN-PARA makes each of `calls` (fixed-format lines), then STOPs.
+    fn caller_at(calls: &[&str]) -> String {
+        let mut lines = vec![
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. OUTER."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+        ];
+        lines.extend(calls.iter().map(|c| at(12, c)));
+        lines.push(at(12, "STOP RUN."));
+        lines.join("\n")
+    }
+
+    #[test]
+    fn literal_call_to_a_program_in_another_file_is_a_uses_edge() {
+        let a = caller_at(&["CALL 'SUB-B'."]);
+        let b = prog("SUB-B");
+        let emitter = scan_tree(&[("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())]);
+        let recs = jsonl(&emitter);
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [
+                serde_json::json!({"type":"uses","from":id_of(&recs,"MAIN-PARA"),"to":id_of(&recs,"SUB-B")})
+            ]
+        );
+    }
+
+    #[test]
+    fn literal_naming_no_program_is_external_and_data_name_is_func_value() {
+        let text = caller_at(&["CALL 'NOPE'.", "CALL P-NAME."]);
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        for want in [
+            serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"external"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"NOPE"}),
+            serde_json::json!({"type":"unresolved","fqn":"P-NAME","category":"func-value"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"P-NAME"}),
+        ] {
+            assert!(recs.contains(&want), "{want} missing from {recs:?}");
+        }
+        assert!(!recs.iter().any(|r| r["type"] == "uses"));
+    }
+
+    #[test]
+    fn case_insensitive_call_match_is_a_uses_edge_with_a_warning() {
+        let text = [caller_at(&["CALL 'sub-b'."]), prog("SUB-B")].join("\n");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(recs
+            .iter()
+            .any(|r| r["type"] == "uses" && r["to"] == id_of(&recs, "SUB-B").as_str()));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("case-insensitively")),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn call_naming_two_programs_is_unknown_not_a_guess() {
+        let text = [
+            caller_at(&["CALL 'SUB-ONE'."]),
+            prog("SUB-ONE"),
+            prog("SUB-ONE"),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(recs.contains(
+            &serde_json::json!({"type":"unresolved","fqn":"SUB-ONE","category":"unknown"})
+        ));
+        assert!(!recs.iter().any(|r| r["type"] == "uses"));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("more than one program")),
+            "{diags:?}"
+        );
     }
 }

@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
-use crate::ast::{Paragraph, ProcRange, Program, Section, Span, Statement, Transfer};
+use crate::ast::{CallTarget, Paragraph, ProcRange, Program, Section, Span, Statement, Transfer};
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
 use crate::parser::parse_compilation_unit;
 use crate::preprocess::{preprocess, read_file, Search};
-use crate::resolve::{scopes, ProcKind, Resolution, Scope};
+use crate::resolve::{resolve_call, scopes, CallResolution, ProcKind, Resolution, Scope};
 use crate::source_map::{FileId, Origin, SourceMap};
 
 /// Unified JSONL records (SPEC §2), the `cobol` stream's wire shapes.
@@ -84,6 +84,21 @@ pub struct Emitter {
     next_id: usize,
     base: PathBuf,
     prefix: String,
+    /// Every emitted program, in emission order: its PROGRAM-ID and Struct id.
+    programs: Vec<(String, String)>,
+    /// Each scanned file's source map, indexed as [`PendingCall::file`].
+    maps: Vec<SourceMap>,
+    /// CALLs queued until [`Emitter::finish`] resolves them against the whole tree.
+    calls: Vec<PendingCall>,
+}
+
+/// A `CALL` awaiting whole-tree resolution: its calling paragraph's id, its target, and the
+/// index of its file's map in `Emitter::maps`.
+#[derive(Debug)]
+struct PendingCall {
+    from: String,
+    target: CallTarget,
+    file: usize,
 }
 
 /// A located span: the start origin's file name, byte offsets, and 1-based lines.
@@ -155,6 +170,9 @@ struct Locate<'a> {
     scope: usize,
     ids: Vec<Vec<Option<String>>>,
     pending: Vec<Pending>,
+    calls: Vec<PendingCall>,
+    /// This file's index in `Emitter::maps`.
+    file: usize,
     diags: Vec<Diagnostic>,
 }
 
@@ -249,6 +267,9 @@ impl Emitter {
             next_id: 0,
             base: base.to_path_buf(),
             prefix: prefix.to_string(),
+            programs: Vec::new(),
+            maps: Vec::new(),
+            calls: Vec::new(),
         }
     }
 
@@ -296,6 +317,7 @@ impl Emitter {
     fn program(&mut self, loc: &mut Locate, p: &Program, parent: &str, up: Option<&str>) {
         loc.enter();
         let (id, scope) = self.structure(loc, &p.name.text, p.span, parent, up);
+        self.programs.push((p.name.text.clone(), id.clone()));
         if let Some(data) = &p.data {
             for entry in data.sections.iter().flat_map(|s| &s.entries) {
                 if let (1, Some(name)) = (entry.level, &entry.name) {
@@ -351,7 +373,7 @@ impl Emitter {
         });
         loc.claim(ProcKind::Paragraph, &para.name.text, section, &id);
         for sentence in &para.sentences {
-            collect(&mut loc.pending, loc.scope, &id, &sentence.statements);
+            collect(loc, &id, &sentence.statements);
         }
     }
 
@@ -427,6 +449,61 @@ impl Emitter {
         });
     }
 
+    /// Resolves every queued `CALL` against the programs of the whole tree, so a call into
+    /// another file holds. A resolved literal is a `uses` edge to its program's Struct; one
+    /// naming no program or several (ambiguous) is an unresolved call, a data-name target is
+    /// `func-value`. Returns the diagnostics (case-insensitive matches, ambiguity).
+    pub fn finish(&mut self) -> Vec<Diagnostic> {
+        let scopes: Vec<Scope> = self
+            .programs
+            .iter()
+            .map(|(name, _)| Scope {
+                name: name.clone(),
+                parent: None,
+                procs: Vec::new(),
+                records: Vec::new(),
+            })
+            .collect();
+        let mut diags = Vec::new();
+        for call in std::mem::take(&mut self.calls) {
+            let map = &self.maps[call.file];
+            let (resolution, warning) = resolve_call(&scopes, map, &call.target);
+            diags.extend(warning);
+            let target = match &call.target {
+                CallTarget::Literal(name) => name,
+                CallTarget::Identifier(name) => &name.name,
+            };
+            let category = match resolution {
+                CallResolution::Program(i) => {
+                    let to = self.programs[i].1.clone();
+                    self.recs.push(Rec::Uses {
+                        from: call.from,
+                        to,
+                    });
+                    continue;
+                }
+                CallResolution::Ambiguous => {
+                    let message = format!("CALL {} names more than one program", target.text);
+                    diags.push(map.diagnostic(target.span.start, &message));
+                    "unknown"
+                }
+                CallResolution::External => "external",
+                CallResolution::Dynamic => "func-value",
+            };
+            if self.unresolved.insert(target.text.clone()) {
+                self.recs.push(Rec::Unresolved {
+                    fqn: target.text.clone(),
+                    category: category.to_string(),
+                });
+            }
+            self.recs.push(Rec::UnresolvedCall {
+                from: call.from,
+                to: target.text.clone(),
+            });
+        }
+        diags
+    }
+
     /// Scans one COBOL file: `path` is the identity its records carry and the name copybooks
     /// are searched from; `text` is its source. Returns the diagnostics of the expansion and
     /// parse, which are not emitted as records.
@@ -454,6 +531,7 @@ impl Emitter {
         let (tokens, mut diags) = preprocess(&mut map, path, text, dialect, search, lookup);
         let (unit, more) = parse_compilation_unit(&map, dialect, &tokens);
         diags.extend(more);
+        let file = self.maps.len();
         let mut loc = Locate {
             map: &map,
             main: path,
@@ -464,6 +542,8 @@ impl Emitter {
             scope: 0,
             ids: Vec::new(),
             pending: Vec::new(),
+            calls: Vec::new(),
+            file,
             diags: Vec::new(),
         };
         for program in &unit.programs {
@@ -471,6 +551,8 @@ impl Emitter {
         }
         self.transfer_facts(&mut loc);
         diags.extend(loc.diags);
+        self.calls.extend(loc.calls);
+        self.maps.push(map);
         diags
     }
 
@@ -514,9 +596,10 @@ impl Emitter {
         self.recs.retain(|r| match r {
             Rec::Module { fqn } => parents.contains(fqn),
             Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
-            Rec::Calls { from, .. } | Rec::Uses { from, .. } | Rec::UnresolvedCall { from, .. } => {
-                ids.contains(from)
+            Rec::Calls { from, to, .. } | Rec::Uses { from, to } => {
+                ids.contains(from) && ids.contains(to)
             }
+            Rec::UnresolvedCall { from, .. } => ids.contains(from),
             _ => true,
         });
         let called: BTreeSet<String> = self
@@ -607,26 +690,29 @@ fn value_flag(arg: &str) -> bool {
 }
 
 /// Queues the `PERFORM`, `SORT`/`MERGE` procedure and `GO TO` names of `statements`, branches
-/// included, from the paragraph `from` of scope `scope`. A `PERFORM` without a target is
-/// inline; `RESUME AT` queues kind `resume`; `RESUME NEXT STATEMENT` has no transfer.
-fn collect(out: &mut Vec<Pending>, scope: usize, from: &str, statements: &[Statement]) {
+/// included, from the paragraph `from` of the current scope. A `PERFORM` without a target is
+/// inline; `RESUME AT` queues kind `resume`; `RESUME NEXT STATEMENT` has no transfer. A `CALL`
+/// is queued as a [`PendingCall`].
+fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
+    let scope = loc.scope;
     for statement in statements {
         match &statement.transfer {
-            Some(Transfer::Perform(Some(range))) => out.push(Pending {
+            Some(Transfer::Perform(Some(range))) => loc.pending.push(Pending {
                 scope,
                 from: from.to_string(),
                 kind: "perform",
                 range: range.clone(),
             }),
             Some(Transfer::SortMerge { input, output }) => {
-                out.extend(input.iter().chain(output).map(|range| Pending {
-                    scope,
-                    from: from.to_string(),
-                    kind: "perform",
-                    range: range.clone(),
-                }));
+                loc.pending
+                    .extend(input.iter().chain(output).map(|range| Pending {
+                        scope,
+                        from: from.to_string(),
+                        kind: "perform",
+                        range: range.clone(),
+                    }));
             }
-            Some(Transfer::Resume(name)) => out.push(Pending {
+            Some(Transfer::Resume(name)) => loc.pending.push(Pending {
                 scope,
                 from: from.to_string(),
                 kind: "resume",
@@ -635,7 +721,7 @@ fn collect(out: &mut Vec<Pending>, scope: usize, from: &str, statements: &[State
                     thru: None,
                 },
             }),
-            Some(Transfer::GoTo(names)) => out.extend(names.iter().map(|name| Pending {
+            Some(Transfer::GoTo(names)) => loc.pending.extend(names.iter().map(|name| Pending {
                 scope,
                 from: from.to_string(),
                 kind: "goto",
@@ -644,9 +730,14 @@ fn collect(out: &mut Vec<Pending>, scope: usize, from: &str, statements: &[State
                     thru: None,
                 },
             })),
+            Some(Transfer::Call(target)) => loc.calls.push(PendingCall {
+                from: from.to_string(),
+                target: target.clone(),
+                file: loc.file,
+            }),
             _ => {}
         }
-        collect(out, scope, from, &statement.children);
+        collect(loc, from, &statement.children);
     }
 }
 
@@ -761,6 +852,9 @@ pub fn run(argv: &[String]) -> Result<(), String> {
         }
     }
 
+    for diag in emitter.finish() {
+        write_diagnostic(&mut err, &diag).map_err(|e| e.to_string())?;
+    }
     if let Some(set) = &targets {
         emitter.retain_targets(set);
     }
