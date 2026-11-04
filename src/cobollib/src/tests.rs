@@ -502,6 +502,13 @@ mod unit {
     }
 
     #[test]
+    fn ibm_reserves_exactly_entry_and_alter_among_the_oo_and_spec_words() {
+        let words = OO_WORDS.iter().copied().chain(["ENTRY", "ALTER", "CLASS"]);
+        let reserved: Vec<&str> = words.filter(|w| Dialect::Ibm.is_reserved(w)).collect();
+        assert_eq!(reserved, ["ENTRY", "ALTER"]);
+    }
+
+    #[test]
     fn reserved_word_match_is_case_insensitive() {
         assert!(Dialect::Cobol85.is_reserved("class"));
         assert!(Dialect::Cobol85.is_reserved("Alter"));
@@ -1267,6 +1274,14 @@ mod unit {
                 TokenKind::Word
             };
             assert_eq!(shape(&tokens), [(kind, word)], "{word}");
+        }
+    }
+
+    #[test]
+    fn every_oo_word_is_an_ordinary_word_under_ibm() {
+        for word in OO_WORDS {
+            let (tokens, _) = lex_all(&at(8, word), fixed(), Dialect::Ibm);
+            assert_eq!(shape(&tokens), [(TokenKind::Word, word)], "{word}");
         }
     }
 
