@@ -2306,6 +2306,68 @@ mod unit {
             assert!(err.contains("placeholder"), "{err}");
         }
     }
+
+    mod parser_oo {
+        use super::*;
+
+        /// Parses free-format `text` under `dialect`, with no copybooks.
+        fn parse_oo(
+            dialect: Dialect,
+            text: &str,
+        ) -> (crate::ast::CompilationUnit, Vec<crate::diag::Diagnostic>) {
+            crate::parser::parse_source(
+                "p.cob",
+                &format!(">>SOURCE FREE\n{text}"),
+                dialect,
+                &search(),
+                &|_| None,
+            )
+        }
+
+        #[test]
+        fn top_level_class_and_interface_go_to_the_compilation_unit() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. Foo.\nEND CLASS Foo.\nIDENTIFICATION DIVISION.\nINTERFACE-ID. Bar.\nEND INTERFACE Bar.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            assert!(unit.programs.is_empty());
+            assert_eq!(unit.classes[0].name.text, "Foo");
+            assert_eq!(unit.interfaces[0].name.text, "Bar");
+        }
+
+        #[test]
+        fn cobol85_does_not_route_class_id() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. Foo.\nEND CLASS Foo.\n";
+            let (unit, _) = parse_oo(Dialect::Cobol85, text);
+            assert!(unit.classes.is_empty() && unit.programs.is_empty());
+        }
+
+        #[test]
+        fn class_nested_in_a_program_goes_to_the_program() {
+            let text = "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nIDENTIFICATION DIVISION.\nCLASS-ID. C.\nEND CLASS C.\nEND PROGRAM P.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(unit.programs.len(), 1);
+            assert_eq!(unit.programs[0].classes[0].name.text, "C");
+            assert!(unit.classes.is_empty());
+        }
+
+        #[test]
+        fn unit_without_its_end_closes_at_the_next_header() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. A.\nIDENTIFICATION DIVISION.\nCLASS-ID. B.\nEND CLASS B.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            let names: Vec<&str> = unit.classes.iter().map(|c| c.name.text.as_str()).collect();
+            assert_eq!(names, ["A", "B"]);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+        }
+
+        #[test]
+        fn program_repository_paragraph_is_kept() {
+            let text = "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nENVIRONMENT DIVISION.\nCONFIGURATION SECTION.\nREPOSITORY.\n    CLASS Foo.\nEND PROGRAM P.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(unit.programs[0].repository[0].name.text, "Foo");
+        }
+    }
 }
 
 fn search() -> crate::preprocess::Search {

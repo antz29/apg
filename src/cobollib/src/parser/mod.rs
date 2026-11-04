@@ -5,11 +5,12 @@
 //! [`parse_compilation_unit`] over mapped tokens, and [`parse_source`], the in-memory reader.
 
 pub mod data;
+mod oo;
 pub mod procedure;
 
 use std::path::Path;
 
-use crate::ast::{CompilationUnit, Name, Program, Span};
+use crate::ast::{Class, CompilationUnit, Interface, Name, Program, Span};
 use crate::diag::Diagnostic;
 use crate::dialect::Dialect;
 use crate::lexer::TokenKind;
@@ -17,6 +18,50 @@ use crate::preprocess::{self, Search};
 use crate::source_map::{Mapped, SourceMap};
 
 const IDENTIFICATION: &[&str] = &["IDENTIFICATION", "ID"];
+
+/// An OO unit: a `CLASS-ID` or `INTERFACE-ID` with its header-level result, or a `METHOD-ID`.
+enum Oo {
+    Class(Option<Box<Class>>),
+    Interface(Option<Box<Interface>>),
+    Method,
+}
+
+/// The OO unit starting at `i`: its keyword, or an `IDENTIFICATION DIVISION` line directly above
+/// one. Returns the unit and the tokens it spans from `i`; `None` when no OO unit starts there
+/// (always under cobol85).
+fn oo_unit(
+    map: &SourceMap,
+    dialect: Dialect,
+    tokens: &[Mapped],
+    i: usize,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Oo, usize)> {
+    let k = if header(tokens, i, IDENTIFICATION) {
+        i + 2
+            + usize::from(
+                tokens
+                    .get(i + 2)
+                    .is_some_and(|t| t.token.kind == TokenKind::Period),
+            )
+    } else {
+        i
+    };
+    let head = tokens.get(k)?;
+    let (unit, used, ds) = if is_word(head, "CLASS-ID") {
+        let p = oo::parse_class(map, dialect, &tokens[k..])?;
+        (Oo::Class(p.unit.map(Box::new)), p.used, p.diags)
+    } else if is_word(head, "INTERFACE-ID") {
+        let p = oo::parse_interface(map, dialect, &tokens[k..])?;
+        (Oo::Interface(p.unit.map(Box::new)), p.used, p.diags)
+    } else if is_word(head, "METHOD-ID") {
+        let p = oo::parse_method(map, dialect, &tokens[k..], false)?;
+        (Oo::Method, p.used, p.diags)
+    } else {
+        return None;
+    };
+    diags.extend(ds);
+    Some((unit, k - i + used.max(1)))
+}
 
 fn is_word(t: &Mapped, word: &str) -> bool {
     matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved)
@@ -179,7 +224,20 @@ fn parse_program(
             used = next;
             break;
         }
-        if header(tokens, i, IDENTIFICATION) {
+        if let Some((unit, n)) = oo_unit(map, dialect, tokens, i, diags) {
+            match unit {
+                Oo::Class(c) => prog.classes.extend(c.map(|c| *c)),
+                Oo::Interface(_) => diags.push(map.diagnostic(
+                    tokens[i].origin,
+                    "INTERFACE-ID nested in a program is skipped",
+                )),
+                Oo::Method => diags.push(map.diagnostic(
+                    tokens[i].origin,
+                    "METHOD-ID outside a CLASS-ID or INTERFACE-ID is skipped",
+                )),
+            }
+            i += n;
+        } else if header(tokens, i, IDENTIFICATION) {
             // Without an END PROGRAM for this program, the next header is a sibling, not nested.
             if !closed_later(tokens, i, &prog.name.text) {
                 used = i;
@@ -196,6 +254,8 @@ fn parse_program(
             let e = section_end(tokens, i + 1);
             prog.environment = Some(span(&tokens[i], &tokens[e - 1]));
             prog.declared = environment_names(&tokens[i..e]);
+            prog.repository
+                .extend(oo::repository(dialect, &tokens[i..e]));
             i = e;
         } else if header(tokens, i, &["DATA"]) {
             let e = section_end(tokens, i + 1);
@@ -231,10 +291,22 @@ pub fn parse_compilation_unit(
     tokens: &[Mapped],
 ) -> (CompilationUnit, Vec<Diagnostic>) {
     let mut programs = Vec::new();
+    let mut classes = Vec::new();
+    let mut interfaces = Vec::new();
     let mut diags = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        if header(tokens, i, IDENTIFICATION) {
+        if let Some((unit, n)) = oo_unit(map, dialect, tokens, i, &mut diags) {
+            match unit {
+                Oo::Class(c) => classes.extend(c.map(|c| *c)),
+                Oo::Interface(x) => interfaces.extend(x.map(|x| *x)),
+                Oo::Method => diags.push(map.diagnostic(
+                    tokens[i].origin,
+                    "METHOD-ID outside a CLASS-ID or INTERFACE-ID is skipped",
+                )),
+            }
+            i += n;
+        } else if header(tokens, i, IDENTIFICATION) {
             match parse_program(map, dialect, &tokens[i..], &mut diags) {
                 Some((program, n)) => {
                     programs.push(program);
@@ -253,8 +325,8 @@ pub fn parse_compilation_unit(
     (
         CompilationUnit {
             programs,
-            classes: Vec::new(),
-            interfaces: Vec::new(),
+            classes,
+            interfaces,
         },
         diags,
     )

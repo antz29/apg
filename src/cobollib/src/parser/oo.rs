@@ -140,7 +140,11 @@ fn unit_end(
             // `END OBJECT.` and `END FACTORY.` carry no name; the others do.
             let named = !matches!(kind, "OBJECT" | "FACTORY");
             let mut used = k + 2;
-            if named && tokens.get(used).is_some_and(|t| t.token.kind != TokenKind::Period) {
+            if named
+                && tokens
+                    .get(used)
+                    .is_some_and(|t| t.token.kind != TokenKind::Period)
+            {
                 used += 1;
             }
             if period_at(tokens, used) {
@@ -191,7 +195,11 @@ fn header(tokens: &[Mapped]) -> Header {
                 }
             }
             (true, "IMPLEMENTS") => mode = Mode::Implements,
-            _ if matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved | TokenKind::Alnum) => {
+            _ if matches!(
+                t.token.kind,
+                TokenKind::Word | TokenKind::Reserved | TokenKind::Alnum
+            ) =>
+            {
                 match mode {
                     Mode::Name => {
                         if h.name.is_none() {
@@ -250,7 +258,10 @@ pub fn parse_class(map: &SourceMap, dialect: Dialect, tokens: &[Mapped]) -> Opti
         ));
     }
     let Some(name) = h.name else {
-        diags.push(map.diagnostic(tokens[0].origin, "CLASS-ID has no class name; the class is skipped"));
+        diags.push(map.diagnostic(
+            tokens[0].origin,
+            "CLASS-ID has no class name; the class is skipped",
+        ));
         return Some(Parsed {
             unit: None,
             used,
@@ -454,7 +465,10 @@ pub fn parse_method(
         ));
     }
     let Some(name) = h.name else {
-        diags.push(map.diagnostic(tokens[0].origin, "METHOD-ID has no method name; the method is skipped"));
+        diags.push(map.diagnostic(
+            tokens[0].origin,
+            "METHOD-ID has no method name; the method is skipped",
+        ));
         return Some(Parsed {
             unit: None,
             used,
