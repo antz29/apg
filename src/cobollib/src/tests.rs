@@ -2266,6 +2266,136 @@ mod int {
         assert_eq!(unit.programs[0].name.text, "TWO");
     }
 
+    /// The paragraph names of the one program in `unit`.
+    fn paragraph_names(unit: &crate::ast::CompilationUnit) -> Vec<&str> {
+        let procedure = unit.programs[0].procedure.as_ref().unwrap();
+        procedure
+            .paragraphs
+            .iter()
+            .map(|p| p.name.text.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn fixed_paragraph_header_ends_a_sentence_missing_its_period() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "DISPLAY X"),
+            at(8, "NEXT-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (unit, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("not ended by a period"),
+            "{diags:?}"
+        );
+        assert_eq!(diags[0].line, 5, "{diags:?}");
+        assert_eq!(paragraph_names(&unit), ["MAIN-PARA", "NEXT-PARA"]);
+        let procedure = unit.programs[0].procedure.as_ref().unwrap();
+        assert_eq!(procedure.paragraphs[1].sentences[0].statements.len(), 1);
+    }
+
+    #[test]
+    fn fixed_section_header_ends_a_sentence_missing_its_period() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "DISPLAY X"),
+            at(8, "SEC-A SECTION."),
+            at(8, "PARA-B."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (unit, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("not ended by a period"),
+            "{diags:?}"
+        );
+        let procedure = unit.programs[0].procedure.as_ref().unwrap();
+        let sections: Vec<&str> = procedure
+            .sections
+            .iter()
+            .map(|s| s.name.text.as_str())
+            .collect();
+        assert_eq!(sections, ["SEC-A"]);
+    }
+
+    #[test]
+    fn free_section_header_ends_a_sentence_missing_its_period() {
+        let (unit, diags) =
+            parse_file("IDENTIFICATION DIVISION.\nPROGRAM-ID. PROG.\nPROCEDURE DIVISION.\nMAIN-PARA.\nDISPLAY X\nSEC-A SECTION.\nPARA-B.\nSTOP RUN.\n");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("not ended by a period"),
+            "{diags:?}"
+        );
+        let procedure = unit.programs[0].procedure.as_ref().unwrap();
+        let sections: Vec<&str> = procedure
+            .sections
+            .iter()
+            .map(|s| s.name.text.as_str())
+            .collect();
+        assert_eq!(sections, ["SEC-A"]);
+    }
+
+    #[test]
+    fn free_paragraph_name_does_not_end_a_sentence() {
+        let (unit, diags) = parse_file(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. PROG.\nPROCEDURE DIVISION.\nMAIN-PARA.\nMOVE A TO\nB.\nSTOP RUN.\n",
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(paragraph_names(&unit), ["MAIN-PARA"]);
+    }
+
+    #[test]
+    fn fixed_name_in_area_b_does_not_end_a_sentence() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "MOVE A TO"),
+            at(12, "B."),
+        ]
+        .join("\n");
+        let (unit, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(paragraph_names(&unit), ["MAIN-PARA"]);
+    }
+
+    #[test]
+    fn replaced_token_at_the_previous_position_never_starts_a_header() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "REPLACE ==Q== BY ==A B==."),
+            at(8, "Q."),
+        ]
+        .join("\n");
+        let (unit, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert!(
+            diags
+                .iter()
+                .all(|d| !d.message.contains("not ended by a period")),
+            "{diags:?}"
+        );
+        assert_eq!(paragraph_names(&unit), ["MAIN-PARA"]);
+    }
+
     #[test]
     fn text_before_the_first_program_is_one_diagnostic() {
         let (unit, diags) = parse_file(

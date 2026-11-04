@@ -11,8 +11,12 @@ use crate::ast::{
 };
 use crate::diag::Diagnostic;
 use crate::dialect::{Dialect, Feature};
+use crate::format::Layout;
 use crate::lexer::TokenKind;
 use crate::source_map::{Mapped, Origin, SourceMap};
+
+/// Original columns of area A (SPEC §3): where a fixed-layout header starts.
+const AREA_A: std::ops::RangeInclusive<usize> = 8..=11;
 
 /// Statement verbs: a token that is one of these starts a statement.
 const VERBS: &[&str] = &[
@@ -300,12 +304,41 @@ impl Parser<'_> {
             if self.ends_program(i, stop) {
                 break;
             }
+            // A header inside the sentence means its period is missing: the sentence ends there.
+            if let Some(header) = (i + 1..stop).find(|&j| self.header_at(j, stop)) {
+                self.sentence(i, header, None);
+                i = header;
+                continue;
+            }
             if stop > i {
                 let period = (stop < t.len()).then(|| self.origin(stop));
                 self.sentence(i, stop, period);
             }
             i = stop + 1;
         }
+    }
+
+    /// Whether token `j` starts a header that ends the sentence before `stop` (which holds a
+    /// period): a paragraph (name then the period) or `<name> SECTION [n].`. Fixed layout needs
+    /// the name in area A; free layout takes only the section form. A token at the position of
+    /// the previous token (a REPLACE substitution) never starts one.
+    fn header_at(&self, j: usize, stop: usize) -> bool {
+        let t = self.tokens;
+        let o = t[j].origin;
+        if stop >= t.len() || !self.is_proc_name(j) || t[j - 1].origin == o {
+            return false;
+        }
+        let Some(layout) = self.map.layout(o.file) else {
+            return false;
+        };
+        let area_a = matches!(layout, Layout::Source(_)) && AREA_A.contains(&o.col);
+        if j + 1 == stop {
+            return area_a;
+        }
+        let section = j + 1 < stop
+            && is(&t[j + 1], "SECTION")
+            && (j + 2 == stop || (j + 3 == stop && t[j + 2].token.kind == TokenKind::Numeric));
+        section && (area_a || layout == Layout::Free)
     }
 
     fn ends_program(&self, i: usize, stop: usize) -> bool {
