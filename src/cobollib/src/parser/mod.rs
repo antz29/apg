@@ -88,6 +88,54 @@ fn span(first: &Mapped, last: &Mapped) -> Span {
     }
 }
 
+/// The non-data names an ENVIRONMENT DIVISION declares: SELECT [OPTIONAL] file names, and the
+/// SPECIAL-NAMES mnemonic (after IS), ALPHABET, CLASS and ON/OFF [STATUS] [IS] names.
+fn environment_names(tokens: &[Mapped]) -> Vec<Name> {
+    fn declare(tokens: &[Mapped], k: usize, out: &mut Vec<Name>) {
+        // `ON STATUS IS n` is seen by both the ON and IS arms; a name is declared once.
+        if let Some(t) = tokens.get(k).filter(|t| t.token.kind == TokenKind::Word) {
+            if out
+                .iter()
+                .any(|n| n.text.eq_ignore_ascii_case(&t.token.text))
+            {
+                return;
+            }
+            out.push(Name {
+                text: t.token.text.clone(),
+                span: span(t, t),
+            });
+        }
+    }
+    let mut out = Vec::new();
+    let mut in_special = false;
+    for (i, t) in tokens.iter().enumerate() {
+        if !matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved) {
+            continue;
+        }
+        match t.token.text.to_ascii_uppercase().as_str() {
+            "SELECT" => {
+                let optional = tokens.get(i + 1).is_some_and(|n| is_word(n, "OPTIONAL"));
+                declare(tokens, i + 1 + usize::from(optional), &mut out);
+            }
+            "SPECIAL-NAMES" => in_special = true,
+            "FILE-CONTROL" | "I-O-CONTROL" => in_special = false,
+            "IS" | "ALPHABET" | "CLASS" if in_special => declare(tokens, i + 1, &mut out),
+            "ON" | "OFF" if in_special => {
+                let mut k = i + 1;
+                if tokens.get(k).is_some_and(|n| is_word(n, "STATUS")) {
+                    k += 1;
+                }
+                if tokens.get(k).is_some_and(|n| is_word(n, "IS")) {
+                    k += 1;
+                }
+                declare(tokens, k, &mut out);
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Parses the program at the start of `tokens` (an `IDENTIFICATION DIVISION`) and returns it
 /// with the number of tokens it used. `None` when it has no `PROGRAM-ID`: one diagnostic is
 /// pushed and the caller resumes at the next program.
@@ -120,6 +168,7 @@ fn parse_program(
         data: None,
         procedure: None,
         nested: Vec::new(),
+        declared: Vec::new(),
     };
     let mut used = tokens.len();
     let mut i = id_end;
@@ -144,6 +193,7 @@ fn parse_program(
         } else if header(tokens, i, &["ENVIRONMENT"]) {
             let e = section_end(tokens, i + 1);
             prog.environment = Some(span(&tokens[i], &tokens[e - 1]));
+            prog.declared = environment_names(&tokens[i..e]);
             i = e;
         } else if header(tokens, i, &["DATA"]) {
             let e = section_end(tokens, i + 1);

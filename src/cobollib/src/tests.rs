@@ -2138,6 +2138,30 @@ mod unit {
         }
 
         #[test]
+        fn environment_declares_select_and_special_names_once() {
+            let (unit, diags) = parse_file(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. ENVP.\nENVIRONMENT DIVISION.\nCONFIGURATION SECTION.\nSPECIAL-NAMES.\n    C01 IS TOP-PAGE\n    CLASS VALID-CH IS \"A\" THRU \"Z\"\n    SWITCH-1 ON STATUS IS SW-ON\n    OFF STATUS SW-OFF.\nINPUT-OUTPUT SECTION.\nFILE-CONTROL.\n    SELECT OPTIONAL CARD-FILE ASSIGN TO CARDS.\n    SELECT PRINT-FILE ASSIGN TO PRINTER.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\nEND PROGRAM ENVP.\n",
+            );
+            assert!(diags.is_empty(), "{diags:?}");
+            let names: Vec<&str> = unit.programs[0]
+                .declared
+                .iter()
+                .map(|n| n.text.as_str())
+                .collect();
+            assert_eq!(
+                names,
+                [
+                    "TOP-PAGE",
+                    "VALID-CH",
+                    "SW-ON",
+                    "SW-OFF",
+                    "CARD-FILE",
+                    "PRINT-FILE"
+                ]
+            );
+        }
+
+        #[test]
         fn program_without_end_program_is_a_sibling_not_nested() {
             let (unit, diags) = parse_file(
                 "IDENTIFICATION DIVISION.\nPROGRAM-ID. ONE.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. TWO.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\n",
