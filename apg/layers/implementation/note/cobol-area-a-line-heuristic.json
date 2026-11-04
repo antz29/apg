@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-area-a-line-heuristic",
+  "body": "area_a_departure checks area A line by line: a line's first word is checked only when the previous line ended a sentence, and a paragraph header is one word ending in a period (END-*, EXIT, CONTINUE, GOBACK, NEXT, ELSE excluded). Limit: statements starting mid-line after a period are not checked, and the heuristic may misjudge unusual layouts. Upgrade if the NIST corpus or user code shows false or missed area-A diagnostics.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.format.area_a_departure",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

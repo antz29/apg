@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-procedure-division-model-limits",
+  "body": "parse_procedure_division diagnoses and drops statements before the first paragraph, parses then drops a declarative USE sentence, records ALTER PROCEED TO targets as plain refs, and keeps no IF/EVALUATE branch structure. Limit: a program whose procedure division has no paragraph header yields no statements, and USE file references are lost. Upgrade when facts need pre-paragraph statements, USE targets or ALTER targets.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.procedure.parse_procedure_division",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

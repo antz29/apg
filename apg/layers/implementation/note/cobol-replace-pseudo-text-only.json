@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-replace-pseudo-text-only",
+  "body": "replace supports pseudo-text operands only and starts a REPLACE statement at any token spelled REPLACE. Limit: identifier or literal REPLACE operands are not matched, and REPLACE used as a data name would be misread. Upgrade when a corpus uses non-pseudo-text REPLACE operands or REPLACE as a name.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.replace.replace",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

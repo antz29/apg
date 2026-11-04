@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-diagnostic-no-severity",
+  "body": "Diagnostic carries file, 1-based line/col and message but no severity, so an obsolete-level warning is told apart from an error only by its message wording (\"is Obsolete under this dialect\"), which the NIST parse e2e matches. Limit: severity is not structural and the line/col convention is unvalidated. Upgrade by adding a severity field to Diagnostic before any gate relies on error-level counts beyond the NIST test.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.diag.Diagnostic",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

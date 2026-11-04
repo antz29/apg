@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-copy-replace-scope-and-extensions",
+  "body": "preprocess applies a REPLACE found inside a copybook at copybook level, so it ends with the copybook, and finds copybooks with the bare name or the lower- and upper-case .cpy/.cbl/.cob/.cobol extensions. Limit: copybook REPLACE does not persist past the copybook, and mixed-case extensions such as .Cbl are not found. Upgrade when a corpus needs persistent copybook REPLACE or mixed-case extensions (via a directory-listing lookup).",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.preprocess.preprocess",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
