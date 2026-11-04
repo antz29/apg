@@ -507,6 +507,43 @@ mod unit {
     }
 
     #[test]
+    fn area_b_one_word_entry_after_program_id_draws_no_diagnostic() {
+        let text = [at(8, "PROGRAM-ID. PROG."), at(12, "ST101A.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn area_b_program_id_is_still_a_diagnostic() {
+        let text = [at(8, "IDENTIFICATION DIVISION."), at(12, "PROGRAM-ID.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].line, 2);
+    }
+
+    #[test]
+    fn user_paragraph_named_end_routine_in_area_a_is_a_paragraph_header() {
+        let text = [at(8, "PROCEDURE DIVISION."), at(8, "END-ROUTINE.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn user_paragraph_named_end_routine_in_area_b_is_a_diagnostic() {
+        let text = [at(8, "PROCEDURE DIVISION."), at(12, "END-ROUTINE.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].line, 2);
+    }
+
+    #[test]
+    fn scope_terminator_in_area_b_draws_no_diagnostic() {
+        let text = [at(8, "PROCEDURE DIVISION."), at(12, "END-IF.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
     fn level_01_and_77_outside_area_a_are_diagnostics_and_level_05_is_not_checked() {
         let text = [
             at(8, "WORKING-STORAGE SECTION."),

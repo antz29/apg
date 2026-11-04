@@ -104,6 +104,7 @@ fn free_reason(line: &str) -> Option<&'static str> {
 fn area_a(file: &str, lines: &[&str]) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut sentence_start = true;
+    let mut procedure = false;
     for (i, line) in lines.iter().enumerate() {
         let chars: Vec<char> = line.chars().collect();
         let indicator = chars.get(6).copied().unwrap_or(' ');
@@ -121,8 +122,13 @@ fn area_a(file: &str, lines: &[&str]) -> Vec<Diagnostic> {
             let first = words.next().unwrap_or_default().to_ascii_uppercase();
             let second = words.next().unwrap_or_default().to_ascii_uppercase();
             let in_a = col <= AREA_A_END;
-            if let Some(why) = area_a_departure(text, &first, &second, in_a, sentence_start) {
+            if let Some(why) =
+                area_a_departure(text, &first, &second, in_a, sentence_start, procedure)
+            {
                 diags.push(diag(file, i + 1, col, why.to_string()));
+            }
+            if sentence_start && second.trim_end_matches('.') == "DIVISION" {
+                procedure = first == "PROCEDURE";
             }
         }
         sentence_start = text.ends_with('.');
@@ -130,13 +136,15 @@ fn area_a(file: &str, lines: &[&str]) -> Vec<Diagnostic> {
     diags
 }
 
-/// The area A departure of a line that starts with `first`, if any.
+/// The area A departure of a line that starts with `first`, if any. `procedure` is true inside
+/// the PROCEDURE DIVISION, where a one-word sentence is a paragraph name.
 fn area_a_departure(
     text: &str,
     first: &str,
     second: &str,
     in_a: bool,
     sentence_start: bool,
+    procedure: bool,
 ) -> Option<&'static str> {
     if text.starts_with('.') {
         return in_a.then_some("separator period starts in area A");
@@ -151,17 +159,62 @@ fn area_a_departure(
     if matches!(second.trim_end_matches('.'), "DIVISION" | "SECTION") {
         return (!in_a).then_some("division or section name must start in area A");
     }
-    if is_paragraph(first) {
+    if procedure {
+        if is_paragraph(first) {
+            return (!in_a).then_some("paragraph name must start in area A");
+        }
+    } else if ID_ENV_PARAGRAPHS.contains(&first) {
         return (!in_a).then_some("paragraph name must start in area A");
+    } else if is_paragraph(first) {
+        return None;
     }
     (in_a && !matches!(first, "FD" | "SD" | "RD" | "CD" | "END"))
         .then_some("statement starts in area A")
 }
 
+/// Paragraph headers outside the PROCEDURE DIVISION (IDENTIFICATION and ENVIRONMENT).
+const ID_ENV_PARAGRAPHS: [&str; 12] = [
+    "PROGRAM-ID.",
+    "AUTHOR.",
+    "INSTALLATION.",
+    "DATE-WRITTEN.",
+    "DATE-COMPILED.",
+    "SECURITY.",
+    "REMARKS.",
+    "SOURCE-COMPUTER.",
+    "OBJECT-COMPUTER.",
+    "SPECIAL-NAMES.",
+    "FILE-CONTROL.",
+    "I-O-CONTROL.",
+];
+
+/// COBOL-85 scope terminators: one-word sentences that are statements, not paragraph names.
+const SCOPE_TERMINATORS: [&str; 19] = [
+    "END-ADD.",
+    "END-CALL.",
+    "END-COMPUTE.",
+    "END-DELETE.",
+    "END-DIVIDE.",
+    "END-EVALUATE.",
+    "END-IF.",
+    "END-MULTIPLY.",
+    "END-PERFORM.",
+    "END-READ.",
+    "END-RECEIVE.",
+    "END-RETURN.",
+    "END-REWRITE.",
+    "END-SEARCH.",
+    "END-START.",
+    "END-STRING.",
+    "END-SUBTRACT.",
+    "END-UNSTRING.",
+    "END-WRITE.",
+];
+
 /// A paragraph name is one word ending in a period. Scope terminators and bare verbs that
 /// end a sentence are not names.
 fn is_paragraph(first: &str) -> bool {
     first.ends_with('.')
-        && !first.starts_with("END-")
+        && !SCOPE_TERMINATORS.contains(&first)
         && !matches!(first, "EXIT." | "CONTINUE." | "GOBACK." | "NEXT." | "ELSE.")
 }
