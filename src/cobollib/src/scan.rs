@@ -606,8 +606,9 @@ fn value_flag(arg: &str) -> bool {
     )
 }
 
-/// Queues the `PERFORM` (with a range) and `GO TO` names of `statements`, branches included,
-/// from the paragraph `from` of scope `scope`. A `PERFORM` without a target is inline.
+/// Queues the `PERFORM`, `SORT`/`MERGE` procedure and `GO TO` names of `statements`, branches
+/// included, from the paragraph `from` of scope `scope`. A `PERFORM` without a target is
+/// inline; `RESUME AT` queues kind `resume`; `RESUME NEXT STATEMENT` has no transfer.
 fn collect(out: &mut Vec<Pending>, scope: usize, from: &str, statements: &[Statement]) {
     for statement in statements {
         match &statement.transfer {
@@ -616,6 +617,23 @@ fn collect(out: &mut Vec<Pending>, scope: usize, from: &str, statements: &[State
                 from: from.to_string(),
                 kind: "perform",
                 range: range.clone(),
+            }),
+            Some(Transfer::SortMerge { input, output }) => {
+                out.extend(input.iter().chain(output).map(|range| Pending {
+                    scope,
+                    from: from.to_string(),
+                    kind: "perform",
+                    range: range.clone(),
+                }));
+            }
+            Some(Transfer::Resume(name)) => out.push(Pending {
+                scope,
+                from: from.to_string(),
+                kind: "resume",
+                range: ProcRange {
+                    from: name.clone(),
+                    thru: None,
+                },
             }),
             Some(Transfer::GoTo(names)) => out.extend(names.iter().map(|name| Pending {
                 scope,

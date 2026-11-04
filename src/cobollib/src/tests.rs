@@ -3088,6 +3088,60 @@ mod int {
             .any(|d| format!("{d:?}").contains("perform NOPE")));
     }
 
+    /// MAIN-PARA sorts with an input procedure and an output `THRU` range, RESUMEs at R-PARA
+    /// and RESUMEs to the next statement (which emits nothing).
+    fn sort_and_resume() -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "SORT S-FILE ON ASCENDING KEY K"),
+            at(12, "    INPUT PROCEDURE IN-PARA"),
+            at(12, "    OUTPUT PROCEDURE IS OUT-PARA THRU OUT-END."),
+            at(12, "RESUME AT R-PARA."),
+            at(12, "RESUME NEXT STATEMENT."),
+            at(8, "IN-PARA."),
+            at(12, "DISPLAY X."),
+            at(8, "OUT-PARA."),
+            at(12, "DISPLAY X."),
+            at(8, "OUT-END."),
+            at(12, "DISPLAY X."),
+            at(8, "R-PARA."),
+            at(12, "DISPLAY X."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn sort_procedures_are_performs_and_resume_at_is_a_resume_call() {
+        let (recs, diags) = scan_text("/root/prog.cob", &sort_and_resume(), &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        let call = |to: &str, kind: &str| serde_json::json!({"type":"calls","from":main,"to":to,"properties":{"kind":kind}});
+        let mut want = vec![
+            call(&id_of(&recs, "IN-PARA"), "perform"),
+            call(&id_of(&recs, "OUT-PARA"), "perform"),
+            call(&id_of(&recs, "OUT-END"), "perform"),
+            call(&id_of(&recs, "R-PARA"), "resume"),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["calls", "uses"]), want);
+    }
+
+    #[test]
+    fn unresolved_resume_is_an_unknown_target_with_a_diagnostic() {
+        let text = sort_and_resume().replace("RESUME AT R-PARA.", "RESUME AT NOPE.");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        let main = id_of(&recs, "MAIN-PARA");
+        assert!(
+            recs.contains(&serde_json::json!({"type":"unresolved_call","from":main,"to":"NOPE"}))
+        );
+        assert!(diags
+            .iter()
+            .any(|d| format!("{d:?}").contains("resume NOPE")));
+    }
+
     /// A one-paragraph-performing program `name`, its MAIN-PARA calling P-A.
     fn perform_prog(name: &str) -> String {
         [
