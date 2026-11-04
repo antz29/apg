@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-ibm-reserved-words",
-  "body": "Under ibm the OO words are contextual keywords as under every dialect, so OBJECT, METHOD and INVOKE used as data names parse as ordinary data names, not as errors.",
+  "body": "Under ibm the OO words are contextual keywords as under every dialect, so OBJECT, METHOD and INVOKE used as data names parse as ordinary data names with their statements intact.",
   "properties": {
     "feature": "cobol-frontend"
   },
