@@ -31,6 +31,12 @@ pub fn read_file(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
+/// A resolved COPY: the COPY token's origin and the copybook path it expanded to.
+pub struct CopySite {
+    pub origin: Origin,
+    pub path: PathBuf,
+}
+
 /// Expands COPY and REPLACE in `text`, the file named `name`. Returns the tokens in expanded
 /// order, each with its original position, and every diagnostic.
 pub fn preprocess(
@@ -41,6 +47,20 @@ pub fn preprocess(
     search: &Search,
     lookup: &dyn Fn(&Path) -> Option<String>,
 ) -> (Vec<Mapped>, Vec<Diagnostic>) {
+    let (tokens, diags, _) = preprocess_with_copies(map, name, text, dialect, search, lookup);
+    (tokens, diags)
+}
+
+/// `preprocess`, also returning the site of every resolved COPY (nested ones included, each at
+/// its own copybook's origin), in expansion order.
+pub fn preprocess_with_copies(
+    map: &mut SourceMap,
+    name: &str,
+    text: &str,
+    dialect: Dialect,
+    search: &Search,
+    lookup: &dyn Fn(&Path) -> Option<String>,
+) -> (Vec<Mapped>, Vec<Diagnostic>, Vec<CopySite>) {
     let mut pre = Pre {
         map,
         dialect,
@@ -48,6 +68,7 @@ pub fn preprocess(
         lookup,
         side: Vec::new(),
         diags: Vec::new(),
+        copies: Vec::new(),
     };
     let mut stack = vec![PathBuf::from(name)];
     let tokens = pre.stream(Path::new(name), text, &mut stack);
@@ -69,7 +90,7 @@ pub fn preprocess(
             }
         })
         .collect();
-    (mapped, pre.diags)
+    (mapped, pre.diags, pre.copies)
 }
 
 fn is_word(t: &Token, word: &str) -> bool {
@@ -85,6 +106,7 @@ struct Pre<'a> {
     /// name its slot, so the original file and position come back after `replace` runs.
     side: Vec<(FileId, Token)>,
     diags: Vec<Diagnostic>,
+    copies: Vec<CopySite>,
 }
 
 impl Pre<'_> {
@@ -211,6 +233,10 @@ impl Pre<'_> {
             self.diag(at, &format!("circular COPY of `{}`", name.text));
             return Vec::new();
         }
+        self.copies.push(CopySite {
+            origin: self.origin(at),
+            path: path.clone(),
+        });
         stack.push(path.clone());
         let body = self.stream(&path, &text, stack);
         stack.pop();
