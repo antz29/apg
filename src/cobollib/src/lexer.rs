@@ -104,10 +104,15 @@ fn units(text: &str, layout: Layout) -> Vec<Unit> {
             Layout::Free => (false, false, chars),
             Layout::Source(_) => {
                 let indicator = chars.get(6).map_or(' ', |ch| ch.c);
-                let body = chars
+                let mut body: Vec<Ch> = chars
                     .into_iter()
                     .filter(|ch| (8..=72).contains(&ch.col))
                     .collect();
+                if indicator == '-' {
+                    // A continuation's leading blanks are insignificant in every context.
+                    let blanks = body.iter().take_while(|ch| ch.c == ' ').count();
+                    body.drain(..blanks);
+                }
                 (matches!(indicator, '*' | '/' | 'D'), indicator == '-', body)
             }
         };
@@ -187,13 +192,24 @@ impl Lexer {
     }
 
     /// The character `n` places ahead of the next one, within the same line or continuation.
+    /// Blanks left before a continuation are passed over, as `join_continuation` passes them.
     fn ahead(&self, n: usize) -> Option<char> {
         let mut i = self.i;
         for _ in 0..n {
             self.peek_from(i)?;
-            i = self.next_index(i);
+            let next = self.next_index(i);
+            i = self.before_continuation(next).unwrap_or(next);
         }
         self.peek_from(i).map(|ch| ch.c)
+    }
+
+    /// The `Line(true)` marker that the blanks from `i` lead to, when a continuation follows them.
+    fn before_continuation(&self, mut i: usize) -> Option<usize> {
+        let start = i;
+        while matches!(self.units.get(i), Some(Unit::Char(ch)) if ch.c == ' ') {
+            i += 1;
+        }
+        (i > start && matches!(self.units.get(i), Some(Unit::Line(true)))).then_some(i)
     }
 
     fn peek(&self) -> Option<Ch> {
@@ -228,6 +244,7 @@ impl Lexer {
                 self.bump();
                 self.push(TokenKind::PseudoDelim, "==".to_string(), ch);
             }
+            ',' | ';' if self.ahead(1).is_none_or(char::is_whitespace) => self.bump(),
             '.' => self.single(TokenKind::Period, ch),
             ',' => self.single(TokenKind::Comma, ch),
             ';' => self.single(TokenKind::Semicolon, ch),
@@ -324,6 +341,42 @@ impl Lexer {
         self.ahead(0) == Some('.') && self.ahead(1).is_some_and(|c| !c.is_whitespace())
     }
 
+    /// Moves past the blanks a PICTURE clause or a separator may hold.
+    fn skip_spaces(&mut self) {
+        while self.ahead(0) == Some(' ') {
+            self.bump();
+        }
+    }
+
+    /// The PICTURE string after `PIC`/`PICTURE [IS]`: one token up to the next space. An inner
+    /// period stays in; a final period before a space or the end of the line is a separator.
+    fn picture(&mut self) {
+        self.skip_spaces();
+        if self.ahead(0).is_some_and(|c| c.eq_ignore_ascii_case(&'I'))
+            && self.ahead(1).is_some_and(|c| c.eq_ignore_ascii_case(&'S'))
+            && self.ahead(2).is_none_or(char::is_whitespace)
+        {
+            self.bump();
+            self.bump();
+            self.skip_spaces();
+        }
+        let Some(start) = self.peek() else { return };
+        let mut text = String::new();
+        loop {
+            self.join_continuation();
+            match self.ahead(0) {
+                Some(c) if !c.is_whitespace() && c != '=' && (c != '.' || self.inner_dot()) => {
+                    text.push(c);
+                    self.bump();
+                }
+                _ => break,
+            }
+        }
+        if !text.is_empty() {
+            self.push(TokenKind::Word, text, start);
+        }
+    }
+
     /// A word, number or PICTURE string: word characters and inner periods.
     fn take_word(&mut self) -> String {
         let mut text = String::new();
@@ -377,9 +430,30 @@ impl Lexer {
                         ),
                     );
                 }
+                let picture =
+                    text.eq_ignore_ascii_case("PIC") || text.eq_ignore_ascii_case("PICTURE");
                 self.push(kind, text, ch);
+                if picture {
+                    self.picture();
+                }
             }
         }
+    }
+
+    /// The index past a continuation's reopening quote and the quote after it, when the line
+    /// `Line(true)` at `self.i` opens with that pair: a quote ending the previous line then pairs
+    /// with the reopening quote into one embedded quote.
+    fn paired_quote_at_continuation(&self, quote: char) -> Option<usize> {
+        if !matches!(self.units.get(self.i), Some(Unit::Line(true))) {
+            return None;
+        }
+        let mut i = self.i + 1;
+        while matches!(self.units.get(i), Some(Unit::Char(ch)) if ch.c == ' ') {
+            i += 1;
+        }
+        let reopen = matches!(self.units.get(i), Some(Unit::Char(ch)) if ch.c == quote);
+        let second = matches!(self.units.get(i + 1), Some(Unit::Char(ch)) if ch.c == quote);
+        (reopen && second).then_some(i + 2)
     }
 
     /// Reads a literal whose opening `quote` is next. A doubled quote is one quote; a
@@ -395,6 +469,9 @@ impl Lexer {
                     if matches!(self.units.get(self.i), Some(Unit::Char(next)) if next.c == quote) {
                         value.push(quote);
                         self.i += 1;
+                    } else if let Some(resume) = self.paired_quote_at_continuation(quote) {
+                        value.push(quote);
+                        self.i = resume;
                     } else {
                         closed = true;
                         break;

@@ -834,6 +834,121 @@ mod unit {
     }
 
     #[test]
+    fn comma_or_semicolon_before_a_space_or_line_end_is_no_token() {
+        let text = [at(8, "MOVE A, B; C,"), at(8, "D.")].join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "MOVE"),
+                (TokenKind::Word, "A"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Word, "C"),
+                (TokenKind::Word, "D"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn picture_string_after_pic_is_one_token_and_a_final_period_separates() {
+        let text = [
+            at(8, "01 A PIC +++++.++. 01 B PICTURE IS --,---.--."),
+            at(8, "01 C PIC $.** VALUE ZERO. 02 D PICTURE ***,***.**."),
+        ]
+        .join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Numeric, "01"),
+                (TokenKind::Word, "A"),
+                (TokenKind::Word, "PIC"),
+                (TokenKind::Word, "+++++.++"),
+                (TokenKind::Period, "."),
+                (TokenKind::Numeric, "01"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Word, "PICTURE"),
+                (TokenKind::Word, "--,---.--"),
+                (TokenKind::Period, "."),
+                (TokenKind::Numeric, "01"),
+                (TokenKind::Word, "C"),
+                (TokenKind::Word, "PIC"),
+                (TokenKind::Word, "$.**"),
+                (TokenKind::Word, "VALUE"),
+                (TokenKind::Word, "ZERO"),
+                (TokenKind::Period, "."),
+                (TokenKind::Numeric, "02"),
+                (TokenKind::Word, "D"),
+                (TokenKind::Word, "PICTURE"),
+                (TokenKind::Word, "***,***.**"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn period_ending_a_continued_number_stays_inside_it() {
+        let text = [at(8, "MOVE 12."), format!("{}7 TO X.", at(7, "-"))].join("\n");
+        let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "MOVE"),
+                (TokenKind::Numeric, "12.7"),
+                (TokenKind::Word, "TO"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn quote_in_last_column_pairs_with_the_continuation_reopening_quote() {
+        let text = [
+            at(8, &format!("{:<50}\"ABCDEFGHIJKLM\"", "DISPLAY")),
+            format!("{}    \"\"9K(L)M>N<O PQRSTUVWXYZ\".", at(7, "-")),
+        ]
+        .join("\n");
+        let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Alnum, "ABCDEFGHIJKLM\"9K(L)M>N<O PQRSTUVWXYZ"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn continued_number_with_blanks_after_the_dash_and_a_period_at_line_end() {
+        let cont = |body: &str| format!("{}{:<65}", at(7, "-"), body);
+        let text = [
+            format!("{}{:<65}", " ".repeat(7), "MOVE -"),
+            cont("             9"),
+            cont("             9"),
+            cont("             ."),
+            cont("             7 TO X."),
+        ]
+        .join("\n");
+        let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "MOVE"),
+                (TokenKind::Numeric, "-99.7"),
+                (TokenKind::Word, "TO"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
     fn slash_in_column_seven_is_a_comment_line() {
         let text = [at(7, "/ PAGE EJECT"), at(8, "DISPLAY C.")].join("\n");
         let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
@@ -849,7 +964,7 @@ mod unit {
 
     #[test]
     fn pseudo_text_delimiters_and_separators() {
-        let (tokens, _) = lex_all(&at(8, "==A==, B; (C)"), fixed(), Dialect::Cobol85);
+        let (tokens, _) = lex_all(&at(8, "==A==,B;(C)"), fixed(), Dialect::Cobol85);
         assert_eq!(
             shape(&tokens),
             [
