@@ -56,8 +56,8 @@ mod unit {
     #[test]
     fn no_oo_word_is_reserved_under_any_dialect_but_class_under_cobol85() {
         for dialect in ALL_DIALECTS {
-            for word in OO_WORDS.iter().chain(["INVOKE"].iter()) {
-                if dialect == Dialect::Cobol85 && *word == "CLASS" {
+            for word in OO_WORDS {
+                if dialect == Dialect::Cobol85 && word == "CLASS" {
                     continue;
                 }
                 assert!(!dialect.is_reserved(word), "{dialect:?} reserves {word}");
@@ -88,6 +88,7 @@ mod unit {
     #[test]
     fn oo_word_match_is_case_insensitive() {
         assert!(crate::dialect::is_oo_word("object"));
+        assert!(crate::dialect::is_oo_word("INVOKE"));
         assert!(!crate::dialect::is_oo_word("ALTER"));
     }
 

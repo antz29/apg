@@ -62,7 +62,7 @@ pub enum Feature {
 
 /// OO words: contextual keywords under every dialect (SPEC §8). Only `CLASS` is reserved,
 /// and only under `cobol85` (see [`Dialect::is_reserved`]).
-pub const OO_WORDS: [&str; 13] = [
+pub const OO_WORDS: [&str; 14] = [
     "CLASS",
     "OBJECT",
     "METHOD",
@@ -76,6 +76,7 @@ pub const OO_WORDS: [&str; 13] = [
     "GET",
     "INHERITS",
     "IMPLEMENTS",
+    "INVOKE",
 ];
 
 /// Whether `word` is one of the OO words (case-insensitive).
