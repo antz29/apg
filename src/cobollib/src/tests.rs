@@ -2677,6 +2677,85 @@ mod unit {
                     .all(|e| e.property.is_none() && e.object_reference.is_none()));
             }
         }
+
+        #[test]
+        fn method_body_without_paragraph_is_one_method_body_paragraph() {
+            let text = "IDENTIFICATION DIVISION.\nCLASS-ID. C.\nOBJECT.\nMETHOD-ID. Run.\nPROCEDURE DIVISION.\nINVOKE SELF \"Go\".\nEND METHOD Run.\nEND OBJECT.\nEND CLASS C.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let method = &unit.classes[0].object.as_ref().unwrap().methods[0];
+            let paragraphs = &method.procedure.as_ref().unwrap().paragraphs;
+            assert_eq!(paragraphs.len(), 1);
+            assert_eq!(
+                paragraphs[0].name.text,
+                crate::parser::procedure::METHOD_BODY_PARAGRAPH
+            );
+            let stmts: Vec<&Statement> = paragraphs[0]
+                .sentences
+                .iter()
+                .flat_map(|s| &s.statements)
+                .collect();
+            assert_eq!(stmts.len(), 1);
+            let (receiver, target, _, _) = invoke(stmts[0]);
+            assert!(matches!(receiver, Receiver::Self_));
+            assert!(matches!(target, CallTarget::Literal(m) if m.text.contains("Go")));
+        }
+
+        #[test]
+        fn program_statements_before_its_first_paragraph_are_diagnosed_and_dropped() {
+            let text = "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nPROCEDURE DIVISION.\nDISPLAY X.\nMAIN-PARA.\nSTOP RUN.\nEND PROGRAM P.\n";
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, text);
+            assert_eq!(
+                diags
+                    .iter()
+                    .filter(|d| d.message == "statement outside a paragraph")
+                    .count(),
+                1,
+                "{diags:?}"
+            );
+            let paragraphs = &unit.programs[0].procedure.as_ref().unwrap().paragraphs;
+            assert_eq!(paragraphs.len(), 1);
+            assert_eq!(paragraphs[0].name.text, "MAIN-PARA");
+        }
+
+        #[test]
+        fn if_else_invoke_and_raise_are_statements_and_join_no_condition() {
+            let text = with_procedure(
+                "    IF X = 1 INVOKE SELF \"Go\" ELSE RAISE EXCEPTION Bad END-IF.\n",
+            );
+            let (unit, diags) = parse_oo(Dialect::Cobol2002, &text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+            let branches = &stmts[0].children;
+            assert_eq!(branches.len(), 2, "{branches:?}");
+            assert!(matches!(
+                invoke(&branches[0]).1,
+                CallTarget::Literal(m) if m.text.contains("Go")
+            ));
+            assert!(matches!(
+                &branches[1].transfer,
+                Some(Transfer::Raise(RaiseTarget::ExceptionName(n))) if n.text == "Bad"
+            ));
+            assert!(branches[1].refs.is_empty());
+        }
+
+        #[test]
+        fn if_condition_with_raise_as_a_data_name_stays_an_operand() {
+            let text = with_procedure(
+                "    IF X = RAISE DISPLAY Y END-IF.\n    IF RAISE = 1 STOP RUN END-IF.\n",
+            );
+            for dialect in [Dialect::Cobol85, Dialect::Cobol2002] {
+                let (unit, diags) = parse_oo(dialect, &text);
+                assert!(diags.is_empty(), "{dialect:?} {diags:?}");
+                let stmts = statements(&unit);
+                assert_eq!(stmts.len(), 2, "{dialect:?}");
+                assert_eq!(qnames(&stmts[0].refs), ["X", "RAISE"], "{dialect:?}");
+                assert_eq!(qnames(&stmts[1].refs), ["RAISE"], "{dialect:?}");
+                assert!(stmts.iter().all(|s| s.transfer.is_none()), "{dialect:?}");
+            }
+        }
     }
 }
 
@@ -5412,5 +5491,117 @@ mod int {
                 "to":id_of(&recs,"WS-R"),
             })]
         );
+    }
+
+    #[test]
+    fn method_body_without_paragraph_keeps_its_invokes_and_references() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 WS-R PIC X."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(12, "INVOKE SELF \"Helper\"."),
+            at(12, "DISPLAY WS-R."),
+            at(8, "END METHOD Run."),
+            at(8, "METHOD-ID. Helper."),
+            at(8, "END METHOD Helper."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+            at(8, "END PROGRAM P."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(
+            recs.iter().all(|r| r["name"] != "<method-body>"),
+            "{recs:?}"
+        );
+        let run = method_fn(&recs, "P.Foo", "Run", serde_json::json!(["instance"]));
+        let helper = method_fn(&recs, "P.Foo", "Helper", serde_json::json!(["instance"]));
+        assert_eq!(edges(&recs, &["calls"]), [invoke_call(&run, &helper)]);
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":run,"to":id_of(&recs,"WS-R")})]
+        );
+    }
+
+    #[test]
+    fn statements_before_a_programs_first_paragraph_are_diagnosed_and_dropped() {
+        let text = program(
+            &[at(12, "01 X PIC X.")],
+            &[
+                at(12, "DISPLAY X."),
+                at(8, "MAIN-PARA."),
+                at(12, "STOP RUN."),
+            ],
+        );
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert_eq!(
+            diags
+                .iter()
+                .filter(|d| d.message == "statement outside a paragraph")
+                .count(),
+            1,
+            "{diags:?}"
+        );
+        assert!(
+            recs.iter().all(|r| r["name"] != "<method-body>"),
+            "{recs:?}"
+        );
+        assert!(edges(&recs, &["uses", "unresolved_use", "unresolved_call"]).is_empty());
+        assert!(recs.iter().any(|r| r["name"] == "MAIN-PARA"), "{recs:?}");
+    }
+
+    #[test]
+    fn invoke_inside_if_and_else_yields_its_calls() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 R OBJECT REFERENCE Base."),
+            at(8, "01 X PIC X."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "IF X = 1"),
+            at(16, "INVOKE R \"Run\""),
+            at(12, "ELSE"),
+            at(16, "INVOKE R \"Stop\""),
+            at(12, "END-IF."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "END METHOD Run."),
+            at(8, "METHOD-ID. Stop."),
+            at(8, "END METHOD Stop."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Base."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        let mut want = vec![
+            invoke_call(
+                &main,
+                &method_fn(&recs, "Base", "Run", serde_json::json!(["instance"])),
+            ),
+            invoke_call(
+                &main,
+                &method_fn(&recs, "Base", "Stop", serde_json::json!(["instance"])),
+            ),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["calls"]), want);
+        assert!(edges(&recs, &["unresolved_call"]).is_empty(), "{recs:?}");
     }
 }
