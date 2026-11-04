@@ -275,7 +275,8 @@ fn global_declared(program: &Program, tokens: &[Mapped], out: &mut HashSet<Strin
 
 /// Names a program declares in its token stream outside the DATA DIVISION: file names after
 /// SELECT, FD and SD, index names after INDEXED (with or without BY; not `ORGANIZATION [IS]
-/// INDEXED`), and the mnemonic (after IS) and alphabet (after ALPHABET) names of SPECIAL-NAMES.
+/// INDEXED`), and the mnemonic (after IS), alphabet (after ALPHABET), class (after CLASS) and
+/// switch-status (after ON/OFF [STATUS] [IS]) names of SPECIAL-NAMES.
 fn token_declared(tokens: &[Mapped], out: &mut HashSet<String>) {
     let mut in_special = false;
     for (i, t) in tokens.iter().enumerate() {
@@ -305,8 +306,18 @@ fn token_declared(tokens: &[Mapped], out: &mut HashSet<String>) {
             }
             "SPECIAL-NAMES" => in_special = true,
             "FILE-CONTROL" | "I-O-CONTROL" | "DATA" | "PROCEDURE" => in_special = false,
-            "IS" if in_special => declare_word(tokens.get(i + 1), out),
-            "ALPHABET" if in_special => declare_word(tokens.get(i + 1), out),
+            "IS" | "ALPHABET" | "CLASS" if in_special => declare_word(tokens.get(i + 1), out),
+            "ON" | "OFF" if in_special => {
+                // `ON|OFF [STATUS] [IS] name` — the switch-status condition name.
+                let mut k = i + 1;
+                if tokens.get(k).is_some_and(|n| is_word(n, "STATUS")) {
+                    k += 1;
+                }
+                if tokens.get(k).is_some_and(|n| is_word(n, "IS")) {
+                    k += 1;
+                }
+                declare_word(tokens.get(k), out);
+            }
             _ => {}
         }
     }
