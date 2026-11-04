@@ -344,7 +344,10 @@ impl Parser<'_> {
 
     /// A sentence of statements, added to the open paragraph.
     fn statement_sentence(&mut self, a: usize, b: usize, period: Option<Origin>) {
-        if self.para.is_none() {
+        // A declarative section's USE sentence precedes its first paragraph; the AST has no slot
+        // for it, so it is checked for diagnostics and not kept.
+        let use_sentence = self.in_decl && self.section.is_some() && is(&self.tokens[a], "USE");
+        if self.para.is_none() && !use_sentence {
             let at = self.origin(a);
             self.diag(at, "statement outside a paragraph");
             return;
@@ -354,6 +357,9 @@ impl Parser<'_> {
             let at = self.origin(next);
             let found = self.tokens[next].token.text.clone();
             self.diag(at, &format!("expected a statement, found `{found}`"));
+        }
+        if self.para.is_none() {
+            return;
         }
         let sentence = Sentence {
             span: self.span(a, b),
