@@ -288,6 +288,72 @@ mod unit {
         }
 
         #[test]
+        fn optional_phrase_words_open_their_branches() {
+            let cases = [
+                ("READ F END MOVE 1 TO X END-READ.", 1),
+                ("READ F NOT AT END MOVE 1 TO X END-READ.", 1),
+                (
+                    "WRITE R INVALID GO TO A-PARA NOT INVALID MOVE 1 TO X END-WRITE.",
+                    2,
+                ),
+                ("WRITE R NOT EOP DISPLAY X END-WRITE.", 1),
+                ("CALL 'S' USING A OVERFLOW DISPLAY X END-CALL.", 1),
+                ("CALL 'S' USING A NOT ON EXCEPTION DISPLAY X END-CALL.", 1),
+                ("ADD 1 TO X SIZE ERROR DISPLAY Y END-ADD.", 1),
+            ];
+            for (stmt, children) in cases {
+                let text = format!("PROCEDURE DIVISION.\nA-PARA.\n    {stmt}\n");
+                let (div, diags) = parse_procedure(&text).unwrap();
+                assert!(diags.is_empty(), "{stmt}: {diags:?}");
+                let statement = &div.paragraphs[0].sentences[0].statements;
+                assert_eq!(statement.len(), 1, "{stmt}");
+                assert_eq!(statement[0].children.len(), children, "{stmt}");
+            }
+        }
+
+        #[test]
+        fn search_takes_when_conditions_and_its_end_search() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    SEARCH GRP VARYING N1 WHEN E (N1) = L1 MOVE \"AA\" TO L2 WHEN E (N1) = L3 DISPLAY X END-SEARCH.\n    SEARCH ALL T END GO TO A-PARA WHEN T1 EQUAL TO \"05\" AND T2 EQUAL \"07\" DISPLAY Y.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let sentences = &div.paragraphs[0].sentences;
+            assert_eq!(sentences.len(), 2);
+            let search = &sentences[0].statements[0];
+            assert!(search.scope_end.is_some());
+            assert_eq!(search.children.len(), 2);
+            assert!(search.refs.iter().any(|r| r.name.text == "L3"));
+            assert_eq!(sentences[1].statements[0].children.len(), 2);
+        }
+
+        #[test]
+        fn all_digit_section_and_paragraph_names_are_procedure_names() {
+            let text = "PROCEDURE DIVISION.\n00 SECTION 00.\nA-PARA.\n    GO TO 3 4 DEPENDING ON N.\n3.\n    PERFORM 3 THRU 4.\n4.\n    DISPLAY X.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(div.sections[0].name.text, "00");
+            let names: Vec<&str> = div.sections[0]
+                .paragraphs
+                .iter()
+                .map(|p| p.name.text.as_str())
+                .collect();
+            assert_eq!(names, ["A-PARA", "3", "4"]);
+            match &div.sections[0].paragraphs[0].sentences[0].statements[0].transfer {
+                Some(Transfer::GoTo(targets)) => {
+                    assert_eq!(targets.len(), 2);
+                    assert_eq!(targets[0].name.text, "3");
+                }
+                other => panic!("expected GO TO, found {other:?}"),
+            }
+            match &div.sections[0].paragraphs[1].sentences[0].statements[0].transfer {
+                Some(Transfer::Perform(Some(range))) => {
+                    assert_eq!(range.from.name.text, "3");
+                    assert_eq!(range.thru.as_ref().map(|q| q.name.text.as_str()), Some("4"));
+                }
+                other => panic!("expected an out-of-line PERFORM, found {other:?}"),
+            }
+        }
+
+        #[test]
         fn text_without_the_division_header_is_none() {
             assert!(parse_procedure("DATA DIVISION.\n").is_none());
         }

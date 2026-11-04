@@ -88,15 +88,23 @@ const SCOPE_TERMINATORS: &[&str] = &[
 ];
 
 /// Phrases that open a branch of a statement (`ON SIZE ERROR`, `AT END`, ...), each with the
-/// statements it holds. A leading `NOT` negates the branch.
+/// statements it holds. A leading `NOT` negates the branch. The optional `ON`/`AT`/`KEY` words
+/// are spelled out both ways; the longer form comes first so it wins.
 const BRANCHES: &[&[&str]] = &[
     &["ON", "SIZE", "ERROR"],
+    &["SIZE", "ERROR"],
     &["ON", "OVERFLOW"],
+    &["OVERFLOW"],
     &["ON", "EXCEPTION"],
+    &["EXCEPTION"],
     &["AT", "END"],
+    &["END"],
     &["AT", "END-OF-PAGE"],
+    &["END-OF-PAGE"],
     &["AT", "EOP"],
+    &["EOP"],
     &["INVALID", "KEY"],
+    &["INVALID"],
 ];
 
 /// Words that are phrase keywords or operand noise, never data names in a reference.
@@ -348,7 +356,7 @@ impl Parser<'_> {
                 span: self.span(a, a + 1),
                 paragraphs: Vec::new(),
             });
-        } else if words.len() == 1 && words[0].token.kind == TokenKind::Word && !self.is_verb(a) {
+        } else if words.len() == 1 && is_header_word(&words[0]) && !self.is_verb(a) {
             if self.in_decl && self.section.is_none() {
                 let at = self.origin(a);
                 self.diag(at, "expected a section header in DECLARATIVES");
@@ -435,6 +443,11 @@ impl Parser<'_> {
     fn is_name(&self, k: usize) -> bool {
         let t = &self.tokens[k];
         t.token.kind == TokenKind::Word && !word_in(t, KEYWORDS) && !word_in(t, VERBS)
+    }
+
+    /// A procedure name: a data-name-like word or an all-digit paragraph name (`GO TO 50`).
+    fn is_proc_name(&self, k: usize) -> bool {
+        self.is_name(k) || self.tokens[k].token.kind == TokenKind::Numeric
     }
 
     /// The name at `k` with its `OF`/`IN` qualifiers, and the index after it.
@@ -584,8 +597,9 @@ impl Parser<'_> {
             self.diag(at, "PERFORM without a target or statements");
             return (None, end);
         }
-        let outline =
-            self.is_name(k) && !self.closes(k, end) && !(k + 1 < end && is(&t[k + 1], "TIMES"));
+        let outline = self.is_proc_name(k)
+            && !self.closes(k, end)
+            && !(k + 1 < end && is(&t[k + 1], "TIMES"));
         if outline {
             if let Some((range, next)) = self.proc_range(k, end) {
                 let mut refs = Vec::new();
@@ -659,7 +673,7 @@ impl Parser<'_> {
             k += 1;
         }
         let mut targets = Vec::new();
-        while k < end && self.is_name(k) && !self.closes(k, end) && !is(&t[k], "DEPENDING") {
+        while k < end && self.is_proc_name(k) && !self.closes(k, end) && !is(&t[k], "DEPENDING") {
             let (name, next) = self.qualified(k, end);
             targets.push(name);
             k = next;
@@ -693,14 +707,14 @@ impl Parser<'_> {
         if k < end && is(&t[k], "IS") {
             k += 1;
         }
-        if k >= end || !self.is_name(k) {
+        if k >= end || !self.is_proc_name(k) {
             return None;
         }
         let (from, mut next) = self.qualified(k, end);
         let mut thru = None;
         if next + 1 < end
             && (is(&t[next], "THRU") || is(&t[next], "THROUGH"))
-            && self.is_name(next + 1)
+            && self.is_proc_name(next + 1)
         {
             let (name, after) = self.qualified(next + 1, end);
             thru = Some(name);
@@ -768,7 +782,12 @@ impl Parser<'_> {
             }
             let branch = self.branch_at(k, end, search);
             if branch > 0 {
-                let (kids, next) = self.statements(k + branch, end);
+                // A SEARCH `WHEN` holds a condition before its statements.
+                let mut body = k + branch;
+                if search && is(&t[body - 1], "WHEN") {
+                    body = self.refs_until(body, end, &mut refs);
+                }
+                let (kids, next) = self.statements(body, end);
                 children.extend(kids);
                 k = next;
                 continue;
@@ -824,10 +843,15 @@ fn spells(words: &[Mapped], list: &[&str]) -> bool {
     words.len() == list.len() && words.iter().zip(list).all(|(t, &w)| is(t, w))
 }
 
+/// Whether `t` can name a section or paragraph header: a word or an all-digit name.
+fn is_header_word(t: &Mapped) -> bool {
+    matches!(t.token.kind, TokenKind::Word | TokenKind::Numeric)
+}
+
 /// Whether `words` is a `<name> SECTION.` header, with an optional segment number.
 fn section_header(words: &[Mapped]) -> bool {
     words.len() >= 2
-        && words[0].token.kind == TokenKind::Word
+        && is_header_word(&words[0])
         && is(&words[1], "SECTION")
         && (words.len() == 2 || (words.len() == 3 && words[2].token.kind == TokenKind::Numeric))
 }
