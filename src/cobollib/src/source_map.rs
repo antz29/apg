@@ -3,6 +3,7 @@
 //! text pulled in by COPY). `Token` carries no file, so the preprocessor maps per file.
 
 use crate::diag::Diagnostic;
+use crate::format::Layout;
 use crate::lexer::Token;
 
 /// Index of a file registered in a `SourceMap`.
@@ -28,6 +29,8 @@ pub struct Mapped {
 #[derive(Debug, Default)]
 pub struct SourceMap {
     names: Vec<String>,
+    /// Layout per file, indexed by `FileId`; `None` until `set_layout`.
+    layouts: Vec<Option<Layout>>,
 }
 
 impl SourceMap {
@@ -40,6 +43,19 @@ impl SourceMap {
     /// The name a `FileId` was registered under.
     pub fn name(&self, file: FileId) -> &str {
         &self.names[file.0]
+    }
+
+    /// Records the layout `file` is read through.
+    pub fn set_layout(&mut self, file: FileId, layout: Layout) {
+        if self.layouts.len() <= file.0 {
+            self.layouts.resize(file.0 + 1, None);
+        }
+        self.layouts[file.0] = Some(layout);
+    }
+
+    /// The layout recorded for `file`, or `None` if it was never set.
+    pub fn layout(&self, file: FileId) -> Option<Layout> {
+        self.layouts.get(file.0).copied().flatten()
     }
 
     /// Pairs every token of `file` with its origin; the token keeps its own line and column.

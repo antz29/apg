@@ -2068,6 +2068,37 @@ mod unit {
             assert_eq!(names(&data.sections[0].entries), ["W"]);
         }
     }
+
+    mod source_map {
+        use super::*;
+        use crate::format::Layout;
+
+        #[test]
+        fn set_layout_then_read_it_back() {
+            let mut map = SourceMap::default();
+            let file = map.add_file("p.cob");
+            map.set_layout(file, Layout::Free);
+            assert_eq!(map.layout(file), Some(Layout::Free));
+        }
+
+        #[test]
+        fn unset_file_has_no_layout() {
+            let mut map = SourceMap::default();
+            let file = map.add_file("p.cob");
+            assert_eq!(map.layout(file), None);
+        }
+
+        #[test]
+        fn two_files_keep_their_own_layouts() {
+            let mut map = SourceMap::default();
+            let first = map.add_file("a.cob");
+            let second = map.add_file("b.cpy");
+            map.set_layout(second, Layout::Free);
+            map.set_layout(first, fixed());
+            assert_eq!(map.layout(first), Some(fixed()));
+            assert_eq!(map.layout(second), Some(Layout::Free));
+        }
+    }
 }
 
 fn search() -> crate::preprocess::Search {
