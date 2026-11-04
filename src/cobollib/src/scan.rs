@@ -10,7 +10,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::ast::{
     CallTarget, Class, CompilationUnit, DataDivision, DataEntry, Interface, Name, Paragraph,
-    ProcRange, Program, QualifiedName, Section, Span, Statement, Transfer,
+    ProcRange, ProcedureDivision, Program, QualifiedName, RepositoryEntry, Section, Span,
+    Statement, Transfer,
 };
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
@@ -19,7 +20,7 @@ use crate::parser::parse_compilation_unit;
 use crate::preprocess::{preprocess_with_copies, read_file, CopySite, Search};
 use crate::resolve::{
     declared, declares, global_data, resolve_call, scopes, CallResolution, ClassIndex, Declared,
-    ProcKind, Resolution, Scope, Type, TypeRes,
+    MethodRes, ProcKind, Resolution, Scope, Site, Type, TypeRes,
 };
 use crate::source_map::{FileId, Mapped, Origin, SourceMap};
 
@@ -70,8 +71,9 @@ pub enum Rec {
         to: String,
         properties: BTreeMap<String, String>,
     },
-    /// A `PERFORM` or `GO TO` naming a section, or a data reference to a record: the target's Struct.
-    /// A `COPY` is a program's `uses` of the copybook's File, `properties.kind` `copy`.
+    /// A `PERFORM`, `GO TO` or `INVOKE` (`kind` `perform`, `goto`, `invoke`), or a data reference
+    /// to a record: the target's Struct. A `COPY` is a program's `uses` of the copybook's File,
+    /// `properties.kind` `copy`.
     Uses {
         from: String,
         to: String,
@@ -119,6 +121,8 @@ pub struct Emitter {
     type_ids: BTreeMap<usize, String>,
     /// Class and interface names awaiting resolution in [`Emitter::finish`].
     type_refs: Vec<TypeRef>,
+    /// The emitted id of each paragraph, method and method prototype, keyed by [`node_key`].
+    ids: BTreeMap<usize, String>,
 }
 
 /// A class or interface name a unit names (`INHERITS`, `IMPLEMENTS`, `USING`, `REPOSITORY`, or an
@@ -356,6 +360,7 @@ impl Emitter {
             units: Vec::new(),
             type_ids: BTreeMap::new(),
             type_refs: Vec::new(),
+            ids: BTreeMap::new(),
         }
     }
 
@@ -449,8 +454,17 @@ impl Emitter {
 
     /// A `CLASS-ID` Struct under `parent` (contained by `up` when nested) with a Function per
     /// method of its FACTORY and OBJECT sections, then `GET-`/`SET-` Functions per top-level
-    /// PROPERTY item of their data divisions. Method bodies are not walked.
-    fn class(&mut self, loc: &mut Locate, c: &Class, parent: &str, up: Option<&str>) {
+    /// PROPERTY item of their data divisions. A method body's data references are queued from
+    /// the method when the class sits in program `program` (see [`method_refs`]); its INVOKEs
+    /// resolve in [`Emitter::invoke_facts`].
+    fn class(
+        &mut self,
+        loc: &mut Locate,
+        c: &Class,
+        parent: &str,
+        up: Option<&str>,
+        program: Option<usize>,
+    ) {
         let (id, scope) = self.structure(loc, &c.name.text, c.span, parent, up);
         loc.owners.push((c.span, id.clone()));
         self.type_ids.insert(addr(Type::Class(c)), id.clone());
@@ -463,6 +477,18 @@ impl Emitter {
         // Class data has no record Structs, so its OBJECT REFERENCEs are from the class itself.
         for section in c.factory.iter().chain(&c.object) {
             self.division_refs(&id, section.data.as_ref());
+        }
+        // Class-level data names: a method body naming one is not a program record.
+        let mut class_data = BTreeSet::new();
+        for d in c
+            .factory
+            .iter()
+            .chain(&c.object)
+            .filter_map(|s| s.data.as_ref())
+        {
+            for s in &d.sections {
+                declared_names(&s.entries, &mut class_data);
+            }
         }
         let mut seen = BTreeSet::new();
         for m in c.factory.iter().chain(&c.object).flat_map(|s| &s.methods) {
@@ -478,8 +504,22 @@ impl Emitter {
                     &id,
                     vec![key.to_string()],
                 );
+                self.ids.insert(node_key(m), fid.clone());
                 // Method data has no record Structs either, so its references are from the method.
                 self.division_refs(&fid, m.data.as_ref());
+                if let (Some(program), Some(proc)) = (program, &m.procedure) {
+                    let mut names = class_data.clone();
+                    if let Some(d) = &m.data {
+                        for s in &d.sections {
+                            declared_names(&s.entries, &mut names);
+                        }
+                    }
+                    for para in paragraphs(proc) {
+                        for sentence in &para.sentences {
+                            method_refs(loc, program, &fid, &sentence.statements, &names);
+                        }
+                    }
+                }
             }
         }
         // Properties are instance-keyed (static ones too), so they share the instance key with
@@ -528,7 +568,8 @@ impl Emitter {
         let mut seen = BTreeSet::new();
         for p in &i.prototypes {
             if seen.insert(p.name.text.clone()) {
-                self.member(loc, &p.name.text, p.span, &scope, &id, Vec::new());
+                let fid = self.member(loc, &p.name.text, p.span, &scope, &id, Vec::new());
+                self.ids.insert(node_key(p), fid);
             }
         }
     }
@@ -607,8 +648,9 @@ impl Emitter {
                 self.paragraph(loc, para, &scope, &id, None);
             }
         }
+        let program = loc.scope;
         for c in &p.classes {
-            self.class(loc, c, &scope, Some(&id));
+            self.class(loc, c, &scope, Some(&id), Some(program));
         }
         for nested in &p.nested {
             self.program(loc, nested, &scope, Some(&id));
@@ -633,6 +675,7 @@ impl Emitter {
     ) {
         let id = self.member(loc, &para.name.text, para.span, parent, up, Vec::new());
         loc.claim(ProcKind::Paragraph, &para.name.text, section, &id);
+        self.ids.insert(node_key(para), id.clone());
         for sentence in &para.sentences {
             collect(loc, &id, &sentence.statements);
         }
@@ -906,6 +949,45 @@ impl Emitter {
                 TypeRes::Scanned(_) | TypeRes::Ambiguous => {}
             }
         }
+        self.invoke_facts(&index, &units);
+    }
+
+    /// Emits the `calls` of each resolved INVOKE, from its paragraph or method to the method
+    /// Function its receiver resolves to (a prototype when the receiver's type is an interface).
+    /// An external or unknown target is an `unresolved_call` naming the method as written, once
+    /// per (source, name). Each (source, target) is emitted once.
+    fn invoke_facts(&mut self, index: &ClassIndex, units: &[CompilationUnit]) {
+        let mut out = Vec::new();
+        invokes_in(units, index, &self.ids, &mut out);
+        let mut linked = BTreeSet::new();
+        let mut reported = BTreeSet::new();
+        for Invoke { from, res, name } in out {
+            let to = match res {
+                MethodRes::Method(m) => self.ids.get(&node_key(m)).cloned(),
+                MethodRes::Prototype(p) => self.ids.get(&node_key(p)).cloned(),
+                MethodRes::External | MethodRes::Unknown => None,
+            };
+            if let Some(to) = to {
+                if linked.insert((from.clone(), to.clone())) {
+                    self.push_call(from, to, "invoke");
+                }
+                continue;
+            }
+            let category = if res == MethodRes::External {
+                "external"
+            } else {
+                "unknown"
+            };
+            if reported.insert((from.clone(), name.clone())) {
+                if self.unresolved.insert(name.clone()) {
+                    self.recs.push(Rec::Unresolved {
+                        fqn: name.clone(),
+                        category: category.to_string(),
+                    });
+                }
+                self.recs.push(Rec::UnresolvedCall { from, to: name });
+            }
+        }
     }
 
     /// Scans one COBOL file: `path` is the identity its records carry and the name copybooks
@@ -964,7 +1046,7 @@ impl Emitter {
             self.program(&mut loc, program, &module, None);
         }
         for c in &unit.classes {
-            self.class(&mut loc, c, &module, None);
+            self.class(&mut loc, c, &module, None, None);
         }
         for i in &unit.interfaces {
             self.interface(&mut loc, i, &module, None);
@@ -1224,6 +1306,181 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
             _ => {}
         }
         collect(loc, from, &statement.children);
+    }
+}
+
+/// An INVOKE awaiting its report: the emitted id of the Function it sits in, what its receiver
+/// resolves to, and the method name as written.
+struct Invoke<'a> {
+    from: String,
+    res: MethodRes<'a>,
+    name: String,
+}
+
+/// The [`Emitter::ids`] key of a paragraph, method or method prototype: its address in the units.
+fn node_key<T>(node: &T) -> usize {
+    std::ptr::from_ref(node) as usize
+}
+
+/// A procedure division's paragraphs: declaratives, sections, then unsectioned paragraphs.
+fn paragraphs(div: &ProcedureDivision) -> Vec<&Paragraph> {
+    div.declaratives
+        .iter()
+        .chain(&div.sections)
+        .flat_map(|s| &s.paragraphs)
+        .chain(&div.paragraphs)
+        .collect()
+}
+
+/// Every INVOKE of the units' programs and classes, resolved by `index` against the whole tree.
+fn invokes_in<'a>(
+    units: &'a [CompilationUnit],
+    index: &ClassIndex<'a>,
+    ids: &BTreeMap<usize, String>,
+    out: &mut Vec<Invoke<'a>>,
+) {
+    for unit in units {
+        for c in &unit.classes {
+            class_invokes(c, &[], &[], index, ids, out);
+        }
+        for p in &unit.programs {
+            program_invokes(p, &[], &[], index, ids, out);
+        }
+    }
+}
+
+/// The INVOKEs of a program's paragraphs (each its own Function, with the program as the site)
+/// and of its classes and nested programs. `outer_data` and `outer_repos` are the enclosing
+/// programs' DATA DIVISIONs and REPOSITORY entries, innermost first.
+fn program_invokes<'a>(
+    p: &'a Program,
+    outer_data: &[&'a DataDivision],
+    outer_repos: &[&'a RepositoryEntry],
+    index: &ClassIndex<'a>,
+    ids: &BTreeMap<usize, String>,
+    out: &mut Vec<Invoke<'a>>,
+) {
+    let data: Vec<&'a DataDivision> = p.data.iter().chain(outer_data.iter().copied()).collect();
+    let repos: Vec<&'a RepositoryEntry> = p
+        .repository
+        .iter()
+        .chain(outer_repos.iter().copied())
+        .collect();
+    if let Some(proc) = &p.procedure {
+        for para in paragraphs(proc) {
+            let Some(from) = ids.get(&node_key(para)) else {
+                continue;
+            };
+            let site = Site {
+                class: None,
+                factory: false,
+                data: data.clone(),
+                repository: repos.clone(),
+            };
+            for sentence in &para.sentences {
+                statement_invokes(&sentence.statements, from, &site, index, out);
+            }
+        }
+    }
+    for c in &p.classes {
+        class_invokes(c, &data, &repos, index, ids, out);
+    }
+    for nested in &p.nested {
+        program_invokes(nested, &data, &repos, index, ids, out);
+    }
+}
+
+/// The INVOKEs of a class's methods, each attributed to its method Function (a method's
+/// paragraphs have no Functions of their own). The site is the class, with the method's own
+/// data, its section's data, then the enclosing programs' data.
+fn class_invokes<'a>(
+    c: &'a Class,
+    outer_data: &[&'a DataDivision],
+    outer_repos: &[&'a RepositoryEntry],
+    index: &ClassIndex<'a>,
+    ids: &BTreeMap<usize, String>,
+    out: &mut Vec<Invoke<'a>>,
+) {
+    let repos: Vec<&'a RepositoryEntry> = c
+        .repository
+        .iter()
+        .chain(outer_repos.iter().copied())
+        .collect();
+    for section in c.factory.iter().chain(&c.object) {
+        for m in &section.methods {
+            let (Some(from), Some(proc)) = (ids.get(&node_key(m)), &m.procedure) else {
+                continue;
+            };
+            let data: Vec<&'a DataDivision> = m
+                .data
+                .iter()
+                .chain(section.data.iter())
+                .chain(outer_data.iter().copied())
+                .collect();
+            let site = Site {
+                class: Some(c),
+                factory: m.factory,
+                data,
+                repository: repos.clone(),
+            };
+            for para in paragraphs(proc) {
+                for sentence in &para.sentences {
+                    statement_invokes(&sentence.statements, from, &site, index, out);
+                }
+            }
+        }
+    }
+}
+
+/// Resolves each INVOKE of `statements` (branches included) from the Function `from`.
+fn statement_invokes<'a>(
+    statements: &[Statement],
+    from: &str,
+    site: &Site<'a>,
+    index: &ClassIndex<'a>,
+    out: &mut Vec<Invoke<'a>>,
+) {
+    for s in statements {
+        if let Some(Transfer::Invoke {
+            receiver, method, ..
+        }) = &s.transfer
+        {
+            let name = match method {
+                CallTarget::Literal(n) => n.text.clone(),
+                CallTarget::Identifier(q) => q.name.text.clone(),
+            };
+            out.push(Invoke {
+                from: from.to_string(),
+                res: index.resolve_invoke(site, receiver, method),
+                name,
+            });
+        }
+        statement_invokes(&s.children, from, site, index, out);
+    }
+}
+
+/// Queues the data references of a method body (branches included) as references from the
+/// method's Function `from` to the records of program `program`. `skip` names the class and
+/// method data, which hold no record Struct, so a reference to one is not queued.
+fn method_refs(
+    loc: &mut Locate,
+    program: usize,
+    from: &str,
+    statements: &[Statement],
+    skip: &BTreeSet<String>,
+) {
+    for s in statements {
+        loc.data_refs.extend(
+            s.refs
+                .iter()
+                .filter(|n| !skip.contains(&n.name.text.to_ascii_uppercase()))
+                .map(|name| PendingRef {
+                    scope: program,
+                    from: from.to_string(),
+                    name: name.clone(),
+                }),
+        );
+        method_refs(loc, program, from, &s.children, skip);
     }
 }
 
