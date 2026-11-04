@@ -28,10 +28,14 @@ mod unit {
 
     #[test]
     fn from_name_refuses_cobol2023_and_unknown_names() {
-        let placeholder = Dialect::from_name("cobol2023").unwrap_err();
-        assert!(placeholder.contains("cobol2023"), "{placeholder}");
-        let unknown = Dialect::from_name("cobol1974").unwrap_err();
-        assert!(unknown.contains("unknown dialect `cobol1974`"), "{unknown}");
+        assert_eq!(
+            Dialect::from_name("cobol2023").unwrap_err(),
+            "dialect cobol2023 is a placeholder with no features yet; use cobol85, cobol2002, cobol2014 or ibm"
+        );
+        assert_eq!(
+            Dialect::from_name("cobol1974").unwrap_err(),
+            "unknown dialect `cobol1974`; expected cobol85, cobol2002, cobol2014 or ibm"
+        );
     }
 
     #[test]
