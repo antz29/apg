@@ -141,6 +141,14 @@ SCAN OPTIONS:
   --exclude-path <glob>       Exclude path patterns (repeatable)
   --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
                                repeatable)
+  --std <dialect>             COBOL dialect: cobol85 (default), cobol2002,
+                               cobol2014 or ibm (overrides cobol.dialect in
+                               apg/config.json; cobol2023 is refused)
+  --copy-path <dir>           COBOL copybook search directory (repeatable)
+  --std <dialect>             COBOL dialect: cobol85 (default), cobol2002,
+                               cobol2014 or ibm (overrides cobol.dialect in
+                               apg/config.json; cobol2023 is refused)
+  --copy-path <dir>           COBOL copybook search directory (repeatable)
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)
   --no-progress               Progress is on by default when stderr is a
