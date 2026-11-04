@@ -268,9 +268,30 @@ impl Lexer {
         }
     }
 
+    /// Moves past the blanks, continuation marker and leading blanks a word, number or PICTURE
+    /// string runs across. Blanks not followed by a continuation are left in place.
+    fn join_continuation(&mut self) {
+        let mut i = self.i;
+        while matches!(self.units.get(i), Some(Unit::Char(ch)) if ch.c == ' ') {
+            i += 1;
+        }
+        if !matches!(self.units.get(i), Some(Unit::Line(true))) {
+            return;
+        }
+        i += 1;
+        while matches!(self.units.get(i), Some(Unit::Char(ch)) if ch.c == ' ') {
+            i += 1;
+        }
+        self.i = i;
+    }
+
     fn take_while(&mut self, keep: impl Fn(char) -> bool) -> String {
         let mut text = String::new();
-        while let Some(c) = self.ahead(0).filter(|c| keep(*c)) {
+        loop {
+            self.join_continuation();
+            let Some(c) = self.ahead(0).filter(|c| keep(*c)) else {
+                break;
+            };
             text.push(c);
             self.bump();
         }
@@ -306,10 +327,14 @@ impl Lexer {
     /// A word, number or PICTURE string: word characters and inner periods.
     fn take_word(&mut self) -> String {
         let mut text = String::new();
-        while let Some(c) = self
-            .ahead(0)
-            .filter(|&c| is_word_char(c) || self.inner_dot())
-        {
+        loop {
+            self.join_continuation();
+            let Some(c) = self
+                .ahead(0)
+                .filter(|&c| is_word_char(c) || self.inner_dot())
+            else {
+                break;
+            };
             text.push(c);
             self.bump();
         }

@@ -712,6 +712,59 @@ mod unit {
     }
 
     #[test]
+    fn continued_literal_keeps_the_trailing_blanks_of_the_continued_line() {
+        let text = [at(8, "DISPLAY \"AB  "), format!("{}\"CD\".", at(7, "-"))].join("\n");
+        let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Alnum, "AB  CD"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn continued_word_joins_across_blanks_at_both_ends_of_the_split() {
+        let continued = |first: &str, second: &str| {
+            let text = [
+                format!("{}{:<65}", " ".repeat(7), first),
+                format!("{}{second}", at(7, "-")),
+            ]
+            .join("\n");
+            let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+            tokens
+        };
+        let tokens = continued("PROCEDURE", "    DIVISION.");
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "PROCEDUREDIVISION"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert_eq!((tokens[0].line, tokens[0].col), (1, 8));
+        assert_eq!(
+            shape(&continued("CONT-", "  A")),
+            [(TokenKind::Word, "CONT-A")]
+        );
+        assert_eq!(
+            shape(&continued("PIC", "  TURE")),
+            [(TokenKind::Word, "PICTURE")]
+        );
+    }
+
+    #[test]
+    fn continued_picture_string_joins_like_its_unbroken_text() {
+        let text = [at(8, "PIC S9("), format!("{}  6)V9(6).", at(7, "-"))].join("\n");
+        let (continued, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        let (single, _) = lex_all(&at(8, "PIC S9(6)V9(6)."), fixed(), Dialect::Cobol85);
+        assert_eq!(shape(&continued), shape(&single));
+    }
+
+    #[test]
     fn doubled_quote_is_one_quote_in_both_quote_styles() {
         let (tokens, _) = lex_all(&at(8, "\"A\"\"B\" 'IT''S'"), fixed(), Dialect::Cobol85);
         assert_eq!(
