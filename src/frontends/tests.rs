@@ -48,6 +48,39 @@ mod unit {
         );
     }
 
+    /// cobol-frontend phase-02 task-22: the cobol stream's opaque-id prefix is
+    /// `cb`, distinct from every other language's, so a merged COBOL stream
+    /// cannot collide ids; COBOL needs no scan-time tool on PATH.
+    #[test]
+    fn id_prefix_for_cobol_is_distinct_and_tool_less() {
+        let prefix = id_prefix_for("cobol");
+        assert_eq!(prefix, "cb");
+        for language in [
+            "go",
+            "java",
+            "cpp",
+            "rust",
+            "ts",
+            "js",
+            "csharp",
+            "md",
+            "sh",
+            "yaml",
+            "json",
+            "toml",
+            "xml",
+            "dockerfile",
+            "makefile",
+            "ini",
+            "misc",
+            "py",
+            "agent",
+        ] {
+            assert_ne!(prefix, id_prefix_for(language), "cobol vs {language}");
+        }
+        assert!(scan_time_tools("cobol").is_empty());
+    }
+
     /// schema-alignment phase-02 task-17: the agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural

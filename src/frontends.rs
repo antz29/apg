@@ -78,6 +78,9 @@ pub fn available_languages() -> Vec<String> {
         if dir.join("pyfrontend").exists() {
             langs.push("py".into());
         }
+        if dir.join("cobolfrontend").exists() {
+            langs.push("cobol".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -133,6 +136,9 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
             "py" if dir.join("pyfrontend").exists() => {
                 return Some(dir.join("pyfrontend").display().to_string());
             }
+            "cobol" if dir.join("cobolfrontend").exists() => {
+                return Some(dir.join("cobolfrontend").display().to_string());
+            }
             "csharp"
                 if dir.join("csharpfrontend").exists()
                     || dir.join("csharpfrontend.exe").exists() =>
@@ -172,6 +178,7 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
         | "misc" => option_env!("APG_FRONTEND_STRUCT"),
         "py" => option_env!("APG_FRONTEND_PY"),
+        "cobol" => option_env!("APG_FRONTEND_COBOL"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
@@ -247,10 +254,10 @@ pub fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32, skip_set:
             if has_extension(&p, exts, depth - 1, skip_set) {
                 return true;
             }
-        } else if p
-            .extension()
-            .is_some_and(|e| exts.contains(&format!(".{}", e.to_str().unwrap_or("")).as_str()))
-        {
+        } else if p.extension().is_some_and(|e| {
+            exts.iter()
+                .any(|x| x.eq_ignore_ascii_case(&format!(".{}", e.to_str().unwrap_or(""))))
+        }) {
             return true;
         }
     }
@@ -303,6 +310,14 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
         // a deep excluded tree is never entered. `.pyi` is accepted alongside
         // `.py`; `.pyx` is not a candidate.
         ("py", &[".py", ".pyi"], 8, PY_DETECTOR_SKIP),
+        // COBOL claims `.cob`/`.cbl`/`.cobol` sources and `.cpy` copybooks in
+        // any letter case (`has_extension` compares case-insensitively).
+        (
+            "cobol",
+            &[".cob", ".cbl", ".cobol", ".cpy"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+        ),
     ];
     let mut out = Vec::new();
     for (lang, exts, depth, skip) in &candidates {
@@ -367,6 +382,7 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "ini" => "ini",
         "misc" => "mi",
         "py" => "py",
+        "cobol" => "cb",
         // The agent-definition frontend's stream keeps its own prefix, distinct
         // from `x` (the unknown-id fallback) so a merged agent stream cannot
         // collide opaque ids.
@@ -617,6 +633,39 @@ pub fn spawn_frontend(
     phase: u32,
     log: &mut Log,
 ) -> anyhow::Result<Option<PathBuf>> {
+    spawn_frontend_args(
+        lang,
+        project_dir,
+        module_dirs,
+        path_excludes,
+        no_build_scripts,
+        multi,
+        handoff,
+        tmp,
+        targets,
+        phase,
+        &[],
+        log,
+    )
+}
+
+/// [`spawn_frontend`] plus `cobol_args` (the `-std=` and `--copy-path` argv
+/// fragment from `cobol::...`), appended only when `lang` is `cobol`.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_frontend_args(
+    lang: &str,
+    project_dir: &Path,
+    module_dirs: &[String],
+    path_excludes: &[String],
+    no_build_scripts: bool,
+    multi: bool,
+    handoff: &FrontendHandoff,
+    tmp: &Path,
+    targets: &[String],
+    phase: u32,
+    cobol_args: &[String],
+    log: &mut Log,
+) -> anyhow::Result<Option<PathBuf>> {
     // Runtime scan-time toolchain preflight (SPEC:
     // `solution.component.scan-time-preflight`): a selected language whose
     // required tool is absent fails the whole scan here, before any spawn, with
@@ -645,6 +694,9 @@ pub fn spawn_frontend(
     }
     if multi {
         child.arg("--id-prefix").arg(id_prefix_for(lang));
+    }
+    if lang == "cobol" {
+        child.args(cobol_args);
     }
     // The per-stream selector for the bundled structural scanner: ONE binary
     // serves every structural stream id, so the spawn must name the stream it
