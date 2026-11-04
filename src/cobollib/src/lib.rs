@@ -1,5 +1,6 @@
 //! apg COBOL frontend crate (`cobolfrontend`).
 
+pub mod ast;
 pub mod diag;
 pub mod dialect;
 pub mod format;
