@@ -2181,6 +2181,38 @@ mod int {
     }
 
     #[test]
+    fn each_file_records_the_layout_it_was_read_through() {
+        let copy = ">>SOURCE FREE\n01 REC-CB PIC X.\n";
+        let main = program(
+            &[at(12, "COPY REC.")],
+            &[at(8, "MAIN-PARA."), at(12, "STOP RUN.")],
+        );
+        let lookup = |p: &std::path::Path| {
+            (p == std::path::Path::new("/root/REC.cpy")).then(|| copy.to_string())
+        };
+        let mut map = SourceMap::default();
+        let (tokens, _) = crate::preprocess::preprocess(
+            &mut map,
+            "/root/prog.cob",
+            &main,
+            Dialect::Cobol85,
+            &search(),
+            &lookup,
+        );
+        let file_named = |name: &str| {
+            tokens
+                .iter()
+                .map(|m| m.origin.file)
+                .find(|f| map.name(*f) == name)
+                .unwrap()
+        };
+        let main_id = file_named("/root/prog.cob");
+        let copy_id = file_named("/root/REC.cpy");
+        assert_eq!(map.layout(main_id), Some(fixed()));
+        assert_eq!(map.layout(copy_id), Some(crate::format::Layout::Free));
+    }
+
+    #[test]
     fn replace_in_the_main_file_applies_across_copy() {
         let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC TAG.")].join("\n");
         let main = program(

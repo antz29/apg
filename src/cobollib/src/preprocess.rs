@@ -127,6 +127,7 @@ impl Pre<'_> {
         let name = path.display().to_string();
         let file = self.map.add_file(&name);
         let (layout, diags) = format::check(&name, text, self.dialect);
+        self.map.set_layout(file, layout);
         self.diags.extend(diags);
         let (mut cursor, diags) = lexer::lex(&name, text, layout, self.dialect);
         self.diags.extend(diags);
