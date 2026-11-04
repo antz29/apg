@@ -9,6 +9,7 @@ use crate::ast::{
     Section,
 };
 use crate::diag::Diagnostic;
+use crate::parser::procedure::METHOD_BODY_PARAGRAPH;
 use crate::source_map::SourceMap;
 
 /// Whether a procedure name is a section or a paragraph.
@@ -141,7 +142,10 @@ fn procedures(out: &mut Vec<Proc>, div: &ProcedureDivision) {
         add_section(out, section);
     }
     for paragraph in &div.paragraphs {
-        push(out, ProcKind::Paragraph, &paragraph.name.text, None);
+        // A method's leading sentences are no user paragraph: never a PERFORM or GO TO target.
+        if paragraph.name.text != METHOD_BODY_PARAGRAPH {
+            push(out, ProcKind::Paragraph, &paragraph.name.text, None);
+        }
     }
     for section in &div.sections {
         add_section(out, section);
