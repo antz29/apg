@@ -1,10 +1,11 @@
 //! Unit tests for the dialect table. The table is a single unit, so the tests live in
 //! `tests::unit` alone (no `int` tier: nothing here wires two units together).
 
-use crate::ast::{DataDivision, DataEntry};
+use crate::ast::{CallTarget, DataDivision, DataEntry, ProcedureDivision, Transfer};
 use crate::dialect::{Dialect, Feature, FeatureLevel, Limits, SourceFormat, OO_WORDS};
 use crate::lexer::{lex, Token, TokenKind};
 use crate::parser::data::parse_data_division;
+use crate::parser::procedure::parse_procedure_division;
 use crate::source_map::SourceMap;
 
 const ALL_DIALECTS: [Dialect; 4] = [
@@ -56,6 +57,19 @@ fn parse_data(text: &str) -> Option<(DataDivision, Vec<crate::diag::Diagnostic>)
     parse_data_division(&map, Dialect::Cobol85, &mapped)
 }
 
+/// Lexes free-format `text` as `p.cob`, maps its tokens and parses its PROCEDURE DIVISION under cobol85.
+fn parse_procedure(text: &str) -> Option<(ProcedureDivision, Vec<crate::diag::Diagnostic>)> {
+    let mut map = SourceMap::default();
+    let file = map.add_file("p.cob");
+    let (mut cursor, _) = lex("p.cob", text, crate::format::Layout::Free, Dialect::Cobol85);
+    let mut tokens = Vec::new();
+    while let Some(token) = cursor.bump() {
+        tokens.push(token);
+    }
+    let mapped = map.map(file, tokens);
+    parse_procedure_division(&map, Dialect::Cobol85, &mapped)
+}
+
 /// The data-name text of each entry in order, `FILLER` for an unnamed one.
 fn names(entries: &[DataEntry]) -> Vec<&str> {
     entries
@@ -67,6 +81,161 @@ fn names(entries: &[DataEntry]) -> Vec<&str> {
 mod unit {
     use super::*;
     use crate::format::Layout;
+
+    mod parser_procedure {
+        use super::*;
+
+        #[test]
+        fn paragraphs_hold_sentences_and_qualified_references() {
+            let text = "PROCEDURE DIVISION.\nMAIN-PARA.\n    DISPLAY X.\n    STOP RUN.\n    MOVE A OF S TO B.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty());
+            assert_eq!(div.paragraphs.len(), 1);
+            let sentences = &div.paragraphs[0].sentences;
+            assert_eq!(sentences.len(), 3);
+            assert_eq!(sentences[2].statements[0].refs[0].qualifiers.len(), 1);
+        }
+
+        #[test]
+        fn declaratives_and_sections_nest_their_paragraphs() {
+            let text = "PROCEDURE DIVISION.\nDECLARATIVES.\nERR-SECTION SECTION.\n    USE AFTER STANDARD ERROR PROCEDURE ON F.\nERR-PARA.\n    DISPLAY X.\nEND DECLARATIVES.\nMAIN SECTION.\nMAIN-PARA.\n    STOP RUN.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty());
+            assert_eq!(div.declaratives.len(), 1);
+            assert_eq!(div.declaratives[0].name.text, "ERR-SECTION");
+            assert_eq!(div.declaratives[0].paragraphs.len(), 1);
+            assert_eq!(div.sections.len(), 1);
+            assert_eq!(div.sections[0].name.text, "MAIN");
+            assert_eq!(div.sections[0].paragraphs[0].name.text, "MAIN-PARA");
+        }
+
+        #[test]
+        fn out_of_line_perform_keeps_its_thru_range() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    PERFORM B-PARA THRU C-PARA 3 TIMES.\nB-PARA.\n    CONTINUE.\nC-PARA.\n    CONTINUE.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty());
+            match &div.paragraphs[0].sentences[0].statements[0].transfer {
+                Some(Transfer::Perform(Some(range))) => {
+                    assert_eq!(range.from.name.text, "B-PARA");
+                    assert_eq!(
+                        range.thru.as_ref().map(|q| q.name.text.as_str()),
+                        Some("C-PARA")
+                    );
+                }
+                other => panic!("expected an out-of-line PERFORM, found {other:?}"),
+            }
+        }
+
+        #[test]
+        fn inline_perform_nests_an_if_with_its_else() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    PERFORM VARYING I FROM 1 BY 1 UNTIL I > 5\n        IF I = 2 DISPLAY I ELSE DISPLAY J END-IF\n    END-PERFORM.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty());
+            let perform = &div.paragraphs[0].sentences[0].statements[0];
+            assert_eq!(perform.transfer, Some(Transfer::Perform(None)));
+            assert!(perform.scope_end.is_some());
+            assert_eq!(perform.children.len(), 1);
+            let branch = &perform.children[0];
+            assert!(branch.scope_end.is_some());
+            assert_eq!(branch.children.len(), 2);
+        }
+
+        #[test]
+        fn go_to_keeps_its_targets_and_an_unnamed_go_is_obsolete() {
+            let text =
+                "PROCEDURE DIVISION.\nA-PARA.\n    GO TO B-PARA C-PARA DEPENDING ON N.\n    GO.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert_eq!(diags.len(), 1);
+            let sentences = &div.paragraphs[0].sentences;
+            match &sentences[0].statements[0].transfer {
+                Some(Transfer::GoTo(targets)) => assert_eq!(targets.len(), 2),
+                other => panic!("expected GO TO, found {other:?}"),
+            }
+            assert_eq!(sentences[0].statements[0].refs[0].name.text, "N");
+            assert_eq!(
+                sentences[1].statements[0].transfer,
+                Some(Transfer::GoTo(Vec::new()))
+            );
+        }
+
+        #[test]
+        fn alter_is_obsolete_but_still_scanned() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    ALTER B-PARA TO PROCEED TO C-PARA.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert_eq!(diags.len(), 1);
+            assert_eq!(div.paragraphs[0].sentences[0].statements.len(), 1);
+        }
+
+        #[test]
+        fn entry_is_silent() {
+            let (_, diags) =
+                parse_procedure("PROCEDURE DIVISION.\nA-PARA.\n    ENTRY 'E' USING X.\n").unwrap();
+            assert!(diags.is_empty());
+        }
+
+        #[test]
+        fn call_takes_a_literal_or_an_identifier_target() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    CALL 'SUB1' USING A.\n    CALL P-NAME.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty());
+            let statements = &div.paragraphs[0].sentences;
+            match &statements[0].statements[0].transfer {
+                Some(Transfer::Call(CallTarget::Literal(name))) => assert_eq!(name.text, "SUB1"),
+                other => panic!("expected a literal CALL, found {other:?}"),
+            }
+            match &statements[1].statements[0].transfer {
+                Some(Transfer::Call(CallTarget::Identifier(name))) => {
+                    assert_eq!(name.name.text, "P-NAME")
+                }
+                other => panic!("expected an identifier CALL, found {other:?}"),
+            }
+        }
+
+        #[test]
+        fn sort_keeps_its_input_and_output_procedures() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    SORT S-FILE ON ASCENDING KEY K INPUT PROCEDURE IN-PARA OUTPUT PROCEDURE IS OUT-PARA THRU OUT-END.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty());
+            match &div.paragraphs[0].sentences[0].statements[0].transfer {
+                Some(Transfer::SortMerge { input, output }) => {
+                    assert_eq!(
+                        input.as_ref().map(|r| r.from.name.text.as_str()),
+                        Some("IN-PARA")
+                    );
+                    let out = output.as_ref().unwrap();
+                    assert_eq!(out.from.name.text, "OUT-PARA");
+                    assert_eq!(
+                        out.thru.as_ref().map(|q| q.name.text.as_str()),
+                        Some("OUT-END")
+                    );
+                }
+                other => panic!("expected SORT, found {other:?}"),
+            }
+        }
+
+        #[test]
+        fn a_stray_scope_terminator_costs_only_its_sentence() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    MOVE 1 TO X END-IF.\n    DISPLAY Y.\nB-PARA.\n    DISPLAY Z.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert_eq!(diags.len(), 1);
+            assert_eq!(div.paragraphs.len(), 2);
+            assert_eq!(div.paragraphs[0].sentences.len(), 2);
+            assert_eq!(div.paragraphs[0].sentences[0].statements.len(), 1);
+        }
+
+        #[test]
+        fn unknown_verb_is_a_sentence_diagnostic() {
+            let (div, diags) =
+                parse_procedure("PROCEDURE DIVISION.\nA-PARA.\n    FROB X.\n").unwrap();
+            assert_eq!(diags.len(), 1);
+            assert!(div.paragraphs[0].sentences[0].statements.is_empty());
+        }
+
+        #[test]
+        fn text_without_the_division_header_is_none() {
+            assert!(parse_procedure("DATA DIVISION.\n").is_none());
+        }
+    }
 
     #[test]
     fn default_dialect_is_cobol85() {
