@@ -238,6 +238,11 @@ const KEYWORDS: &[&str] = &[
     "ZEROES",
 ];
 
+/// The name of the nameless leading paragraph a METHOD-ID procedure division opens for the
+/// sentences before its first paragraph. The angle brackets are not in any COBOL word, so no
+/// paragraph name can clash with it; resolve and scan recognise the paragraph by this name.
+pub const METHOD_BODY_PARAGRAPH: &str = "<method-body>";
+
 /// Parses the PROCEDURE DIVISION at the start of `tokens`. `map` locates the tokens and the
 /// diagnostics. Returns `None` when `tokens` does not start with the division header. A
 /// diagnostic never stops the parse: a malformed sentence keeps the statements before its
@@ -247,6 +252,26 @@ pub fn parse_procedure_division(
     dialect: Dialect,
     tokens: &[Mapped],
 ) -> Option<(ProcedureDivision, Vec<Diagnostic>)> {
+    parse_division(map, dialect, tokens, false)
+}
+
+/// Parses a METHOD-ID's procedure division like [`parse_procedure_division`], except that the
+/// sentences before its first paragraph are kept in a leading [`METHOD_BODY_PARAGRAPH`] rather
+/// than diagnosed.
+pub fn parse_method_procedure_division(
+    map: &SourceMap,
+    dialect: Dialect,
+    tokens: &[Mapped],
+) -> Option<(ProcedureDivision, Vec<Diagnostic>)> {
+    parse_division(map, dialect, tokens, true)
+}
+
+fn parse_division(
+    map: &SourceMap,
+    dialect: Dialect,
+    tokens: &[Mapped],
+    method_body: bool,
+) -> Option<(ProcedureDivision, Vec<Diagnostic>)> {
     if !(is(tokens.first()?, "PROCEDURE") && is(tokens.get(1)?, "DIVISION")) {
         return None;
     }
@@ -254,6 +279,7 @@ pub fn parse_procedure_division(
         map,
         dialect,
         tokens,
+        method_body,
         diags: Vec::new(),
         declaratives: Vec::new(),
         paragraphs: Vec::new(),
@@ -302,6 +328,8 @@ struct Parser<'a> {
     map: &'a SourceMap,
     dialect: Dialect,
     tokens: &'a [Mapped],
+    /// A METHOD-ID body: statements before its first paragraph open the leading paragraph.
+    method_body: bool,
     diags: Vec<Diagnostic>,
     declaratives: Vec<Section>,
     paragraphs: Vec<Paragraph>,
@@ -464,9 +492,22 @@ impl Parser<'_> {
         // for it, so it is checked for diagnostics and not kept.
         let use_sentence = self.in_decl && self.section.is_some() && is(&self.tokens[a], "USE");
         if self.para.is_none() && !use_sentence {
-            let at = self.origin(a);
-            self.diag(at, "statement outside a paragraph");
-            return;
+            if self.method_body && self.section.is_none() && !self.in_decl {
+                let at = self.origin(a);
+                let name = Name {
+                    text: METHOD_BODY_PARAGRAPH.to_string(),
+                    span: Span { start: at, end: at },
+                };
+                self.para = Some(Paragraph {
+                    name,
+                    span: self.span(a, a + 1),
+                    sentences: Vec::new(),
+                });
+            } else {
+                let at = self.origin(a);
+                self.diag(at, "statement outside a paragraph");
+                return;
+            }
         }
         let (statements, next) = self.statements(a, b);
         if next < b {

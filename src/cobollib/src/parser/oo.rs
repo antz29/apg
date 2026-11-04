@@ -20,7 +20,7 @@ use crate::lexer::TokenKind;
 use crate::source_map::{Mapped, SourceMap};
 
 use super::data::parse_data_division;
-use super::procedure::parse_procedure_division;
+use super::procedure::parse_method_procedure_division;
 
 /// One OO unit, or the malformed header it was skipped at.
 pub struct Parsed<T> {
@@ -502,7 +502,7 @@ pub fn parse_method(
         div
     });
     let procedure = if p < body_end {
-        parse_procedure_division(map, dialect, &tokens[p..body_end])
+        parse_method_procedure_division(map, dialect, &tokens[p..body_end])
     } else {
         None
     };
