@@ -9,8 +9,8 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::ast::{
-    CallTarget, DataEntry, Paragraph, ProcRange, Program, QualifiedName, Section, Span, Statement,
-    Transfer,
+    CallTarget, Class, DataEntry, Interface, Paragraph, ProcRange, Program, QualifiedName, Section,
+    Span, Statement, Transfer,
 };
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
@@ -50,6 +50,9 @@ pub enum Rec {
         id: String,
         parent: String,
         name: String,
+        /// The overload key of a method (`factory`/`instance`); empty for paragraphs.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        params: Vec<String>,
         file: String,
         path: String,
         start: usize,
@@ -199,6 +202,8 @@ struct Locate<'a> {
     decls: Vec<Declared>,
     scope: usize,
     ids: Vec<Vec<Option<String>>>,
+    /// Each program and OO unit's span with its Struct id, pre-order, for [`enclosing`].
+    owners: Vec<(Span, String)>,
     pending: Vec<Pending>,
     calls: Vec<PendingCall>,
     /// Per scope, the emitted id of each 01-level record by its upper-cased name (first kept).
@@ -292,18 +297,9 @@ fn module_of(base: &Path, path: &Path) -> String {
     )
 }
 
-/// The span of every program in `programs`, nested ones included, in pre-order (a program before
-/// its nested programs), matching the order the emitter records program ids in.
-fn program_spans(programs: &[Program], out: &mut Vec<Span>) {
-    for p in programs {
-        out.push(p.span);
-        program_spans(&p.nested, out);
-    }
-}
-
-/// The innermost program whose span holds `at`, a site in the main file. `owners` is pre-order,
-/// so the last containing span is the innermost. A span end outside the main file (a copybook's
-/// text) is open-ended: its line numbers belong to another file.
+/// The innermost program or OO unit whose span holds `at`, a site in the main file. `owners` is
+/// pre-order, so the last containing span is the innermost. A span end outside the main file (a
+/// copybook's text) is open-ended: its line numbers belong to another file.
 fn enclosing(owners: &[(Span, String)], map: &SourceMap, main: &str, at: Origin) -> Option<String> {
     let pos = (at.line, at.col);
     let key = |o: Origin| (map.name(o.file) == main).then_some((o.line, o.col));
@@ -393,10 +389,77 @@ impl Emitter {
         (id, scope)
     }
 
+    /// A `CLASS-ID` Struct under `parent` (contained by `up` when nested) with a Function per
+    /// method of its FACTORY and OBJECT sections. Method bodies are not walked.
+    fn class(&mut self, loc: &mut Locate, c: &Class, parent: &str, up: Option<&str>) {
+        let (id, scope) = self.structure(loc, &c.name.text, c.span, parent, up);
+        loc.owners.push((c.span, id.clone()));
+        let mut seen = BTreeSet::new();
+        for m in c.factory.iter().chain(&c.object).flat_map(|s| &s.methods) {
+            // Factory and instance methods share a name only across the two keys below, so a
+            // (kind, name) repeat is skipped (first kept) rather than colliding in the ingestor.
+            if seen.insert((m.factory, m.name.text.clone())) {
+                let key = if m.factory { "factory" } else { "instance" };
+                self.member(
+                    loc,
+                    &m.name.text,
+                    m.span,
+                    &scope,
+                    &id,
+                    vec![key.to_string()],
+                );
+            }
+        }
+    }
+
+    /// An `INTERFACE-ID` Struct with a Function per method prototype (a repeated name is kept once).
+    fn interface(&mut self, loc: &mut Locate, i: &Interface, parent: &str, up: Option<&str>) {
+        let (id, scope) = self.structure(loc, &i.name.text, i.span, parent, up);
+        loc.owners.push((i.span, id.clone()));
+        let mut seen = BTreeSet::new();
+        for p in &i.prototypes {
+            if seen.insert(p.name.text.clone()) {
+                self.member(loc, &p.name.text, p.span, &scope, &id, Vec::new());
+            }
+        }
+    }
+
+    /// A Function named `name` located at `span`, contained by `up`; returns its id.
+    fn member(
+        &mut self,
+        loc: &mut Locate,
+        name: &str,
+        span: Span,
+        parent: &str,
+        up: &str,
+        params: Vec<String>,
+    ) -> String {
+        let l = loc.span(span);
+        let id = self.fresh_id();
+        self.recs.push(Rec::Function {
+            id: id.clone(),
+            parent: parent.to_string(),
+            name: name.to_string(),
+            params,
+            file: l.path.clone(),
+            path: l.path,
+            start: l.start,
+            end: l.end,
+            start_line: l.start_line,
+            end_line: l.end_line,
+        });
+        self.recs.push(Rec::Contains {
+            from: up.to_string(),
+            to: id.clone(),
+        });
+        id
+    }
+
     fn program(&mut self, loc: &mut Locate, p: &Program, parent: &str, up: Option<&str>) {
         loc.enter();
         let (id, scope) = self.structure(loc, &p.name.text, p.span, parent, up);
         self.programs.push((p.name.text.clone(), id.clone()));
+        loc.owners.push((p.span, id.clone()));
         let mut records = BTreeMap::new();
         let mut declared = BTreeSet::new();
         if let Some(data) = &p.data {
@@ -421,6 +484,9 @@ impl Emitter {
                 self.paragraph(loc, para, &scope, &id, None);
             }
         }
+        for c in &p.classes {
+            self.class(loc, c, &scope, Some(&id));
+        }
         for nested in &p.nested {
             self.program(loc, nested, &scope, Some(&id));
         }
@@ -442,23 +508,7 @@ impl Emitter {
         up: &str,
         section: Option<usize>,
     ) {
-        let l = loc.span(para.span);
-        let id = self.fresh_id();
-        self.recs.push(Rec::Function {
-            id: id.clone(),
-            parent: parent.to_string(),
-            name: para.name.text.clone(),
-            file: l.path.clone(),
-            path: l.path,
-            start: l.start,
-            end: l.end,
-            start_line: l.start_line,
-            end_line: l.end_line,
-        });
-        self.recs.push(Rec::Contains {
-            from: up.to_string(),
-            to: id.clone(),
-        });
+        let id = self.member(loc, &para.name.text, para.span, parent, up, Vec::new());
         loc.claim(ProcKind::Paragraph, &para.name.text, section, &id);
         for sentence in &para.sentences {
             collect(loc, &id, &sentence.statements);
@@ -734,6 +784,7 @@ impl Emitter {
             decls: declared(&unit),
             scope: 0,
             ids: Vec::new(),
+            owners: Vec::new(),
             pending: Vec::new(),
             calls: Vec::new(),
             data_ids: Vec::new(),
@@ -742,17 +793,17 @@ impl Emitter {
             file,
             diags: Vec::new(),
         };
-        let first = self.programs.len();
         for program in &unit.programs {
             self.program(&mut loc, program, &module, None);
         }
-        let mut spans = Vec::new();
-        program_spans(&unit.programs, &mut spans);
-        let owners: Vec<(Span, String)> = spans
-            .into_iter()
-            .zip(self.programs[first..].iter().map(|(_, id)| id.clone()))
-            .collect();
+        for c in &unit.classes {
+            self.class(&mut loc, c, &module, None);
+        }
+        for i in &unit.interfaces {
+            self.interface(&mut loc, i, &module, None);
+        }
         self.transfer_facts(&mut loc);
+        let owners = std::mem::take(&mut loc.owners);
         self.copy_uses(&map, path, &copies, &owners);
         diags.extend(loc.diags);
         self.calls.extend(loc.calls);
