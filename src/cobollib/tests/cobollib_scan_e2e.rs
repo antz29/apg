@@ -377,4 +377,53 @@ mod e2e {
         assert!(uses(&recs, &start, "OTHER"), "{recs:?}");
         assert!(uses(&recs, &start, "src/cobol.SUB-B"), "{recs:?}");
     }
+
+    #[test]
+    #[ignore = "e2e tier: spawns cobolfrontend over a scratch tree; run via cargo test e2e:: -- --ignored"]
+    fn copy_statement_copybook_emits_one_kind_copy_uses_edge() {
+        let scratch = Scratch::new("copy-uses");
+        scratch.write(
+            "prog.cbl",
+            &source(&[
+                ">>SOURCE FREE",
+                "IDENTIFICATION DIVISION.",
+                "PROGRAM-ID. PROG.",
+                "PROCEDURE DIVISION.",
+                "MAIN-PARA.",
+                "    COPY STMT.",
+                "    CALL \"SUB\".",
+                "    STOP RUN.",
+                "END PROGRAM PROG.",
+            ]),
+        );
+        scratch.write("sub.cbl", &sub());
+        let copybook = scratch.write("copies/STMT.cpy", "    DISPLAY \"HI\".\n");
+        let copies = copybook.parent().expect("parent").display().to_string();
+        let out = run(&scratch.root, &["--copy-path", &copies]);
+        assert!(out.status.success(), "{:?}", stderr_lines(&out));
+        let recs = records(&out);
+        let prog = id_of(&recs, "struct", "PROG");
+        let sub_id = id_of(&recs, "struct", "SUB");
+        let file = recs
+            .iter()
+            .find(|r| r["type"] == "file" && path_ends(r, "STMT.cpy"))
+            .unwrap_or_else(|| panic!("no copybook File: {recs:?}"));
+        let to = file["path"].as_str().expect("copybook path");
+        let copy_edges: Vec<&Value> = recs
+            .iter()
+            .filter(|r| r["type"] == "uses" && r["properties"]["kind"] == "copy")
+            .collect();
+        assert_eq!(copy_edges.len(), 1, "{copy_edges:?}");
+        assert_eq!(copy_edges[0]["from"], prog.as_str());
+        assert_eq!(copy_edges[0]["to"], to);
+        assert_eq!(
+            copy_edges[0]["properties"],
+            serde_json::json!({"kind": "copy"})
+        );
+        let call = recs
+            .iter()
+            .find(|r| r["type"] == "uses" && r["to"] == sub_id.as_str())
+            .unwrap_or_else(|| panic!("no CALL uses: {recs:?}"));
+        assert!(call.get("properties").is_none(), "{call:?}");
+    }
 }
