@@ -30,6 +30,10 @@ pub struct QualifiedName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompilationUnit {
     pub programs: Vec<Program>,
+    /// Top-level `CLASS-ID` units (COBOL 2002 OO).
+    pub classes: Vec<Class>,
+    /// Top-level `INTERFACE-ID` units (COBOL 2002 OO).
+    pub interfaces: Vec<Interface>,
 }
 
 /// A `PROGRAM-ID` unit with its divisions and nested programs.
@@ -45,6 +49,10 @@ pub struct Program {
     /// Non-data names the program declares in its ENVIRONMENT DIVISION: SELECT file names,
     /// SPECIAL-NAMES mnemonic names, ALPHABET, CLASS and ON/OFF STATUS names.
     pub declared: Vec<Name>,
+    /// Entries of the CONFIGURATION SECTION's REPOSITORY paragraph (COBOL 2002 OO).
+    pub repository: Vec<RepositoryEntry>,
+    /// `CLASS-ID` units nested in this program (COBOL 2002 OO).
+    pub classes: Vec<Class>,
 }
 
 /// The DATA DIVISION and its sections.
@@ -96,6 +104,10 @@ pub struct DataEntry {
     /// Index names from `INDEXED [BY]`.
     pub indexes: Vec<Name>,
     pub pic: Option<Pic>,
+    /// The `OBJECT REFERENCE` clause, when the entry names a class or interface.
+    pub object_reference: Option<ObjectReference>,
+    /// The Micro Focus `PROPERTY` clause, when the entry is a property.
+    pub property: Option<Property>,
     pub children: Vec<DataEntry>,
 }
 

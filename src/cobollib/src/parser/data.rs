@@ -244,6 +244,8 @@ impl Parser<'_> {
             global: false,
             indexes: Vec::new(),
             pic: None,
+            object_reference: None,
+            property: None,
             children: Vec::new(),
         };
         let mut closed = false;

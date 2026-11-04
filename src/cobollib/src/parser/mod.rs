@@ -169,6 +169,8 @@ fn parse_program(
         procedure: None,
         nested: Vec::new(),
         declared: Vec::new(),
+        repository: Vec::new(),
+        classes: Vec::new(),
     };
     let mut used = tokens.len();
     let mut i = id_end;
@@ -248,7 +250,14 @@ pub fn parse_compilation_unit(
             i = next_identification(tokens, i + 1);
         }
     }
-    (CompilationUnit { programs }, diags)
+    (
+        CompilationUnit {
+            programs,
+            classes: Vec::new(),
+            interfaces: Vec::new(),
+        },
+        diags,
+    )
 }
 
 /// The in-memory reader: COPY and REPLACE expansion over `text` (which runs the format check
