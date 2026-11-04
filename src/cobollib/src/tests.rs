@@ -3122,6 +3122,59 @@ mod int {
     }
 
     #[test]
+    fn a_copybook_is_one_file_record_however_many_programs_copy_it() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC X.")].join("\n");
+        let prog_text = |name: &str| {
+            [
+                at(8, "IDENTIFICATION DIVISION."),
+                at(8, &format!("PROGRAM-ID. {name}.")),
+                at(8, "DATA DIVISION."),
+                at(8, "WORKING-STORAGE SECTION."),
+                at(12, "COPY REC."),
+                at(8, "PROCEDURE DIVISION."),
+                at(8, "MAIN-PARA."),
+                at(12, "STOP RUN."),
+            ]
+            .join("\n")
+        };
+        let (one, two) = (prog_text("ONE"), prog_text("TWO"));
+        let copied = |recs: &[serde_json::Value]| {
+            recs.iter()
+                .filter(|r| r["type"] == "file" && r["path"] == "/root/REC.cpy")
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // Copied by two programs, never walked.
+        let (recs, _) = scan_text("/root/one.cob", &one, &[("/root/REC.cpy", &copy)]);
+        assert_eq!(copied(&recs).len(), 1, "{recs:?}");
+        assert_eq!(
+            copied(&recs)[0],
+            serde_json::json!({"type":"file","path":"/root/REC.cpy","parent":"","start_line":1,"end_line":2})
+        );
+        // Copied by two programs and also walked: still one record.
+        let tree = [
+            ("/root/one.cob", one.as_str()),
+            ("/root/two.cob", two.as_str()),
+            ("/root/REC.cpy", copy.as_str()),
+        ];
+        let recs = jsonl(&scan_tree(&tree));
+        assert_eq!(copied(&recs).len(), 1, "{recs:?}");
+    }
+
+    #[test]
+    fn a_walked_copybook_without_identification_division_draws_no_parse_diagnostic() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC X.")].join("\n");
+        let (recs, diags) = scan_text("/root/REC.cpy", &copy, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(recs.contains(
+            &serde_json::json!({"type":"file","path":"/root/REC.cpy","parent":"","start_line":1,"end_line":2})
+        ));
+        // A file that does open an IDENTIFICATION DIVISION still reports its own errors.
+        let (_, diags) = scan_text("/root/bad.cob", &at(8, "IDENTIFICATION DIVISION."), &[]);
+        assert!(!diags.is_empty());
+    }
+
+    #[test]
     fn non_ascii_before_a_column_is_counted_in_characters() {
         let text = [
             at(8, "IDENTIFICATION DIVISION."),

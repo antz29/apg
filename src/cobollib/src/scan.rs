@@ -3,6 +3,7 @@
 //! Structs and Functions, with `contains` edges by scanner-local opaque id. Byte offsets are
 //! exact over the origin file's text, so a declaration in a copybook indexes the copybook.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
@@ -13,13 +14,14 @@ use crate::ast::{
 };
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
+use crate::lexer::TokenKind;
 use crate::parser::parse_compilation_unit;
 use crate::preprocess::{preprocess, read_file, Search};
 use crate::resolve::{
     declared, declares, global_data, resolve_call, scopes, CallResolution, Declared, ProcKind,
     Resolution, Scope,
 };
-use crate::source_map::{FileId, Origin, SourceMap};
+use crate::source_map::{FileId, Mapped, Origin, SourceMap};
 
 /// Unified JSONL records (SPEC §2), the `cobol` stream's wire shapes.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -91,6 +93,8 @@ pub enum Rec {
 pub struct Emitter {
     recs: Vec<Rec>,
     modules: BTreeSet<String>,
+    /// Every file that has its File record, whether walked or copied (one record each).
+    files: BTreeSet<String>,
     unresolved: BTreeSet<String>,
     next_id: usize,
     base: PathBuf,
@@ -289,6 +293,7 @@ impl Emitter {
         Emitter {
             recs: Vec::new(),
             modules: BTreeSet::new(),
+            files: BTreeSet::new(),
             unresolved: BTreeSet::new(),
             next_id: 0,
             base: base.to_path_buf(),
@@ -600,27 +605,31 @@ impl Emitter {
         lookup: &dyn Fn(&Path) -> Option<String>,
     ) -> Vec<Diagnostic> {
         let module = module_of(&self.base, Path::new(path));
-        if self.modules.insert(module.clone()) {
-            self.recs.push(Rec::Module {
-                fqn: module.clone(),
-            });
+        if self.files.insert(path.to_string()) {
+            self.file_record(path, text);
         }
-        self.recs.push(Rec::File {
-            path: path.to_string(),
-            parent: module.clone(),
-            start_line: 1,
-            end_line: text.lines().count().max(1),
-        });
+        // Every copybook the expansion reads, in read order, for its File record.
+        let copied = RefCell::new(Vec::new());
+        let read = |p: &Path| {
+            let text = lookup(p)?;
+            copied
+                .borrow_mut()
+                .push((p.display().to_string(), text.clone()));
+            Some(text)
+        };
         let mut map = SourceMap::default();
-        let (tokens, mut diags) = preprocess(&mut map, path, text, dialect, search, lookup);
+        let (tokens, mut diags) = preprocess(&mut map, path, text, dialect, search, &read);
         let (unit, more) = parse_compilation_unit(&map, dialect, &tokens);
-        diags.extend(more);
+        // A file with no IDENTIFICATION DIVISION (a copybook) has no standalone parse errors.
+        if has_identification(&tokens) {
+            diags.extend(more);
+        }
         let file = self.maps.len();
         let mut loc = Locate {
             map: &map,
             main: path,
             main_text: text,
-            lookup,
+            lookup: &read,
             texts: BTreeMap::new(),
             scopes: scopes(&unit),
             decls: declared(&unit),
@@ -641,7 +650,28 @@ impl Emitter {
         diags.extend(loc.diags);
         self.calls.extend(loc.calls);
         self.maps.push(map);
+        for (name, text) in copied.into_inner() {
+            if self.files.insert(name.clone()) {
+                self.file_record(&name, &text);
+            }
+        }
         diags
+    }
+
+    /// Emits the Module (once) and the File record of `path`, whose text is `text`.
+    fn file_record(&mut self, path: &str, text: &str) {
+        let module = module_of(&self.base, Path::new(path));
+        if self.modules.insert(module.clone()) {
+            self.recs.push(Rec::Module {
+                fqn: module.clone(),
+            });
+        }
+        self.recs.push(Rec::File {
+            path: path.to_string(),
+            parent: module,
+            start_line: 1,
+            end_line: text.lines().count().max(1),
+        });
     }
 
     /// The records emitted so far, in order.
@@ -861,6 +891,18 @@ fn declared_names(entries: &[DataEntry], out: &mut BTreeSet<String>) {
     }
 }
 
+/// Whether the expanded tokens hold an `IDENTIFICATION DIVISION` header (`ID DIVISION` too).
+fn has_identification(tokens: &[Mapped]) -> bool {
+    tokens.windows(2).any(|w| {
+        matches!(w[0].token.kind, TokenKind::Word | TokenKind::Reserved)
+            && matches!(
+                w[0].token.text.to_ascii_uppercase().as_str(),
+                "IDENTIFICATION" | "ID"
+            )
+            && w[1].token.text.eq_ignore_ascii_case("DIVISION")
+    })
+}
+
 /// The COBOL source extensions, in any letter case.
 fn is_cobol_source(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
@@ -928,7 +970,11 @@ pub fn run(argv: &[String]) -> Result<(), String> {
     let targets = read_targets(args.targets.as_deref());
     let search = Search {
         scan_root: root.clone(),
-        copy_paths: args.copy_paths.iter().map(PathBuf::from).collect(),
+        copy_paths: args
+            .copy_paths
+            .iter()
+            .map(|p| absolutize(Path::new(p)))
+            .collect(),
     };
 
     let mut files = Vec::new();
