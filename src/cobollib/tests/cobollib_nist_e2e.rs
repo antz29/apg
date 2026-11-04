@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use cobolfrontend::ast::{
-    CompilationUnit, DataEntry, ProcedureDivision, Program, QualifiedName, Statement,
+    CompilationUnit, DataEntry, ProcedureDivision, Program, QualifiedName, Span, Statement,
 };
 use cobolfrontend::diag::Diagnostic;
 use cobolfrontend::dialect::Dialect;
@@ -187,11 +187,19 @@ fn parse_with_tokens(path: &Path, dir: &Path) -> (SourceMap, Vec<Mapped>, Compil
     (map, tokens, unit)
 }
 
-/// Every program in `programs`, nested ones included, in source order.
-fn nested_programs<'a>(programs: &'a [Program], out: &mut Vec<&'a Program>) {
+/// Every program in `programs`, nested ones included, in source order, each with the GLOBAL
+/// names of the programs enclosing it (its own included).
+fn nested_programs<'a>(
+    programs: &'a [Program],
+    tokens: &[Mapped],
+    enclosing: &HashSet<String>,
+    out: &mut Vec<(&'a Program, HashSet<String>)>,
+) {
     for program in programs {
-        out.push(program);
-        nested_programs(&program.nested, out);
+        let mut globals = enclosing.clone();
+        global_declared(program, program_tokens(tokens, program), &mut globals);
+        out.push((program, globals.clone()));
+        nested_programs(&program.nested, tokens, &globals, out);
     }
 }
 
@@ -225,14 +233,53 @@ fn declare_word(t: Option<&Mapped>, out: &mut HashSet<String>) {
     }
 }
 
+/// Whether `t` is the word `text` (case-insensitive), plain or reserved.
+fn is_word(t: &Mapped, text: &str) -> bool {
+    word_token(t) && t.token.text.eq_ignore_ascii_case(text)
+}
+
+fn word_token(t: &Mapped) -> bool {
+    matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved)
+}
+
+/// Whether the entry spanning `span` (its first token up to, not including, its period) holds
+/// the word GLOBAL in its own clauses.
+fn has_global(span: Span, tokens: &[Mapped]) -> bool {
+    let Some(from) = tokens.iter().position(|t| t.origin == span.start) else {
+        return false;
+    };
+    tokens[from..]
+        .iter()
+        .take_while(|t| t.origin != span.end)
+        .any(|t| is_word(t, "GLOBAL"))
+}
+
+/// Names a program declares GLOBAL, visible to the programs nested in it: a 01/77 entry whose
+/// own clause has GLOBAL (with its subordinates) and an FD/SD file name followed by GLOBAL.
+fn global_declared(program: &Program, tokens: &[Mapped], out: &mut HashSet<String>) {
+    if let Some(data) = &program.data {
+        for entry in data.sections.iter().flat_map(|s| &s.entries) {
+            if has_global(entry.span, tokens) {
+                declare_entries(std::slice::from_ref(entry), out);
+            }
+        }
+    }
+    for (i, t) in tokens.iter().enumerate() {
+        if (is_word(t, "FD") || is_word(t, "SD"))
+            && tokens.get(i + 2).is_some_and(|g| is_word(g, "GLOBAL"))
+        {
+            declare_word(tokens.get(i + 1), out);
+        }
+    }
+}
+
 /// Names a program declares in its token stream outside the DATA DIVISION: file names after
-/// SELECT, FD and SD, index names after INDEXED BY, and the mnemonic (after IS) and alphabet
-/// (after ALPHABET) names of SPECIAL-NAMES.
+/// SELECT, FD and SD, index names after INDEXED (with or without BY; not `ORGANIZATION [IS]
+/// INDEXED`), and the mnemonic (after IS) and alphabet (after ALPHABET) names of SPECIAL-NAMES.
 fn token_declared(tokens: &[Mapped], out: &mut HashSet<String>) {
-    let word = |t: &Mapped| matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved);
     let mut in_special = false;
     for (i, t) in tokens.iter().enumerate() {
-        if !word(t) {
+        if !word_token(t) {
             continue;
         }
         match t.token.text.to_ascii_uppercase().as_str() {
@@ -241,8 +288,15 @@ fn token_declared(tokens: &[Mapped], out: &mut HashSet<String>) {
                 let optional = next.is_some_and(|n| n.token.text.eq_ignore_ascii_case("OPTIONAL"));
                 declare_word(tokens.get(i + 1 + usize::from(optional)), out);
             }
-            "BY" if i > 0 && tokens[i - 1].token.text.eq_ignore_ascii_case("INDEXED") => {
-                for n in tokens[i + 1..]
+            "INDEXED"
+                if !(i > 0
+                    && matches!(
+                        tokens[i - 1].token.text.to_ascii_uppercase().as_str(),
+                        "ORGANIZATION" | "IS"
+                    )) =>
+            {
+                let by = tokens.get(i + 1).is_some_and(|n| is_word(n, "BY"));
+                for n in tokens[i + 1 + usize::from(by)..]
                     .iter()
                     .take_while(|n| matches!(n.token.kind, TokenKind::Word | TokenKind::Comma))
                 {
@@ -296,10 +350,9 @@ mod e2e {
         for path in &corpus(&dir) {
             let (map, tokens, unit) = parse_with_tokens(path, &dir);
             let mut all = Vec::new();
-            nested_programs(&unit.programs, &mut all);
-            for program in all {
+            nested_programs(&unit.programs, &tokens, &HashSet::new(), &mut all);
+            for (program, mut declared) in all {
                 checked += 1;
-                let mut declared = HashSet::new();
                 if let Some(data) = &program.data {
                     for section in &data.sections {
                         declare_entries(&section.entries, &mut declared);
@@ -340,12 +393,8 @@ mod e2e {
         report.extend(
             ranked
                 .iter()
-                .take(150)
                 .map(|(name, (n, example))| format!("  {n:>5}  {name}  e.g. {example}")),
         );
-        if undeclared > 150 {
-            report.push(format!("... {} more groups not shown", undeclared - 150));
-        }
         assert!(total == 0, "{}", report.join("\n"));
     }
 
