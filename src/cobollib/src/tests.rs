@@ -697,6 +697,34 @@ mod unit {
     }
 
     #[test]
+    fn author_comment_entry_with_unmatched_quote_yields_no_tokens_or_diagnostic() {
+        let text = [
+            at(8, "AUTHOR."),
+            at(12, "FRED \"UNCLOSED"),
+            at(8, "ENVIRONMENT DIVISION."),
+        ]
+        .join("\n");
+        let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, ["AUTHOR", ".", "ENVIRONMENT", "DIVISION", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn remarks_comment_entry_with_area_b_division_header_yields_nothing() {
+        let text = [
+            at(8, "REMARKS."),
+            at(12, "PROCEDURE DIVISION."),
+            at(12, "DISPLAY X."),
+            at(8, "PROCEDURE DIVISION."),
+        ]
+        .join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        let texts: Vec<&str> = tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, ["REMARKS", ".", "PROCEDURE", "DIVISION", "."]);
+    }
+
+    #[test]
     fn continued_literal_resumes_after_the_quote_in_area_b() {
         let text = [at(8, "DISPLAY \"AB"), format!("{}\"CD\".", at(7, "-"))].join("\n");
         let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);

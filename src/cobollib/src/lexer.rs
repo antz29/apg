@@ -87,6 +87,8 @@ enum Unit {
 fn units(text: &str, layout: Layout) -> Vec<Unit> {
     let mut units = Vec::new();
     let mut base = 0;
+    let fixed = matches!(layout, Layout::Source(_));
+    let mut comment = false;
     for (n, raw) in text.split('\n').enumerate() {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
         let chars: Vec<Ch> = line
@@ -100,7 +102,7 @@ fn units(text: &str, layout: Layout) -> Vec<Unit> {
             })
             .collect();
         base += raw.len() + 1;
-        let (skip, continued, body): (bool, bool, Vec<Ch>) = match layout {
+        let (skip, continued, mut body): (bool, bool, Vec<Ch>) = match layout {
             Layout::Free => (false, false, chars),
             Layout::Source(_) => {
                 let indicator = chars.get(6).map_or(' ', |ch| ch.c);
@@ -119,6 +121,24 @@ fn units(text: &str, layout: Layout) -> Vec<Unit> {
         let body_text: String = body.iter().map(|ch| ch.c).collect();
         if skip || body_text.trim_start().starts_with(">>") {
             continue;
+        }
+        if fixed {
+            // A comment entry runs until the next line with a character in area A.
+            if comment
+                && !body
+                    .iter()
+                    .take_while(|ch| ch.col <= 11)
+                    .all(|ch| ch.c == ' ')
+            {
+                comment = false;
+            }
+            if comment {
+                continue;
+            }
+            if let Some(end) = comment_header(&body) {
+                body.truncate(end);
+                comment = true;
+            }
         }
         units.push(Unit::Line(continued));
         units.extend(body.into_iter().map(Unit::Char));
@@ -146,6 +166,29 @@ pub fn lex(file: &str, text: &str, layout: Layout, dialect: Dialect) -> (Cursor,
         },
         lexer.diags,
     )
+}
+
+/// The end (past the period) of an identification-division paragraph header that starts in
+/// area A: its comment entry text follows it on the line and below.
+fn comment_header(body: &[Ch]) -> Option<usize> {
+    const HEADERS: [&str; 6] = [
+        "AUTHOR",
+        "INSTALLATION",
+        "DATE-WRITTEN",
+        "DATE-COMPILED",
+        "SECURITY",
+        "REMARKS",
+    ];
+    let start = body.iter().position(|ch| ch.c != ' ')?;
+    if body[start].col > 11 {
+        return None;
+    }
+    let period = start + body[start..].iter().position(|ch| ch.c == '.')?;
+    let word: String = body[start..period].iter().map(|ch| ch.c).collect();
+    HEADERS
+        .iter()
+        .any(|h| word.eq_ignore_ascii_case(h))
+        .then_some(period + 1)
 }
 
 fn is_word_char(c: char) -> bool {
