@@ -81,6 +81,20 @@ mod unit {
         assert!(scan_time_tools("cobol").is_empty());
     }
 
+    /// cobol-frontend phase-02 task-22: only the COBOL candidate matches its
+    /// extensions in any letter case; every other language stays exact-case,
+    /// so `Main.JAVA` is not a java source.
+    #[test]
+    fn ext_matches_is_case_insensitive_only_when_asked() {
+        let cobol = [".cob", ".cbl", ".cobol", ".cpy"];
+        assert!(ext_matches("CBL", &cobol, true));
+        assert!(ext_matches("Cpy", &cobol, true));
+        assert!(!ext_matches("CBL", &cobol, false));
+        let java = [".java"];
+        assert!(ext_matches("java", &java, false));
+        assert!(!ext_matches("JAVA", &java, false));
+    }
+
     /// schema-alignment phase-02 task-17: the agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural
