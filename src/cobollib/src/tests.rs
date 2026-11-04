@@ -2056,6 +2056,57 @@ mod unit {
         fn text_that_is_not_a_data_division_parses_to_none() {
             assert!(parse_data("PROCEDURE DIVISION. STOP RUN.").is_none());
         }
+
+        #[test]
+        fn global_clause_and_indexed_by_names_are_kept() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 GLOBAL-DATA IS GLOBAL. 01 T. 05 A OCCURS 3 TIMES INDEXED BY IDX-1 IDX-2 PIC X. 05 B PIC X.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let entries = &division.sections[0].entries;
+            assert!(entries[0].global);
+            assert!(!entries[1].global);
+            let kids = &entries[1].children;
+            let indexes: Vec<&str> = kids[0].indexes.iter().map(|n| n.text.as_str()).collect();
+            assert_eq!(indexes, ["IDX-1", "IDX-2"]);
+            assert!(kids[1].indexes.is_empty());
+            assert_eq!(kids[0].pic.as_ref().map(|p| p.text.as_str()), Some("X"));
+        }
+
+        #[test]
+        fn indexed_without_by_stops_at_the_period() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. WORKING-STORAGE SECTION. 01 R. 05 A OCCURS 2 INDEXED I.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let a = &division.sections[0].entries[0].children[0];
+            let indexes: Vec<&str> = a.indexes.iter().map(|n| n.text.as_str()).collect();
+            assert_eq!(indexes, ["I"]);
+        }
+
+        #[test]
+        fn fd_and_sd_names_record_their_global_flag() {
+            let (division, diags) = parse_data(
+                "DATA DIVISION. FILE SECTION. FD TEST-FILE GLOBAL. 01 TR PIC X. SD SORT-FILE. 01 SR PIC X. FD OUT-FILE RECORD CONTAINS 80. 01 OR-REC PIC X.",
+            )
+            .unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let files: Vec<(&str, bool)> = division
+                .files
+                .iter()
+                .map(|f| (f.name.text.as_str(), f.global))
+                .collect();
+            assert_eq!(
+                files,
+                [
+                    ("TEST-FILE", true),
+                    ("SORT-FILE", false),
+                    ("OUT-FILE", false)
+                ]
+            );
+        }
     }
 
     mod parser_entry {

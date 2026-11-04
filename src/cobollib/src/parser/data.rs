@@ -4,7 +4,9 @@
 //! [`parse_data_division`], called by the parser with the tokens from `DATA DIVISION.` to the
 //! end of the division.
 
-use crate::ast::{DataDivision, DataEntry, DataSection, DataSectionKind, Name, Pic, Span};
+use crate::ast::{
+    DataDivision, DataEntry, DataSection, DataSectionKind, FileName, Name, Pic, Span,
+};
 use crate::diag::Diagnostic;
 use crate::dialect::Dialect;
 use crate::lexer::TokenKind;
@@ -82,6 +84,7 @@ pub fn parse_data_division(
         dialect,
         tokens,
         diags: Vec::new(),
+        files: Vec::new(),
     };
     let body = tokens
         .iter()
@@ -120,6 +123,7 @@ pub fn parse_data_division(
             end: tokens[tokens.len() - 1].origin,
         },
         sections,
+        files: p.files,
     };
     Some((division, p.diags))
 }
@@ -129,6 +133,7 @@ struct Parser<'a> {
     dialect: Dialect,
     tokens: &'a [Mapped],
     diags: Vec<Diagnostic>,
+    files: Vec<FileName>,
 }
 
 impl Parser<'_> {
@@ -171,8 +176,16 @@ impl Parser<'_> {
         while i < end {
             if is(&tokens[i], "FD") || is(&tokens[i], "SD") {
                 // File and sort descriptions are not AST entries; they close the open records.
+                let next = self.skip_entry(i, end);
+                if let Some(t) = tokens.get(i + 1).filter(|t| i + 1 < end) {
+                    if t.token.kind == TokenKind::Word && !is_clause(t) {
+                        let name = self.name(i + 1);
+                        let global = (i + 2..next).any(|j| is(&tokens[j], "GLOBAL"));
+                        self.files.push(FileName { name, global });
+                    }
+                }
                 close(&mut stack, &mut roots, 0);
-                i = self.skip_entry(i, end);
+                i = next;
                 continue;
             }
             let dropped = level_of(&tokens[i]);
@@ -228,6 +241,8 @@ impl Parser<'_> {
             redefines: false,
             renames: false,
             occurs: false,
+            global: false,
+            indexes: Vec::new(),
             pic: None,
             children: Vec::new(),
         };
@@ -264,6 +279,20 @@ impl Parser<'_> {
             }
             if is(t, "OCCURS") {
                 entry.occurs = true;
+            }
+            if is(t, "GLOBAL") {
+                entry.global = true;
+            }
+            if is(t, "INDEXED") {
+                j += 1;
+                if j < end && is(&tokens[j], "BY") {
+                    j += 1;
+                }
+                while j < end && tokens[j].token.kind == TokenKind::Word && !is_clause(&tokens[j]) {
+                    entry.indexes.push(self.name(j));
+                    j += 1;
+                }
+                continue;
             }
             j += 1;
         }
