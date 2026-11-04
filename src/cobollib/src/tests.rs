@@ -3050,6 +3050,102 @@ mod unit {
             assert_eq!(qnames(&stmts[0].refs), ["X"]);
             assert!(stmts[0].transfer.is_none());
         }
+
+        #[test]
+        fn exec_cics_invoke_service_and_webservice_are_external_service_calls() {
+            let text = "    EXEC CICS INVOKE SERVICE('SVC') END-EXEC.\n    EXEC CICS INVOKE WEBSERVICE(WS-WEB) END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(
+                &stmts[0].transfer,
+                Some(Transfer::ExecService(CallTarget::Literal(n))) if n.text.contains("SVC")
+            ));
+            assert!(matches!(
+                &stmts[1].transfer,
+                Some(Transfer::ExecService(CallTarget::Identifier(n))) if n.name.text == "WS-WEB"
+            ));
+        }
+
+        #[test]
+        fn exec_cics_start_and_return_transid_are_no_transfer_and_no_diagnostic() {
+            let text = "    EXEC CICS START TRANSID('T1') END-EXEC.\n    EXEC CICS RETURN TRANSID('T2') END-EXEC.\n    DISPLAY X.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 3);
+            assert!(stmts[..2]
+                .iter()
+                .all(|s| s.transfer.is_none() && s.refs.is_empty()));
+            assert_eq!(qnames(&stmts[2].refs), ["X"]);
+        }
+
+        #[test]
+        fn exec_cics_invoke_service_inside_if_else_is_its_own_call_under_ibm() {
+            let text =
+                "    IF X = 1 EXEC CICS INVOKE SERVICE('SVC') END-EXEC ELSE MOVE 2 TO Y END-IF.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert!(stmts[0].transfer.is_none());
+            assert!(qnames(&stmts[0].refs).contains(&"X"));
+            let branches = &stmts[0].children;
+            assert_eq!(branches.len(), 2, "{branches:?}");
+            assert!(matches!(
+                &branches[0].transfer,
+                Some(Transfer::ExecService(CallTarget::Literal(n))) if n.text.contains("SVC")
+            ));
+            assert!(branches[1].transfer.is_none());
+            assert_eq!(qnames(&branches[1].refs), ["Y"]);
+        }
+
+        #[test]
+        fn exec_cics_invoke_service_inside_if_else_is_skipped_under_cobol85_and_the_else_survives()
+        {
+            let text =
+                "    IF X = 1 EXEC CICS INVOKE SERVICE('SVC') END-EXEC ELSE MOVE 2 TO Y END-IF.\n";
+            let (unit, diags) = parse_exec(Dialect::Cobol85, text);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(count(&diags, NOT_IBM), 1, "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            let branches = &stmts[0].children;
+            assert!(
+                branches.iter().all(|b| b.transfer.is_none()),
+                "{branches:?}"
+            );
+            assert!(
+                branches.iter().any(|b| qnames(&b.refs) == ["Y"]),
+                "{branches:?}"
+            );
+        }
+
+        #[test]
+        fn exec_cics_start_transid_after_a_move_in_one_sentence_is_its_own_statement_under_ibm() {
+            let text = "    MOVE 1 TO X EXEC CICS START TRANSID('T1') END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+            assert!(stmts[0].transfer.is_none());
+            assert!(stmts[1].transfer.is_none());
+            assert!(stmts[1].refs.is_empty());
+        }
+
+        #[test]
+        fn exec_cics_start_transid_after_a_move_is_skipped_under_cobol85_and_the_move_survives() {
+            let text = "    MOVE 1 TO X EXEC CICS START TRANSID('T1') END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Cobol85, text);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(count(&diags, NOT_IBM), 1, "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+            assert!(stmts[0].transfer.is_none());
+        }
     }
 }
 
