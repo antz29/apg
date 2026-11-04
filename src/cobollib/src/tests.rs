@@ -1405,6 +1405,39 @@ mod unit {
     }
 
     #[test]
+    fn replace_pseudo_text_may_span_lines() {
+        let text = [
+            at(8, "REPLACE ==DISPLAY"),
+            at(8, "  A== BY ==SHOW=="),
+            at(8, "  ."),
+            at(8, "DISPLAY A."),
+        ]
+        .join("\n");
+        let (tokens, diags) = replaced(&text);
+        assert_eq!(
+            shape(&tokens),
+            [(TokenKind::Word, "SHOW"), (TokenKind::Period, ".")]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn replace_pseudo_text_may_hold_a_separator_period_and_empty_by_deletes_it() {
+        let (tokens, diags) = replaced(&at(8, "REPLACE ==A. == BY ====. DISPLAY X A. DISPLAY B."));
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "B"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
     fn malformed_replace_is_a_diagnostic_and_skips_its_sentence() {
         let (tokens, diags) = replaced(&at(8, "REPLACE ==A== DISPLAY A. DISPLAY B."));
         assert_eq!(
