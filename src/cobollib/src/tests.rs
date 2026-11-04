@@ -6241,4 +6241,105 @@ mod int {
         );
         assert!(!recs.iter().any(|r| r["type"] == "unresolved"), "{recs:?}");
     }
+
+    #[test]
+    fn exec_cics_invoke_service_and_webservice_are_external_unresolved_calls_named_as_written() {
+        let a = caller_at(&[
+            "EXEC CICS INVOKE SERVICE('SVC-A') END-EXEC.",
+            "EXEC CICS INVOKE WEBSERVICE(WS-WEB) END-EXEC.",
+        ]);
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/a.cob", &a, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        for want in [
+            serde_json::json!({"type":"unresolved","fqn":"SVC-A","category":"external"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"SVC-A"}),
+            serde_json::json!({"type":"unresolved","fqn":"WS-WEB","category":"external"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"WS-WEB"}),
+        ] {
+            assert!(recs.contains(&want), "{want} missing from {recs:?}");
+        }
+        assert!(edges(&recs, &["calls", "uses"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn exec_cics_invoke_service_naming_a_scanned_program_stays_external() {
+        let b = prog("SUB-B");
+        let a = caller_at(&["EXEC CICS INVOKE SERVICE('SUB-B') END-EXEC."]);
+        let recs = scan_tree_ibm(&[("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())]);
+        assert!(edges(&recs, &["calls", "uses"]).is_empty(), "{recs:?}");
+        assert!(
+            recs.contains(
+                &serde_json::json!({"type":"unresolved","fqn":"SUB-B","category":"external"})
+            ),
+            "{recs:?}"
+        );
+        let main = id_of(&recs, "MAIN-PARA");
+        assert_eq!(
+            edges(&recs, &["unresolved_call"]),
+            vec![serde_json::json!({"type":"unresolved_call","from":main,"to":"SUB-B"})]
+        );
+    }
+
+    #[test]
+    fn repeated_exec_cics_invoke_service_links_one_target_and_reports_one_unresolved_call() {
+        let a = caller_at(&[
+            "EXEC CICS INVOKE SERVICE('SVC-A') END-EXEC.",
+            "EXEC CICS INVOKE SERVICE('SVC-A') END-EXEC.",
+        ]);
+        let (recs, _) = scan_text_in(Dialect::Ibm, "/root/a.cob", &a, &[]);
+        let targets = recs
+            .iter()
+            .filter(|r| r["type"] == "unresolved" && r["fqn"] == "SVC-A")
+            .count();
+        assert_eq!(targets, 1, "{recs:?}");
+        assert_eq!(edges(&recs, &["unresolved_call"]).len(), 1, "{recs:?}");
+    }
+
+    #[test]
+    fn exec_cics_start_and_return_transid_draw_no_calls_uses_or_unresolved_records() {
+        let a = caller_at(&[
+            "EXEC CICS START TRANSID('T1') END-EXEC.",
+            "EXEC CICS RETURN TRANSID('T2') END-EXEC.",
+        ]);
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/a.cob", &a, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(
+            edges(
+                &recs,
+                &[
+                    "calls",
+                    "uses",
+                    "unresolved_call",
+                    "unresolved_use",
+                    "unresolved"
+                ]
+            )
+            .is_empty(),
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn exec_cics_service_and_transid_are_skipped_under_cobol85() {
+        let b = prog("SUB-B");
+        let a = caller_at(&[
+            "EXEC CICS INVOKE SERVICE('SUB-B') END-EXEC.",
+            "EXEC CICS INVOKE WEBSERVICE(WS-WEB) END-EXEC.",
+            "EXEC CICS START TRANSID('T1') END-EXEC.",
+        ]);
+        let recs = jsonl(&scan_tree(&[
+            ("/root/a.cob", a.as_str()),
+            ("/root/b.cob", b.as_str()),
+        ]));
+        assert!(
+            edges(
+                &recs,
+                &["uses", "calls", "unresolved_call", "unresolved_use"]
+            )
+            .is_empty(),
+            "{recs:?}"
+        );
+        assert!(!recs.iter().any(|r| r["type"] == "unresolved"), "{recs:?}");
+    }
 }
