@@ -144,13 +144,15 @@ fn addr(ty: Type<'_>) -> usize {
     }
 }
 
-/// A `CALL` awaiting whole-tree resolution: its calling paragraph's id, its target, and the
-/// index of its file's map in `Emitter::maps`.
+/// A `CALL` awaiting whole-tree resolution: its calling paragraph's id, its target, the index of
+/// its file's map in `Emitter::maps`, and whether it is an `EXEC CICS` service call, which lies
+/// outside the scan and is never resolved.
 #[derive(Debug)]
 struct PendingCall {
     from: String,
     target: CallTarget,
     file: usize,
+    exec: bool,
 }
 
 /// A located span: the start origin's file name, byte offsets, and 1-based lines.
@@ -868,29 +870,33 @@ impl Emitter {
         let mut diags = Vec::new();
         for call in std::mem::take(&mut self.calls) {
             let map = &self.maps[call.file];
-            let (resolution, warning) = resolve_call(&scopes, map, &call.target);
-            diags.extend(warning);
             let target = match &call.target {
                 CallTarget::Literal(name) => name,
                 CallTarget::Identifier(name) => &name.name,
             };
-            let category = match resolution {
-                CallResolution::Program(i) => {
-                    let to = self.programs[i].1.clone();
-                    self.recs.push(Rec::Uses {
-                        from: call.from,
-                        to,
-                        properties: BTreeMap::new(),
-                    });
-                    continue;
+            let category = if call.exec {
+                "external"
+            } else {
+                let (resolution, warning) = resolve_call(&scopes, map, &call.target);
+                diags.extend(warning);
+                match resolution {
+                    CallResolution::Program(i) => {
+                        let to = self.programs[i].1.clone();
+                        self.recs.push(Rec::Uses {
+                            from: call.from,
+                            to,
+                            properties: BTreeMap::new(),
+                        });
+                        continue;
+                    }
+                    CallResolution::Ambiguous => {
+                        let message = format!("CALL {} names more than one program", target.text);
+                        diags.push(map.diagnostic(target.span.start, &message));
+                        "unknown"
+                    }
+                    CallResolution::External => "external",
+                    CallResolution::Dynamic => "func-value",
                 }
-                CallResolution::Ambiguous => {
-                    let message = format!("CALL {} names more than one program", target.text);
-                    diags.push(map.diagnostic(target.span.start, &message));
-                    "unknown"
-                }
-                CallResolution::External => "external",
-                CallResolution::Dynamic => "func-value",
             };
             if self.unresolved.insert(target.text.clone()) {
                 self.recs.push(Rec::Unresolved {
@@ -1302,6 +1308,13 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
                 from: from.to_string(),
                 target: target.clone(),
                 file: loc.file,
+                exec: false,
+            }),
+            Some(Transfer::ExecService(target)) => loc.calls.push(PendingCall {
+                from: from.to_string(),
+                target: target.clone(),
+                file: loc.file,
+                exec: true,
             }),
             _ => {}
         }
