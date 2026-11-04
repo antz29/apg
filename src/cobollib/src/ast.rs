@@ -173,6 +173,8 @@ pub enum Transfer {
     /// `RESUME AT procedure-name`.
     Resume(QualifiedName),
     Call(CallTarget),
+    /// `EXEC CICS INVOKE SERVICE` / `WEBSERVICE`: the target lies outside the scan.
+    ExecService(CallTarget),
     /// `SORT` or `MERGE` with their `INPUT`/`OUTPUT PROCEDURE` ranges.
     SortMerge {
         input: Option<ProcRange>,
