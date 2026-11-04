@@ -194,7 +194,7 @@ Verified in `src/load/tables.rs`:
   Struct→Struct and Struct→Function. **Function→Function and Module→Function containment are not allowed**, which is
   why sections are Structs (§10, Section).
 - `Calls` is Function→Function and stores edge properties, so `kind` can be recorded (below). `kind` is the first edge property any frontend emits: the ingestor stores edge properties, but no existing frontend emits them, and the query tools do not read them yet.
-- `Uses` is Function→Struct and Struct→Struct.
+- `Uses` is Function→Struct and Struct→Struct, and Struct→File only for a COBOL `COPY`, carrying `{"kind":"copy"}` (§10.2).
 - `UnresolvedCall` is Function→UnresolvedTarget and carries only `target_type`, so the
   control-transfer kind cannot be stored on an unresolved edge.
 - `UnresolvedUse` is Function→UnresolvedTarget and Struct→UnresolvedTarget.
