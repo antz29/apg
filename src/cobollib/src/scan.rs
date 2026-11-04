@@ -105,6 +105,8 @@ pub struct Emitter {
     maps: Vec<SourceMap>,
     /// CALLs queued until [`Emitter::finish`] resolves them against the whole tree.
     calls: Vec<PendingCall>,
+    /// The files holding an error-level diagnostic (the file a diagnostic is located in).
+    errored: BTreeSet<String>,
 }
 
 /// A `CALL` awaiting whole-tree resolution: its calling paragraph's id, its target, and the
@@ -301,7 +303,25 @@ impl Emitter {
             programs: Vec::new(),
             maps: Vec::new(),
             calls: Vec::new(),
+            errored: BTreeSet::new(),
         }
+    }
+
+    /// Records the files of `diags` that hold an error-level diagnostic.
+    fn note_errors(&mut self, diags: &[Diagnostic]) {
+        self.errored.extend(
+            diags
+                .iter()
+                .filter(|d| !is_warning(&d.message))
+                .map(|d| d.file.clone()),
+        );
+    }
+
+    /// The closing stderr line: how many COBOL files had an error-level diagnostic.
+    pub fn error_summary(&self) -> String {
+        let n = self.errored.len();
+        let files = if n == 1 { "file" } else { "files" };
+        format!("cobol: {n} {files} had errors")
     }
 
     fn fresh_id(&mut self) -> String {
@@ -590,6 +610,7 @@ impl Emitter {
                 to: target.text.clone(),
             });
         }
+        self.note_errors(&diags);
         diags
     }
 
@@ -655,6 +676,7 @@ impl Emitter {
                 self.file_record(&name, &text);
             }
         }
+        self.note_errors(&diags);
         diags
     }
 
@@ -903,6 +925,21 @@ fn has_identification(tokens: &[Mapped]) -> bool {
     })
 }
 
+/// Whether a diagnostic is a warning rather than an error, by its wording: the free-format
+/// heuristic, a feature level below error (`warning`, `archaic`, `obsolete`), and a
+/// case-insensitive `CALL` match.
+fn is_warning(message: &str) -> bool {
+    message.starts_with("warning:")
+        || [
+            " is Warning under this dialect",
+            " is Archaic under this dialect",
+            " is Obsolete under this dialect",
+            "matches a PROGRAM-ID only case-insensitively",
+        ]
+        .iter()
+        .any(|end| message.ends_with(end))
+}
+
 /// The COBOL source extensions, in any letter case.
 fn is_cobol_source(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
@@ -1009,6 +1046,7 @@ pub fn run(argv: &[String]) -> Result<(), String> {
     for diag in emitter.finish() {
         write_diagnostic(&mut err, &diag).map_err(|e| e.to_string())?;
     }
+    writeln!(err, "{}", emitter.error_summary()).map_err(|e| e.to_string())?;
     if let Some(set) = &targets {
         emitter.retain_targets(set);
     }

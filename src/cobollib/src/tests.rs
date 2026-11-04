@@ -3577,6 +3577,43 @@ mod int {
         );
     }
 
+    #[test]
+    fn error_summary_counts_each_file_with_an_error_once() {
+        let a = caller_at(&["PERFORM NOWHERE.", "PERFORM NOWHERE2."]);
+        let b = caller_at(&["PERFORM NOWHERE."]);
+        let c = prog("CLEAN");
+        let emitter = scan_tree(&[
+            ("/root/a.cob", a.as_str()),
+            ("/root/b.cob", b.as_str()),
+            ("/root/c.cob", c.as_str()),
+        ]);
+        assert_eq!(emitter.error_summary(), "cobol: 2 files had errors");
+    }
+
+    #[test]
+    fn error_summary_is_singular_for_one_file() {
+        let a = caller_at(&["PERFORM NOWHERE."]);
+        let emitter = scan_tree(&[("/root/a.cob", a.as_str())]);
+        assert_eq!(emitter.error_summary(), "cobol: 1 file had errors");
+    }
+
+    #[test]
+    fn warnings_alone_leave_the_error_count_at_zero() {
+        let a = caller_at(&["CALL 'sub-b'."]);
+        let b = prog("SUB-B");
+        let emitter = scan_tree(&[("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())]);
+        assert_eq!(emitter.error_summary(), "cobol: 0 files had errors");
+    }
+
+    #[test]
+    fn suppressed_standalone_copybook_diagnostics_never_count() {
+        let text = "       01 X PIC X.\n           FOO BAR.\n";
+        let (_, diags) = scan_text("/root/cb.cpy", text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let emitter = scan_tree(&[("/root/cb.cpy", text)]);
+        assert_eq!(emitter.error_summary(), "cobol: 0 files had errors");
+    }
+
     /// Program `name` with records `REC` (items `F`, `F2`) and `CODES` (condition `ON-CODE`),
     /// a 77 `LONE`, and MAIN-PARA holding `body`, one statement per line.
     fn data_prog(name: &str, body: &[&str]) -> String {
