@@ -42,6 +42,9 @@ pub struct Program {
     pub data: Option<DataDivision>,
     pub procedure: Option<ProcedureDivision>,
     pub nested: Vec<Program>,
+    /// Non-data names the program declares in its ENVIRONMENT DIVISION: SELECT file names,
+    /// SPECIAL-NAMES mnemonic names, ALPHABET, CLASS and ON/OFF STATUS names.
+    pub declared: Vec<Name>,
 }
 
 /// The DATA DIVISION and its sections.
@@ -49,6 +52,15 @@ pub struct Program {
 pub struct DataDivision {
     pub span: Span,
     pub sections: Vec<DataSection>,
+    /// FD and SD file names, each with its `GLOBAL` flag.
+    pub files: Vec<FileName>,
+}
+
+/// An FD or SD file name and whether its header carries `GLOBAL`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileName {
+    pub name: Name,
+    pub global: bool,
 }
 
 /// Which DATA DIVISION section holds its entries.
@@ -79,6 +91,10 @@ pub struct DataEntry {
     pub redefines: bool,
     pub renames: bool,
     pub occurs: bool,
+    /// The entry carries the `GLOBAL` clause.
+    pub global: bool,
+    /// Index names from `INDEXED [BY]`.
+    pub indexes: Vec<Name>,
     pub pic: Option<Pic>,
     pub children: Vec<DataEntry>,
 }
