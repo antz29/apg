@@ -676,6 +676,39 @@ mod unit {
     }
 
     #[test]
+    fn period_followed_by_text_is_part_of_the_token() {
+        let text = at(8, "PIC ZZZ.ZZ. 9.99. 9.X 1.");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "PIC"),
+                (TokenKind::Word, "ZZZ.ZZ"),
+                (TokenKind::Period, "."),
+                (TokenKind::Numeric, "9.99"),
+                (TokenKind::Period, "."),
+                (TokenKind::Word, "9.X"),
+                (TokenKind::Numeric, "1"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn slash_in_column_seven_is_a_comment_line() {
+        let text = [at(7, "/ PAGE EJECT"), at(8, "DISPLAY C.")].join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "C"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
     fn pseudo_text_delimiters_and_separators() {
         let (tokens, _) = lex_all(&at(8, "==A==, B; (C)"), fixed(), Dialect::Cobol85);
         assert_eq!(

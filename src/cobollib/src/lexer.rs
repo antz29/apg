@@ -82,8 +82,8 @@ enum Unit {
 }
 
 /// Splits the text into units by the layout's column rules. Fixed layout drops columns 1-6 and
-/// 73-80, comment lines (`*`, and `D` as a debugging line) and `>>` directive lines; an `-`
-/// indicator marks a continuation. Free layout keeps every line whole.
+/// 73-80, comment lines (`*` and `/` page eject, and `D` as a debugging line) and `>>` directive
+/// lines; an `-` indicator marks a continuation. Free layout keeps every line whole.
 fn units(text: &str, layout: Layout) -> Vec<Unit> {
     let mut units = Vec::new();
     let mut base = 0;
@@ -108,7 +108,7 @@ fn units(text: &str, layout: Layout) -> Vec<Unit> {
                     .into_iter()
                     .filter(|ch| (8..=72).contains(&ch.col))
                     .collect();
-                (matches!(indicator, '*' | 'D'), indicator == '-', body)
+                (matches!(indicator, '*' | '/' | 'D'), indicator == '-', body)
             }
         };
         let body_text: String = body.iter().map(|ch| ch.c).collect();
@@ -210,7 +210,7 @@ impl Lexer {
             '*' if self.free && self.ahead(1) == Some('>') => self.skip_line(),
             '"' | '\'' => self.literal(ch.c, ch, TokenKind::Alnum),
             c if c.is_ascii_alphabetic() => {
-                let text = self.take_while(is_word_char);
+                let text = self.take_word();
                 self.word(ch, text);
             }
             c if c.is_ascii_digit() => self.digits(ch),
@@ -297,11 +297,34 @@ impl Lexer {
         text
     }
 
-    /// A run starting with a digit is a number when it is all digits, else a word.
+    /// Whether the `.` next is inside a word, number or PICTURE string: a separator period is
+    /// one followed by a space, the end of the line or the end of the text.
+    fn inner_dot(&self) -> bool {
+        self.ahead(0) == Some('.') && self.ahead(1).is_some_and(|c| !c.is_whitespace())
+    }
+
+    /// A word, number or PICTURE string: word characters and inner periods.
+    fn take_word(&mut self) -> String {
+        let mut text = String::new();
+        while let Some(c) = self
+            .ahead(0)
+            .filter(|&c| is_word_char(c) || self.inner_dot())
+        {
+            text.push(c);
+            self.bump();
+        }
+        text
+    }
+
+    /// A run starting with a digit is a number when it is digits with at most one decimal
+    /// point, else a word (a PICTURE such as `9.X`).
     fn digits(&mut self, ch: Ch) {
-        let text = self.take_while(is_word_char);
-        if text.chars().all(|c| c.is_ascii_digit()) {
-            let text = self.numeric(text);
+        let text = self.take_word();
+        let numeric = text.matches('.').count() <= 1
+            && text
+                .split('.')
+                .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
+        if numeric {
             self.push(TokenKind::Numeric, text, ch);
         } else {
             self.word(ch, text);
