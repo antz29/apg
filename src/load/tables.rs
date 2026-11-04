@@ -1515,7 +1515,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         conn.query(&stmt)?;
         Ok(())
     };
-    let stmts: [(&str, String); 43] = [
+    let stmts: [(&str, String); 44] = [
         (
             "module.parquet",
             format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
