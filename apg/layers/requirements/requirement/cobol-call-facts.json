@@ -9,27 +9,17 @@
   "out": [
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-perform-goto-calls",
+      "target": "requirements.requirement.cobol-data-reference-uses",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-perform-thru-calls",
+      "target": "requirements.requirement.cobol-dynamic-call",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-section-targets",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cobol-procedure-calls",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cobol-unresolved-procedure",
+      "target": "requirements.requirement.cobol-external-call",
       "properties": {}
     },
     {
@@ -44,22 +34,57 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-external-call",
+      "target": "requirements.requirement.cobol-perform-goto-calls",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-dynamic-call",
+      "target": "requirements.requirement.cobol-perform-thru-calls",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-data-reference-uses",
+      "target": "requirements.requirement.cobol-procedure-calls",
       "properties": {}
     },
     {
       "kind": "contains",
       "target": "requirements.requirement.cobol-qualified-data-names",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-section-targets",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-unresolved-procedure",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-exec-cics-program-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-exec-cics-service-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-exec-cics-transactions",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-exec-sql-host-variables",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-exec-sql-calls",
       "properties": {}
     }
   ],

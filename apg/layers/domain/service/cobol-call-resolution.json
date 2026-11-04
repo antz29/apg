@@ -12,12 +12,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-object-reference-uses",
+      "target": "requirements.requirement.cobol-data-reference-uses",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-inheritance-uses",
+      "target": "requirements.requirement.cobol-dynamic-call",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-external-call",
       "properties": {}
     },
     {
@@ -27,27 +32,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-perform-goto-calls",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-perform-thru-calls",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-section-targets",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-procedure-calls",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-unresolved-procedure",
+      "target": "requirements.requirement.cobol-inheritance-uses",
       "properties": {}
     },
     {
@@ -62,22 +47,62 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-external-call",
+      "target": "requirements.requirement.cobol-object-reference-uses",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-dynamic-call",
+      "target": "requirements.requirement.cobol-perform-goto-calls",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-data-reference-uses",
+      "target": "requirements.requirement.cobol-perform-thru-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-procedure-calls",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.cobol-qualified-data-names",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-section-targets",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-unresolved-procedure",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-cics-program-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-cics-service-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-cics-transactions",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-sql-host-variables",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-sql-calls",
       "properties": {}
     }
   ],
