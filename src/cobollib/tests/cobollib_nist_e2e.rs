@@ -4,13 +4,54 @@
 //! SG groups must each give at least one obsolete-level warning. Run via
 //! `cargo test e2e:: -- --ignored --test-threads=4`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use cobolfrontend::ast::{
+    CompilationUnit, DataEntry, ProcedureDivision, Program, QualifiedName, Statement,
+};
 use cobolfrontend::diag::Diagnostic;
 use cobolfrontend::dialect::Dialect;
-use cobolfrontend::parser::parse_source;
-use cobolfrontend::preprocess::{read_file, Search};
+use cobolfrontend::lexer::TokenKind;
+use cobolfrontend::parser::{parse_compilation_unit, parse_source};
+use cobolfrontend::preprocess::{preprocess, read_file, Search};
+use cobolfrontend::source_map::{Mapped, SourceMap};
+
+/// Figurative constants and special registers: data names a statement may use without a
+/// DATA DIVISION entry.
+const FIGURATIVE: &[&str] = &[
+    "ZERO",
+    "ZEROS",
+    "ZEROES",
+    "SPACE",
+    "SPACES",
+    "HIGH-VALUE",
+    "HIGH-VALUES",
+    "LOW-VALUE",
+    "LOW-VALUES",
+    "QUOTE",
+    "QUOTES",
+    "NULL",
+    "NULLS",
+    "ALL",
+    "RETURN-CODE",
+    "SORT-RETURN",
+    "SORT-CORE-SIZE",
+    "SORT-FILE-SIZE",
+    "SORT-MODE-SIZE",
+    "SORT-MESSAGE",
+    "TALLY",
+    "LINAGE-COUNTER",
+    "LINE-COUNTER",
+    "PAGE-COUNTER",
+    "DEBUG-ITEM",
+    "DEBUG-LINE",
+    "DEBUG-NAME",
+    "DEBUG-CONTENTS",
+    "DEBUG-SUB-1",
+    "DEBUG-SUB-2",
+    "DEBUG-SUB-3",
+];
 
 const PREFIXES: [&str; 10] = ["NC", "IC", "IF", "IX", "OB", "RL", "SG", "SM", "SQ", "ST"];
 
@@ -125,8 +166,188 @@ fn normalise(message: &str) -> String {
     out
 }
 
+/// Parses one program keeping its token stream, as `parse_source` does (COPY/REPLACE expansion,
+/// then the parser) but returning the tokens the data-reference check reads.
+fn parse_with_tokens(path: &Path, dir: &Path) -> (SourceMap, Vec<Mapped>, CompilationUnit) {
+    let text = read_file(path).unwrap_or_else(|| panic!("cannot read {}", path.display()));
+    let search = Search {
+        scan_root: dir.to_path_buf(),
+        copy_paths: Vec::new(),
+    };
+    let mut map = SourceMap::default();
+    let (tokens, _) = preprocess(
+        &mut map,
+        &path.display().to_string(),
+        &text,
+        Dialect::Cobol85,
+        &search,
+        &read_file,
+    );
+    let (unit, _) = parse_compilation_unit(&map, Dialect::Cobol85, &tokens);
+    (map, tokens, unit)
+}
+
+/// Every program in `programs`, nested ones included, in source order.
+fn nested_programs<'a>(programs: &'a [Program], out: &mut Vec<&'a Program>) {
+    for program in programs {
+        out.push(program);
+        nested_programs(&program.nested, out);
+    }
+}
+
+/// The tokens of `program`, from its first token to its last (nested programs included).
+fn program_tokens<'a>(tokens: &'a [Mapped], program: &Program) -> &'a [Mapped] {
+    let start = tokens
+        .iter()
+        .position(|t| t.origin == program.span.start)
+        .unwrap_or(0);
+    let end = tokens[start..]
+        .iter()
+        .position(|t| t.origin == program.span.end)
+        .map_or(tokens.len(), |k| start + k + 1);
+    &tokens[start..end]
+}
+
+/// Adds the data names of `entries` and their children (level-88 condition names included).
+fn declare_entries(entries: &[DataEntry], out: &mut HashSet<String>) {
+    for entry in entries {
+        if let Some(name) = &entry.name {
+            out.insert(name.text.to_ascii_uppercase());
+        }
+        declare_entries(&entry.children, out);
+    }
+}
+
+/// The word at `t` when it is a plain word, added as declared in upper case.
+fn declare_word(t: Option<&Mapped>, out: &mut HashSet<String>) {
+    if let Some(t) = t.filter(|t| t.token.kind == TokenKind::Word) {
+        out.insert(t.token.text.to_ascii_uppercase());
+    }
+}
+
+/// Names a program declares in its token stream outside the DATA DIVISION: file names after
+/// SELECT, FD and SD, index names after INDEXED BY, and the mnemonic (after IS) and alphabet
+/// (after ALPHABET) names of SPECIAL-NAMES.
+fn token_declared(tokens: &[Mapped], out: &mut HashSet<String>) {
+    let word = |t: &Mapped| matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved);
+    let mut in_special = false;
+    for (i, t) in tokens.iter().enumerate() {
+        if !word(t) {
+            continue;
+        }
+        match t.token.text.to_ascii_uppercase().as_str() {
+            "SELECT" | "FD" | "SD" => {
+                let next = tokens.get(i + 1);
+                let optional = next.is_some_and(|n| n.token.text.eq_ignore_ascii_case("OPTIONAL"));
+                declare_word(tokens.get(i + 1 + usize::from(optional)), out);
+            }
+            "BY" if i > 0 && tokens[i - 1].token.text.eq_ignore_ascii_case("INDEXED") => {
+                for n in tokens[i + 1..]
+                    .iter()
+                    .take_while(|n| matches!(n.token.kind, TokenKind::Word | TokenKind::Comma))
+                {
+                    declare_word(Some(n), out);
+                }
+            }
+            "SPECIAL-NAMES" => in_special = true,
+            "FILE-CONTROL" | "I-O-CONTROL" | "DATA" | "PROCEDURE" => in_special = false,
+            "IS" if in_special => declare_word(tokens.get(i + 1), out),
+            "ALPHABET" if in_special => declare_word(tokens.get(i + 1), out),
+            _ => {}
+        }
+    }
+}
+
+/// Every data-name reference a statement makes, nested statements included.
+fn statement_refs<'a>(statements: &'a [Statement], out: &mut Vec<&'a QualifiedName>) {
+    for statement in statements {
+        out.extend(statement.refs.iter());
+        statement_refs(&statement.children, out);
+    }
+}
+
+/// Every data-name reference in a procedure division: declaratives, sections, paragraphs.
+fn procedure_refs(division: &ProcedureDivision) -> Vec<&QualifiedName> {
+    let mut refs = Vec::new();
+    let sections = division
+        .declaratives
+        .iter()
+        .chain(&division.sections)
+        .flat_map(|s| &s.paragraphs);
+    for paragraph in division.paragraphs.iter().chain(sections) {
+        for sentence in &paragraph.sentences {
+            statement_refs(&sentence.statements, &mut refs);
+        }
+    }
+    refs
+}
+
 mod e2e {
     use super::*;
+
+    #[test]
+    #[ignore = "e2e tier: reads the vendored NIST CCVS85 corpus; run via cargo test e2e:: -- --ignored"]
+    fn nist_data_references_are_declared() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/nist");
+        let mut checked = 0;
+        let mut bad_programs = 0;
+        let mut total = 0;
+        let mut groups: BTreeMap<String, (usize, String)> = BTreeMap::new();
+        for path in &corpus(&dir) {
+            let (map, tokens, unit) = parse_with_tokens(path, &dir);
+            let mut all = Vec::new();
+            nested_programs(&unit.programs, &mut all);
+            for program in all {
+                checked += 1;
+                let mut declared = HashSet::new();
+                if let Some(data) = &program.data {
+                    for section in &data.sections {
+                        declare_entries(&section.entries, &mut declared);
+                    }
+                }
+                token_declared(program_tokens(&tokens, program), &mut declared);
+                let refs = program
+                    .procedure
+                    .as_ref()
+                    .map(procedure_refs)
+                    .unwrap_or_default();
+                let mut program_bad = false;
+                for reference in refs {
+                    for n in std::iter::once(&reference.name).chain(&reference.qualifiers) {
+                        let key = n.text.to_ascii_uppercase();
+                        if declared.contains(&key) || FIGURATIVE.contains(&key.as_str()) {
+                            continue;
+                        }
+                        total += 1;
+                        program_bad = true;
+                        let at = n.span.start;
+                        let example = format!("{}:{}:{}", map.name(at.file), at.line, at.col);
+                        groups.entry(key).or_insert((0, example)).0 += 1;
+                    }
+                }
+                bad_programs += usize::from(program_bad);
+            }
+        }
+        let undeclared = groups.len();
+        let mut ranked: Vec<(String, (usize, String))> = groups.into_iter().collect();
+        ranked.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then_with(|| a.0.cmp(&b.0)));
+        let mut report = vec![
+            format!(
+                "NIST data-reference summary: {checked} programs checked, {bad_programs} with undeclared refs, {total} undeclared refs"
+            ),
+            format!("undeclared names: {undeclared} groups (count, name, e.g. file:line:col)"),
+        ];
+        report.extend(
+            ranked
+                .iter()
+                .take(150)
+                .map(|(name, (n, example))| format!("  {n:>5}  {name}  e.g. {example}")),
+        );
+        if undeclared > 150 {
+            report.push(format!("... {} more groups not shown", undeclared - 150));
+        }
+        assert!(total == 0, "{}", report.join("\n"));
+    }
 
     #[test]
     #[ignore = "e2e tier: reads the vendored NIST CCVS85 corpus; run via cargo test e2e:: -- --ignored"]
