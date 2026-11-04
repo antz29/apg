@@ -4,8 +4,9 @@
 //! are local to a program.
 
 use crate::ast::{
-    CallTarget, CompilationUnit, DataDivision, DataEntry, FileName, Name, ProcedureDivision,
-    Program, QualifiedName, Section,
+    CallTarget, Class, CompilationUnit, DataDivision, DataEntry, FileName, Interface, Method,
+    MethodPrototype, Name, ProcedureDivision, Program, QualifiedName, Receiver, RepositoryEntry,
+    Section,
 };
 use crate::diag::Diagnostic;
 use crate::source_map::SourceMap;
@@ -377,4 +378,245 @@ fn holds(
         .children
         .iter()
         .any(|c| holds(c, name, &below, global_only, inside))
+}
+
+/// A CLASS-ID or INTERFACE-ID of the scan, by reference. scan.rs matches it to its Struct by
+/// address (`std::ptr::eq`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type<'a> {
+    Class(&'a Class),
+    Interface(&'a Interface),
+}
+
+/// What a class or interface name resolves to. `External` is a name outside the scan (its
+/// target is an unresolved use of category external); `Ambiguous` is several scanned types
+/// sharing the name, which is never guessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeRes<'a> {
+    Scanned(Type<'a>),
+    External,
+    Ambiguous,
+}
+
+/// What an `INVOKE` resolves to: a METHOD-ID (`Method`), an interface prototype, a class outside
+/// the scan (`External`), or nothing the scan can name (`Unknown`, so no target).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodRes<'a> {
+    Method(&'a Method),
+    Prototype(&'a MethodPrototype),
+    External,
+    Unknown,
+}
+
+/// Where an `INVOKE` is written: its enclosing class, whether the enclosing method sits in the
+/// FACTORY section (`factory`), the data divisions searched for a receiver item in order
+/// (innermost first), and the REPOSITORY entries in scope.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Site<'a> {
+    pub class: Option<&'a Class>,
+    pub factory: bool,
+    pub data: Vec<&'a DataDivision>,
+    pub repository: Vec<&'a RepositoryEntry>,
+}
+
+/// Every CLASS-ID and INTERFACE-ID of the scan, nested programs included, by COBOL name.
+#[derive(Debug)]
+pub struct ClassIndex<'a> {
+    types: Vec<(&'a str, Type<'a>)>,
+}
+
+impl<'a> ClassIndex<'a> {
+    /// Indexes the classes and interfaces of `units`.
+    pub fn new(units: impl IntoIterator<Item = &'a CompilationUnit>) -> Self {
+        let mut types = Vec::new();
+        for unit in units {
+            for class in &unit.classes {
+                types.push((class.name.text.as_str(), Type::Class(class)));
+            }
+            for interface in &unit.interfaces {
+                types.push((interface.name.text.as_str(), Type::Interface(interface)));
+            }
+            for program in &unit.programs {
+                add_program(&mut types, program);
+            }
+        }
+        Self { types }
+    }
+
+    /// Resolves a class or interface name, case-insensitively as COBOL words are.
+    pub fn resolve_type(&self, name: &Name) -> TypeRes<'a> {
+        let hits: Vec<Type<'a>> = self
+            .types
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case(&name.text))
+            .map(|(_, t)| *t)
+            .collect();
+        match hits.as_slice() {
+            [] => TypeRes::External,
+            [one] => TypeRes::Scanned(*one),
+            _ => TypeRes::Ambiguous,
+        }
+    }
+
+    /// Resolves `INVOKE receiver method`. `SELF` is the enclosing class (instance or factory by
+    /// `site.factory`); `SUPER` its first parent; an object data item its `OBJECT REFERENCE`
+    /// class (instance methods); a class name its factory methods. Parents are walked through
+    /// `INHERITS`. Method names match case-insensitively; a dynamic method name is `Unknown`.
+    pub fn resolve_invoke(
+        &self,
+        site: &Site<'a>,
+        receiver: &Receiver,
+        method: &CallTarget,
+    ) -> MethodRes<'a> {
+        let CallTarget::Literal(name) = method else {
+            return MethodRes::Unknown;
+        };
+        let budget = self.types.len() + 1;
+        match receiver {
+            Receiver::Self_ => site.class.map_or(MethodRes::Unknown, |c| {
+                self.find(Type::Class(c), &name.text, site.factory, budget)
+            }),
+            Receiver::Super => site
+                .class
+                .and_then(|c| c.inherits.first())
+                .map_or(MethodRes::Unknown, |p| {
+                    self.via(self.resolve_type(p), &name.text, site.factory, budget)
+                }),
+            Receiver::Null => MethodRes::Unknown,
+            Receiver::ClassName(class) => self.class_receiver(site, class, &name.text, budget),
+            Receiver::Name(qn) => match item_class(&site.data, qn) {
+                Some(Some(class)) => self.via(self.resolve_type(class), &name.text, false, budget),
+                Some(None) => MethodRes::Unknown,
+                None if qn.qualifiers.is_empty() => {
+                    self.class_receiver(site, &qn.name, &name.text, budget)
+                }
+                None => MethodRes::Unknown,
+            },
+        }
+    }
+
+    /// `INVOKE class "m"`: a scanned class's factory method; a REPOSITORY class outside the scan
+    /// is `External`; any other name is `Unknown`.
+    fn class_receiver(
+        &self,
+        site: &Site<'a>,
+        class: &Name,
+        method: &str,
+        budget: usize,
+    ) -> MethodRes<'a> {
+        match self.resolve_type(class) {
+            TypeRes::Scanned(Type::Class(c)) => self.find(Type::Class(c), method, true, budget),
+            TypeRes::Scanned(Type::Interface(_)) | TypeRes::Ambiguous => MethodRes::Unknown,
+            TypeRes::External
+                if site
+                    .repository
+                    .iter()
+                    .any(|r| r.name.text.eq_ignore_ascii_case(&class.text)) =>
+            {
+                MethodRes::External
+            }
+            TypeRes::External => MethodRes::Unknown,
+        }
+    }
+
+    fn via(&self, res: TypeRes<'a>, method: &str, factory: bool, budget: usize) -> MethodRes<'a> {
+        match res {
+            TypeRes::Scanned(t) => self.find(t, method, factory, budget),
+            TypeRes::External => MethodRes::External,
+            TypeRes::Ambiguous => MethodRes::Unknown,
+        }
+    }
+
+    /// Finds `method` in `ty` or, failing that, in its parents; `budget` bounds an INHERITS cycle.
+    fn find(&self, ty: Type<'a>, method: &str, factory: bool, budget: usize) -> MethodRes<'a> {
+        if budget == 0 {
+            return MethodRes::Unknown;
+        }
+        let budget = budget - 1;
+        let (own, parents) = match ty {
+            Type::Class(c) => {
+                let own = c
+                    .factory
+                    .iter()
+                    .chain(c.object.iter())
+                    .flat_map(|s| &s.methods)
+                    .find(|m| m.factory == factory && m.name.text.eq_ignore_ascii_case(method))
+                    .map(MethodRes::Method);
+                (own, &c.inherits)
+            }
+            Type::Interface(i) => {
+                let own = i
+                    .prototypes
+                    .iter()
+                    .find(|p| p.name.text.eq_ignore_ascii_case(method))
+                    .map(MethodRes::Prototype);
+                (own, &i.inherits)
+            }
+        };
+        own.or_else(|| {
+            parents
+                .iter()
+                .map(|p| self.via(self.resolve_type(p), method, factory, budget))
+                .find(|r| *r != MethodRes::Unknown)
+        })
+        .unwrap_or(MethodRes::Unknown)
+    }
+}
+
+fn add_program<'a>(types: &mut Vec<(&'a str, Type<'a>)>, program: &'a Program) {
+    for class in &program.classes {
+        types.push((class.name.text.as_str(), Type::Class(class)));
+    }
+    for nested in &program.nested {
+        add_program(types, nested);
+    }
+}
+
+/// The class an object data item names, for a receiver: `None` when no single item holds the
+/// name, `Some(None)` for an untyped `OBJECT REFERENCE`, `Some(Some(class))` for a typed one.
+fn item_class<'d>(data: &[&'d DataDivision], name: &QualifiedName) -> Option<Option<&'d Name>> {
+    let mut hits: Vec<&'d DataEntry> = Vec::new();
+    for &div in data {
+        for section in &div.sections {
+            items(&section.entries, name, &[], &mut hits);
+        }
+    }
+    match hits.as_slice() {
+        [one] => {
+            let entry: &'d DataEntry = one;
+            Some(
+                entry
+                    .object_reference
+                    .as_ref()
+                    .and_then(|o| o.class.as_ref()),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Collects the entries named `name` (qualifiers among `enclosing`), recursing into children.
+fn items<'d>(
+    entries: &'d [DataEntry],
+    name: &QualifiedName,
+    enclosing: &[&str],
+    out: &mut Vec<&'d DataEntry>,
+) {
+    for entry in entries {
+        let own = entry
+            .name
+            .as_ref()
+            .filter(|_| entry.level != 88)
+            .map(|n| n.text.as_str());
+        if own.is_some_and(|n| n.eq_ignore_ascii_case(&name.name.text))
+            && name
+                .qualifiers
+                .iter()
+                .all(|q| enclosing.iter().any(|e| e.eq_ignore_ascii_case(&q.text)))
+        {
+            out.push(entry);
+        }
+        let below: Vec<&str> = enclosing.iter().copied().chain(own).collect();
+        items(&entry.children, name, &below, out);
+    }
 }
