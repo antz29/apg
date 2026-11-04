@@ -855,7 +855,8 @@ impl Emitter {
     /// Resolves every queued `CALL` against the programs of the whole tree, so a call into
     /// another file holds. A resolved literal is a `uses` edge to its program's Struct; one
     /// naming no program or several (ambiguous) is an unresolved call, a data-name target is
-    /// `func-value`. Returns the diagnostics (case-insensitive matches, ambiguity).
+    /// `func-value`. Each (source, target) `uses` and each (source, name) unresolved call is
+    /// emitted once. Returns the diagnostics (case-insensitive matches, ambiguity).
     pub fn finish(&mut self) -> Vec<Diagnostic> {
         let scopes: Vec<Scope> = self
             .programs
@@ -868,6 +869,8 @@ impl Emitter {
             })
             .collect();
         let mut diags = Vec::new();
+        let mut linked = BTreeSet::new();
+        let mut reported = BTreeSet::new();
         for call in std::mem::take(&mut self.calls) {
             let map = &self.maps[call.file];
             let target = match &call.target {
@@ -882,11 +885,13 @@ impl Emitter {
                 match resolution {
                     CallResolution::Program(i) => {
                         let to = self.programs[i].1.clone();
-                        self.recs.push(Rec::Uses {
-                            from: call.from,
-                            to,
-                            properties: BTreeMap::new(),
-                        });
+                        if linked.insert((call.from.clone(), to.clone())) {
+                            self.recs.push(Rec::Uses {
+                                from: call.from,
+                                to,
+                                properties: BTreeMap::new(),
+                            });
+                        }
                         continue;
                     }
                     CallResolution::Ambiguous => {
@@ -904,10 +909,12 @@ impl Emitter {
                     category: category.to_string(),
                 });
             }
-            self.recs.push(Rec::UnresolvedCall {
-                from: call.from,
-                to: target.text.clone(),
-            });
+            if reported.insert((call.from.clone(), target.text.clone())) {
+                self.recs.push(Rec::UnresolvedCall {
+                    from: call.from,
+                    to: target.text.clone(),
+                });
+            }
         }
         self.resolve_types();
         self.note_errors(&diags);
