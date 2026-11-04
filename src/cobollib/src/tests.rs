@@ -469,13 +469,21 @@ mod unit {
     }
 
     #[test]
-    fn indicators_accepted_and_slash_is_not() {
-        let ok = [at(7, "*"), at(7, "D"), at(7, "-")].join("\n");
-        let (_, diags) = crate::format::check("p.cob", &ok, Dialect::Cobol2002);
+    fn indicators_accepted_including_slash() {
+        let ok = [at(7, "*"), at(7, "/ PAGE EJECT"), at(7, "D"), at(7, "-")].join("\n");
+        let (layout, diags) = crate::format::check("p.cob", &ok, Dialect::Cobol2002);
+        assert_eq!(layout, Layout::Source(SourceFormat::Fixed));
         assert!(diags.is_empty(), "{diags:?}");
-        let slash = at(7, "/ comment");
-        let (_, diags) = crate::format::check("p.cob", &slash, Dialect::Cobol2002);
+        let dollar = at(7, "$ comment");
+        let (_, diags) = crate::format::check("p.cob", &dollar, Dialect::Cobol2002);
         assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn slash_line_draws_no_area_a_diagnostic() {
+        let text = [at(8, "PROCEDURE DIVISION."), at(7, "/ PAGE EJECT")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]

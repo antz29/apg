@@ -94,20 +94,20 @@ fn free_reason(line: &str) -> Option<&'static str> {
         return Some("text past column 80");
     }
     let indicator = chars.get(6).copied().unwrap_or(' ');
-    (!chars.iter().all(|c| c.is_whitespace()) && !matches!(indicator, ' ' | '*' | '-' | 'D'))
+    (!chars.iter().all(|c| c.is_whitespace()) && !matches!(indicator, ' ' | '*' | '/' | '-' | 'D'))
         .then_some("column 7 is not an indicator")
 }
 
 /// Area A checks (§3). A line's first word is checked only where a sentence begins (after a
 /// period, or at the top of the file); a separator period is checked at any line start.
-/// Comment, directive and continuation lines are not checked.
+/// Comment (`*` or `/` indicator), directive and continuation lines are not checked.
 fn area_a(file: &str, lines: &[&str]) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut sentence_start = true;
     for (i, line) in lines.iter().enumerate() {
         let chars: Vec<char> = line.chars().collect();
         let indicator = chars.get(6).copied().unwrap_or(' ');
-        if indicator == '*' || line.trim_start().starts_with(">>") {
+        if matches!(indicator, '*' | '/') || line.trim_start().starts_with(">>") {
             continue;
         }
         let body: String = chars.iter().skip(7).take(TEXT_END - 7).collect();
