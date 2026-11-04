@@ -4719,4 +4719,135 @@ mod int {
             "{recs:?}"
         );
     }
+
+    /// Class `Foo` whose `section` (FACTORY or OBJECT) holds WORKING-STORAGE `body` lines; the
+    /// body starts at line 6.
+    fn property_class(section: &str, body: &[&str]) -> String {
+        let mut lines = vec![
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, &format!("{section}.")),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+        ];
+        lines.extend(body.iter().map(|l| at(8, l)));
+        lines.push(at(8, &format!("END {section}.")));
+        lines.push(at(8, "END CLASS Foo."));
+        lines.join("\n")
+    }
+
+    /// The Functions named `name` under class `Foo`.
+    fn class_functions<'a>(
+        recs: &'a [serde_json::Value],
+        name: &str,
+    ) -> Vec<&'a serde_json::Value> {
+        recs.iter()
+            .filter(|r| r["type"] == "function" && r["name"] == name && r["parent"] == "Foo")
+            .collect()
+    }
+
+    #[test]
+    fn property_accessors_are_located_at_the_declaration_with_the_as_name() {
+        let text = property_class("OBJECT", &["01 Q PROPERTY AS \"qname\" PIC X."]);
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prop.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let foo = id_of(&recs, "Foo");
+        for name in ["GET-qname", "SET-qname"] {
+            let f = class_functions(&recs, name);
+            assert_eq!(f.len(), 1, "{name}: {recs:?}");
+            assert_eq!(f[0]["params"], serde_json::json!(["instance"]));
+            assert_eq!(f[0]["start_line"], 6);
+            assert_eq!(f[0]["end_line"], 6);
+            assert!(
+                recs.iter()
+                    .any(|r| r["type"] == "contains" && r["from"] == foo && r["to"] == f[0]["id"]),
+                "{name} not contained by Foo: {recs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn with_no_set_suppresses_the_set_accessor() {
+        let text = property_class("OBJECT", &["01 P PROPERTY AS \"pname\" WITH NO SET PIC X."]);
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prop.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(class_functions(&recs, "GET-pname").len(), 1, "{recs:?}");
+        assert!(class_functions(&recs, "SET-pname").is_empty(), "{recs:?}");
+        assert!(!recs.iter().any(|r| r["type"] == "function"
+            && r["name"].as_str().is_some_and(|n| n.starts_with("SET-"))));
+    }
+
+    #[test]
+    fn property_without_as_is_named_by_its_data_name_and_filler_is_skipped() {
+        let text = property_class(
+            "OBJECT",
+            &["01 N PROPERTY PIC X.", "01 FILLER PROPERTY PIC X."],
+        );
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prop.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(class_functions(&recs, "GET-N").len(), 1, "{recs:?}");
+        assert_eq!(class_functions(&recs, "SET-N").len(), 1, "{recs:?}");
+        assert!(!recs
+            .iter()
+            .any(|r| r["type"] == "function"
+                && r["name"].as_str().is_some_and(|n| n.contains("FILLER"))));
+    }
+
+    #[test]
+    fn factory_property_is_keyed_as_an_instance_accessor() {
+        let text = property_class("FACTORY", &["01 F PROPERTY AS \"fname\" PIC X."]);
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prop.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        for name in ["GET-fname", "SET-fname"] {
+            let f = class_functions(&recs, name);
+            assert_eq!(f.len(), 1, "{name}: {recs:?}");
+            assert_eq!(f[0]["params"], serde_json::json!(["instance"]));
+            assert_eq!(f[0]["start_line"], 6);
+        }
+    }
+
+    #[test]
+    fn second_property_with_the_same_accessor_is_dropped_keeping_the_first() {
+        let text = property_class(
+            "OBJECT",
+            &[
+                "01 A PROPERTY AS \"x\" PIC X.",
+                "01 B PROPERTY AS \"x\" PIC X.",
+            ],
+        );
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prop.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let get = class_functions(&recs, "GET-x");
+        assert_eq!(get.len(), 1, "{recs:?}");
+        assert_eq!(get[0]["start_line"], 6);
+        assert_eq!(class_functions(&recs, "SET-x").len(), 1, "{recs:?}");
+    }
+
+    #[test]
+    fn a_same_named_method_keeps_the_slot_and_the_property_get_is_skipped() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "OBJECT."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 P PROPERTY PIC X."),
+            at(8, "METHOD-ID. GET-P."),
+            at(8, "END METHOD GET-P."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prop.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let get = class_functions(&recs, "GET-P");
+        assert_eq!(get.len(), 1, "{recs:?}");
+        assert_eq!(
+            get[0]["start_line"], 7,
+            "the method, not the accessor, is kept"
+        );
+        let set = class_functions(&recs, "SET-P");
+        assert_eq!(set.len(), 1, "{recs:?}");
+        assert_eq!(set[0]["start_line"], 6);
+    }
 }
