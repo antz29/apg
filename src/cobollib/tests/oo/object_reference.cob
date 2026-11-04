@@ -12,6 +12,7 @@
            05 held OBJECT REFERENCE Account.
        77 cur-acct OBJECT REFERENCE Account.
        PROCEDURE DIVISION.
+       MAIN-PARA.
            SET acct TO NULL.
            MOVE acct TO any-obj.
            STOP RUN.
