@@ -6342,4 +6342,82 @@ mod int {
         );
         assert!(!recs.iter().any(|r| r["type"] == "unresolved"), "{recs:?}");
     }
+
+    #[test]
+    fn repeated_literal_call_to_a_scanned_program_is_one_uses_edge() {
+        let a = caller_at(&["CALL 'SUB-B'.", "CALL 'SUB-B'."]);
+        let b = prog("SUB-B");
+        let recs = jsonl(&scan_tree(&[
+            ("/root/a.cob", a.as_str()),
+            ("/root/b.cob", b.as_str()),
+        ]));
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [
+                serde_json::json!({"type":"uses","from":id_of(&recs,"MAIN-PARA"),"to":id_of(&recs,"SUB-B")})
+            ],
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_external_literal_and_variable_calls_each_report_one_call_and_one_target() {
+        let text = caller_at(&[
+            "CALL 'NOPE'.",
+            "CALL 'NOPE'.",
+            "CALL P-NAME.",
+            "CALL P-NAME.",
+        ]);
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        for (name, category) in [("NOPE", "external"), ("P-NAME", "func-value")] {
+            let targets = recs
+                .iter()
+                .filter(|r| r["type"] == "unresolved" && r["fqn"] == name)
+                .count();
+            assert_eq!(targets, 1, "{name}: {recs:?}");
+            assert!(
+                recs.contains(
+                    &serde_json::json!({"type":"unresolved","fqn":name,"category":category})
+                ),
+                "{name}: {recs:?}"
+            );
+            let calls = edges(&recs, &["unresolved_call"])
+                .into_iter()
+                .filter(|r| r["to"] == name && r["from"] == main.as_str())
+                .count();
+            assert_eq!(calls, 1, "{name}: {recs:?}");
+        }
+    }
+
+    #[test]
+    fn same_call_from_two_paragraphs_is_one_uses_edge_per_paragraph() {
+        let a = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. OUTER."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "CALL 'SUB-B'."),
+            at(8, "OTHER-PARA."),
+            at(12, "CALL 'SUB-B'."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let b = prog("SUB-B");
+        let recs = jsonl(&scan_tree(&[
+            ("/root/a.cob", a.as_str()),
+            ("/root/b.cob", b.as_str()),
+        ]));
+        let sub = id_of(&recs, "SUB-B");
+        for para in ["MAIN-PARA", "OTHER-PARA"] {
+            let from = id_of(&recs, para);
+            let n = edges(&recs, &["uses"])
+                .into_iter()
+                .filter(|r| r["from"] == from.as_str() && r["to"] == sub.as_str())
+                .count();
+            assert_eq!(n, 1, "{para}: {recs:?}");
+        }
+        assert_eq!(edges(&recs, &["uses"]).len(), 2, "{recs:?}");
+    }
 }
