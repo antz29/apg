@@ -2939,6 +2939,117 @@ mod unit {
             assert_eq!(stmts.len(), 1);
             assert_eq!(qnames(&stmts[0].refs), ["X"]);
         }
+
+        #[test]
+        fn exec_cics_link_and_xctl_with_a_literal_program_are_literal_calls() {
+            let text = "    EXEC CICS LINK PROGRAM('SUB') END-EXEC.\n    EXEC CICS XCTL PROGRAM('XSUB') END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(
+                &stmts[0].transfer,
+                Some(Transfer::Call(CallTarget::Literal(n))) if n.text.contains("SUB")
+            ));
+            assert!(matches!(
+                &stmts[1].transfer,
+                Some(Transfer::Call(CallTarget::Literal(n))) if n.text.contains("XSUB")
+            ));
+        }
+
+        #[test]
+        fn exec_cics_link_and_xctl_with_a_variable_program_are_identifier_calls() {
+            let text = "    EXEC CICS LINK PROGRAM(WS-PROG) END-EXEC.\n    EXEC CICS XCTL PROGRAM(WS-NEXT) END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(
+                &stmts[0].transfer,
+                Some(Transfer::Call(CallTarget::Identifier(n))) if n.name.text == "WS-PROG"
+            ));
+            assert!(matches!(
+                &stmts[1].transfer,
+                Some(Transfer::Call(CallTarget::Identifier(n))) if n.name.text == "WS-NEXT"
+            ));
+        }
+
+        #[test]
+        fn exec_cics_other_verbs_give_no_program_transfer() {
+            let text = "    EXEC CICS START TRANSID('T') PROGRAM('SUB') END-EXEC.\n    EXEC CICS RETURN PROGRAM(WS-PROG) END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(stmts.iter().all(|s| s.transfer.is_none()));
+        }
+
+        #[test]
+        fn exec_cics_link_inside_if_else_is_its_own_call_under_ibm() {
+            let text =
+                "    IF X = 1 EXEC CICS LINK PROGRAM('SUB') END-EXEC ELSE MOVE 2 TO Y END-IF.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert!(stmts[0].transfer.is_none());
+            assert!(qnames(&stmts[0].refs).contains(&"X"));
+            let branches = &stmts[0].children;
+            assert_eq!(branches.len(), 2, "{branches:?}");
+            assert!(matches!(
+                &branches[0].transfer,
+                Some(Transfer::Call(CallTarget::Literal(n))) if n.text.contains("SUB")
+            ));
+            assert!(branches[1].transfer.is_none());
+            assert_eq!(qnames(&branches[1].refs), ["Y"]);
+        }
+
+        #[test]
+        fn exec_cics_link_inside_if_else_is_skipped_under_cobol85_and_the_else_survives() {
+            let text =
+                "    IF X = 1 EXEC CICS LINK PROGRAM('SUB') END-EXEC ELSE MOVE 2 TO Y END-IF.\n";
+            let (unit, diags) = parse_exec(Dialect::Cobol85, text);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(count(&diags, NOT_IBM), 1, "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            let branches = &stmts[0].children;
+            assert!(
+                branches.iter().all(|b| b.transfer.is_none()),
+                "{branches:?}"
+            );
+            assert!(
+                branches.iter().any(|b| qnames(&b.refs) == ["Y"]),
+                "{branches:?}"
+            );
+        }
+
+        #[test]
+        fn exec_cics_link_after_a_move_in_one_sentence_is_its_own_call_under_ibm() {
+            let text = "    MOVE 1 TO X EXEC CICS LINK PROGRAM('SUB') END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+            assert!(stmts[0].transfer.is_none());
+            assert!(matches!(
+                &stmts[1].transfer,
+                Some(Transfer::Call(CallTarget::Literal(n))) if n.text.contains("SUB")
+            ));
+        }
+
+        #[test]
+        fn exec_cics_link_after_a_move_is_skipped_under_cobol85_and_the_move_survives() {
+            let text = "    MOVE 1 TO X EXEC CICS LINK PROGRAM('SUB') END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Cobol85, text);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(count(&diags, NOT_IBM), 1, "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+            assert!(stmts[0].transfer.is_none());
+        }
     }
 }
 
