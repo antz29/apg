@@ -3359,6 +3359,61 @@ mod int {
             .any(|d| format!("{d:?}").contains("resume NOPE")));
     }
 
+    /// Two paragraphs named SAME (one per section): unqualified, a PERFORM and a GO TO of it are
+    /// ambiguous, so each is an unknown unresolved call with a diagnostic naming its kind.
+    #[test]
+    fn ambiguous_unqualified_perform_and_goto_are_unknown_targets_with_kind_diagnostics() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "PERFORM SAME."),
+            at(12, "GO TO SAME."),
+            at(8, "S-ONE SECTION."),
+            at(8, "SAME."),
+            at(12, "DISPLAY X."),
+            at(8, "S-TWO SECTION."),
+            at(8, "SAME."),
+            at(12, "DISPLAY X."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        let main = id_of(&recs, "MAIN-PARA");
+        assert!(recs
+            .contains(&serde_json::json!({"type":"unresolved","fqn":"SAME","category":"unknown"})));
+        assert!(
+            recs.contains(&serde_json::json!({"type":"unresolved_call","from":main,"to":"SAME"}))
+        );
+        assert!(!recs
+            .iter()
+            .any(|r| r["type"] == "calls" || r["type"] == "uses"));
+        for kind in [
+            "perform SAME names more than one procedure",
+            "goto SAME names more than one procedure",
+        ] {
+            assert!(
+                diags.iter().any(|d| format!("{d:?}").contains(kind)),
+                "{kind} missing from {diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unresolved_goto_is_an_unknown_target_with_a_goto_diagnostic() {
+        let text = control().replace("GO TO P-TWO.", "GO TO NOPE.");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        let main = id_of(&recs, "MAIN-PARA");
+        assert!(recs
+            .contains(&serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"unknown"})));
+        assert!(
+            recs.contains(&serde_json::json!({"type":"unresolved_call","from":main,"to":"NOPE"}))
+        );
+        assert!(diags
+            .iter()
+            .any(|d| format!("{d:?}").contains("goto NOPE names no procedure")));
+    }
+
     /// A one-paragraph-performing program `name`, its MAIN-PARA calling P-A.
     fn perform_prog(name: &str) -> String {
         [
