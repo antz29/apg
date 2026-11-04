@@ -1064,13 +1064,6 @@ mod unit {
             .join("\n")
     }
 
-    fn search() -> crate::preprocess::Search {
-        crate::preprocess::Search {
-            scan_root: "/root".into(),
-            copy_paths: Vec::new(),
-        }
-    }
-
     fn texts(tokens: &[(String, String, usize, usize)]) -> Vec<&str> {
         tokens.iter().map(|t| t.0.as_str()).collect()
     }
@@ -1555,5 +1548,237 @@ mod unit {
             let data = unit.programs[0].data.as_ref().unwrap();
             assert_eq!(names(&data.sections[0].entries), ["W"]);
         }
+    }
+}
+
+fn search() -> crate::preprocess::Search {
+    crate::preprocess::Search {
+        scan_root: "/root".into(),
+        copy_paths: Vec::new(),
+    }
+}
+
+/// Expands `text` (named `name`) against the in-memory `files`, then parses it; keeps the map
+/// so origins can be named. The same stages as `parse_source`, without discarding the map.
+fn expand(
+    name: &str,
+    text: &str,
+    files: &[(&str, &str)],
+) -> (
+    crate::ast::CompilationUnit,
+    Vec<crate::diag::Diagnostic>,
+    SourceMap,
+) {
+    let store: std::collections::HashMap<std::path::PathBuf, String> = files
+        .iter()
+        .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
+        .collect();
+    let lookup = |path: &std::path::Path| store.get(path).cloned();
+    let mut map = SourceMap::default();
+    let (tokens, mut diags) =
+        crate::preprocess::preprocess(&mut map, name, text, Dialect::Cobol85, &search(), &lookup);
+    let (unit, more) = crate::parser::parse_compilation_unit(&map, Dialect::Cobol85, &tokens);
+    diags.extend(more);
+    (unit, diags, map)
+}
+
+mod int {
+    use super::*;
+
+    /// A fixed-format IDENTIFICATION, DATA and PROCEDURE header around `data` and `proc`.
+    fn program(data: &[String], proc: &[String]) -> String {
+        let mut lines = vec![
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+        ];
+        lines.extend(data.iter().cloned());
+        lines.push(at(8, "PROCEDURE DIVISION."));
+        lines.extend(proc.iter().cloned());
+        lines.join("\n")
+    }
+
+    #[test]
+    fn copybook_declaration_maps_back_to_its_copybook_line() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC X(4).")].join("\n");
+        let main = program(
+            &[at(12, "COPY REC.")],
+            &[at(8, "MAIN-PARA."), at(12, "DISPLAY F-CB.")],
+        );
+        let (unit, diags, map) = expand("/root/prog.cob", &main, &[("/root/REC.cpy", &copy)]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let rec = &unit.programs[0].data.as_ref().unwrap().sections[0].entries[0];
+        let name = rec.name.as_ref().unwrap();
+        assert_eq!(
+            (
+                name.text.as_str(),
+                map.name(name.span.start.file),
+                name.span.start.line,
+                name.span.start.col
+            ),
+            ("REC-CB", "/root/REC.cpy", 1, 11)
+        );
+        let child = rec.children[0].name.as_ref().unwrap();
+        assert_eq!(
+            (
+                map.name(child.span.start.file),
+                child.span.start.line,
+                child.span.start.col
+            ),
+            ("/root/REC.cpy", 2, 15)
+        );
+    }
+
+    #[test]
+    fn replace_in_the_main_file_applies_across_copy() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC TAG.")].join("\n");
+        let main = program(
+            &[at(12, "REPLACE ==TAG== BY ==9==."), at(12, "COPY REC.")],
+            &[at(8, "MAIN-PARA."), at(12, "STOP RUN.")],
+        );
+        let (unit, diags, _) = expand("/root/prog.cob", &main, &[("/root/REC.cpy", &copy)]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let rec = &unit.programs[0].data.as_ref().unwrap().sections[0].entries[0];
+        assert_eq!(
+            rec.children[0].pic.as_ref().map(|p| p.text.as_str()),
+            Some("9")
+        );
+    }
+
+    #[test]
+    fn a_syntax_error_costs_only_its_sentence() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "DISPLAY 'A'."),
+            at(8, "BAD-PARA."),
+            at(12, "FROB X."),
+            at(8, "LATER-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (unit, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].line, 7, "{diags:?}");
+        let paragraphs = &unit.programs[0].procedure.as_ref().unwrap().paragraphs;
+        let names: Vec<&str> = paragraphs.iter().map(|p| p.name.text.as_str()).collect();
+        assert_eq!(names, ["MAIN-PARA", "BAD-PARA", "LATER-PARA"]);
+        let counts: Vec<usize> = paragraphs
+            .iter()
+            .map(|p| p.sentences.iter().map(|s| s.statements.len()).sum())
+            .collect();
+        assert_eq!(counts, [1, 0, 1]);
+    }
+
+    #[test]
+    fn header_error_skips_one_program_and_keeps_the_next() {
+        let (unit, diags) = parse_file(
+            "IDENTIFICATION DIVISION.\nAUTHOR. X.\nPROCEDURE DIVISION.\nSTOP RUN.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. TWO.\nPROCEDURE DIVISION.\nMAIN.\nSTOP RUN.\n",
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(unit.programs.len(), 1);
+        assert_eq!(unit.programs[0].name.text, "TWO");
+    }
+
+    #[test]
+    fn text_before_the_first_program_is_one_diagnostic() {
+        let (unit, diags) = parse_file(
+            "JUNK X.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nPROCEDURE DIVISION.\nMAIN.\nSTOP RUN.\n",
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(unit.programs.len(), 1);
+    }
+
+    #[test]
+    fn area_a_departure_is_located_in_the_original_file() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(8, "DISPLAY X."),
+        ]
+        .join("\n");
+        let (_, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert!(
+            diags.iter().any(|d| {
+                (d.file.as_str(), d.line, d.col) == ("prog.cob", 5, 8)
+                    && d.message.contains("area A")
+            }),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn word_over_the_limit_is_located_and_lifted_by_the_later_dialect() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, &format!("DISPLAY {}.", "A".repeat(31))),
+        ]
+        .join("\n");
+        let (_, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert!(
+            diags
+                .iter()
+                .any(|d| (d.file.as_str(), d.line, d.col) == ("prog.cob", 5, 20)),
+            "{diags:?}"
+        );
+        let (_, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol2002, &search(), &|_| {
+                None
+            });
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn oo_word_is_an_ordinary_data_name_under_cobol85_but_class_is_reserved() {
+        let (unit, diags) = parse_file(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 OBJECT PIC X.\n01 INVOKE PIC X.\nPROCEDURE DIVISION.\nMAIN.\nSTOP RUN.\n",
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        let entries = &unit.programs[0].data.as_ref().unwrap().sections[0].entries;
+        assert_eq!(names(entries), ["OBJECT", "INVOKE"]);
+        let (unit, diags) = parse_file(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 CLASS PIC X.\nPROCEDURE DIVISION.\nMAIN.\nSTOP RUN.\n",
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let entries = &unit.programs[0].data.as_ref().unwrap().sections[0].entries;
+        assert!(!names(entries).contains(&"CLASS"), "{entries:?}");
+    }
+
+    #[test]
+    fn slash_comment_and_zzz_picture_in_a_real_program() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 REC."),
+            at(12, "05 E PIC ZZZ.ZZ."),
+            at(7, "/ PAGE EJECT"),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let (unit, diags) =
+            crate::parser::parse_source("prog.cob", &text, Dialect::Cobol85, &search(), &|_| None);
+        assert!(diags.is_empty(), "{diags:?}");
+        let rec = &unit.programs[0].data.as_ref().unwrap().sections[0].entries[0];
+        assert_eq!(
+            rec.children[0].pic.as_ref().map(|p| p.text.as_str()),
+            Some("ZZZ.ZZ")
+        );
+        let paragraphs = &unit.programs[0].procedure.as_ref().unwrap().paragraphs;
+        assert_eq!(paragraphs[0].name.text, "MAIN-PARA");
     }
 }
