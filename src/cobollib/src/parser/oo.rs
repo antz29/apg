@@ -387,7 +387,19 @@ pub fn parse_interface(
     if !dialect.oo_enabled() || !tokens.first().is_some_and(|t| is_word(t, "INTERFACE-ID")) {
         return None;
     }
-    let h = header(tokens);
+    // `USING` params follow the name and INHERITS clauses; split them off the shared header.
+    let full = header(tokens);
+    let using_at = (1..full.period)
+        .find(|&k| word_at(tokens, k, "USING"))
+        .unwrap_or(full.period);
+    let h = Header {
+        period: full.period,
+        ..header(&tokens[..using_at])
+    };
+    let using: Vec<Name> = (using_at + 1..full.period)
+        .filter(|&k| is_name(&tokens[k]))
+        .map(|k| name_at(tokens, k))
+        .collect();
     let mut diags = Vec::new();
     let (body_end, used, closed) = unit_end(tokens, h.period + 1, "INTERFACE", class_boundary);
     if !closed {
@@ -436,7 +448,7 @@ pub fn parse_interface(
             span: span(tokens, 0, used - 1),
             identification: span(tokens, 0, h.period),
             inherits: h.inherits,
-            using: Vec::new(),
+            using,
             prototypes,
         }),
         used,
