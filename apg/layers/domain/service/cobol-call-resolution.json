@@ -107,7 +107,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-resume-raise-facts",
+      "target": "requirements.requirement.cobol-raise-no-facts",
       "properties": {}
     }
   ],
