@@ -3007,4 +3007,114 @@ mod int {
             .expect("REC-CB struct unfiltered");
         assert_eq!(rec, same);
     }
+
+    /// The id of the first record named `name`.
+    fn id_of(recs: &[serde_json::Value], name: &str) -> String {
+        recs.iter()
+            .find(|r| r["name"] == name)
+            .and_then(|r| r["id"].as_str())
+            .expect("named record")
+            .to_string()
+    }
+
+    /// Records of the given `types`, sorted so the comparison ignores emission order.
+    fn edges(recs: &[serde_json::Value], types: &[&str]) -> Vec<serde_json::Value> {
+        let mut out: Vec<serde_json::Value> = recs
+            .iter()
+            .filter(|r| types.contains(&r["type"].as_str().unwrap_or("")))
+            .cloned()
+            .collect();
+        out.sort_by_key(|v| v.to_string());
+        out
+    }
+
+    /// MAIN-PARA performs P-ONE, then P-ONE THRU P-THREE, and GOes TO P-TWO; P-THREE (in
+    /// section S-ONE) performs the section.
+    fn control() -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "PERFORM P-ONE."),
+            at(12, "PERFORM P-ONE THRU P-THREE."),
+            at(12, "GO TO P-TWO."),
+            at(8, "P-ONE."),
+            at(12, "DISPLAY X."),
+            at(8, "P-TWO."),
+            at(12, "DISPLAY X."),
+            at(8, "S-ONE SECTION."),
+            at(8, "P-THREE."),
+            at(12, "PERFORM S-ONE."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn perform_and_goto_paragraphs_are_calls_with_their_kind_and_sections_are_uses() {
+        let (recs, diags) = scan_text("/root/prog.cob", &control(), &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        let (p1, p2, p3) = (
+            id_of(&recs, "P-ONE"),
+            id_of(&recs, "P-TWO"),
+            id_of(&recs, "P-THREE"),
+        );
+        let s1 = id_of(&recs, "S-ONE");
+        let perform = |from: &str, to: &str| serde_json::json!({"type":"calls","from":from,"to":to,"properties":{"kind":"perform"}});
+        let mut want = vec![
+            perform(&main, &p1),
+            perform(&main, &p1),
+            perform(&main, &p2),
+            perform(&main, &p3),
+            serde_json::json!({"type":"calls","from":main,"to":p2,"properties":{"kind":"goto"}}),
+            serde_json::json!({"type":"uses","from":p3,"to":s1}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["calls", "uses"]), want);
+    }
+
+    #[test]
+    fn unresolved_perform_is_an_unknown_target_with_a_diagnostic() {
+        let text = control().replace("PERFORM S-ONE.", "PERFORM NOPE.");
+        let (recs, diags) = scan_text("/root/prog.cob", &text, &[]);
+        let p3 = id_of(&recs, "P-THREE");
+        assert!(recs
+            .contains(&serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"unknown"})));
+        assert!(recs.contains(&serde_json::json!({"type":"unresolved_call","from":p3,"to":"NOPE"})));
+        assert!(!recs.iter().any(|r| r["type"] == "uses"));
+        assert!(diags
+            .iter()
+            .any(|d| format!("{d:?}").contains("perform NOPE")));
+    }
+
+    /// A one-paragraph-performing program `name`, its MAIN-PARA calling P-A.
+    fn perform_prog(name: &str) -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, &format!("PROGRAM-ID. {name}.")),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "PERFORM P-A."),
+            at(8, "P-A."),
+            at(12, "DISPLAY X."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn targets_drop_control_transfers_whose_source_is_outside_them() {
+        let (a, b) = (perform_prog("A"), perform_prog("B"));
+        let tree = [("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())];
+        let mut emitter = scan_tree(&tree);
+        assert_eq!(edges(&jsonl(&emitter), &["calls"]).len(), 2);
+        let target: std::collections::HashSet<String> =
+            ["/root/a.cob".to_string()].into_iter().collect();
+        emitter.retain_targets(&target);
+        let recs = jsonl(&emitter);
+        let main_a = id_of(&recs, "MAIN-PARA");
+        let calls = edges(&recs, &["calls"]);
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert_eq!(calls[0]["from"], main_a.as_str());
+    }
 }

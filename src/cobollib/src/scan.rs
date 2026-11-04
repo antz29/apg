@@ -7,11 +7,12 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
-use crate::ast::{Paragraph, Program, Section, Span};
+use crate::ast::{Paragraph, ProcRange, Program, Section, Span, Statement, Transfer};
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
 use crate::parser::parse_compilation_unit;
 use crate::preprocess::{preprocess, read_file, Search};
+use crate::resolve::{scopes, ProcKind, Resolution, Scope};
 use crate::source_map::{FileId, Origin, SourceMap};
 
 /// Unified JSONL records (SPEC §2), the `cobol` stream's wire shapes.
@@ -52,6 +53,25 @@ pub enum Rec {
         from: String,
         to: String,
     },
+    /// A resolved control transfer: `properties.kind` is `perform` or `goto`.
+    Calls {
+        from: String,
+        to: String,
+        properties: BTreeMap<String, String>,
+    },
+    /// A `PERFORM` or `GO TO` naming a section: the section's Struct.
+    Uses {
+        from: String,
+        to: String,
+    },
+    UnresolvedCall {
+        from: String,
+        to: String,
+    },
+    Unresolved {
+        fqn: String,
+        category: String,
+    },
 }
 
 /// Accumulates one scan's records. Ids are `<prefix>1`, `<prefix>2`, ... in emission order;
@@ -60,6 +80,7 @@ pub enum Rec {
 pub struct Emitter {
     recs: Vec<Rec>,
     modules: BTreeSet<String>,
+    unresolved: BTreeSet<String>,
     next_id: usize,
     base: PathBuf,
     prefix: String,
@@ -72,6 +93,15 @@ struct Loc {
     end: usize,
     start_line: usize,
     end_line: usize,
+}
+
+/// A `PERFORM` or `GO TO` awaiting resolution: its enclosing paragraph's id, its program's
+/// scope, the edge kind, and the procedure name or `from THRU thru` range it names.
+struct Pending {
+    scope: usize,
+    from: String,
+    kind: &'static str,
+    range: ProcRange,
 }
 
 /// One file's text with its line-start offsets, for `(line, col)` to byte conversion.
@@ -112,16 +142,51 @@ impl Text {
     }
 }
 
-/// Locates spans by their origin file's text, reading copybook text through `lookup`.
+/// Locates spans by their origin file's text, reading copybook text through `lookup`. Also
+/// carries the file's procedure scopes: `ids[s]` holds the emitted id of each procedure of
+/// scope `s` (aligned to `scopes[s].procs`), `scope` the one being emitted.
 struct Locate<'a> {
     map: &'a SourceMap,
     main: &'a str,
     main_text: &'a str,
     lookup: &'a dyn Fn(&Path) -> Option<String>,
     texts: BTreeMap<String, Text>,
+    scopes: Vec<Scope>,
+    scope: usize,
+    ids: Vec<Vec<Option<String>>>,
+    pending: Vec<Pending>,
+    diags: Vec<Diagnostic>,
 }
 
 impl Locate<'_> {
+    /// Starts the next program in pre-order, whose scope index is the count so far.
+    fn enter(&mut self) {
+        self.scope = self.ids.len();
+        self.ids
+            .push(vec![None; self.scopes[self.scope].procs.len()]);
+    }
+
+    /// Records `id` as the procedure of the current scope matching `kind`, `name` and
+    /// `section` (its owning section's index); returns its index in the scope's `procs`.
+    fn claim(
+        &mut self,
+        kind: ProcKind,
+        name: &str,
+        section: Option<usize>,
+        id: &str,
+    ) -> Option<usize> {
+        let procs = &self.scopes[self.scope].procs;
+        let ids = &mut self.ids[self.scope];
+        let at = (0..procs.len()).find(|&i| {
+            ids[i].is_none()
+                && procs[i].kind == kind
+                && procs[i].name == name
+                && procs[i].section == section
+        })?;
+        ids[at] = Some(id.to_string());
+        Some(at)
+    }
+
     fn text(&mut self, file: FileId) -> &Text {
         let name = self.map.name(file).to_string();
         let (main, main_text, lookup) = (self.main, self.main_text, self.lookup);
@@ -180,6 +245,7 @@ impl Emitter {
         Emitter {
             recs: Vec::new(),
             modules: BTreeSet::new(),
+            unresolved: BTreeSet::new(),
             next_id: 0,
             base: base.to_path_buf(),
             prefix: prefix.to_string(),
@@ -228,6 +294,7 @@ impl Emitter {
     }
 
     fn program(&mut self, loc: &mut Locate, p: &Program, parent: &str, up: Option<&str>) {
+        loc.enter();
         let (id, scope) = self.structure(loc, &p.name.text, p.span, parent, up);
         if let Some(data) = &p.data {
             for entry in data.sections.iter().flat_map(|s| &s.entries) {
@@ -241,7 +308,7 @@ impl Emitter {
                 self.section(loc, section, &scope, &id);
             }
             for para in &proc.paragraphs {
-                self.paragraph(loc, para, &scope, &id);
+                self.paragraph(loc, para, &scope, &id, None);
             }
         }
         for nested in &p.nested {
@@ -251,12 +318,20 @@ impl Emitter {
 
     fn section(&mut self, loc: &mut Locate, s: &Section, parent: &str, up: &str) {
         let (id, scope) = self.structure(loc, &s.name.text, s.span, parent, Some(up));
+        let at = loc.claim(ProcKind::Section, &s.name.text, None, &id);
         for para in &s.paragraphs {
-            self.paragraph(loc, para, &scope, &id);
+            self.paragraph(loc, para, &scope, &id, at);
         }
     }
 
-    fn paragraph(&mut self, loc: &mut Locate, para: &Paragraph, parent: &str, up: &str) {
+    fn paragraph(
+        &mut self,
+        loc: &mut Locate,
+        para: &Paragraph,
+        parent: &str,
+        up: &str,
+        section: Option<usize>,
+    ) {
         let l = loc.span(para.span);
         let id = self.fresh_id();
         self.recs.push(Rec::Function {
@@ -272,7 +347,83 @@ impl Emitter {
         });
         self.recs.push(Rec::Contains {
             from: up.to_string(),
-            to: id,
+            to: id.clone(),
+        });
+        loc.claim(ProcKind::Paragraph, &para.name.text, section, &id);
+        for sentence in &para.sentences {
+            collect(&mut loc.pending, loc.scope, &id, &sentence.statements);
+        }
+    }
+
+    /// Resolves every pending `PERFORM`/`GO TO` of the file (all its programs are emitted by
+    /// now, so forward references hold) into `calls`/`uses` edges, or `unresolved_call` with a
+    /// diagnostic naming the kind and the location.
+    fn transfer_facts(&mut self, loc: &mut Locate) {
+        for p in std::mem::take(&mut loc.pending) {
+            let scope = &loc.scopes[p.scope];
+            let ids = &loc.ids[p.scope];
+            let (from, kind) = (&p.from, p.kind);
+            let resolved = match &p.range.thru {
+                None => scope.resolve(&p.range.from),
+                Some(thru) => scope.range(&p.range.from, thru),
+            };
+            let edge = |i: usize| ids[i].clone().map(|to| (from.clone(), to));
+            let ambiguous = matches!(resolved, Resolution::Ambiguous);
+            match resolved {
+                Resolution::One(i) => {
+                    let Some((from, to)) = edge(i) else { continue };
+                    if scope.procs[i].kind == ProcKind::Section {
+                        self.recs.push(Rec::Uses { from, to });
+                    } else {
+                        self.push_call(from, to, kind);
+                    }
+                }
+                Resolution::Range(list) => {
+                    for (from, to) in list.iter().filter_map(|&i| edge(i)) {
+                        self.push_call(from, to, kind);
+                    }
+                }
+                Resolution::Undefined | Resolution::Ambiguous => {
+                    // The failing name: a bad `THRU` end only when the start resolved.
+                    let failing = match &p.range.thru {
+                        Some(thru)
+                            if matches!(scope.resolve(&p.range.from), Resolution::One(_)) =>
+                        {
+                            thru
+                        }
+                        _ => &p.range.from,
+                    };
+                    let name = &failing.name;
+                    let why = if ambiguous {
+                        "names more than one procedure"
+                    } else {
+                        "names no procedure of its program"
+                    };
+                    loc.diags.push(
+                        loc.map
+                            .diagnostic(name.span.start, &format!("{kind} {} {why}", name.text)),
+                    );
+                    if self.unresolved.insert(name.text.clone()) {
+                        self.recs.push(Rec::Unresolved {
+                            fqn: name.text.clone(),
+                            category: "unknown".to_string(),
+                        });
+                    }
+                    self.recs.push(Rec::UnresolvedCall {
+                        from: from.clone(),
+                        to: name.text.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    fn push_call(&mut self, from: String, to: String, kind: &str) {
+        let properties = BTreeMap::from([("kind".to_string(), kind.to_string())]);
+        self.recs.push(Rec::Calls {
+            from,
+            to,
+            properties,
         });
     }
 
@@ -309,10 +460,17 @@ impl Emitter {
             main_text: text,
             lookup,
             texts: BTreeMap::new(),
+            scopes: scopes(&unit),
+            scope: 0,
+            ids: Vec::new(),
+            pending: Vec::new(),
+            diags: Vec::new(),
         };
         for program in &unit.programs {
             self.program(&mut loc, program, &module, None);
         }
+        self.transfer_facts(&mut loc);
+        diags.extend(loc.diags);
         diags
     }
 
@@ -323,13 +481,19 @@ impl Emitter {
 
     /// Keeps only the facts of the `targets` files (File records and the Struct/Function
     /// records located in them). A Module stays when a kept File sits in it; a `contains`
-    /// edge stays when both ends do.
+    /// edge stays when both ends do; a control-transfer edge stays when its source does, and
+    /// an `unresolved` target when a kept `unresolved_call` names it.
     pub fn retain_targets(&mut self, targets: &HashSet<String>) {
         self.recs.retain(|r| match r {
             Rec::File { path, .. } | Rec::Struct { path, .. } | Rec::Function { path, .. } => {
                 targets.contains(path)
             }
-            Rec::Module { .. } | Rec::Contains { .. } => true,
+            Rec::Module { .. }
+            | Rec::Contains { .. }
+            | Rec::Calls { .. }
+            | Rec::Uses { .. }
+            | Rec::UnresolvedCall { .. }
+            | Rec::Unresolved { .. } => true,
         });
         let ids: BTreeSet<String> = self
             .recs
@@ -350,6 +514,21 @@ impl Emitter {
         self.recs.retain(|r| match r {
             Rec::Module { fqn } => parents.contains(fqn),
             Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
+            Rec::Calls { from, .. } | Rec::Uses { from, .. } | Rec::UnresolvedCall { from, .. } => {
+                ids.contains(from)
+            }
+            _ => true,
+        });
+        let called: BTreeSet<String> = self
+            .recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::UnresolvedCall { to, .. } => Some(to.clone()),
+                _ => None,
+            })
+            .collect();
+        self.recs.retain(|r| match r {
+            Rec::Unresolved { fqn, .. } => called.contains(fqn),
             _ => true,
         });
     }
@@ -425,6 +604,32 @@ fn value_flag(arg: &str) -> bool {
         arg,
         "--module" | "--id-prefix" | "--targets" | "--copy-path" | "--cache-dir" | "--cache-key"
     )
+}
+
+/// Queues the `PERFORM` (with a range) and `GO TO` names of `statements`, branches included,
+/// from the paragraph `from` of scope `scope`. A `PERFORM` without a target is inline.
+fn collect(out: &mut Vec<Pending>, scope: usize, from: &str, statements: &[Statement]) {
+    for statement in statements {
+        match &statement.transfer {
+            Some(Transfer::Perform(Some(range))) => out.push(Pending {
+                scope,
+                from: from.to_string(),
+                kind: "perform",
+                range: range.clone(),
+            }),
+            Some(Transfer::GoTo(names)) => out.extend(names.iter().map(|name| Pending {
+                scope,
+                from: from.to_string(),
+                kind: "goto",
+                range: ProcRange {
+                    from: name.clone(),
+                    thru: None,
+                },
+            })),
+            _ => {}
+        }
+        collect(out, scope, from, &statement.children);
+    }
 }
 
 /// `path` made absolute and symlink-resolved when it exists (so the walk and the target list
