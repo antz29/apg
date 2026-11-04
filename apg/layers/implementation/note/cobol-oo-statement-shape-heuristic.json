@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-oo-statement-shape-heuristic",
+  "body": "oo_statement_at stops an operand or condition scan at INVOKE only when it is followed by a receiver and a method literal or name, and at RAISE only when followed by EXCEPTION or a name, and only under an OO dialect, so an INVOKE or RAISE used as a data name stays an operand. Limit: under an OO dialect an operand sequence shaped like INVOKE name literal is split into its own statement. Upgrade to a scope-aware check against declared data names if a corpus shows such operands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.procedure.Parser.oo_statement_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

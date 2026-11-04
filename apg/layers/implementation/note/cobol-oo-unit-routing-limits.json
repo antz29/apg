@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-oo-unit-routing-limits",
+  "body": "oo_unit routes a CLASS-ID or INTERFACE-ID at a header position, but a bare CLASS-ID inside a program's DATA or PROCEDURE section is absorbed into that section because section ends do not stop at unit headers, and an INTERFACE-ID nested in a program is skipped with a diagnostic because Program has no interfaces field. Limit: such nested units yield no facts. Upgrade by threading the dialect into the section-end check and giving Program an interfaces field when real COBOL 2002 sources nest them.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.oo_unit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
