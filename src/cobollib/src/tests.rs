@@ -10,8 +10,14 @@ const ALL_DIALECTS: [Dialect; 4] = [
     Dialect::Ibm,
 ];
 
+/// A line with `text` starting at column `col` (1-based).
+fn at(col: usize, text: &str) -> String {
+    format!("{}{}", " ".repeat(col - 1), text)
+}
+
 mod unit {
     use super::*;
+    use crate::format::Layout;
 
     #[test]
     fn default_dialect_is_cobol85() {
@@ -158,6 +164,167 @@ mod unit {
         assert_eq!(Dialect::Ibm.default_format(), SourceFormat::Cobol85);
         assert_eq!(Dialect::Cobol2002.default_format(), SourceFormat::Fixed);
         assert_eq!(Dialect::Cobol2014.default_format(), SourceFormat::Fixed);
+    }
+
+    #[test]
+    fn directive_free_sets_the_free_layout() {
+        let text = [at(8, ">>source format free"), at(8, "DISPLAY X.")].join("\n");
+        let (layout, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(layout, Layout::Free);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn directive_fixed_turns_area_a_checks_off() {
+        let text = [at(8, ">>SOURCE IS FIXED"), at(12, "PROCEDURE DIVISION.")].join("\n");
+        let (layout, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(layout, Layout::Source(SourceFormat::Fixed));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn directive_cobol85_turns_area_a_checks_on() {
+        let text = [at(8, ">>SOURCE COBOL85"), at(12, "PROCEDURE DIVISION.")].join("\n");
+        let (layout, diags) = crate::format::check("p.cob", &text, Dialect::Cobol2002);
+        assert_eq!(layout, Layout::Source(SourceFormat::Cobol85));
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn unknown_directive_format_is_diagnosed_and_reads_the_dialect_default() {
+        let text = at(8, ">>SOURCE FORMAT VARIABLE");
+        let (layout, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(layout, Layout::Source(SourceFormat::Cobol85));
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!((diags[0].line, diags[0].col), (1, 8));
+        assert!(diags[0].message.contains("VARIABLE"), "{diags:?}");
+    }
+
+    #[test]
+    fn clean_fixed_text_has_no_warning_and_no_area_a_checks() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(12, "PROCEDURE DIVISION."),
+            at(12, "DISPLAY X."),
+        ]
+        .join("\n");
+        let (layout, diags) = crate::format::check("p.cob", &text, Dialect::Cobol2002);
+        assert_eq!(layout, Layout::Source(SourceFormat::Fixed));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn free_looking_text_warns_naming_the_file_and_reads_fixed() {
+        let text = at(1, "IDENTIFICATION DIVISION.");
+        let (layout, diags) = crate::format::check("prog.cob", &text, Dialect::Cobol2002);
+        assert_eq!(layout, Layout::Source(SourceFormat::Fixed));
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].file, "prog.cob");
+        assert_eq!((diags[0].line, diags[0].col), (1, 1));
+        assert!(diags[0].message.contains("free-format"), "{diags:?}");
+        assert!(diags[0].message.contains("fixed format"), "{diags:?}");
+    }
+
+    #[test]
+    fn text_past_column_80_warns_but_identification_area_does_not() {
+        let past = format!("{}X", " ".repeat(80));
+        let (_, diags) = crate::format::check("p.cob", &past, Dialect::Cobol2002);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let ident = at(73, "PROG0001");
+        let (_, diags) = crate::format::check("p.cob", &ident, Dialect::Cobol2002);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn indicators_accepted_and_slash_is_not() {
+        let ok = [at(7, "*"), at(7, "D"), at(7, "-")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &ok, Dialect::Cobol2002);
+        assert!(diags.is_empty(), "{diags:?}");
+        let slash = at(7, "/ comment");
+        let (_, diags) = crate::format::check("p.cob", &slash, Dialect::Cobol2002);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn division_outside_area_a_is_a_diagnostic() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(12, "PROCEDURE DIVISION."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!((diags[0].line, diags[0].col), (2, 12));
+    }
+
+    #[test]
+    fn paragraph_outside_area_a_is_a_diagnostic() {
+        let text = [at(8, "PROCEDURE DIVISION."), at(12, "MAIN-PARA.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].line, 2);
+    }
+
+    #[test]
+    fn level_01_and_77_outside_area_a_are_diagnostics_and_level_05_is_not_checked() {
+        let text = [
+            at(8, "WORKING-STORAGE SECTION."),
+            at(12, "01 REC."),
+            at(12, "77 W PIC X."),
+            at(12, "05 F PIC X."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        let lines: Vec<usize> = diags.iter().map(|d| d.line).collect();
+        assert_eq!(lines, [2, 3], "{diags:?}");
+    }
+
+    #[test]
+    fn statement_in_area_a_is_a_diagnostic() {
+        let text = [at(8, "PROCEDURE DIVISION."), at(8, "DISPLAY X.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!((diags[0].line, diags[0].col), (2, 8));
+    }
+
+    #[test]
+    fn separator_period_in_area_a_is_a_diagnostic() {
+        let text = [at(12, "DISPLAY X"), at(8, ".")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].line, 2);
+    }
+
+    #[test]
+    fn valid_cobol85_program_has_no_area_a_diagnostics() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "DISPLAY X."),
+            at(12, "STOP RUN."),
+            at(8, "01 REC."),
+            at(12, "05 F PIC X."),
+            at(8, "77 W PIC X."),
+            at(12, "."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn continuation_and_comment_lines_are_not_area_a_checked() {
+        let text = [
+            at(8, "PROCEDURE DIVISION."),
+            at(12, "DISPLAY \"A"),
+            format!("{}\"B\".", at(7, "-")),
+            at(7, "* MOVE X TO Y."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     fn diag(message: &str) -> crate::diag::Diagnostic {
