@@ -9,8 +9,8 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::ast::{
-    CallTarget, Class, DataEntry, Interface, Paragraph, ProcRange, Program, QualifiedName, Section,
-    Span, Statement, Transfer,
+    CallTarget, Class, CompilationUnit, DataDivision, DataEntry, Interface, Name, Paragraph,
+    ProcRange, Program, QualifiedName, Section, Span, Statement, Transfer,
 };
 use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
@@ -18,8 +18,8 @@ use crate::lexer::TokenKind;
 use crate::parser::parse_compilation_unit;
 use crate::preprocess::{preprocess_with_copies, read_file, CopySite, Search};
 use crate::resolve::{
-    declared, declares, global_data, resolve_call, scopes, CallResolution, Declared, ProcKind,
-    Resolution, Scope,
+    declared, declares, global_data, resolve_call, scopes, CallResolution, ClassIndex, Declared,
+    ProcKind, Resolution, Scope, Type, TypeRes,
 };
 use crate::source_map::{FileId, Mapped, Origin, SourceMap};
 
@@ -113,6 +113,31 @@ pub struct Emitter {
     calls: Vec<PendingCall>,
     /// The files holding an error-level diagnostic (the file a diagnostic is located in).
     errored: BTreeSet<String>,
+    /// Every scanned file's unit, kept so [`Emitter::finish`] can index the whole tree's classes.
+    units: Vec<CompilationUnit>,
+    /// The emitted Struct id of each class and interface, keyed by [`addr`].
+    type_ids: BTreeMap<usize, String>,
+    /// Class and interface names awaiting resolution in [`Emitter::finish`].
+    type_refs: Vec<TypeRef>,
+}
+
+/// A class or interface name a unit names (`INHERITS`, `IMPLEMENTS`, `USING`, `REPOSITORY`, or an
+/// `OBJECT REFERENCE`), with the Struct or Function id that names it and the name as written.
+#[derive(Debug)]
+struct TypeRef {
+    from: String,
+    name: Name,
+    /// A `REPOSITORY` entry: its scanned target is not a use (only one outside the scan is).
+    repository: bool,
+}
+
+/// A class or interface's key in [`Emitter::type_ids`]: its address in the stored units, which
+/// [`Emitter::finish`] reads back through the same units.
+fn addr(ty: Type<'_>) -> usize {
+    match ty {
+        Type::Class(c) => std::ptr::from_ref(c) as usize,
+        Type::Interface(i) => std::ptr::from_ref(i) as usize,
+    }
 }
 
 /// A `CALL` awaiting whole-tree resolution: its calling paragraph's id, its target, and the
@@ -328,6 +353,39 @@ impl Emitter {
             maps: Vec::new(),
             calls: Vec::new(),
             errored: BTreeSet::new(),
+            units: Vec::new(),
+            type_ids: BTreeMap::new(),
+            type_refs: Vec::new(),
+        }
+    }
+
+    /// Queues `name` as named by the Struct or Function `from` (see [`TypeRef`]).
+    fn type_ref(&mut self, from: &str, name: &Name, repository: bool) {
+        self.type_refs.push(TypeRef {
+            from: from.to_string(),
+            name: name.clone(),
+            repository,
+        });
+    }
+
+    /// Queues each class named by an OBJECT REFERENCE in `entries`, and beneath them, from `from`.
+    fn object_refs(&mut self, from: &str, entries: &[DataEntry]) {
+        for entry in entries {
+            if let Some(name) = entry
+                .object_reference
+                .as_ref()
+                .and_then(|o| o.class.as_ref())
+            {
+                self.type_ref(from, name, false);
+            }
+            self.object_refs(from, &entry.children);
+        }
+    }
+
+    /// Queues the OBJECT REFERENCE classes of a data division's sections from `from`.
+    fn division_refs(&mut self, from: &str, data: Option<&DataDivision>) {
+        for section in data.iter().flat_map(|d| &d.sections) {
+            self.object_refs(from, &section.entries);
         }
     }
 
@@ -395,13 +453,24 @@ impl Emitter {
     fn class(&mut self, loc: &mut Locate, c: &Class, parent: &str, up: Option<&str>) {
         let (id, scope) = self.structure(loc, &c.name.text, c.span, parent, up);
         loc.owners.push((c.span, id.clone()));
+        self.type_ids.insert(addr(Type::Class(c)), id.clone());
+        for name in c.inherits.iter().chain(&c.implements) {
+            self.type_ref(&id, name, false);
+        }
+        for entry in &c.repository {
+            self.type_ref(&id, &entry.name, true);
+        }
+        // Class data has no record Structs, so its OBJECT REFERENCEs are from the class itself.
+        for section in c.factory.iter().chain(&c.object) {
+            self.division_refs(&id, section.data.as_ref());
+        }
         let mut seen = BTreeSet::new();
         for m in c.factory.iter().chain(&c.object).flat_map(|s| &s.methods) {
             // Factory and instance methods share a name only across the two keys below, so a
             // (kind, name) repeat is skipped (first kept) rather than colliding in the ingestor.
             if seen.insert((m.factory, m.name.text.clone())) {
                 let key = if m.factory { "factory" } else { "instance" };
-                self.member(
+                let fid = self.member(
                     loc,
                     &m.name.text,
                     m.span,
@@ -409,6 +478,8 @@ impl Emitter {
                     &id,
                     vec![key.to_string()],
                 );
+                // Method data has no record Structs either, so its references are from the method.
+                self.division_refs(&fid, m.data.as_ref());
             }
         }
         // Properties are instance-keyed (static ones too), so they share the instance key with
@@ -450,6 +521,10 @@ impl Emitter {
     fn interface(&mut self, loc: &mut Locate, i: &Interface, parent: &str, up: Option<&str>) {
         let (id, scope) = self.structure(loc, &i.name.text, i.span, parent, up);
         loc.owners.push((i.span, id.clone()));
+        self.type_ids.insert(addr(Type::Interface(i)), id.clone());
+        for name in i.inherits.iter().chain(&i.using) {
+            self.type_ref(&id, name, false);
+        }
         let mut seen = BTreeSet::new();
         for p in &i.prototypes {
             if seen.insert(p.name.text.clone()) {
@@ -494,16 +569,30 @@ impl Emitter {
         let (id, scope) = self.structure(loc, &p.name.text, p.span, parent, up);
         self.programs.push((p.name.text.clone(), id.clone()));
         loc.owners.push((p.span, id.clone()));
+        for entry in &p.repository {
+            self.type_ref(&id, &entry.name, true);
+        }
         let mut records = BTreeMap::new();
         let mut declared = BTreeSet::new();
         if let Some(data) = &p.data {
             for section in &data.sections {
                 declared_names(&section.entries, &mut declared);
                 for entry in &section.entries {
-                    if let (1, Some(name)) = (entry.level, &entry.name) {
-                        let (rec, _) =
-                            self.structure(loc, &name.text, entry.span, &scope, Some(&id));
-                        records.entry(name.text.to_ascii_uppercase()).or_insert(rec);
+                    // A 01 record owns its subordinate items; a 77 item is owned by the program.
+                    let owner = match (entry.level, &entry.name) {
+                        (1, Some(name)) => {
+                            let (rec, _) =
+                                self.structure(loc, &name.text, entry.span, &scope, Some(&id));
+                            records
+                                .entry(name.text.to_ascii_uppercase())
+                                .or_insert(rec.clone());
+                            Some(rec)
+                        }
+                        (77, _) => Some(id.clone()),
+                        _ => None,
+                    };
+                    if let Some(owner) = owner {
+                        self.object_refs(&owner, std::slice::from_ref(entry));
                     }
                 }
             }
@@ -771,8 +860,52 @@ impl Emitter {
                 to: target.text.clone(),
             });
         }
+        self.resolve_types();
         self.note_errors(&diags);
         diags
+    }
+
+    /// Resolves every queued class or interface name against the whole tree's classes. A scanned
+    /// one is a `uses` to its Struct (a `REPOSITORY` entry emits nothing); one outside the scan is
+    /// an `unresolved_use` of category external, once per (source, name); an ambiguous name is
+    /// never guessed.
+    fn resolve_types(&mut self) {
+        let units = std::mem::take(&mut self.units);
+        let index = ClassIndex::new(&units);
+        let mut linked = BTreeSet::new();
+        let mut reported = BTreeSet::new();
+        for r in std::mem::take(&mut self.type_refs) {
+            match index.resolve_type(&r.name) {
+                TypeRes::Scanned(ty) if !r.repository => {
+                    let Some(to) = self.type_ids.get(&addr(ty)) else {
+                        continue;
+                    };
+                    if linked.insert((r.from.clone(), to.clone())) {
+                        self.recs.push(Rec::Uses {
+                            from: r.from,
+                            to: to.clone(),
+                            properties: BTreeMap::new(),
+                        });
+                    }
+                }
+                TypeRes::External => {
+                    let name = &r.name.text;
+                    if reported.insert((r.from.clone(), name.to_ascii_uppercase())) {
+                        if self.unresolved.insert(name.clone()) {
+                            self.recs.push(Rec::Unresolved {
+                                fqn: name.clone(),
+                                category: "external".to_string(),
+                            });
+                        }
+                        self.recs.push(Rec::UnresolvedUse {
+                            from: r.from,
+                            to: name.clone(),
+                        });
+                    }
+                }
+                TypeRes::Scanned(_) | TypeRes::Ambiguous => {}
+            }
+        }
     }
 
     /// Scans one COBOL file: `path` is the identity its records carry and the name copybooks
@@ -836,6 +969,8 @@ impl Emitter {
         for i in &unit.interfaces {
             self.interface(&mut loc, i, &module, None);
         }
+        // Moved, not copied: the classes' addresses (their [`addr`] keys) stay the same.
+        self.units.push(unit);
         self.transfer_facts(&mut loc);
         let owners = std::mem::take(&mut loc.owners);
         self.copy_uses(&map, path, &copies, &owners);
