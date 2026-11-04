@@ -2,6 +2,7 @@
 //! `tests::unit` alone (no `int` tier: nothing here wires two units together).
 
 use crate::dialect::{Dialect, Feature, FeatureLevel, Limits, SourceFormat, OO_WORDS};
+use crate::lexer::{lex, Token, TokenKind};
 
 const ALL_DIALECTS: [Dialect; 4] = [
     Dialect::Cobol85,
@@ -13,6 +14,30 @@ const ALL_DIALECTS: [Dialect; 4] = [
 /// A line with `text` starting at column `col` (1-based).
 fn at(col: usize, text: &str) -> String {
     format!("{}{}", " ".repeat(col - 1), text)
+}
+
+/// Lexes `text` under `dialect` and returns the tokens and the diagnostics.
+fn lex_all(
+    text: &str,
+    layout: crate::format::Layout,
+    dialect: Dialect,
+) -> (Vec<Token>, Vec<crate::diag::Diagnostic>) {
+    let (mut cursor, diags) = lex("p.cob", text, layout, dialect);
+    let mut tokens = Vec::new();
+    while let Some(token) = cursor.bump() {
+        tokens.push(token);
+    }
+    (tokens, diags)
+}
+
+/// The fixed (`cobol85`) column layout.
+fn fixed() -> crate::format::Layout {
+    crate::format::Layout::Source(SourceFormat::Cobol85)
+}
+
+/// Each token as its kind and text.
+fn shape(tokens: &[Token]) -> Vec<(TokenKind, &str)> {
+    tokens.iter().map(|t| (t.kind, t.text.as_str())).collect()
 }
 
 mod unit {
@@ -325,6 +350,230 @@ mod unit {
         .join("\n");
         let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
         assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn fixed_layout_ignores_sequence_area_and_columns_73_to_80() {
+        let text = format!("000100 {:<65}{}", "DISPLAY X.", "PROG0001");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn comment_and_debugging_lines_are_skipped() {
+        let text = [
+            at(7, "* DISPLAY A."),
+            at(7, "D DISPLAY B."),
+            at(8, "DISPLAY C."),
+        ]
+        .join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Word, "C"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn directive_lines_are_not_tokens() {
+        let text = [at(8, ">>SOURCE FORMAT FREE"), at(8, "DISPLAY X.")].join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(tokens[0].text, "DISPLAY");
+    }
+
+    #[test]
+    fn continued_word_joins_across_the_continuation_line() {
+        let text = [at(8, "PROGRAM-"), format!("{}ID.", at(7, "-"))].join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [(TokenKind::Word, "PROGRAM-ID"), (TokenKind::Period, ".")]
+        );
+    }
+
+    #[test]
+    fn continued_literal_resumes_after_the_quote_in_area_b() {
+        let text = [at(8, "DISPLAY \"AB"), format!("{}\"CD\".", at(7, "-"))].join("\n");
+        let (tokens, diags) = lex_all(&text, fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "DISPLAY"),
+                (TokenKind::Alnum, "ABCD"),
+                (TokenKind::Period, ".")
+            ]
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn doubled_quote_is_one_quote_in_both_quote_styles() {
+        let (tokens, _) = lex_all(&at(8, "\"A\"\"B\" 'IT''S'"), fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [(TokenKind::Alnum, "A\"B"), (TokenKind::Alnum, "IT'S")]
+        );
+    }
+
+    #[test]
+    fn national_literal_is_its_own_kind() {
+        let (tokens, _) = lex_all(&at(8, "N\"XY\""), fixed(), Dialect::Cobol85);
+        assert_eq!(shape(&tokens), [(TokenKind::National, "XY")]);
+    }
+
+    #[test]
+    fn numeric_literals_take_sign_and_decimal_point() {
+        let (tokens, _) = lex_all(
+            &at(8, "MOVE +1.5 -3 .5 10 TO X."),
+            fixed(),
+            Dialect::Cobol85,
+        );
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "MOVE"),
+                (TokenKind::Numeric, "+1.5"),
+                (TokenKind::Numeric, "-3"),
+                (TokenKind::Numeric, ".5"),
+                (TokenKind::Numeric, "10"),
+                (TokenKind::Word, "TO"),
+                (TokenKind::Word, "X"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn period_after_a_number_is_a_separator() {
+        let (tokens, _) = lex_all(&at(8, "MOVE 10."), fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::Word, "MOVE"),
+                (TokenKind::Numeric, "10"),
+                (TokenKind::Period, ".")
+            ]
+        );
+    }
+
+    #[test]
+    fn pseudo_text_delimiters_and_separators() {
+        let (tokens, _) = lex_all(&at(8, "==A==, B; (C)"), fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [
+                (TokenKind::PseudoDelim, "=="),
+                (TokenKind::Word, "A"),
+                (TokenKind::PseudoDelim, "=="),
+                (TokenKind::Comma, ","),
+                (TokenKind::Word, "B"),
+                (TokenKind::Semicolon, ";"),
+                (TokenKind::LParen, "("),
+                (TokenKind::Word, "C"),
+                (TokenKind::RParen, ")")
+            ]
+        );
+    }
+
+    #[test]
+    fn reserved_words_follow_the_dialect() {
+        let (tokens, _) = lex_all(&at(8, "class OBJECT"), fixed(), Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [(TokenKind::Reserved, "class"), (TokenKind::Word, "OBJECT")]
+        );
+        let (tokens, _) = lex_all(&at(8, "CLASS"), fixed(), Dialect::Cobol2002);
+        assert_eq!(shape(&tokens), [(TokenKind::Word, "CLASS")]);
+    }
+
+    #[test]
+    fn every_oo_word_but_class_is_an_ordinary_word_under_cobol85() {
+        for word in OO_WORDS {
+            let (tokens, _) = lex_all(&at(8, word), fixed(), Dialect::Cobol85);
+            let kind = if word == "CLASS" {
+                TokenKind::Reserved
+            } else {
+                TokenKind::Word
+            };
+            assert_eq!(shape(&tokens), [(kind, word)], "{word}");
+        }
+    }
+
+    #[test]
+    fn word_over_the_dialect_limit_is_a_diagnostic_and_still_a_token() {
+        let (_, diags) = lex_all(&at(8, &"A".repeat(30)), fixed(), Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+        let (tokens, diags) = lex_all(&at(8, &"A".repeat(31)), fixed(), Dialect::Cobol85);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!((diags[0].line, diags[0].col), (1, 8));
+        let (_, diags) = lex_all(&at(8, &"A".repeat(31)), fixed(), Dialect::Cobol2002);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn literal_over_the_dialect_limit_is_a_diagnostic_and_still_a_token() {
+        let text = format!("\"{}\"", "X".repeat(160));
+        let (_, diags) = lex_all(&text, Layout::Free, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+        let text = format!("\"{}\"", "X".repeat(161));
+        let (tokens, diags) = lex_all(&text, Layout::Free, Dialect::Cobol85);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn unterminated_literal_is_a_diagnostic() {
+        let (tokens, diags) = lex_all("DISPLAY \"ABC", Layout::Free, Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [(TokenKind::Word, "DISPLAY"), (TokenKind::Alnum, "ABC")]
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn free_format_reads_from_column_one_and_comments_after_star_greater() {
+        let (tokens, _) = lex_all("DISPLAY \"*>\" *> note", Layout::Free, Dialect::Cobol85);
+        assert_eq!(
+            shape(&tokens),
+            [(TokenKind::Word, "DISPLAY"), (TokenKind::Alnum, "*>")]
+        );
+        assert_eq!(tokens[0].col, 1);
+    }
+
+    #[test]
+    fn token_positions_refer_to_the_original_text() {
+        let text = [at(8, "DISPLAY X."), at(12, "STOP RUN.")].join("\n");
+        let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
+        let stop = tokens.iter().find(|t| t.text == "STOP").unwrap();
+        assert_eq!(
+            (stop.offset, stop.line, stop.col),
+            (text.find("STOP").unwrap(), 2, 12)
+        );
+    }
+
+    #[test]
+    fn cursor_peeks_and_bumps_in_order() {
+        let (mut cursor, _) = lex("p.cob", &at(8, "A B"), fixed(), Dialect::Cobol85);
+        assert_eq!(cursor.peek().map(|t| t.text.as_str()), Some("A"));
+        assert_eq!(cursor.peek_nth(1).map(|t| t.text.as_str()), Some("B"));
+        assert_eq!(cursor.bump().map(|t| t.text), Some("A".to_string()));
+        assert!(!cursor.at_end());
+        cursor.bump();
+        assert!(cursor.bump().is_none());
+        assert!(cursor.at_end());
     }
 
     fn diag(message: &str) -> crate::diag::Diagnostic {
