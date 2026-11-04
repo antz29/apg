@@ -367,10 +367,16 @@ fn section_header(tokens: &[Mapped], i: usize) -> Option<Option<DataSectionKind>
 /// that is open, a level-88 condition name to the item it follows.
 fn place(stack: &mut Vec<DataEntry>, roots: &mut Vec<DataEntry>, entry: DataEntry) {
     match entry.level {
-        66 => match stack.first_mut() {
-            Some(record) => record.children.push(entry),
-            None => roots.push(entry),
-        },
+        66 => {
+            // Fold the open items above the record first, so the rename follows them in source order.
+            if let Some(open) = stack.get(1).map(|open| open.level) {
+                close(stack, roots, open);
+            }
+            match stack.first_mut() {
+                Some(record) => record.children.push(entry),
+                None => roots.push(entry),
+            }
+        }
         88 => attach(stack, roots, entry),
         77 => {
             close(stack, roots, 0);
