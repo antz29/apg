@@ -244,6 +244,8 @@ Verified in `src/load/tables.rs`:
 | `INTERFACE-ID … USING Param` | `uses` to the parameter's class or interface when in scan; otherwise `unresolved_use`, category `external` |
 | `REPOSITORY CLASS "java…"` | `unresolved_use`, category `external`, from the program's Struct |
 | `COPY` of a copybook | `File` node for the copybook; its declarations located in it |
+| `COPY` of a copybook, resolved | `uses` from the program Struct whose span contains the outermost COPY site, to the copybook's `File` (`to` = its path as in its File record), one per (program, copybook), with properties `{"kind":"copy"}`. A nested COPY gives the outer program an edge to each copybook in the chain. This is the only `uses` record with properties. The ingestor keeps a Struct→File `uses` only when `kind` = `copy`, so a copybook change reaches every program that COPYs it (requirement cobol-impact-unit). Under `--targets` the edge goes with its source program |
+| `COPY` in a file with no program, or an unresolved `COPY` | No edge |
 | `INTERFACE-ID` | `Struct`, contained by its File (as `CLASS-ID`). Its method prototypes are `Function`s contained by it (decided, O11) |
 | `RAISE EXCEPTION` with a standard condition name (for example `EC-USER`) | No fact (decided, O13) |
 | Micro Focus `RAISE` with an object | No extra fact; the object's declared type is already `uses` (decided, O13) |
