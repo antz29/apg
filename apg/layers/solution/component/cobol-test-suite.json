@@ -6,13 +6,38 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.cobol-conformance",
       "properties": {}
     },
     {
-      "kind": "is-role",
-      "target": "solution.role.frontend-module",
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.tests",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.tests.unit",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.tests.int",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobollib_e2e",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobollib_e2e.e2e",
       "properties": {}
     }
   ],

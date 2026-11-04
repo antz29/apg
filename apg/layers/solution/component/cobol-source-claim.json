@@ -6,13 +6,18 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.cobol-source-classification",
       "properties": {}
     },
     {
-      "kind": "is-role",
-      "target": "solution.role.scan-module",
+      "kind": "implemented-by",
+      "target": "rust.apg.classify.cobol_code_type",
       "properties": {}
     }
   ],

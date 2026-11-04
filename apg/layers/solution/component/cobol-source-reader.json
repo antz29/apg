@@ -6,13 +6,68 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.cobol-source-reading",
       "properties": {}
     },
     {
-      "kind": "is-role",
-      "target": "solution.role.frontend-module",
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.format",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.lexer",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.preprocess",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.replace",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.source_map",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.data",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.procedure",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.oo",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.exec",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.ast",
       "properties": {}
     }
   ],

@@ -6,6 +6,11 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.cobol-call-resolution",
       "properties": {}
@@ -16,8 +21,8 @@
       "properties": {}
     },
     {
-      "kind": "is-role",
-      "target": "solution.role.frontend-module",
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.resolve",
       "properties": {}
     }
   ],

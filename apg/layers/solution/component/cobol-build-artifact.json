@@ -6,13 +6,23 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.pipeline-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.cobol-language-integration",
       "properties": {}
     },
     {
-      "kind": "is-role",
-      "target": "solution.role.pipeline-module",
+      "kind": "implemented-by",
+      "target": "rust.build_script_build.stage_cobol",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "Formula/apg-cobol.rb",
       "properties": {}
     }
   ],
