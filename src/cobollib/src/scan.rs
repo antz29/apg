@@ -390,7 +390,8 @@ impl Emitter {
     }
 
     /// A `CLASS-ID` Struct under `parent` (contained by `up` when nested) with a Function per
-    /// method of its FACTORY and OBJECT sections. Method bodies are not walked.
+    /// method of its FACTORY and OBJECT sections, then `GET-`/`SET-` Functions per top-level
+    /// PROPERTY item of their data divisions. Method bodies are not walked.
     fn class(&mut self, loc: &mut Locate, c: &Class, parent: &str, up: Option<&str>) {
         let (id, scope) = self.structure(loc, &c.name.text, c.span, parent, up);
         loc.owners.push((c.span, id.clone()));
@@ -408,6 +409,39 @@ impl Emitter {
                     &id,
                     vec![key.to_string()],
                 );
+            }
+        }
+        // Properties are instance-keyed (static ones too), so they share the instance key with
+        // methods: a same-named method keeps the slot and the property accessor is skipped.
+        let entries = c
+            .factory
+            .iter()
+            .chain(&c.object)
+            .filter_map(|s| s.data.as_ref())
+            .flat_map(|d| &d.sections)
+            .flat_map(|s| &s.entries);
+        for entry in entries {
+            let Some(prop) = &entry.property else {
+                continue;
+            };
+            let Some(name) = prop.as_name.as_ref().or(entry.name.as_ref()) else {
+                continue;
+            };
+            let mut accessors = vec![format!("GET-{}", name.text)];
+            if !prop.no_set {
+                accessors.push(format!("SET-{}", name.text));
+            }
+            for accessor in accessors {
+                if seen.insert((false, accessor.clone())) {
+                    self.member(
+                        loc,
+                        &accessor,
+                        entry.span,
+                        &scope,
+                        &id,
+                        vec!["instance".to_string()],
+                    );
+                }
             }
         }
     }
