@@ -165,10 +165,12 @@ struct Loc {
 }
 
 /// A `PERFORM` or `GO TO` awaiting resolution: its enclosing paragraph's id, its program's
-/// scope, the edge kind, and the procedure name or `from THRU thru` range it names.
+/// scope, the section index of that paragraph (`Proc.section`), the edge kind, and the procedure
+/// name or `from THRU thru` range it names.
 struct Pending {
     scope: usize,
     from: String,
+    section: Option<usize>,
     kind: &'static str,
     range: ProcRange,
 }
@@ -679,7 +681,7 @@ impl Emitter {
         loc.claim(ProcKind::Paragraph, &para.name.text, section, &id);
         self.ids.insert(node_key(para), id.clone());
         for sentence in &para.sentences {
-            collect(loc, &id, &sentence.statements);
+            collect(loc, &id, section, &sentence.statements);
         }
     }
 
@@ -692,8 +694,8 @@ impl Emitter {
             let ids = &loc.ids[p.scope];
             let (from, kind) = (&p.from, p.kind);
             let resolved = match &p.range.thru {
-                None => scope.resolve(&p.range.from),
-                Some(thru) => scope.range(&p.range.from, thru),
+                None => scope.resolve_within(&p.range.from, p.section),
+                Some(thru) => scope.range_within(&p.range.from, thru, p.section),
             };
             let edge = |i: usize| ids[i].clone().map(|to| (from.clone(), to));
             let ambiguous = matches!(resolved, Resolution::Ambiguous);
@@ -719,7 +721,10 @@ impl Emitter {
                     // The failing name: a bad `THRU` end only when the start resolved.
                     let failing = match &p.range.thru {
                         Some(thru)
-                            if matches!(scope.resolve(&p.range.from), Resolution::One(_)) =>
+                            if matches!(
+                                scope.resolve_within(&p.range.from, p.section),
+                                Resolution::One(_)
+                            ) =>
                         {
                             thru
                         }
@@ -1268,7 +1273,7 @@ fn value_flag(arg: &str) -> bool {
 /// included, from the paragraph `from` of the current scope. A `PERFORM` without a target is
 /// inline; `RESUME AT` queues kind `resume`; `RESUME NEXT STATEMENT` has no transfer. A `CALL`
 /// is queued as a [`PendingCall`]; each operand data name as a [`PendingRef`].
-fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
+fn collect(loc: &mut Locate, from: &str, section: Option<usize>, statements: &[Statement]) {
     let scope = loc.scope;
     for statement in statements {
         loc.data_refs
@@ -1281,6 +1286,7 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
             Some(Transfer::Perform(Some(range))) => loc.pending.push(Pending {
                 scope,
                 from: from.to_string(),
+                section,
                 kind: "perform",
                 range: range.clone(),
             }),
@@ -1289,6 +1295,7 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
                     .extend(input.iter().chain(output).map(|range| Pending {
                         scope,
                         from: from.to_string(),
+                        section,
                         kind: "perform",
                         range: range.clone(),
                     }));
@@ -1296,6 +1303,7 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
             Some(Transfer::Resume(name)) => loc.pending.push(Pending {
                 scope,
                 from: from.to_string(),
+                section,
                 kind: "resume",
                 range: ProcRange {
                     from: name.clone(),
@@ -1305,6 +1313,7 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
             Some(Transfer::GoTo(names)) => loc.pending.extend(names.iter().map(|name| Pending {
                 scope,
                 from: from.to_string(),
+                section,
                 kind: "goto",
                 range: ProcRange {
                     from: name.clone(),
@@ -1325,7 +1334,7 @@ fn collect(loc: &mut Locate, from: &str, statements: &[Statement]) {
             }),
             _ => {}
         }
-        collect(loc, from, &statement.children);
+        collect(loc, from, section, &statement.children);
     }
 }
 

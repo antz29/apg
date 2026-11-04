@@ -174,24 +174,55 @@ fn push(out: &mut Vec<Proc>, kind: ProcKind, name: &str, section: Option<usize>)
 impl Scope {
     /// Resolves a `PERFORM` or `GO TO` name: one procedure, `Undefined`, or `Ambiguous`.
     pub fn resolve(&self, name: &QualifiedName) -> Resolution {
+        self.resolve_within(name, None)
+    }
+
+    /// [`Scope::resolve`] from a paragraph of `section`: an unqualified name matching several
+    /// procedures resolves to the one paragraph of that section (COBOL-85 4.3.8.1 rule 6).
+    pub fn resolve_within(&self, name: &QualifiedName, section: Option<usize>) -> Resolution {
         let hits: Vec<usize> = (0..self.procs.len())
             .filter(|&i| self.matches_name(i, name))
             .collect();
         match hits.as_slice() {
             [] => Resolution::Undefined,
             [one] => Resolution::One(*one),
-            _ => Resolution::Ambiguous,
+            _ => {
+                let own: Vec<usize> = hits
+                    .iter()
+                    .copied()
+                    .filter(|&i| {
+                        name.qualifiers.is_empty()
+                            && section.is_some()
+                            && self.procs[i].kind == ProcKind::Paragraph
+                            && self.procs[i].section == section
+                    })
+                    .collect();
+                match own.as_slice() {
+                    [one] => Resolution::One(*one),
+                    _ => Resolution::Ambiguous,
+                }
+            }
         }
     }
 
     /// Resolves `PERFORM from THRU thru`: the paragraphs from `from` to `thru` in source order.
     /// A section endpoint covers all of its paragraphs; an end before the start is empty.
     pub fn range(&self, from: &QualifiedName, thru: &QualifiedName) -> Resolution {
-        let first = match self.resolve(from) {
+        self.range_within(from, thru, None)
+    }
+
+    /// [`Scope::range`] with each endpoint resolved by [`Scope::resolve_within`] for `section`.
+    pub fn range_within(
+        &self,
+        from: &QualifiedName,
+        thru: &QualifiedName,
+        section: Option<usize>,
+    ) -> Resolution {
+        let first = match self.resolve_within(from, section) {
             Resolution::One(i) => i,
             other => return other,
         };
-        let last = match self.resolve(thru) {
+        let last = match self.resolve_within(thru, section) {
             Resolution::One(j) => self.procs[j].last,
             other => return other,
         };
