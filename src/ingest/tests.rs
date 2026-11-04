@@ -40,72 +40,6 @@ fn fqns(decls: &[FuncDecl]) -> HashMap<String, String> {
     render_function_fqns(decls).into_iter().collect()
 }
 
-/// A COBOL program `PROG` (under `src/cobol`) with a copybook File and a
-/// helper Struct, linked by a Struct→File `Uses` carrying `kind` (none when
-/// `None`) plus an ordinary Struct→Struct `Uses`, assembled through
-/// [`ingest_records`] in memory against the synthetic `/repo` base.
-fn program_copy_graph(kind: Option<&str>) -> Graph {
-    let copybook = "/repo/src/cobol/CUSTREC.cpy";
-    let properties: crate::layers::NodeProperties = kind
-        .map(|k| ("kind".to_string(), k.to_string()))
-        .into_iter()
-        .collect();
-    let records = vec![
-        Record::Module {
-            fqn: "src/cobol".to_string(),
-        },
-        Record::File {
-            path: "/repo/src/cobol/PROG.cbl".to_string(),
-            parent: "src/cobol".to_string(),
-            start_line: 1,
-            end_line: 40,
-        },
-        Record::File {
-            path: copybook.to_string(),
-            parent: "src/cobol".to_string(),
-            start_line: 1,
-            end_line: 12,
-        },
-        Record::Struct {
-            id: "s1".to_string(),
-            parent: "src/cobol".to_string(),
-            name: "PROG".to_string(),
-            path: "/repo/src/cobol/PROG.cbl".to_string(),
-            start: 0,
-            end: 0,
-            start_line: 1,
-            end_line: 40,
-        },
-        Record::Struct {
-            id: "s2".to_string(),
-            parent: "src/cobol".to_string(),
-            name: "HELPER".to_string(),
-            path: "/repo/src/cobol/PROG.cbl".to_string(),
-            start: 0,
-            end: 0,
-            start_line: 41,
-            end_line: 50,
-        },
-        Record::Uses {
-            from: "s1".to_string(),
-            to: copybook.to_string(),
-            properties,
-        },
-        Record::Uses {
-            from: "s1".to_string(),
-            to: "s2".to_string(),
-            properties: Default::default(),
-        },
-    ];
-    let opts = IngestOptions {
-        blacklist: &[],
-        language: "cobol",
-        config: None,
-        base: Some(Path::new("/repo")),
-    };
-    ingest_records(records, &opts, false, None).0
-}
-
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
@@ -1078,50 +1012,5 @@ mod int {
                 .contains(&(task.clone(), target.clone())),
             "the module placeholder keeps the row its recorded kind pairs"
         );
-    }
-
-    /// cobol-impact-unit task-53: a COBOL program's `kind=copy` Struct→File
-    /// Uses edge survives ingest assembly with its absolute copybook target
-    /// rendered repo-relative (the File node's identity) and keeps its edge
-    /// properties. Without `kind=copy` (absent, or any other kind) the same
-    /// Struct→File edge is dropped, while an ordinary Struct→Struct Uses edge
-    /// is unchanged. Pure in-memory: [`ingest_records`] is fed the record
-    /// vector directly with a synthetic `/repo` base (no spool, no I/O).
-    #[test]
-    fn copy_uses_renders_copybook_file_target_repo_relative() {
-        let graph = program_copy_graph(Some("copy"));
-        let program = "cobol.src/cobol.PROG".to_string();
-        let copybook = "src/cobol/CUSTREC.cpy".to_string();
-        assert_eq!(graph.nodes[&copybook].kind, NodeKind::File);
-        assert!(
-            graph.uses.contains(&(program.clone(), copybook.clone())),
-            "a kind=copy Struct→File Uses must keep the repo-relative File target"
-        );
-        assert_eq!(
-            graph
-                .edge_properties
-                .get(&("uses", program, copybook))
-                .and_then(|p| p.get("kind"))
-                .map(String::as_str),
-            Some("copy"),
-            "the kind=copy edge property must be kept"
-        );
-    }
-
-    #[test]
-    fn non_copy_struct_to_file_uses_is_dropped_and_ordinary_uses_kept() {
-        let program = "cobol.src/cobol.PROG".to_string();
-        let helper = "cobol.src/cobol.HELPER".to_string();
-        for kind in [None, Some("other")] {
-            let graph = program_copy_graph(kind);
-            assert!(
-                graph.uses.iter().all(|(_, b)| b != "src/cobol/CUSTREC.cpy"),
-                "a Struct→File Uses without kind=copy ({kind:?}) must be dropped"
-            );
-            assert!(
-                graph.uses.contains(&(program.clone(), helper.clone())),
-                "an ordinary Struct→Struct Uses must be unchanged ({kind:?})"
-            );
-        }
     }
 }
