@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-exec-sql-calls",
-  "body": "An EXEC SQL CALL to a procedure in the scan is a uses edge to its program, one outside the scan is an unresolved call of category external, and a SQL function invoked inside an EXEC SQL block is not an edge.",
+  "body": "An EXEC SQL CALL to a procedure in the scan is a uses edge to its program, one outside the scan is an unresolved call of category external, and a SQL function invoked inside an EXEC SQL block stays unlinked.",
   "properties": {
     "feature": "cobol-frontend"
   },
