@@ -5,6 +5,7 @@
 //! [`parse_procedure_division`], called by the parser with the tokens from `PROCEDURE DIVISION`
 //! to the end of the program's procedure text.
 
+use super::exec::{exec_block_end, is_exec_block};
 use crate::ast::{
     CallTarget, Name, Paragraph, ProcRange, ProcedureDivision, QualifiedName, RaiseTarget,
     Receiver, Section, Sentence, Span, Statement, Transfer,
@@ -324,10 +325,10 @@ enum Kind {
     Resume,
 }
 
-struct Parser<'a> {
+pub(super) struct Parser<'a> {
     map: &'a SourceMap,
-    dialect: Dialect,
-    tokens: &'a [Mapped],
+    pub(super) dialect: Dialect,
+    pub(super) tokens: &'a [Mapped],
     /// A METHOD-ID body: statements before its first paragraph open the leading paragraph.
     method_body: bool,
     diags: Vec<Diagnostic>,
@@ -343,16 +344,16 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
-    fn origin(&self, i: usize) -> Origin {
+    pub(super) fn origin(&self, i: usize) -> Origin {
         self.tokens[i].origin
     }
 
-    fn diag(&mut self, at: Origin, message: &str) {
+    pub(super) fn diag(&mut self, at: Origin, message: &str) {
         let diag = self.map.diagnostic(at, message);
         self.diags.push(diag);
     }
 
-    fn name(&self, i: usize) -> Name {
+    pub(super) fn name(&self, i: usize) -> Name {
         let origin = self.origin(i);
         Name {
             text: self.tokens[i].token.text.clone(),
@@ -364,7 +365,7 @@ impl Parser<'_> {
     }
 
     /// The span of tokens `a..b` (`b` exclusive, `b > a`).
-    fn span(&self, a: usize, b: usize) -> Span {
+    pub(super) fn span(&self, a: usize, b: usize) -> Span {
         Span {
             start: self.origin(a),
             end: self.origin(b - 1),
@@ -377,14 +378,26 @@ impl Parser<'_> {
         let t = self.tokens;
         let mut i = start;
         while i < t.len() {
-            let stop = (i..t.len())
-                .find(|&j| t[j].token.kind == TokenKind::Period)
-                .unwrap_or(t.len());
+            let stop = self.period_from(i);
             if self.ends_program(i, stop) {
                 break;
             }
             // A header inside the sentence means its period is missing: the sentence ends there.
-            if let Some(header) = (i + 1..stop).find(|&j| self.header_at(j, stop)) {
+            // An EXEC block is skipped whole, so a word inside it is never a header.
+            let mut header = None;
+            let mut j = i + 1;
+            while j < stop {
+                if is_exec_block(t, j) {
+                    j = self.past_block(j);
+                    continue;
+                }
+                if self.header_at(j, stop) {
+                    header = Some(j);
+                    break;
+                }
+                j += 1;
+            }
+            if let Some(header) = header {
                 self.sentence(i, header, None);
                 i = header;
                 continue;
@@ -394,6 +407,29 @@ impl Parser<'_> {
                 self.sentence(i, stop, period);
             }
             i = stop + 1;
+        }
+    }
+
+    /// The index of the first period at or after `from` outside an EXEC block (the period of the
+    /// sentence), or the token count when there is none.
+    fn period_from(&self, from: usize) -> usize {
+        let t = self.tokens;
+        let mut j = from;
+        while j < t.len() && t[j].token.kind != TokenKind::Period {
+            j = self.past_block(j);
+        }
+        j.min(t.len())
+    }
+
+    /// The index after the token at `j`: past its `END-EXEC` when it opens an EXEC block that has
+    /// one, else `j + 1`.
+    fn past_block(&self, j: usize) -> usize {
+        match is_exec_block(self.tokens, j)
+            .then(|| exec_block_end(self.tokens, j, self.tokens.len()))
+            .flatten()
+        {
+            Some(after) => after,
+            None => j + 1,
         }
     }
 
@@ -565,10 +601,18 @@ impl Parser<'_> {
     }
 
     /// Whether token `k` starts a statement. `INVOKE` always does (as it did when it was a verb);
-    /// `RAISE` only under OO recognition. Elsewhere both are data names.
+    /// `RAISE` only under OO recognition; an EXEC block always does. Elsewhere they are data names.
     fn starts_statement(&self, k: usize) -> bool {
         let t = &self.tokens[k];
-        self.is_verb(k) || is(t, "INVOKE") || (self.dialect.oo_enabled() && is(t, "RAISE"))
+        self.is_verb(k)
+            || is(t, "INVOKE")
+            || (self.dialect.oo_enabled() && is(t, "RAISE"))
+            || is_exec_block(self.tokens, k)
+    }
+
+    /// Whether an operand or condition scan stops at `k`: a verb, an OO statement or an EXEC block.
+    fn stmt_boundary(&self, k: usize, end: usize) -> bool {
+        is_exec_block(self.tokens, k) || self.oo_statement_at(k, end)
     }
 
     /// Whether an OO `INVOKE` or `RAISE` at `k` has a statement's shape, so an operand or
@@ -595,7 +639,7 @@ impl Parser<'_> {
     }
 
     /// A data or procedure name: a word that is neither a keyword nor a verb.
-    fn is_name(&self, k: usize) -> bool {
+    pub(super) fn is_name(&self, k: usize) -> bool {
         let t = &self.tokens[k];
         t.token.kind == TokenKind::Word && !word_in(t, KEYWORDS) && !word_in(t, VERBS)
     }
@@ -606,7 +650,7 @@ impl Parser<'_> {
     }
 
     /// The name at `k` with its `OF`/`IN` qualifiers, and the index after it.
-    fn qualified(&self, k: usize, end: usize) -> (QualifiedName, usize) {
+    pub(super) fn qualified(&self, k: usize, end: usize) -> (QualifiedName, usize) {
         let t = self.tokens;
         let mut next = k + 1;
         let mut qualifiers = Vec::new();
@@ -644,7 +688,7 @@ impl Parser<'_> {
 
     /// Collects the references in operands up to a verb or a statement-closing token.
     fn refs_until(&self, mut k: usize, end: usize, refs: &mut Vec<QualifiedName>) -> usize {
-        while k < end && !self.is_verb(k) && !self.oo_statement_at(k, end) && !self.closes(k, end) {
+        while k < end && !self.is_verb(k) && !self.stmt_boundary(k, end) && !self.closes(k, end) {
             k = self.ref_at(k, end, refs);
         }
         k
@@ -690,6 +734,9 @@ impl Parser<'_> {
     /// The statement starting at verb `i`, and the index after it. `None` when the statement is
     /// skipped: its diagnostic is already reported and the rest of the sentence is dropped.
     fn statement(&mut self, i: usize, end: usize) -> (Option<Statement>, usize) {
+        if is_exec_block(self.tokens, i) {
+            return self.exec_block(i, end);
+        }
         let verb = self.tokens[i].token.text.to_ascii_uppercase();
         match verb.as_str() {
             "IF" => self.if_statement(i, end),
@@ -780,7 +827,7 @@ impl Parser<'_> {
         let mut h = k;
         while h < end
             && !self.is_verb(h)
-            && !self.oo_statement_at(h, end)
+            && !self.stmt_boundary(h, end)
             && !self.closes(h, end)
             && !is(&t[h], "TIMES")
         {
@@ -910,7 +957,7 @@ impl Parser<'_> {
         let mut returning = None;
         let mut refs = Vec::new();
         let mut after_returning = false;
-        while k < end && !self.is_verb(k) && !self.oo_statement_at(k, end) && !self.closes(k, end) {
+        while k < end && !self.is_verb(k) && !self.stmt_boundary(k, end) && !self.closes(k, end) {
             if is(&t[k], "RETURNING") {
                 after_returning = true;
                 k += 1;
@@ -1065,7 +1112,7 @@ impl Parser<'_> {
                 k = next;
                 continue;
             }
-            if self.closes(k, end) || self.is_verb(k) || self.oo_statement_at(k, end) {
+            if self.closes(k, end) || self.is_verb(k) || self.stmt_boundary(k, end) {
                 break;
             }
             // ALTER operands are procedure names, which are not data references: dropped here.
@@ -1102,12 +1149,12 @@ impl Parser<'_> {
 }
 
 /// Whether `t` is the word `word` (case-insensitive).
-fn is(t: &Mapped, word: &str) -> bool {
+pub(super) fn is(t: &Mapped, word: &str) -> bool {
     matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved)
         && t.token.text.eq_ignore_ascii_case(word)
 }
 
-fn word_in(t: &Mapped, list: &[&str]) -> bool {
+pub(super) fn word_in(t: &Mapped, list: &[&str]) -> bool {
     list.iter().any(|word| is(t, word))
 }
 

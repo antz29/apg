@@ -5,6 +5,7 @@
 //! [`parse_compilation_unit`] over mapped tokens, and [`parse_source`], the in-memory reader.
 
 pub mod data;
+mod exec;
 mod oo;
 pub mod procedure;
 
