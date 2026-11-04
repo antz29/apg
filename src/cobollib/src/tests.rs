@@ -142,6 +142,47 @@ mod unit {
         }
 
         #[test]
+        fn end_prefixed_user_words_are_paragraphs_and_perform_targets() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    PERFORM END-ROUTINE THRU END-ROUTINE-13.\nEND-ROUTINE.\n    DISPLAY X.\nEND-ROUTINE-13.\n    DISPLAY Y.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let names: Vec<&str> = div
+                .paragraphs
+                .iter()
+                .map(|p| p.name.text.as_str())
+                .collect();
+            assert_eq!(names, ["A-PARA", "END-ROUTINE", "END-ROUTINE-13"]);
+            match &div.paragraphs[0].sentences[0].statements[0].transfer {
+                Some(Transfer::Perform(Some(range))) => {
+                    assert_eq!(range.from.name.text, "END-ROUTINE");
+                    assert_eq!(
+                        range.thru.as_ref().map(|q| q.name.text.as_str()),
+                        Some("END-ROUTINE-13")
+                    );
+                }
+                other => panic!("expected an out-of-line PERFORM, found {other:?}"),
+            }
+        }
+
+        #[test]
+        fn write_at_end_of_page_is_a_write_phrase() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    WRITE R AT END-OF-PAGE DISPLAY \"X\".\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(div.paragraphs[0].sentences[0].statements.len(), 1);
+        }
+
+        #[test]
+        fn end_if_still_closes_its_if() {
+            let text = "PROCEDURE DIVISION.\nA-PARA.\n    IF X = 1 DISPLAY Y END-IF DISPLAY Z.\n";
+            let (div, diags) = parse_procedure(text).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let statements = &div.paragraphs[0].sentences[0].statements;
+            assert_eq!(statements.len(), 2);
+            assert!(statements[0].scope_end.is_some());
+        }
+
+        #[test]
         fn inline_perform_nests_an_if_with_its_else() {
             let text = "PROCEDURE DIVISION.\nA-PARA.\n    PERFORM VARYING I FROM 1 BY 1 UNTIL I > 5\n        IF I = 2 DISPLAY I ELSE DISPLAY J END-IF\n    END-PERFORM.\n";
             let (div, diags) = parse_procedure(text).unwrap();

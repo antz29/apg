@@ -64,6 +64,29 @@ const VERBS: &[&str] = &[
     "WRITE",
 ];
 
+/// The COBOL-85 scope terminators: `END-<verb>` for each verb that takes one.
+const SCOPE_TERMINATORS: &[&str] = &[
+    "END-ADD",
+    "END-CALL",
+    "END-COMPUTE",
+    "END-DELETE",
+    "END-DIVIDE",
+    "END-EVALUATE",
+    "END-IF",
+    "END-MULTIPLY",
+    "END-PERFORM",
+    "END-READ",
+    "END-RECEIVE",
+    "END-RETURN",
+    "END-REWRITE",
+    "END-SEARCH",
+    "END-START",
+    "END-STRING",
+    "END-SUBTRACT",
+    "END-UNSTRING",
+    "END-WRITE",
+];
+
 /// Phrases that open a branch of a statement (`ON SIZE ERROR`, `AT END`, ...), each with the
 /// statements it holds. A leading `NOT` negates the branch.
 const BRANCHES: &[&[&str]] = &[
@@ -71,6 +94,7 @@ const BRANCHES: &[&[&str]] = &[
     &["ON", "OVERFLOW"],
     &["ON", "EXCEPTION"],
     &["AT", "END"],
+    &["AT", "END-OF-PAGE"],
     &["AT", "EOP"],
     &["INVALID", "KEY"],
 ];
@@ -790,13 +814,9 @@ fn word_in(t: &Mapped, list: &[&str]) -> bool {
     list.iter().any(|word| is(t, word))
 }
 
-/// Whether `t` is a scope terminator (`END-IF`, `END-PERFORM`, ...).
+/// Whether `t` is a COBOL-85 scope terminator. A user word such as `END-ROUTINE` is not one.
 fn is_end_word(t: &Mapped) -> bool {
-    matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved)
-        && t.token
-            .text
-            .get(..4)
-            .is_some_and(|p| p.eq_ignore_ascii_case("END-"))
+    word_in(t, SCOPE_TERMINATORS)
 }
 
 /// Whether `words` are exactly the words in `list`.
