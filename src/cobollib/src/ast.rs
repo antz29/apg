@@ -166,6 +166,103 @@ pub enum Transfer {
         input: Option<ProcRange>,
         output: Option<ProcRange>,
     },
+    /// `INVOKE receiver method [USING ...] [RETURNING ...]` (OO COBOL).
+    Invoke {
+        receiver: Receiver,
+        method: CallTarget,
+        using: Vec<QualifiedName>,
+        returning: Option<QualifiedName>,
+    },
+    /// `RAISE` of a condition name or of an object (OO COBOL and Micro Focus).
+    Raise(RaiseTarget),
+}
+
+/// The receiver of an `INVOKE`: a class name (factory), `SELF`, `SUPER`, `NULL`, or an
+/// object reference data item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Receiver {
+    Self_,
+    Super,
+    Null,
+    Name(QualifiedName),
+    ClassName(Name),
+}
+
+/// What a `RAISE` names: a standard condition name, or an object reference data item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RaiseTarget {
+    ExceptionName(Name),
+    Object(QualifiedName),
+}
+
+/// A `CLASS-ID` unit with its inheritance, repository entries and FACTORY/OBJECT sections.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Class {
+    pub name: Name,
+    pub span: Span,
+    pub identification: Span,
+    /// The `AS "..."` literal naming the class outside COBOL.
+    pub external: Option<Name>,
+    pub inherits: Vec<Name>,
+    pub implements: Vec<Name>,
+    pub repository: Vec<RepositoryEntry>,
+    pub factory: Option<ObjectSection>,
+    pub object: Option<ObjectSection>,
+}
+
+/// The FACTORY or OBJECT section of a class: its data and its methods.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectSection {
+    pub span: Span,
+    pub data: Option<DataDivision>,
+    pub methods: Vec<Method>,
+}
+
+/// An `INTERFACE-ID` unit with the interfaces it `INHERITS FROM` and its method prototypes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Interface {
+    pub name: Name,
+    pub span: Span,
+    pub identification: Span,
+    pub inherits: Vec<Name>,
+    pub prototypes: Vec<MethodPrototype>,
+}
+
+/// A `METHOD-ID` unit. `factory` is set from the FACTORY section it sits in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Method {
+    pub name: Name,
+    pub span: Span,
+    pub factory: bool,
+    pub data: Option<DataDivision>,
+    pub procedure: Option<ProcedureDivision>,
+}
+
+/// A method prototype in an interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodPrototype {
+    pub name: Name,
+    pub span: Span,
+}
+
+/// A `REPOSITORY` entry: `CLASS name [AS "external"]` or `INTERFACE name`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryEntry {
+    pub name: Name,
+    pub external: Option<Name>,
+}
+
+/// The `OBJECT REFERENCE [class]` clause of a data item; `class` is `None` when untyped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectReference {
+    pub class: Option<Name>,
+}
+
+/// The Micro Focus `PROPERTY [AS "name"] [WITH NO SET]` clause of a data item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Property {
+    pub as_name: Option<Name>,
+    pub no_set: bool,
 }
 
 /// A procedure name, or `from THRU thru`.
