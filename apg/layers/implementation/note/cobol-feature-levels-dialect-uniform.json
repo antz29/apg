@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-feature-levels-dialect-uniform",
+  "body": "Dialect::feature_level returns the SPEC §19.5 starting levels (ALTER and GO TO without a name obsolete, ENTRY ok, section segments ignore) identically under every dialect. Limit: no per-dialect construct levels are sourced, so a construct cannot yet differ in level between dialects. Upgrade when per-dialect feature data is sourced, before any dialect-specific diagnostic behaviour is relied on.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.dialect.Dialect.feature_level",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
