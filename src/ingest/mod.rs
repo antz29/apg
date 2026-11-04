@@ -1413,8 +1413,15 @@ fn ingest_records(
                     to,
                     properties,
                 } => {
+                    // A COBOL COPY target is an absolute copybook path: render it
+                    // to the same repo-relative File identity Record::File uses.
+                    let copy = properties.get("kind").map(String::as_str) == Some("copy");
                     let a = resolve(&from);
-                    let b = resolve(&to);
+                    let b = if copy {
+                        repo_relative_identity(base, &to)
+                    } else {
+                        resolve(&to)
+                    };
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
                     {
@@ -1878,7 +1885,13 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
             && ((graph.nodes[b].kind == NodeKind::Struct
                 && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct))
                 || (graph.nodes[a].kind == NodeKind::Person
-                    && graph.nodes[b].kind == NodeKind::Component))
+                    && graph.nodes[b].kind == NodeKind::Component)
+                || (graph.nodes[a].kind == NodeKind::Struct
+                    && graph.nodes[b].kind == NodeKind::File
+                    && graph
+                        .edge_properties
+                        .get(&("uses", a.clone(), b.clone()))
+                        .is_some_and(|p| p.get("kind").map(String::as_str) == Some("copy"))))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)
