@@ -647,6 +647,104 @@ mod unit {
     }
 
     #[test]
+    fn header_words_spanning_lines_are_one_header() {
+        let ok = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(11, "DATA"),
+            at(12, "DIVISION."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &ok, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+        let bad = [at(12, "DATA"), at(12, "DIVISION.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &bad, Dialect::Cobol85);
+        assert_eq!(
+            diags.iter().map(|d| d.line).collect::<Vec<_>>(),
+            [1],
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn separator_period_after_a_space_closes_the_name() {
+        let ok = [
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RWRT-INIT-GF-01-R ."),
+            at(8, "A SECTION ."),
+            at(12, "MOVE X TO Y."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &ok, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+        let bad = [at(8, "PROCEDURE DIVISION."), at(12, "B .")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &bad, Dialect::Cobol85);
+        assert_eq!(
+            diags.iter().map(|d| d.line).collect::<Vec<_>>(),
+            [2],
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn all_digit_paragraph_name_in_procedure_is_a_paragraph() {
+        let ok = [at(8, "PROCEDURE DIVISION."), at(8, "4.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &ok, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+        let bad = [at(8, "PROCEDURE DIVISION."), at(12, "4.")].join("\n");
+        let (_, diags) = crate::format::check("p.cob", &bad, Dialect::Cobol85);
+        assert_eq!(
+            diags.iter().map(|d| d.line).collect::<Vec<_>>(),
+            [2],
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn copy_and_replace_may_start_in_area_a_or_b() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "REPLACE OFF."),
+            at(8, "COPY  K1W04."),
+            at(12, "COPY K2."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn comment_entry_lines_up_to_the_next_area_a_line_draw_nothing() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "AUTHOR."),
+            at(12, "FEDERAL COMPILER TESTING CENTRE."),
+            at(12, "CONFIGURATION SECTION."),
+            at(12, "PROCEDURE DIVISION."),
+            at(12, "MAIN-PARA."),
+            at(8, "ENVIRONMENT DIVISION."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn genuine_statement_in_area_a_after_a_sentence_end_is_flagged() {
+        let text = [
+            at(8, "PROCEDURE DIVISION."),
+            at(12, "DISPLAY X."),
+            at(8, "MOVE X TO Y."),
+        ]
+        .join("\n");
+        let (_, diags) = crate::format::check("p.cob", &text, Dialect::Cobol85);
+        assert_eq!(
+            (diags.len(), diags[0].line, diags[0].col),
+            (1, 3, 8),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
     fn fixed_layout_ignores_sequence_area_and_columns_73_to_80() {
         let text = format!("000100 {:<65}{}", "DISPLAY X.", "PROG0001");
         let (tokens, _) = lex_all(&text, fixed(), Dialect::Cobol85);
