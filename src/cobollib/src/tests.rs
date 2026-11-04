@@ -774,6 +774,279 @@ mod unit {
         );
     }
 
+    /// Each expanded token as (text, file, line, col).
+    type Expanded = Vec<(String, String, usize, usize)>;
+
+    /// Expands `main` (named `name`) against the in-memory `files`; the tokens and the diagnostics.
+    fn run(
+        name: &str,
+        main: &str,
+        files: &[(&str, &str)],
+        search: &crate::preprocess::Search,
+    ) -> (Expanded, Vec<crate::diag::Diagnostic>) {
+        let store: std::collections::HashMap<std::path::PathBuf, String> = files
+            .iter()
+            .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
+            .collect();
+        let lookup = |path: &std::path::Path| store.get(path).cloned();
+        let mut map = crate::source_map::SourceMap::default();
+        let (mapped, diags) =
+            crate::preprocess::preprocess(&mut map, name, main, Dialect::Cobol85, search, &lookup);
+        let tokens = mapped
+            .iter()
+            .map(|m| {
+                (
+                    m.token.text.clone(),
+                    map.name(m.origin.file).to_string(),
+                    m.origin.line,
+                    m.origin.col,
+                )
+            })
+            .collect();
+        (tokens, diags)
+    }
+
+    /// Lines of fixed-format text, each statement at column 12.
+    fn src(lines: &[&str]) -> String {
+        lines
+            .iter()
+            .map(|l| at(12, l))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn search() -> crate::preprocess::Search {
+        crate::preprocess::Search {
+            scan_root: "/root".into(),
+            copy_paths: Vec::new(),
+        }
+    }
+
+    fn texts(tokens: &[(String, String, usize, usize)]) -> Vec<&str> {
+        tokens.iter().map(|t| t.0.as_str()).collect()
+    }
+
+    /// Copybooks `L1`..`L{len}` under /root: each copies the next, the last displays `last`.
+    fn chain(len: usize, last: &str) -> Vec<(String, String)> {
+        (1..=len)
+            .map(|i| {
+                let text = if i < len {
+                    src(&[&format!("COPY L{}.", i + 1)])
+                } else {
+                    src(&[&format!("DISPLAY {last}.")])
+                };
+                (format!("/root/L{i}.cpy"), text)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn copy_splices_the_copybook_text_in_place() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A.", "STOP RUN."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "X", ".", "STOP", "RUN", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn copied_and_main_tokens_keep_their_own_file_and_position() {
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["COPY A.", "STOP RUN."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X."]))],
+            &search(),
+        );
+        let x = &tokens[1];
+        assert_eq!((x.1.as_str(), x.2, x.3), ("/root/A.cpy", 1, 20));
+        let stop = &tokens[3];
+        assert_eq!((stop.1.as_str(), stop.2, stop.3), ("/root/prog.cob", 2, 12));
+    }
+
+    #[test]
+    fn copy_replacing_swaps_pseudo_text() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A REPLACING ==X== BY ==Y==."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "Y", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn copy_replacing_takes_bare_word_pairs() {
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["COPY A REPLACING X BY Y."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "Y", "."]);
+    }
+
+    #[test]
+    fn main_replace_applies_to_copied_text() {
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["REPLACE ==X== BY ==Z==.", "COPY A."]),
+            &[("/root/A.cpy", &src(&["DISPLAY X."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "Z", "."]);
+    }
+
+    #[test]
+    fn including_directory_is_searched_first() {
+        let (tokens, _) = run(
+            "/root/lib/prog.cob",
+            &src(&["COPY A."]),
+            &[
+                ("/root/lib/A.cpy", &src(&["DISPLAY L."])),
+                ("/root/A.cpy", &src(&["DISPLAY R."])),
+            ],
+            &search(),
+        );
+        assert_eq!(texts(&tokens)[1], "L");
+    }
+
+    #[test]
+    fn scan_root_precedes_copybooks_which_precede_copy() {
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["COPY A."]),
+            &[
+                ("/root/A.cpy", &src(&["DISPLAY R."])),
+                ("/root/copybooks/A.cpy", &src(&["DISPLAY B."])),
+                ("/root/copy/A.cpy", &src(&["DISPLAY K."])),
+            ],
+            &search(),
+        );
+        assert_eq!(texts(&tokens)[1], "R");
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["COPY A."]),
+            &[
+                ("/root/copybooks/A.cpy", &src(&["DISPLAY B."])),
+                ("/root/copy/A.cpy", &src(&["DISPLAY K."])),
+            ],
+            &search(),
+        );
+        assert_eq!(texts(&tokens)[1], "B");
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["COPY A."]),
+            &[("/root/copy/A.cpy", &src(&["DISPLAY K."]))],
+            &crate::preprocess::Search {
+                scan_root: "/root".into(),
+                copy_paths: vec!["/ext".into()],
+            },
+        );
+        assert_eq!(texts(&tokens)[1], "K");
+    }
+
+    #[test]
+    fn copy_paths_are_searched_last_in_the_given_order() {
+        let search = crate::preprocess::Search {
+            scan_root: "/root".into(),
+            copy_paths: vec!["/ext1".into(), "/ext2".into()],
+        };
+        let (tokens, _) = run(
+            "/root/prog.cob",
+            &src(&["COPY A."]),
+            &[
+                ("/ext2/A.cpy", &src(&["DISPLAY E2."])),
+                ("/ext1/A.cpy", &src(&["DISPLAY E1."])),
+            ],
+            &search,
+        );
+        assert_eq!(texts(&tokens)[1], "E1");
+    }
+
+    #[test]
+    fn copybook_extensions_are_matched_in_lower_and_upper_case() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY B.", "COPY C."]),
+            &[
+                ("/root/B.cbl", &src(&["DISPLAY B."])),
+                ("/root/C.COB", &src(&["DISPLAY C."])),
+            ],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "B", ".", "DISPLAY", "C", "."]);
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn missing_copybook_is_a_diagnostic_at_the_copy_and_the_scan_goes_on() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY MISSING.", "STOP RUN."]),
+            &[],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["STOP", "RUN", "."]);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(
+            (diags[0].file.as_str(), diags[0].line, diags[0].col),
+            ("/root/prog.cob", 1, 12)
+        );
+        assert!(diags[0].message.contains("MISSING"), "{diags:?}");
+    }
+
+    #[test]
+    fn circular_copy_is_a_diagnostic_at_the_inner_copy() {
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY A."]),
+            &[("/root/A.cpy", &src(&["DISPLAY A.", "COPY A."]))],
+            &search(),
+        );
+        assert_eq!(texts(&tokens), ["DISPLAY", "A", "."]);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(
+            (diags[0].file.as_str(), diags[0].line, diags[0].col),
+            ("/root/A.cpy", 2, 12)
+        );
+        assert!(diags[0].message.contains("circular"), "{diags:?}");
+    }
+
+    #[test]
+    fn nesting_within_the_depth_limit_expands() {
+        let owned = chain(crate::preprocess::MAX_DEPTH, "END");
+        let files: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .collect();
+        let (tokens, diags) = run("/root/prog.cob", &src(&["COPY L1."]), &files, &search());
+        assert!(texts(&tokens).contains(&"END"), "{tokens:?}");
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn nesting_past_the_depth_limit_is_a_diagnostic_and_the_scan_goes_on() {
+        let owned = chain(crate::preprocess::MAX_DEPTH + 1, "FAR");
+        let files: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .collect();
+        let (tokens, diags) = run(
+            "/root/prog.cob",
+            &src(&["COPY L1.", "STOP RUN."]),
+            &files,
+            &search(),
+        );
+        assert!(!texts(&tokens).contains(&"FAR"), "{tokens:?}");
+        assert!(texts(&tokens).contains(&"RUN"), "{tokens:?}");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("nests deeper"), "{diags:?}");
+    }
+
     fn diag(message: &str) -> crate::diag::Diagnostic {
         crate::diag::Diagnostic {
             file: "prog.cob".to_string(),
