@@ -1461,6 +1461,16 @@ mod unit {
         }
 
         #[test]
+        fn program_without_end_program_is_a_sibling_not_nested() {
+            let (unit, diags) = parse_file(
+                "IDENTIFICATION DIVISION.\nPROGRAM-ID. ONE.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\nIDENTIFICATION DIVISION.\nPROGRAM-ID. TWO.\nPROCEDURE DIVISION.\nMAIN.\n    STOP RUN.\n",
+            );
+            assert!(diags.is_empty(), "{diags:?}");
+            assert_eq!(unit.programs.len(), 2);
+            assert!(unit.programs.iter().all(|p| p.nested.is_empty()));
+        }
+
+        #[test]
         fn declarations_are_kept_around_a_syntax_error() {
             let (unit, diags) = parse_file(
                 "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 A PIC X.\nPROCEDURE DIVISION.\nP1.\n    FOO BAR.\nP2.\n    DISPLAY 'X'.\nEND PROGRAM P.\n",

@@ -61,6 +61,13 @@ fn boundary(tokens: &[Mapped], i: usize) -> bool {
     header(tokens, i, IDENTIFICATION) || end_program(tokens, i).is_some()
 }
 
+/// Whether `END PROGRAM <name>` appears at or after `from`: only then can a program nest inside `name`.
+fn closed_later(tokens: &[Mapped], from: usize, name: &str) -> bool {
+    (from..tokens.len()).any(|k| {
+        end_program(tokens, k).is_some() && tokens.get(k + 2).is_some_and(|t| is_word(t, name))
+    })
+}
+
 /// The first index after `from` where a division, or a program boundary, begins.
 fn section_end(tokens: &[Mapped], from: usize) -> usize {
     (from..tokens.len())
@@ -122,6 +129,11 @@ fn parse_program(
             break;
         }
         if header(tokens, i, IDENTIFICATION) {
+            // Without an END PROGRAM for this program, the next header is a sibling, not nested.
+            if !closed_later(tokens, i, &prog.name.text) {
+                used = i;
+                break;
+            }
             match parse_program(map, dialect, &tokens[i..], diags) {
                 Some((nested, n)) => {
                     prog.nested.push(nested);
