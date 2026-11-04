@@ -3561,4 +3561,103 @@ mod int {
             .contains(&serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"unknown"})));
         assert!(!recs.iter().any(|r| r["fqn"] == "NOPE2"));
     }
+
+    /// Declares a file, an indexed-by name, a mnemonic and a switch-status name, then uses each.
+    fn declared_uses() -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "ENVIRONMENT DIVISION."),
+            at(8, "CONFIGURATION SECTION."),
+            at(8, "SPECIAL-NAMES."),
+            at(12, "CONSOLE IS CRT"),
+            at(12, "SWITCH-1 IS SW-ONE ON STATUS IS SW-ON."),
+            at(8, "INPUT-OUTPUT SECTION."),
+            at(8, "FILE-CONTROL."),
+            at(12, "SELECT CARD-FILE ASSIGN TO CARDS."),
+            at(8, "DATA DIVISION."),
+            at(8, "FILE SECTION."),
+            at(8, "FD CARD-FILE."),
+            at(8, "01 CARD-REC PIC X."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 TBL."),
+            at(12, "05 ENT OCCURS 3 TIMES INDEXED BY IDX PIC X."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "OPEN INPUT CARD-FILE."),
+            at(12, "READ CARD-FILE."),
+            at(12, "SET IDX TO 1."),
+            at(12, "DISPLAY 'X' UPON CRT."),
+            at(12, "IF SW-ON"),
+            at(16, "DISPLAY 'Y'"),
+            at(12, "END-IF."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn declared_file_index_mnemonic_and_switch_names_draw_no_unresolved_use() {
+        let (recs, diags) = scan_text("/root/prog.cob", &declared_uses(), &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(
+            !recs.iter().any(|r| r["type"] == "unresolved_use"),
+            "{recs:?}"
+        );
+        assert!(!recs.iter().any(|r| r["fqn"] == "CARD-FILE"), "{recs:?}");
+        assert!(!recs.iter().any(|r| r["fqn"] == "IDX"), "{recs:?}");
+        assert!(!recs.iter().any(|r| r["fqn"] == "CRT"), "{recs:?}");
+        assert!(!recs.iter().any(|r| r["fqn"] == "SW-ON"), "{recs:?}");
+    }
+
+    /// OUTER holds GLOBAL 01 G-REC; MID uses its item G-F and GRAND (inside MID) uses G-REC.
+    fn global_uses() -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. OUTER."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 G-REC GLOBAL."),
+            at(12, "05 G-F PIC X."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "O-PARA."),
+            at(12, "STOP RUN."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. MID."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "M-PARA."),
+            at(12, "DISPLAY G-F."),
+            at(12, "STOP RUN."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. GRAND."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "G-PARA."),
+            at(12, "DISPLAY G-REC."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM GRAND."),
+            at(8, "END PROGRAM MID."),
+            at(8, "END PROGRAM OUTER."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn nested_and_grandchild_global_references_use_the_outer_record() {
+        let (recs, diags) = scan_text("/root/prog.cob", &global_uses(), &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let record = id_of(&recs, "G-REC");
+        let want = [
+            serde_json::json!({"type":"uses","from":id_of(&recs,"M-PARA"),"to":record}),
+            serde_json::json!({"type":"uses","from":id_of(&recs,"G-PARA"),"to":record}),
+        ];
+        assert_eq!(edges(&recs, &["uses"]), {
+            let mut w = want.to_vec();
+            w.sort_by_key(|v| v.to_string());
+            w
+        });
+        assert!(
+            !recs.iter().any(|r| r["type"] == "unresolved_use"),
+            "{recs:?}"
+        );
+    }
 }

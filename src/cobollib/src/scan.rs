@@ -15,7 +15,10 @@ use crate::diag::{write_diagnostic, Diagnostic};
 use crate::dialect::Dialect;
 use crate::parser::parse_compilation_unit;
 use crate::preprocess::{preprocess, read_file, Search};
-use crate::resolve::{resolve_call, scopes, CallResolution, ProcKind, Resolution, Scope};
+use crate::resolve::{
+    declared, declares, global_data, resolve_call, scopes, CallResolution, Declared, ProcKind,
+    Resolution, Scope,
+};
 use crate::source_map::{FileId, Origin, SourceMap};
 
 /// Unified JSONL records (SPEC §2), the `cobol` stream's wire shapes.
@@ -183,6 +186,8 @@ struct Locate<'a> {
     lookup: &'a dyn Fn(&Path) -> Option<String>,
     texts: BTreeMap<String, Text>,
     scopes: Vec<Scope>,
+    /// Per scope (parallel to `scopes`), the non-data names it declares.
+    decls: Vec<Declared>,
     scope: usize,
     ids: Vec<Vec<Option<String>>>,
     pending: Vec<Pending>,
@@ -472,21 +477,35 @@ impl Emitter {
         let mut reported = BTreeSet::new();
         for r in std::mem::take(&mut loc.data_refs) {
             let scope = &loc.scopes[r.scope];
-            let record = scope.data(&r.name).and_then(|i| {
+            let local = scope.data(&r.name).and_then(|i| {
                 let key = scope.records[i].name.as_ref()?.text.to_ascii_uppercase();
                 loc.data_ids[r.scope].get(&key)
             });
             let name = &r.name.name.text;
+            let record = match local {
+                Some(to) => Some(to.clone()),
+                None if declares(&loc.scopes, &loc.decls, r.scope, &r.name)
+                    || loc.declared[r.scope].contains(&name.to_ascii_uppercase()) =>
+                {
+                    continue
+                }
+                None => {
+                    global_data(&loc.scopes, &loc.decls, r.scope, &r.name).and_then(|(a, i)| {
+                        let key = loc.scopes[a].records[i]
+                            .name
+                            .as_ref()?
+                            .text
+                            .to_ascii_uppercase();
+                        loc.data_ids[a].get(&key).cloned()
+                    })
+                }
+            };
             match record {
                 Some(to) => {
                     if linked.insert((r.from.clone(), to.clone())) {
-                        self.recs.push(Rec::Uses {
-                            from: r.from,
-                            to: to.clone(),
-                        });
+                        self.recs.push(Rec::Uses { from: r.from, to });
                     }
                 }
-                None if loc.declared[r.scope].contains(&name.to_ascii_uppercase()) => {}
                 None => {
                     if reported.insert((r.from.clone(), name.clone())) {
                         if self.unresolved.insert(name.clone()) {
@@ -604,6 +623,7 @@ impl Emitter {
             lookup,
             texts: BTreeMap::new(),
             scopes: scopes(&unit),
+            decls: declared(&unit),
             scope: 0,
             ids: Vec::new(),
             pending: Vec::new(),
