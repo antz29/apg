@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-exec-cics-transactions",
-  "body": "An EXEC CICS START TRANSID, RETURN TRANSID or other transaction command has no program edge.",
+  "body": "An EXEC CICS transaction command, such as START TRANSID or RETURN TRANSID, yields a graph with no program edge from it.",
   "properties": {
     "feature": "cobol-frontend"
   },
