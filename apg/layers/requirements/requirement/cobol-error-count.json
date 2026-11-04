@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-error-count",
+  "body": "The COBOL frontend closes each scan with one stderr line stating the number of COBOL files that had errors.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-source-reading",
+      "properties": {}
+    }
+  ]
+}

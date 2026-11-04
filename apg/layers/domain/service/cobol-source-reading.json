@@ -7,32 +7,7 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-source-handling",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-format-detection",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.cobol-area-a-checks",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-copybook-files",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-source-map",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-copybook-search",
       "properties": {}
     },
     {
@@ -42,12 +17,12 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-sentence-recovery",
+      "target": "requirements.requirement.cobol-copybook-files",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-header-recovery",
+      "target": "requirements.requirement.cobol-copybook-search",
       "properties": {}
     },
     {
@@ -58,6 +33,41 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.cobol-error-report",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-format-detection",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-header-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-sentence-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-source-map",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-error-count",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-crash-reason",
       "properties": {}
     }
   ],

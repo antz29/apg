@@ -9,27 +9,7 @@
   "out": [
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-format-detection",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "requirements.requirement.cobol-area-a-checks",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cobol-copybook-files",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cobol-source-map",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cobol-copybook-search",
       "properties": {}
     },
     {
@@ -39,12 +19,12 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-sentence-recovery",
+      "target": "requirements.requirement.cobol-copybook-files",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.cobol-header-recovery",
+      "target": "requirements.requirement.cobol-copybook-search",
       "properties": {}
     },
     {
@@ -55,6 +35,36 @@
     {
       "kind": "contains",
       "target": "requirements.requirement.cobol-error-report",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-format-detection",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-header-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-sentence-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-source-map",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-error-count",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-crash-reason",
       "properties": {}
     }
   ],

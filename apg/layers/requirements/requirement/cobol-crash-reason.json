@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-crash-reason",
+  "body": "A failed COBOL frontend process writes its failure reason as the last line of stderr before it exits.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-source-reading",
+      "properties": {}
+    }
+  ]
+}
