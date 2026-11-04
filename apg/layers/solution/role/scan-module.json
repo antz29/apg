@@ -222,6 +222,16 @@
       "kind": "is-role",
       "source": "solution.component.code-universe-read",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-driver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-source-claim",
+      "properties": {}
     }
   ]
 }
