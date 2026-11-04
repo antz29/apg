@@ -25,6 +25,11 @@ pub(super) fn exec_block_end(tokens: &[Mapped], start: usize, end: usize) -> Opt
         .map(|k| k + 1)
 }
 
+/// The diagnostic for an EXEC block outside `ibm` (shared with the DATA DIVISION skipper).
+pub(super) const EXEC_NOT_IBM: &str = "an EXEC block is recognised only under ibm";
+/// The diagnostic for an EXEC block with no `END-EXEC` (shared with the DATA DIVISION skipper).
+pub(super) const EXEC_NOT_ENDED: &str = "EXEC block is not ended by END-EXEC";
+
 impl Parser<'_> {
     /// The EXEC block at `i` (see [`is_exec_block`]), read to the `END-EXEC` before `end`. Under
     /// `ibm` it is one statement. Under any other dialect it is one error and is skipped through
@@ -33,12 +38,12 @@ impl Parser<'_> {
     pub(super) fn exec_block(&mut self, i: usize, end: usize) -> (Option<Statement>, usize) {
         let Some(after) = exec_block_end(self.tokens, i, end) else {
             let at = self.origin(i);
-            self.diag(at, "EXEC block is not ended by END-EXEC");
+            self.diag(at, EXEC_NOT_ENDED);
             return (None, end);
         };
         if self.dialect != Dialect::Ibm {
             let at = self.origin(i);
-            self.diag(at, "an EXEC block is recognised only under ibm");
+            self.diag(at, EXEC_NOT_IBM);
             return (None, after);
         }
         let close = after - 1;

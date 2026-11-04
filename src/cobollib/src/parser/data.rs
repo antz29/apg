@@ -13,6 +13,8 @@ use crate::dialect::Dialect;
 use crate::lexer::TokenKind;
 use crate::source_map::{Mapped, Origin, SourceMap};
 
+use super::exec::{exec_block_end, is_exec_block, EXEC_NOT_ENDED, EXEC_NOT_IBM};
+
 /// Words that open a clause or are clause operands. A clause word is never a data name and
 /// ends a PICTURE string.
 const CLAUSE_WORDS: &[&str] = &[
@@ -169,12 +171,37 @@ impl Parser<'_> {
         end
     }
 
+    /// The index after the EXEC block at `i` and its sentence period. Under `ibm` it is no fact
+    /// and no error; elsewhere it is one error. Without an `END-EXEC` it is an error and skips to
+    /// the period.
+    fn exec_block(&mut self, i: usize, end: usize) -> usize {
+        let Some(after) = exec_block_end(self.tokens, i, end) else {
+            let at = self.origin(i);
+            self.diag(at, EXEC_NOT_ENDED);
+            return self.skip_entry(i, end);
+        };
+        if self.dialect != Dialect::Ibm {
+            let at = self.origin(i);
+            self.diag(at, EXEC_NOT_IBM);
+        }
+        if after < end && self.tokens[after].token.kind == TokenKind::Period {
+            after + 1
+        } else {
+            after
+        }
+    }
+
     /// The entries in `i..end`, nested by level number. A malformed entry is dropped.
     fn entries(&mut self, mut i: usize, end: usize) -> Vec<DataEntry> {
         let tokens = self.tokens;
         let mut roots = Vec::new();
         let mut stack = Vec::new();
         while i < end {
+            if is_exec_block(tokens, i) {
+                // An EXEC block is not a data entry: it neither opens nor closes a record.
+                i = self.exec_block(i, end);
+                continue;
+            }
             if is(&tokens[i], "FD") || is(&tokens[i], "SD") {
                 // File and sort descriptions are not AST entries; they close the open records.
                 let next = self.skip_entry(i, end);
