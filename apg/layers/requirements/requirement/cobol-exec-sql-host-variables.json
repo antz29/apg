@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-exec-sql-host-variables",
-  "body": "An EXEC SQL block is opaque, and each host variable it references is a data reference resolved like any other, while its table names emit no node.",
+  "body": "Each host variable an EXEC SQL block references is a data reference resolved like any other, and the block's table names are not graph nodes.",
   "properties": {
     "feature": "cobol-frontend"
   },
