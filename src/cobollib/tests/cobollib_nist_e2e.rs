@@ -20,33 +20,48 @@ fn is_obsolete(d: &Diagnostic) -> bool {
     d.message.ends_with(" is Obsolete under this dialect")
 }
 
-/// Whether `path` is a corpus program: a file with no extension or `.cbl`/`.cob` (any case)
-/// whose stem starts with an in-scope prefix (case-insensitive).
+/// Whether `path` is a corpus program: a `.CBL`/`.SUB` file (any case) whose stem starts with
+/// an in-scope prefix (case-insensitive). `*.log`, `*.DAT` and copybooks never match.
 fn in_scope(path: &Path) -> bool {
-    let ext_ok = match path.extension().and_then(|e| e.to_str()) {
-        None => true,
-        Some(e) => matches!(e.to_ascii_lowercase().as_str(), "cbl" | "cob"),
-    };
+    let ext_ok = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("CBL") || e.eq_ignore_ascii_case("SUB"));
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_uppercase();
-    path.is_file() && ext_ok && PREFIXES.iter().any(|p| stem.starts_with(p))
+    ext_ok && PREFIXES.iter().any(|p| stem.starts_with(p))
 }
 
-/// The in-scope programs under `dir`, sorted; panics naming `dir` when it is missing or empty.
-fn corpus(dir: &Path) -> Vec<PathBuf> {
-    let mut programs: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("NIST corpus missing at {}: {e}", dir.display()))
-        .map(|entry| entry.expect("read corpus entry").path())
-        .filter(|p| in_scope(p))
-        .collect();
+/// Recursively collects the in-scope programs under `dir` (a module folder and its `lib/`).
+fn walk(dir: &Path, programs: &mut Vec<PathBuf>) {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("NIST corpus missing at {}: {e}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("read corpus entry").path();
+        if path.is_dir() {
+            walk(&path, programs);
+        } else if in_scope(&path) {
+            programs.push(path);
+        }
+    }
+}
+
+/// The in-scope programs of the ten module folders under `root`, sorted. The copybook folders
+/// (`copy/`, `copyalt/`) sit beside the module folders and are never walked. Panics naming
+/// `root` when no program is found.
+fn corpus(root: &Path) -> Vec<PathBuf> {
+    let mut programs = Vec::new();
+    for module in PREFIXES {
+        walk(&root.join(module), &mut programs);
+    }
     programs.sort();
     assert!(
         !programs.is_empty(),
-        "no in-scope NIST program (NC/IC/IF/IX/OB/RL/SG/SM/SQ/ST) in {}",
-        dir.display()
+        "no in-scope NIST program (NC/IC/IF/IX/OB/RL/SG/SM/SQ/ST) under {}",
+        root.display()
     );
     programs
 }
