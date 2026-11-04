@@ -6420,4 +6420,112 @@ mod int {
         }
         assert_eq!(edges(&recs, &["uses"]).len(), 2, "{recs:?}");
     }
+
+    #[test]
+    fn exec_sql_host_variable_uses_its_record_and_an_unresolved_one_draws_no_uses_edge() {
+        let text = data_prog(
+            "PROG",
+            &["EXEC SQL SELECT F INTO :F, :LONE, :NOPE FROM T END-EXEC."],
+        );
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":main,"to":id_of(&recs,"REC")})],
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn exec_sql_indicator_variable_draws_no_edge() {
+        let text = data_prog(
+            "PROG",
+            &["EXEC SQL SELECT F INTO :F:CODES FROM T END-EXEC."],
+        );
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":main,"to":id_of(&recs,"REC")})],
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn exec_sql_call_to_a_scanned_program_is_a_uses_edge_like_a_literal_call() {
+        let a = caller_at(&["EXEC SQL CALL SUB-B END-EXEC."]);
+        let b = prog("SUB-B");
+        let recs = scan_tree_ibm(&[("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())]);
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [
+                serde_json::json!({"type":"uses","from":id_of(&recs,"MAIN-PARA"),"to":id_of(&recs,"SUB-B")})
+            ],
+            "{recs:?}"
+        );
+        assert!(edges(&recs, &["unresolved_call"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn exec_sql_call_to_an_unscanned_program_is_external() {
+        let text = caller_at(&["EXEC SQL CALL NOPE END-EXEC."]);
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        for want in [
+            serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"external"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"NOPE"}),
+        ] {
+            assert!(recs.contains(&want), "{want} missing from {recs:?}");
+        }
+        assert!(edges(&recs, &["uses"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn exec_sql_table_names_and_functions_leave_no_record() {
+        let text = data_prog(
+            "PROG",
+            &[
+                "EXEC SQL SELECT UPPER(F) FROM EMP-TAB END-EXEC.",
+                "EXEC SQL SELECT COUNT(*) INTO :F FROM EMP-TAB END-EXEC.",
+            ],
+        );
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        for word in ["EMP-TAB", "UPPER", "COUNT"] {
+            assert!(
+                !recs.iter().any(|r| r.to_string().contains(word)),
+                "{word}: {recs:?}"
+            );
+        }
+        let main = id_of(&recs, "MAIN-PARA");
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":main,"to":id_of(&recs,"REC")})],
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn exec_sql_host_variables_and_calls_are_skipped_under_cobol85() {
+        let a = data_prog(
+            "PROG",
+            &[
+                "EXEC SQL CALL SUB-B END-EXEC.",
+                "EXEC SQL SELECT F INTO :F, :NOPE FROM T END-EXEC.",
+            ],
+        );
+        let b = prog("SUB-B");
+        let recs = jsonl(&scan_tree(&[
+            ("/root/a.cob", a.as_str()),
+            ("/root/b.cob", b.as_str()),
+        ]));
+        assert!(
+            edges(&recs, &["uses", "unresolved_call", "unresolved_use"]).is_empty(),
+            "{recs:?}"
+        );
+        assert!(!recs.iter().any(|r| r["type"] == "unresolved"), "{recs:?}");
+    }
 }
