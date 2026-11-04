@@ -2772,6 +2772,174 @@ mod unit {
             }
         }
     }
+
+    mod parser_exec {
+        use super::*;
+        use crate::ast::{CompilationUnit, QualifiedName, Statement};
+
+        const NOT_IBM: &str = "an EXEC block is recognised only under ibm";
+        const NOT_ENDED: &str = "EXEC block is not ended by END-EXEC";
+
+        /// `body` as the PROCEDURE DIVISION body of program `P`, parsed under `dialect`.
+        fn parse_exec(
+            dialect: Dialect,
+            body: &str,
+        ) -> (CompilationUnit, Vec<crate::diag::Diagnostic>) {
+            let text = format!("IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nPROCEDURE DIVISION.\nMAIN-PARA.\n{body}END PROGRAM P.\n");
+            crate::parser::parse_source(
+                "p.cob",
+                &format!(">>SOURCE FREE\n{text}"),
+                dialect,
+                &search(),
+                &|_| None,
+            )
+        }
+
+        /// The statements of the first paragraph's sentences, flattened.
+        fn statements(unit: &CompilationUnit) -> Vec<&Statement> {
+            let div = unit.programs[0].procedure.as_ref().unwrap();
+            div.paragraphs[0]
+                .sentences
+                .iter()
+                .flat_map(|s| &s.statements)
+                .collect()
+        }
+
+        fn qnames(names: &[QualifiedName]) -> Vec<&str> {
+            names.iter().map(|q| q.name.text.as_str()).collect()
+        }
+
+        fn count(diags: &[crate::diag::Diagnostic], message: &str) -> usize {
+            diags.iter().filter(|d| d.message == message).count()
+        }
+
+        #[test]
+        fn ibm_exec_cics_and_sql_are_one_statement_each() {
+            let text = "    EXEC CICS LINK PROGRAM('SUB') END-EXEC.\n    EXEC SQL SELECT A INTO :HV FROM T END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(matches!(
+                &stmts[0].transfer,
+                Some(Transfer::Call(CallTarget::Literal(n))) if n.text.contains("SUB")
+            ));
+            assert_eq!(qnames(&stmts[1].refs), ["HV"]);
+        }
+
+        #[test]
+        fn exec_block_is_an_error_outside_ibm_and_is_skipped_through_end_exec() {
+            let text = "    EXEC CICS LINK PROGRAM('SUB') END-EXEC.\n    EXEC SQL SELECT A INTO :HV FROM T END-EXEC.\n    DISPLAY X.\n";
+            for dialect in [Dialect::Cobol85, Dialect::Cobol2002, Dialect::Cobol2014] {
+                let (unit, diags) = parse_exec(dialect, text);
+                assert_eq!(diags.len(), 2, "{dialect:?} {diags:?}");
+                assert_eq!(count(&diags, NOT_IBM), 2, "{dialect:?} {diags:?}");
+                let stmts = statements(&unit);
+                assert_eq!(stmts.len(), 1, "{dialect:?}");
+                assert_eq!(qnames(&stmts[0].refs), ["X"], "{dialect:?}");
+                assert!(stmts[0].transfer.is_none(), "{dialect:?}");
+            }
+        }
+
+        #[test]
+        fn exec_block_without_end_exec_is_a_diagnostic_and_skips_to_the_period() {
+            let text = "    EXEC SQL SELECT A FROM T.\n    DISPLAY X.\n";
+            for dialect in ALL_DIALECTS {
+                let (unit, diags) = parse_exec(dialect, text);
+                assert_eq!(diags.len(), 1, "{dialect:?} {diags:?}");
+                assert_eq!(count(&diags, NOT_ENDED), 1, "{dialect:?}");
+                let stmts = statements(&unit);
+                assert_eq!(stmts.len(), 1, "{dialect:?}");
+                assert_eq!(qnames(&stmts[0].refs), ["X"], "{dialect:?}");
+            }
+        }
+
+        #[test]
+        fn period_inside_an_exec_block_does_not_end_the_sentence() {
+            let text = "    EXEC SQL SELECT A. FROM T END-EXEC.\n    DISPLAY X.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let sentences = &unit.programs[0].procedure.as_ref().unwrap().paragraphs[0].sentences;
+            assert_eq!(sentences.len(), 2);
+            assert_eq!(sentences[0].statements.len(), 1);
+            assert_eq!(qnames(&sentences[1].statements[0].refs), ["X"]);
+        }
+
+        #[test]
+        fn word_inside_an_exec_block_does_not_start_a_header() {
+            let text = "    EXEC SQL DELETE FROM OTHER-PARA WHERE KEY = 1 END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let paragraphs = &unit.programs[0].procedure.as_ref().unwrap().paragraphs;
+            assert_eq!(paragraphs.len(), 1);
+            assert_eq!(paragraphs[0].name.text, "MAIN-PARA");
+            assert_eq!(statements(&unit).len(), 1);
+        }
+
+        #[test]
+        fn exec_as_an_operand_is_an_ordinary_word_under_every_dialect() {
+            for dialect in ALL_DIALECTS {
+                let (unit, diags) = parse_exec(dialect, "    MOVE EXEC TO X.\n");
+                assert!(diags.is_empty(), "{dialect:?} {diags:?}");
+                let stmts = statements(&unit);
+                assert_eq!(stmts.len(), 1, "{dialect:?}");
+                assert_eq!(qnames(&stmts[0].refs), ["EXEC", "X"], "{dialect:?}");
+            }
+        }
+
+        #[test]
+        fn exec_sql_inside_if_else_is_its_own_statement_under_ibm() {
+            let text = "    IF X = 1 EXEC SQL SELECT A INTO :HV FROM T END-EXEC ELSE MOVE 2 TO Y END-IF.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert!(qnames(&stmts[0].refs).contains(&"X"));
+            let branches = &stmts[0].children;
+            assert_eq!(branches.len(), 2, "{branches:?}");
+            assert_eq!(qnames(&branches[0].refs), ["HV"]);
+            assert_eq!(qnames(&branches[1].refs), ["Y"]);
+        }
+
+        #[test]
+        fn exec_sql_inside_if_else_is_skipped_under_cobol85_and_the_else_survives() {
+            let text = "    IF X = 1 EXEC SQL SELECT A INTO :HV FROM T END-EXEC ELSE MOVE 2 TO Y END-IF.\n";
+            let (unit, diags) = parse_exec(Dialect::Cobol85, text);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(count(&diags, NOT_IBM), 1, "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert!(qnames(&stmts[0].refs).contains(&"X"));
+            let branches = &stmts[0].children;
+            assert!(
+                branches.iter().any(|b| qnames(&b.refs) == ["Y"]),
+                "{branches:?}"
+            );
+            assert!(branches.iter().all(|b| !qnames(&b.refs).contains(&"HV")));
+        }
+
+        #[test]
+        fn exec_cics_after_a_move_in_one_sentence_is_its_own_statement_under_ibm() {
+            let text = "    MOVE 1 TO X EXEC CICS RETURN END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+            assert!(stmts[1].transfer.is_none());
+        }
+
+        #[test]
+        fn exec_cics_after_a_move_is_skipped_under_cobol85_and_the_move_survives() {
+            let text = "    MOVE 1 TO X EXEC CICS RETURN END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Cobol85, text);
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert_eq!(count(&diags, NOT_IBM), 1, "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert_eq!(qnames(&stmts[0].refs), ["X"]);
+        }
+    }
 }
 
 fn search() -> crate::preprocess::Search {
