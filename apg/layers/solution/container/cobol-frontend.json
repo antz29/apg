@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "cobol-frontend",
-  "body": "The COBOL frontend artifact: build-time stable Rust 1.98.1, zero scan-time tools on PATH, and a hand-written engine whose language ceiling is the dialect table.",
+  "body": "The COBOL frontend artifact: build-time stable Rust 1.98.1 plus crates.io (serde and serde_json only), zero scan-time dependencies, and no engine pin, its hand-written parser's language ceiling set by the dialect table.",
   "properties": {
     "kind": "app"
   },

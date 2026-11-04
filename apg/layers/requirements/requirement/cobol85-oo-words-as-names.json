@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol85-oo-words-as-names",
-  "body": "Under cobol85 only CLASS is reserved among the OO words, so the other OO words parse as ordinary data names.",
+  "body": "Under cobol85 only CLASS is a reserved OO word, and each other OO word parses as an ordinary data name, as every OO word does outside OO context under every dialect.",
   "properties": {
     "feature": "cobol-frontend"
   },
