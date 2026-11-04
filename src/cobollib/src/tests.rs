@@ -2099,6 +2099,65 @@ mod unit {
             assert_eq!(map.layout(second), Some(Layout::Free));
         }
     }
+
+    mod scan_argv {
+        use super::*;
+
+        fn argv(items: &[&str]) -> Vec<String> {
+            items.iter().map(|s| s.to_string()).collect()
+        }
+
+        #[test]
+        fn every_flag_and_bare_exclude_is_read() {
+            let args = crate::scan::parse_args(&argv(&[
+                "/src",
+                "--module",
+                "sub",
+                "--id-prefix",
+                "g1",
+                "--targets",
+                "t.txt",
+                "--cache-dir",
+                "c",
+                "--cache-key",
+                "k",
+                "--copy-path",
+                "cp",
+                "-std=ibm",
+                "sub/x.cob",
+            ]))
+            .unwrap();
+            assert_eq!(args.root, "/src");
+            assert_eq!(args.modules, ["sub"]);
+            assert_eq!(args.id_prefix, "g1");
+            assert_eq!(args.targets.as_deref(), Some("t.txt"));
+            assert_eq!(args.copy_paths, ["cp"]);
+            assert_eq!(args.dialect, Dialect::Ibm);
+            assert_eq!(args.excludes, ["sub/x.cob"]);
+        }
+
+        #[test]
+        fn defaults_without_flags() {
+            let args = crate::scan::parse_args(&argv(&["/src"])).unwrap();
+            assert_eq!(args.id_prefix, "n");
+            assert_eq!(args.dialect, Dialect::DEFAULT);
+            assert!(args.targets.is_none() && args.modules.is_empty());
+        }
+
+        #[test]
+        fn value_flag_without_its_value_is_an_exclude() {
+            let args = crate::scan::parse_args(&argv(&["/src", "--module"])).unwrap();
+            assert!(args.modules.is_empty());
+            assert_eq!(args.excludes, ["--module"]);
+        }
+
+        #[test]
+        fn missing_directory_and_unknown_dialect_are_refused() {
+            assert!(crate::scan::parse_args(&[]).is_err());
+            let err = crate::scan::parse_args(&argv(&["/src", "-std=cobol2023"])).unwrap_err();
+            assert!(err.contains("placeholder"), "{err}");
+        }
+    }
 }
 
 fn search() -> crate::preprocess::Search {
@@ -2743,16 +2802,47 @@ mod int {
             .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
             .collect();
         let lookup = |p: &std::path::Path| store.get(p).cloned();
-        let mut emitter = crate::scan::Emitter::default();
+        let mut emitter = crate::scan::Emitter::new(std::path::Path::new("/root"), "n");
         let diags = emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
+        (jsonl(&emitter), diags)
+    }
+
+    /// Scans every `(path, text)` of `tree` into one emitter under the `/root` base, the
+    /// copybook lookup reading the same tree.
+    fn scan_tree(tree: &[(&str, &str)]) -> crate::scan::Emitter {
+        let store: std::collections::HashMap<std::path::PathBuf, String> = tree
+            .iter()
+            .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
+            .collect();
+        let lookup = |p: &std::path::Path| store.get(p).cloned();
+        let mut emitter = crate::scan::Emitter::new(std::path::Path::new("/root"), "n");
+        for (path, text) in tree {
+            emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
+        }
+        emitter
+    }
+
+    /// The emitter's records as JSON values, one per JSONL line.
+    fn jsonl(emitter: &crate::scan::Emitter) -> Vec<serde_json::Value> {
         let mut out = Vec::new();
         emitter.write_jsonl(&mut out).unwrap();
-        let recs = String::from_utf8(out)
+        String::from_utf8(out)
             .unwrap()
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
-        (recs, diags)
+            .collect()
+    }
+
+    /// A minimal program `name` (PROCEDURE with one paragraph) as a standalone source.
+    fn prog(name: &str) -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, &format!("PROGRAM-ID. {name}.")),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n")
     }
 
     #[test]
@@ -2772,10 +2862,10 @@ mod int {
         assert_eq!(
             recs,
             [
-                serde_json::json!({"type":"module","fqn":"/root"}),
-                serde_json::json!({"type":"file","path":"/root/prog.cob","parent":"/root","start_line":1,"end_line":5}),
-                serde_json::json!({"type":"struct","id":"n1","parent":"/root","name":"PROG","path":"/root/prog.cob","start":7,"end":len,"start_line":1,"end_line":5}),
-                serde_json::json!({"type":"function","id":"n2","parent":"/root.PROG","name":"MAIN-PARA","file":"/root/prog.cob","path":"/root/prog.cob","start":para,"end":len,"start_line":4,"end_line":5}),
+                serde_json::json!({"type":"module","fqn":""}),
+                serde_json::json!({"type":"file","path":"/root/prog.cob","parent":"","start_line":1,"end_line":5}),
+                serde_json::json!({"type":"struct","id":"n1","parent":"","name":"PROG","path":"/root/prog.cob","start":7,"end":len,"start_line":1,"end_line":5}),
+                serde_json::json!({"type":"function","id":"n2","parent":"PROG","name":"MAIN-PARA","file":"/root/prog.cob","path":"/root/prog.cob","start":para,"end":len,"start_line":4,"end_line":5}),
                 serde_json::json!({"type":"contains","from":"n1","to":"n2"}),
             ]
         );
@@ -2802,7 +2892,7 @@ mod int {
             .find(|r| r["type"] == "struct" && r["name"] == "REC-CB")
             .expect("REC-CB struct");
         assert_eq!(rec["path"], "/root/REC.cpy");
-        assert_eq!(rec["parent"], "/root.PROG");
+        assert_eq!(rec["parent"], "PROG");
         assert_eq!(
             (rec["start_line"].as_u64(), rec["end_line"].as_u64()),
             (Some(1), Some(1))
@@ -2837,5 +2927,84 @@ mod int {
         assert_eq!(start, text.find("01 REC-C").unwrap());
         assert!(text[..start].chars().count() < start, "é is two bytes");
         assert_eq!(&text[start..start + 8], "01 REC-C");
+    }
+
+    #[test]
+    fn module_is_relative_to_the_scan_base_and_empty_at_it() {
+        let text = prog("PROG");
+        let (recs, _) = scan_text("/root/src/cobol/prog.cob", &text, &[]);
+        assert_eq!(
+            recs[0],
+            serde_json::json!({"type":"module","fqn":"src/cobol"})
+        );
+        assert_eq!(recs[1]["parent"], "src/cobol");
+        assert_eq!(recs[1]["path"], "/root/src/cobol/prog.cob");
+        let (recs, _) = scan_text("/root/prog.cob", &text, &[]);
+        assert_eq!(recs[0], serde_json::json!({"type":"module","fqn":""}));
+    }
+
+    #[test]
+    fn ids_take_the_id_prefix() {
+        let mut emitter = crate::scan::Emitter::new(std::path::Path::new("/root"), "g1");
+        let none = |_: &std::path::Path| None::<String>;
+        emitter.scan_file(
+            "/root/prog.cob",
+            &prog("PROG"),
+            Dialect::Cobol85,
+            &search(),
+            &none,
+        );
+        let recs = jsonl(&emitter);
+        assert_eq!(recs[2]["id"], "g11");
+        assert_eq!(recs[3]["id"], "g12");
+        assert_eq!(
+            recs[4],
+            serde_json::json!({"type":"contains","from":"g11","to":"g12"})
+        );
+    }
+
+    #[test]
+    fn targets_emit_only_the_target_files_facts_and_resolution_is_unchanged() {
+        let copy = [at(8, "01 REC-CB."), at(12, "05 F-CB PIC X.")].join("\n");
+        let main = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(12, "COPY REC."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+        ]
+        .join("\n");
+        let other = prog("OTHER");
+        let tree = [
+            ("/root/prog.cob", main.as_str()),
+            ("/root/REC.cpy", copy.as_str()),
+            ("/root/other.cob", other.as_str()),
+        ];
+        let unfiltered = jsonl(&scan_tree(&tree));
+        let target: std::collections::HashSet<String> =
+            ["/root/REC.cpy".to_string()].into_iter().collect();
+        let mut filtered = scan_tree(&tree);
+        filtered.retain_targets(&target);
+        let recs = jsonl(&filtered);
+
+        // The copybook's File and its declaration (scoped to the main program, whose
+        // own records are dropped); the module stays because the copybook sits in it.
+        assert_eq!(recs.len(), 3, "{recs:?}");
+        assert!(recs.contains(&serde_json::json!({"type":"module","fqn":""})));
+        assert!(recs
+            .iter()
+            .any(|r| r["type"] == "file" && r["path"] == "/root/REC.cpy"));
+        let rec = recs
+            .iter()
+            .find(|r| r["type"] == "struct" && r["name"] == "REC-CB")
+            .expect("REC-CB struct");
+        let same = unfiltered
+            .iter()
+            .find(|r| r["type"] == "struct" && r["name"] == "REC-CB")
+            .expect("REC-CB struct unfiltered");
+        assert_eq!(rec, same);
     }
 }
