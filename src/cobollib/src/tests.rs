@@ -46,15 +46,23 @@ fn shape(tokens: &[Token]) -> Vec<(TokenKind, &str)> {
 
 /// Lexes free-format `text` as `p.cob`, maps its tokens and parses its DATA DIVISION under cobol85.
 fn parse_data(text: &str) -> Option<(DataDivision, Vec<crate::diag::Diagnostic>)> {
+    parse_data_as(Dialect::Cobol85, text)
+}
+
+/// Lexes free-format `text` as `p.cob`, maps its tokens and parses its DATA DIVISION under `dialect`.
+fn parse_data_as(
+    dialect: Dialect,
+    text: &str,
+) -> Option<(DataDivision, Vec<crate::diag::Diagnostic>)> {
     let mut map = SourceMap::default();
     let file = map.add_file("p.cob");
-    let (mut cursor, _) = lex("p.cob", text, crate::format::Layout::Free, Dialect::Cobol85);
+    let (mut cursor, _) = lex("p.cob", text, crate::format::Layout::Free, dialect);
     let mut tokens = Vec::new();
     while let Some(token) = cursor.bump() {
         tokens.push(token);
     }
     let mapped = map.map(file, tokens);
-    parse_data_division(&map, Dialect::Cobol85, &mapped)
+    parse_data_division(&map, dialect, &mapped)
 }
 
 /// Lexes free-format `text` as `p.cob`, maps its tokens and parses its PROCEDURE DIVISION under cobol85.
@@ -3209,6 +3217,38 @@ mod unit {
             assert!(stmts[0].refs.is_empty());
             assert!(stmts[1].transfer.is_none());
             assert_eq!(qnames(&stmts[1].refs), ["HV"]);
+        }
+
+        /// DATA DIVISION text: an `INCLUDE` block, then a DECLARE SECTION pair around two records.
+        const DATA_EXEC: &str = "DATA DIVISION. WORKING-STORAGE SECTION. EXEC SQL INCLUDE SQLCA END-EXEC. EXEC SQL BEGIN DECLARE SECTION END-EXEC. 01 HV-REC. 05 HV-ID PIC 9(4). 05 HV-NAME PIC X(20). EXEC SQL END DECLARE SECTION END-EXEC. 01 W PIC X.";
+
+        #[test]
+        fn data_exec_include_and_declare_section_are_no_fact_and_no_diagnostic_under_ibm() {
+            let (division, diags) = parse_data_as(Dialect::Ibm, DATA_EXEC).unwrap();
+            assert!(diags.is_empty(), "{diags:?}");
+            let entries = &division.sections[0].entries;
+            assert_eq!(names(entries), ["HV-REC", "W"]);
+            assert_eq!(entries[0].level, 1);
+            let kids = &entries[0].children;
+            assert_eq!(names(kids), ["HV-ID", "HV-NAME"]);
+            assert!(kids.iter().all(|k| k.level == 5));
+        }
+
+        #[test]
+        fn data_exec_blocks_are_one_error_each_and_skipped_outside_ibm() {
+            for dialect in [Dialect::Cobol85, Dialect::Cobol2002, Dialect::Cobol2014] {
+                let (division, diags) = parse_data_as(dialect, DATA_EXEC).unwrap();
+                assert_eq!(diags.len(), 3, "{dialect:?} {diags:?}");
+                assert_eq!(count(&diags, NOT_IBM), 3, "{dialect:?} {diags:?}");
+                let entries = &division.sections[0].entries;
+                assert_eq!(names(entries), ["HV-REC", "W"], "{dialect:?}");
+                assert_eq!(entries[0].level, 1, "{dialect:?}");
+                assert_eq!(
+                    names(&entries[0].children),
+                    ["HV-ID", "HV-NAME"],
+                    "{dialect:?}"
+                );
+            }
         }
     }
 }
