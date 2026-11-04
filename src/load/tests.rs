@@ -82,4 +82,25 @@ mod unit {
             "AppliesTo must declare exactly the Constraint→Language pair"
         );
     }
+
+    /// The Struct→File `Uses` pair is a code pair loaded through its own COPY
+    /// edge table (`uses_struct_file.parquet`, written by `build_load_files` and
+    /// COPYed by `copy_from`). It is admitted by the merge guard via
+    /// `AUTHORED_REL_PAIRS` and must stay out of `spec_rel_pairs`, which would
+    /// double-write the file. The COPY statement itself is built inside
+    /// `copy_from(conn, dir)`, which needs a live connection, so it is not
+    /// asserted here.
+    #[test]
+    fn struct_to_file_uses_pair_is_a_copy_table_not_a_spec_pair() {
+        assert!(
+            rel_table_pairs().contains(&("Uses", "Struct", "File")),
+            "the merge guard must admit the Struct→File Uses pair"
+        );
+        assert!(
+            !spec_rel_pairs()
+                .iter()
+                .any(|(t, f, to)| *t == "Uses" && *f == NodeKind::Struct && *to == NodeKind::File),
+            "spec_rel_pairs feeds build_load_files/copy_from — the code pair must stay out"
+        );
+    }
 }
