@@ -5,7 +5,8 @@
 //! end of the division.
 
 use crate::ast::{
-    DataDivision, DataEntry, DataSection, DataSectionKind, FileName, Name, Pic, Span,
+    DataDivision, DataEntry, DataSection, DataSectionKind, FileName, Name, ObjectReference, Pic,
+    Property, Span,
 };
 use crate::diag::Diagnostic;
 use crate::dialect::Dialect;
@@ -296,6 +297,51 @@ impl Parser<'_> {
                 }
                 continue;
             }
+            // OO words are contextual: `OBJECT REFERENCE` and `PROPERTY` are clauses only under
+            // an OO dialect, so a data name spelled OBJECT or PROPERTY stays a name.
+            if self.dialect.oo_enabled()
+                && is(t, "OBJECT")
+                && is_at(tokens, j + 1, end, "REFERENCE")
+            {
+                j += 2;
+                let mut class = None;
+                if j < end
+                    && tokens[j].token.kind == TokenKind::Word
+                    && !is_clause(&tokens[j])
+                    && !is(&tokens[j], "PROPERTY")
+                {
+                    class = Some(self.name(j));
+                    j += 1;
+                }
+                entry.object_reference = Some(ObjectReference { class });
+                continue;
+            }
+            if self.dialect.oo_enabled() && is(t, "PROPERTY") {
+                j += 1;
+                let mut property = Property {
+                    as_name: None,
+                    no_set: false,
+                };
+                loop {
+                    if j + 1 < end
+                        && is(&tokens[j], "AS")
+                        && tokens[j + 1].token.kind == TokenKind::Alnum
+                    {
+                        property.as_name = Some(self.name(j + 1));
+                        j += 2;
+                    } else if is_at(tokens, j, end, "WITH")
+                        && is_at(tokens, j + 1, end, "NO")
+                        && is_at(tokens, j + 2, end, "SET")
+                    {
+                        property.no_set = true;
+                        j += 3;
+                    } else {
+                        break;
+                    }
+                }
+                entry.property = Some(property);
+                continue;
+            }
             j += 1;
         }
         if !closed {
@@ -363,6 +409,11 @@ impl Parser<'_> {
 fn is(t: &Mapped, word: &str) -> bool {
     matches!(t.token.kind, TokenKind::Word | TokenKind::Reserved)
         && t.token.text.eq_ignore_ascii_case(word)
+}
+
+/// Whether index `j` is before `end` and holds the word `word`.
+fn is_at(tokens: &[Mapped], j: usize, end: usize, word: &str) -> bool {
+    j < end && is(&tokens[j], word)
 }
 
 fn is_clause(t: &Mapped) -> bool {
