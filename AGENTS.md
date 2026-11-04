@@ -738,11 +738,14 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 - 5 code edge types:
   - `Contains` — Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
-  - `Uses` — Function→Struct, Struct→Struct. Rust `impl X for Y` is a `Uses`
+  - `Uses` — Function→Struct, Struct→Struct, Struct→File. Rust `impl X for Y` is a `Uses`
     edge `Y → X` (the type implements the trait); a foreign trait lands as an
     `UnresolvedUse` instead. Rust impl methods (inherent and trait) hang under
     the **self type** (`Type.method`); trait declarations/defaults under the
-    trait.
+    trait. Struct→File is present only for a COBOL `COPY` (one per program and
+    copybook, from the program Struct to the copybook File, rel property
+    `properties` = `{"kind":"copy"}`): the file dependency through which a
+    copybook change reaches each program that COPYs it.
   - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
   - `UnresolvedUse` — Function→UnresolvedTarget, Struct→UnresolvedTarget
 - Authored node labels (the `apg/layers/` node files): `Requirement` (fqn,
