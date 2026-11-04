@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-resume-raise-facts",
+  "body": "`RESUME AT` a procedure name is a calls edge of kind resume to that procedure, while `RESUME AT NEXT STATEMENT`, a standard `RAISE EXCEPTION` and an object `RAISE` add no fact.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-call-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-call-resolution",
+      "properties": {}
+    }
+  ]
+}

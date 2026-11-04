@@ -22,6 +22,31 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-cics-program-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-cics-service-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-cics-transactions",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-sql-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-sql-host-variables",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.cobol-external-call",
       "properties": {}
     },
@@ -82,27 +107,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.cobol-exec-cics-program-calls",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-exec-cics-service-calls",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-exec-cics-transactions",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-exec-sql-host-variables",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.cobol-exec-sql-calls",
+      "target": "requirements.requirement.cobol-resume-raise-facts",
       "properties": {}
     }
   ],
