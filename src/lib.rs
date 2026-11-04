@@ -11,6 +11,7 @@ pub mod artifacts;
 pub mod cache;
 pub mod classify;
 pub mod cleanup;
+pub mod cobol;
 pub mod delta;
 pub mod frontends;
 pub mod git;
