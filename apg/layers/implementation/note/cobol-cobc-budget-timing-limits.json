@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-cobc-budget-timing-limits",
+  "body": "cobc_agreement_and_performance_budget times one cobc batch against the best of three release cobolfrontend runs by wall clock on the machine running it, and detects COPY-using programs by a plain COPY word match on non-comment lines. Limits: the ratio can flake on a loaded machine, and a COPY word inside a string literal counts as a COPY program. Upgrade by averaging several cobc runs or widening the bound if the budget check flakes, and by a token-level COPY check if a string-literal false positive ever appears.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobollib_cobc_e2e.e2e.cobc_agreement_and_performance_budget",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
