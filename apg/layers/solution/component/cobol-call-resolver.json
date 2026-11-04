@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cobol-call-resolver",
+  "body": "The COBOL call resolver: paragraph, section, program, method and record resolution, emitting each resolved edge and each unresolved target as a fact.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.cobol-call-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.cobol-program-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.cobol-frontend",
+      "properties": {}
+    }
+  ]
+}

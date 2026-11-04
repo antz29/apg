@@ -10,6 +10,11 @@
   "in": [
     {
       "kind": "is-role",
+      "source": "solution.container.agent-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.container.cpp-frontend",
       "properties": {}
     },
@@ -45,7 +50,7 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.container.agent-frontend",
+      "source": "solution.container.cobol-frontend",
       "properties": {}
     }
   ]

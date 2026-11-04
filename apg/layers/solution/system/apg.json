@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "solution.container.agent-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.container.build-pipeline",
       "properties": {}
     },
@@ -62,7 +67,7 @@
     },
     {
       "kind": "contains",
-      "target": "solution.container.agent-frontend",
+      "target": "solution.container.cobol-frontend",
       "properties": {}
     }
   ],

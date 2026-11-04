@@ -1,0 +1,53 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-frontend",
+  "body": "A COBOL source file's facts reach the program graph through the standalone cobolfrontend binary under the cobol language id.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-program-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-call-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-dialect-control",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.cobol-codebase-owner",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-program-scanning",
+      "properties": {}
+    }
+  ]
+}

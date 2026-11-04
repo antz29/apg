@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-code-type",
+  "body": "A COBOL file is test under a test or tests segment or a test filename marker, generated under gen or generated, external under vendor, third_party or thirdparty, and src otherwise.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-source-classification",
+      "properties": {}
+    }
+  ]
+}

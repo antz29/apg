@@ -10,6 +10,11 @@
   "in": [
     {
       "kind": "is-role",
+      "source": "solution.component.agent-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.cpp-frontend-artifact",
       "properties": {}
     },
@@ -45,7 +50,27 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.agent-frontend-artifact",
+      "source": "solution.component.cobol-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-call-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-dialect-table",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-test-suite",
       "properties": {}
     }
   ]

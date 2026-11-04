@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "cobol-hand-written-parser",
+  "body": "The COBOL parser, preprocessor and AST are hand-written Rust in this repository, with no external COBOL parser, grammar or runtime as a dependency.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

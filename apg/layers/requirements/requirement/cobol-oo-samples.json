@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-oo-samples",
+  "body": "Each OO sample under cobol2002 yields the class, method, uses and calls facts that the program and call fact requirements define for it.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-verification",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-conformance",
+      "properties": {}
+    }
+  ]
+}
