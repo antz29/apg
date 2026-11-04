@@ -3384,13 +3384,23 @@ mod int {
         text: &str,
         files: &[(&str, &str)],
     ) -> (Vec<serde_json::Value>, Vec<crate::diag::Diagnostic>) {
+        scan_text_in(Dialect::Cobol85, path, text, files)
+    }
+
+    /// [`scan_text`] under `dialect`.
+    fn scan_text_in(
+        dialect: Dialect,
+        path: &str,
+        text: &str,
+        files: &[(&str, &str)],
+    ) -> (Vec<serde_json::Value>, Vec<crate::diag::Diagnostic>) {
         let store: std::collections::HashMap<std::path::PathBuf, String> = files
             .iter()
             .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
             .collect();
         let lookup = |p: &std::path::Path| store.get(p).cloned();
         let mut emitter = crate::scan::Emitter::new(std::path::Path::new("/root"), "n");
-        let mut diags = emitter.scan_file(path, text, Dialect::Cobol85, &search(), &lookup);
+        let mut diags = emitter.scan_file(path, text, dialect, &search(), &lookup);
         diags.extend(emitter.finish());
         (jsonl(&emitter), diags)
     }
@@ -4528,6 +4538,184 @@ mod int {
         });
         assert!(
             !recs.iter().any(|r| r["type"] == "unresolved_use"),
+            "{recs:?}"
+        );
+    }
+
+    /// Class `Foo` (FACTORY `Make`, OBJECT `Run`) then interface `Bar` (prototype `Stop`).
+    fn oo_units() -> String {
+        [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "FACTORY."),
+            at(8, "METHOD-ID. Make."),
+            at(8, "END METHOD Make."),
+            at(8, "END FACTORY."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "INTERFACE-ID. Bar."),
+            at(8, "METHOD-ID. Stop."),
+            at(8, "END METHOD Stop."),
+            at(8, "END INTERFACE Bar."),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn class_and_interface_are_structs_with_their_methods_and_prototypes() {
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &oo_units(), &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let (foo, bar) = (id_of(&recs, "Foo"), id_of(&recs, "Bar"));
+        let record = |kind: &str, name: &str| {
+            recs.iter()
+                .find(|r| r["type"] == kind && r["name"] == name)
+                .unwrap_or_else(|| panic!("{kind} {name} missing: {recs:?}"))
+                .clone()
+        };
+        let class = record("struct", "Foo");
+        assert_eq!(class["parent"], "");
+        assert_eq!(class["path"], "/root/oo.cob");
+        assert_eq!(class["end_line"], 11);
+        let iface = record("struct", "Bar");
+        assert_eq!(iface["parent"], "");
+        assert_eq!(iface["end_line"], 16);
+        let make = record("function", "Make");
+        assert_eq!(make["parent"], "Foo");
+        assert_eq!(make["params"], serde_json::json!(["factory"]));
+        let run = record("function", "Run");
+        assert_eq!(run["parent"], "Foo");
+        assert_eq!(run["params"], serde_json::json!(["instance"]));
+        let stop = record("function", "Stop");
+        assert_eq!(stop["parent"], "Bar");
+        assert!(stop.get("params").is_none(), "{stop}");
+        let mut want = vec![
+            serde_json::json!({"type":"contains","from":foo,"to":make["id"]}),
+            serde_json::json!({"type":"contains","from":foo,"to":run["id"]}),
+            serde_json::json!({"type":"contains","from":bar,"to":stop["id"]}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["contains"]), want);
+    }
+
+    #[test]
+    fn factory_and_object_method_of_one_name_both_render_with_their_key() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "FACTORY."),
+            at(8, "METHOD-ID. Make."),
+            at(8, "END METHOD Make."),
+            at(8, "END FACTORY."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Make."),
+            at(8, "END METHOD Make."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let foo = id_of(&recs, "Foo");
+        let makes: Vec<&serde_json::Value> = recs
+            .iter()
+            .filter(|r| r["type"] == "function" && r["name"] == "Make")
+            .collect();
+        assert_eq!(makes.len(), 2, "{recs:?}");
+        let mut params: Vec<serde_json::Value> =
+            makes.iter().map(|m| m["params"].clone()).collect();
+        params.sort_by_key(|v| v.to_string());
+        assert_eq!(
+            params,
+            [
+                serde_json::json!(["factory"]),
+                serde_json::json!(["instance"])
+            ]
+        );
+        let mut want: Vec<serde_json::Value> = makes
+            .iter()
+            .map(|m| serde_json::json!({"type":"contains","from":foo,"to":m["id"]}))
+            .collect();
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["contains"]), want);
+    }
+
+    #[test]
+    fn copy_in_a_class_method_is_a_copy_use_from_the_class() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RUN-PARA."),
+            at(12, "COPY REC."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let rec = at(12, "DISPLAY X.");
+        let (recs, diags) = scan_text_in(
+            Dialect::Cobol2002,
+            "/root/foo.cob",
+            &text,
+            &[("/root/REC.cpy", &rec)],
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [copy_edge(&id_of(&recs, "Foo"), "/root/REC.cpy")]
+        );
+    }
+
+    #[test]
+    fn program_copy_stays_from_the_program_and_a_class_copy_from_its_class() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. PROG."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "COPY REC."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM PROG."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "RUN-PARA."),
+            at(12, "COPY OTHER."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (rec, other) = (at(12, "DISPLAY X."), at(12, "DISPLAY Y."));
+        let files = [
+            ("/root/REC.cpy", rec.as_str()),
+            ("/root/OTHER.cpy", other.as_str()),
+        ];
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/prog.cob", &text, &files);
+        assert!(diags.is_empty(), "{diags:?}");
+        let mut want = vec![
+            copy_edge(&id_of(&recs, "PROG"), "/root/REC.cpy"),
+            copy_edge(&id_of(&recs, "Foo"), "/root/OTHER.cpy"),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+    }
+
+    #[test]
+    fn cobol85_emits_no_class_or_interface_struct() {
+        let (recs, _) = scan_text_in(Dialect::Cobol85, "/root/oo.cob", &oo_units(), &[]);
+        assert!(
+            !recs
+                .iter()
+                .any(|r| r["type"] == "struct" && (r["name"] == "Foo" || r["name"] == "Bar")),
             "{recs:?}"
         );
     }
