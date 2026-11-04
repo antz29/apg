@@ -2602,4 +2602,47 @@ mod int {
         assert_eq!(scopes[1].resolve(inner_call), Resolution::Undefined);
         assert_eq!(scopes[1].procs[0].name, "IN-PARA");
     }
+
+    /// REC (its second declaration `rec` is dropped), OTHER, LK in LINKAGE; 77 W is no record.
+    const RECORDS: &str = "IDENTIFICATION DIVISION.\nPROGRAM-ID. PROG.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 REC.\n    05 F PIC X.\n01 rec.\n    05 G PIC X.\n01 OTHER.\n    05 F PIC X.\n77 W PIC X.\nLINKAGE SECTION.\n01 LK.\n    05 F2 PIC X.\n";
+
+    #[test]
+    fn records_are_level_01_entries_and_the_first_declaration_wins() {
+        let (unit, diags) = parse_file(RECORDS);
+        assert!(diags.is_empty(), "{diags:?}");
+        let scope = &crate::resolve::scopes(&unit)[0];
+        assert_eq!(names(&scope.records), ["REC", "OTHER", "LK"]);
+        assert_eq!(names(&scope.records[0].children), ["F"]);
+    }
+
+    #[test]
+    fn data_names_resolve_through_their_record_or_not_at_all() {
+        let (unit, diags) = parse_file(RECORDS);
+        assert!(diags.is_empty(), "{diags:?}");
+        let scope = &crate::resolve::scopes(&unit)[0];
+        let span = unit.programs[0].name.span;
+        let word = |text: &str| crate::ast::Name {
+            text: text.to_string(),
+            span,
+        };
+        let qn = |name: &str, quals: &[&str]| crate::ast::QualifiedName {
+            name: word(name),
+            qualifiers: quals.iter().map(|q| word(q)).collect(),
+        };
+        let cases: [(crate::ast::QualifiedName, Option<usize>); 10] = [
+            (qn("REC", &[]), Some(0)),
+            (qn("LK", &[]), Some(2)),
+            (qn("F2", &[]), Some(2)),
+            (qn("F", &["OTHER"]), Some(1)),
+            (qn("F", &["REC"]), Some(0)),
+            (qn("G", &[]), None),
+            (qn("F", &[]), None),
+            (qn("W", &[]), None),
+            (qn("F", &["NOPE"]), None),
+            (qn("F", &["OTHER", "REC"]), None),
+        ];
+        for (name, want) in cases {
+            assert_eq!(scope.data(&name), want, "{name:?}");
+        }
+    }
 }
