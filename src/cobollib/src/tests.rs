@@ -4850,4 +4850,234 @@ mod int {
         assert_eq!(set.len(), 1, "{recs:?}");
         assert_eq!(set[0]["start_line"], 6);
     }
+
+    #[test]
+    fn inherits_and_implements_use_the_scanned_class_and_interface() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "END CLASS Base."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "INTERFACE-ID. IfaceA."),
+            at(8, "END INTERFACE IfaceA."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo INHERITS FROM Base IMPLEMENTS IfaceA."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let foo = id_of(&recs, "Foo");
+        let mut want = vec![
+            serde_json::json!({"type":"uses","from":foo,"to":id_of(&recs,"Base")}),
+            serde_json::json!({"type":"uses","from":foo,"to":id_of(&recs,"IfaceA")}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+        assert!(edges(&recs, &["unresolved_use"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn inheriting_and_implementing_one_class_links_it_once() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "END CLASS Base."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo INHERITS FROM Base IMPLEMENTS base."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, _) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert_eq!(
+            edges(&recs, &["uses"]),
+            [serde_json::json!({"type":"uses","from":id_of(&recs,"Foo"),"to":id_of(&recs,"Base")})]
+        );
+    }
+
+    #[test]
+    fn interface_inherits_and_using_name_scanned_types_and_external_bases_are_unresolved() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Param1."),
+            at(8, "END CLASS Param1."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "INTERFACE-ID. Base2."),
+            at(8, "END INTERFACE Base2."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(
+                8,
+                "INTERFACE-ID. Bar INHERITS FROM Base1 Base2 USING Param1.",
+            ),
+            at(8, "END INTERFACE Bar."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let bar = id_of(&recs, "Bar");
+        let mut want = vec![
+            serde_json::json!({"type":"uses","from":bar,"to":id_of(&recs,"Base2")}),
+            serde_json::json!({"type":"uses","from":bar,"to":id_of(&recs,"Param1")}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+        assert_eq!(
+            edges(&recs, &["unresolved_use"]),
+            [serde_json::json!({"type":"unresolved_use","from":bar,"to":"Base1"})]
+        );
+    }
+
+    #[test]
+    fn external_class_target_is_an_unresolved_use_named_as_written_once() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo INHERITS FROM Ext IMPLEMENTS ext."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            edges(&recs, &["unresolved_use"]),
+            [serde_json::json!({"type":"unresolved_use","from":id_of(&recs,"Foo"),"to":"Ext"})]
+        );
+        assert!(recs
+            .contains(&serde_json::json!({"type":"unresolved","fqn":"Ext","category":"external"})));
+        assert!(edges(&recs, &["uses"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn repository_entries_external_report_and_scanned_ones_emit_nothing() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "END CLASS Base."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo INHERITS FROM Lib."),
+            at(8, "ENVIRONMENT DIVISION."),
+            at(8, "CONFIGURATION SECTION."),
+            at(8, "REPOSITORY."),
+            at(12, "CLASS Lib"),
+            at(12, "CLASS Base."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        // INHERITS and REPOSITORY name Lib: one report. The scanned Base emits nothing.
+        assert_eq!(
+            edges(&recs, &["unresolved_use"]),
+            [serde_json::json!({"type":"unresolved_use","from":id_of(&recs,"Foo"),"to":"Lib"})]
+        );
+        assert!(edges(&recs, &["uses"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn ambiguous_class_name_links_nothing() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Dup."),
+            at(8, "END CLASS Dup."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Dup."),
+            at(8, "END CLASS Dup."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo INHERITS FROM Dup."),
+            at(8, "END CLASS Foo."),
+        ]
+        .join("\n");
+        let (recs, _) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(
+            edges(&recs, &["uses", "unresolved_use"]).is_empty(),
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    fn object_reference_from_01_record_and_77_item_is_a_use_and_untyped_is_nothing() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "77 S OBJECT REFERENCE Base."),
+            at(8, "01 R OBJECT REFERENCE base."),
+            at(8, "01 U OBJECT REFERENCE."),
+            at(8, "PROCEDURE DIVISION."),
+            at(8, "MAIN-PARA."),
+            at(12, "STOP RUN."),
+            at(8, "END PROGRAM P."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "END CLASS Base."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let base = id_of(&recs, "Base");
+        let mut want = vec![
+            serde_json::json!({"type":"uses","from":id_of(&recs,"P"),"to":base}),
+            serde_json::json!({"type":"uses","from":id_of(&recs,"R"),"to":base}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+        assert!(edges(&recs, &["unresolved_use"]).is_empty(), "{recs:?}");
+    }
+
+    #[test]
+    fn object_reference_in_class_data_and_method_data_is_from_the_class_and_the_method() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Foo."),
+            at(8, "FACTORY."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 F OBJECT REFERENCE Base."),
+            at(8, "END FACTORY."),
+            at(8, "OBJECT."),
+            at(8, "METHOD-ID. Run."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 M OBJECT REFERENCE Base."),
+            at(8, "END METHOD Run."),
+            at(8, "END OBJECT."),
+            at(8, "END CLASS Foo."),
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "CLASS-ID. Base."),
+            at(8, "END CLASS Base."),
+        ]
+        .join("\n");
+        let (recs, diags) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let base = id_of(&recs, "Base");
+        let mut want = vec![
+            serde_json::json!({"type":"uses","from":id_of(&recs,"Foo"),"to":base}),
+            serde_json::json!({"type":"uses","from":id_of(&recs,"Run"),"to":base}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["uses"]), want);
+    }
+
+    #[test]
+    fn object_reference_to_an_external_class_is_an_unresolved_use_from_its_owner() {
+        let text = [
+            at(8, "IDENTIFICATION DIVISION."),
+            at(8, "PROGRAM-ID. P."),
+            at(8, "DATA DIVISION."),
+            at(8, "WORKING-STORAGE SECTION."),
+            at(8, "01 R OBJECT REFERENCE Ext."),
+            at(8, "77 S OBJECT REFERENCE ext."),
+            at(8, "END PROGRAM P."),
+        ]
+        .join("\n");
+        let (recs, _) = scan_text_in(Dialect::Cobol2002, "/root/oo.cob", &text, &[]);
+        assert!(edges(&recs, &["uses"]).is_empty(), "{recs:?}");
+        // The 77 item (from P) and the 01 record (from R) each name Ext; one report per owner.
+        let mut want = vec![
+            serde_json::json!({"type":"unresolved_use","from":id_of(&recs,"P"),"to":"ext"}),
+            serde_json::json!({"type":"unresolved_use","from":id_of(&recs,"R"),"to":"Ext"}),
+        ];
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(edges(&recs, &["unresolved_use"]), want);
+    }
 }
