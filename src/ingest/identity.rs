@@ -140,13 +140,23 @@ pub fn root_module_fqn(language: &str, identity: &str, base: &Path) -> String {
 
 /// Applies [`root_module_fqn`] to a declaration's scope parent (or a module
 /// identity), leaving an EMPTY parent empty — a declaration with no scope is a
-/// scanner anomaly and must not become the bare `<language>.` root.
+/// scanner anomaly and must not become the bare `<language>.` root. COBOL is
+/// the exception: a program in a file at the repository root is declared with
+/// an empty parent, and its root module `cobol.` renders `cobol..PROG`.
 pub(crate) fn rooted_scope(language: &str, parent: &str, base: &Path) -> String {
-    if parent.is_empty() {
+    if parent.is_empty() && language != "cobol" {
         String::new()
     } else {
         root_module_fqn(language, parent, base)
     }
+}
+
+/// A COBOL opaque record id (`cb<digits>`, the `cobol` id prefix) is never a
+/// declaration name, so the root-module fallback must not re-root it.
+fn is_cobol_opaque_id(endpoint: &str) -> bool {
+    endpoint
+        .strip_prefix("cb")
+        .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Roots a `contains` endpoint iff it is a known module identity (the frontends
@@ -196,6 +206,11 @@ pub(crate) fn root_edge_endpoint(
         {
             return root_module_fqn(language, endpoint, base);
         }
+    }
+    // A COBOL root-level declaration (`PROG`, `PROG.MAIN-PARA`) names the empty
+    // root module, which no `/`/`.` prefix can match.
+    if language == "cobol" && identities.contains("") && !is_cobol_opaque_id(endpoint) {
+        return format!("{}.{endpoint}", rooted_scope(language, "", base));
     }
     endpoint.to_string()
 }

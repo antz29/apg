@@ -164,6 +164,40 @@ mod unit {
         assert_eq!(rooted_scope("rust", "apg", base), "rust.apg");
     }
 
+    /// cobol-frontend task-31: a COBOL program in a root-level file has an
+    /// empty parent, which roots to `cobol.` so its name renders `cobol..PROG`;
+    /// no other language roots an empty parent. A root-level edge endpoint
+    /// roots under the empty root module, while a `src/cobol` prefix keeps its
+    /// module rooting and a `cb<digits>` opaque id is never re-rooted.
+    #[test]
+    fn cobol_root_level_declarations_root_under_cobol() {
+        let base = Path::new("/repo");
+        assert_eq!(rooted_scope("cobol", "", base), "cobol.");
+        assert_eq!(
+            format!("{}.PROG", rooted_scope("cobol", "", base)),
+            "cobol..PROG"
+        );
+        assert_eq!(rooted_scope("rust", "", base), "");
+        let modules: HashMap<String, HashSet<String>> = HashMap::from([(
+            "cobol".to_string(),
+            HashSet::from(["".to_string(), "src/cobol".to_string()]),
+        )]);
+        assert_eq!(
+            root_edge_endpoint("cobol", "PROG", &modules, base),
+            "cobol..PROG"
+        );
+        assert_eq!(
+            root_edge_endpoint("cobol", "PROG.MAIN-PARA", &modules, base),
+            "cobol..PROG.MAIN-PARA"
+        );
+        assert_eq!(
+            root_edge_endpoint("cobol", "src/cobol.PROG", &modules, base),
+            "cobol.src/cobol.PROG"
+        );
+        assert_eq!(root_edge_endpoint("cobol", "cb12", &modules, base), "cb12");
+        assert_eq!(root_edge_endpoint("rust", "PROG", &modules, base), "PROG");
+    }
+
     /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
     /// `repo_relative_identity` renders a scanner path relative to the
     /// git-toplevel base (the scan root is the non-git fallback),
