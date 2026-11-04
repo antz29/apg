@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-nist-parse",
-  "body": "Every program in the NIST CCVS85 modules NC, IC, IF, IX, OB, RL, SG, SM, SQ and ST parses with no error diagnostic under cobol85, and its OB and SG constructs give warnings only.",
+  "body": "Every program in the NIST CCVS85 modules NC, IC, IF, IX, OB, RL, SG, SM, SQ and ST parses under cobol85 with warning-level diagnostics only, and its OB and SG constructs give obsolete warnings.",
   "properties": {
     "feature": "cobol-frontend"
   },

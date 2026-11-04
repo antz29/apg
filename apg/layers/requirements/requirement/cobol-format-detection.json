@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-format-detection",
-  "body": "A >>SOURCE directive sets a file's format, and a file without one is read as fixed format, with a warning when its text looks free-format.",
+  "body": "The >>SOURCE directive sets a file's format, fixed format is the default, and a warning names a file whose text looks free-format.",
   "properties": {
     "feature": "cobol-frontend"
   },

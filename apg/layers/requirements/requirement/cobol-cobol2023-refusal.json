@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-cobol2023-refusal",
-  "body": "Selecting the cobol2023 dialect refuses the scan with a message, since that dialect has no features until they are added.",
+  "body": "The cobol2023 dialect is a placeholder value, and selecting it refuses the scan with a message.",
   "properties": {
     "feature": "cobol-frontend"
   },

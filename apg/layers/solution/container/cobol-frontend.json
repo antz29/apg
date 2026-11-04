@@ -2,16 +2,11 @@
   "layer": "solution",
   "type": "container",
   "name": "cobol-frontend",
-  "body": "The COBOL frontend artifact: build-time stable Rust 1.98.1, zero scan-time tools on PATH, and no vendored engine, so its language ceiling is the dialect table.",
+  "body": "The COBOL frontend artifact: build-time stable Rust 1.98.1, zero scan-time tools on PATH, and a hand-written engine whose language ceiling is the dialect table.",
   "properties": {
     "kind": "app"
   },
   "out": [
-    {
-      "kind": "contains",
-      "target": "solution.component.cobol-source-reader",
-      "properties": {}
-    },
     {
       "kind": "contains",
       "target": "solution.component.cobol-call-resolver",
@@ -25,6 +20,11 @@
     {
       "kind": "contains",
       "target": "solution.component.cobol-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-source-reader",
       "properties": {}
     },
     {

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-copy-diagnostics",
-  "body": "A nested COPY expands to a fixed depth limit, and a circular COPY or a copybook not found is a diagnostic at the COPY statement that leaves the scan running.",
+  "body": "A nested COPY expands to a fixed depth limit, and a circular COPY or a copybook that cannot be found is a diagnostic at the COPY statement, with the scan running on.",
   "properties": {
     "feature": "cobol-frontend"
   },
