@@ -3146,6 +3146,70 @@ mod unit {
             assert_eq!(qnames(&stmts[0].refs), ["X"]);
             assert!(stmts[0].transfer.is_none());
         }
+
+        #[test]
+        fn sql_host_variables_are_refs_including_hyphenated_and_qualified_names() {
+            let text = "    EXEC SQL SELECT A INTO :WS-HV-1, :REC-A OF REC-GRP FROM T WHERE K = :WS-KEY END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert_eq!(qnames(&stmts[0].refs), ["WS-HV-1", "REC-A", "WS-KEY"]);
+            let qualifiers: Vec<&str> = stmts[0].refs[1]
+                .qualifiers
+                .iter()
+                .map(|n| n.text.as_str())
+                .collect();
+            assert_eq!(qualifiers, ["REC-GRP"]);
+            assert!(stmts[0].transfer.is_none());
+        }
+
+        #[test]
+        fn sql_indicator_after_a_touching_colon_is_not_a_reference() {
+            let text = "    EXEC SQL SELECT A INTO :HV1:IND1, :HV2 FROM T END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(qnames(&stmts[0].refs), ["HV1", "HV2"]);
+        }
+
+        #[test]
+        fn sql_bare_table_names_are_not_references() {
+            let text = "    EXEC SQL DELETE FROM OTHER-TABLE END-EXEC.\n    EXEC SQL SELECT A INTO :HV FROM EMP-TABLE WHERE ID = :HV2 END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(stmts[0].refs.is_empty());
+            assert_eq!(qnames(&stmts[1].refs), ["HV", "HV2"]);
+        }
+
+        #[test]
+        fn sql_call_with_a_bare_name_is_a_literal_call_with_its_host_variables() {
+            let text = "    EXEC SQL CALL PROC-NAME(:HV) END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 1);
+            assert!(matches!(
+                &stmts[0].transfer,
+                Some(Transfer::Call(CallTarget::Literal(n))) if n.text == "PROC-NAME"
+            ));
+            assert_eq!(qnames(&stmts[0].refs), ["HV"]);
+        }
+
+        #[test]
+        fn sql_functions_are_opaque_with_no_transfer_and_no_reference() {
+            let text = "    EXEC SQL SELECT UPPER(NAME) FROM T END-EXEC.\n    EXEC SQL SELECT COUNT(*) INTO :HV FROM T END-EXEC.\n";
+            let (unit, diags) = parse_exec(Dialect::Ibm, text);
+            assert!(diags.is_empty(), "{diags:?}");
+            let stmts = statements(&unit);
+            assert_eq!(stmts.len(), 2);
+            assert!(stmts[0].transfer.is_none());
+            assert!(stmts[0].refs.is_empty());
+            assert!(stmts[1].transfer.is_none());
+            assert_eq!(qnames(&stmts[1].refs), ["HV"]);
+        }
     }
 }
 
