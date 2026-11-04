@@ -6172,4 +6172,73 @@ mod int {
         assert_eq!(edges(&recs, &["calls"]), vec![invoke_call(&main, &run)]);
         assert!(edges(&recs, &["unresolved_call"]).is_empty(), "{recs:?}");
     }
+
+    /// [`scan_tree`] under IBM, so EXEC CICS blocks are statements.
+    fn scan_tree_ibm(tree: &[(&str, &str)]) -> Vec<serde_json::Value> {
+        let none = |_: &std::path::Path| None::<String>;
+        let mut emitter = crate::scan::Emitter::new(std::path::Path::new("/root"), "n");
+        for (path, text) in tree {
+            emitter.scan_file(path, text, Dialect::Ibm, &search(), &none);
+        }
+        emitter.finish();
+        jsonl(&emitter)
+    }
+
+    #[test]
+    fn exec_cics_link_and_xctl_to_a_scanned_program_are_uses_edges_like_a_literal_call() {
+        let b = prog("SUB-B");
+        let literal = caller_at(&["CALL 'SUB-B'."]);
+        let want = edges(
+            &jsonl(&scan_tree(&[
+                ("/root/a.cob", literal.as_str()),
+                ("/root/b.cob", b.as_str()),
+            ])),
+            &["uses"],
+        );
+        assert_eq!(want.len(), 1, "{want:?}");
+        for verb in ["LINK", "XCTL"] {
+            let call = format!("EXEC CICS {verb} PROGRAM('SUB-B') END-EXEC.");
+            let a = caller_at(&[call.as_str()]);
+            let recs = scan_tree_ibm(&[("/root/a.cob", a.as_str()), ("/root/b.cob", b.as_str())]);
+            assert_eq!(edges(&recs, &["uses"]), want, "{verb}");
+        }
+    }
+
+    #[test]
+    fn exec_cics_link_to_an_unscanned_program_is_external_and_a_variable_is_func_value() {
+        let text = caller_at(&[
+            "EXEC CICS LINK PROGRAM('NOPE') END-EXEC.",
+            "EXEC CICS XCTL PROGRAM(WS-NEXT) END-EXEC.",
+        ]);
+        let (recs, diags) = scan_text_in(Dialect::Ibm, "/root/prog.cob", &text, &[]);
+        assert!(diags.is_empty(), "{diags:?}");
+        let main = id_of(&recs, "MAIN-PARA");
+        for want in [
+            serde_json::json!({"type":"unresolved","fqn":"NOPE","category":"external"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"NOPE"}),
+            serde_json::json!({"type":"unresolved","fqn":"WS-NEXT","category":"func-value"}),
+            serde_json::json!({"type":"unresolved_call","from":main,"to":"WS-NEXT"}),
+        ] {
+            assert!(recs.contains(&want), "{want} missing from {recs:?}");
+        }
+        assert!(!recs.iter().any(|r| r["type"] == "uses"));
+    }
+
+    #[test]
+    fn exec_cics_program_calls_are_skipped_under_cobol85() {
+        let b = prog("SUB-B");
+        let a = caller_at(&[
+            "EXEC CICS LINK PROGRAM('SUB-B') END-EXEC.",
+            "EXEC CICS XCTL PROGRAM(WS-NEXT) END-EXEC.",
+        ]);
+        let recs = jsonl(&scan_tree(&[
+            ("/root/a.cob", a.as_str()),
+            ("/root/b.cob", b.as_str()),
+        ]));
+        assert!(
+            edges(&recs, &["uses", "unresolved_call"]).is_empty(),
+            "{recs:?}"
+        );
+        assert!(!recs.iter().any(|r| r["type"] == "unresolved"), "{recs:?}");
+    }
 }
