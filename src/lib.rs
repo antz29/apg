@@ -135,16 +135,12 @@ USAGE:
 
 SCAN OPTIONS:
   --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
-                               csharp, py (comma-separated or repeated;
+                               csharp, py, cobol (comma-separated or repeated;
                                auto-detected for every language present if
                                omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
   --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
                                repeatable)
-  --std <dialect>             COBOL dialect: cobol85 (default), cobol2002,
-                               cobol2014 or ibm (overrides cobol.dialect in
-                               apg/config.json; cobol2023 is refused)
-  --copy-path <dir>           COBOL copybook search directory (repeatable)
   --std <dialect>             COBOL dialect: cobol85 (default), cobol2002,
                                cobol2014 or ibm (overrides cobol.dialect in
                                apg/config.json; cobol2023 is refused)
