@@ -138,14 +138,15 @@ source confirms a clause, the parser rejects it with a diagnostic rather than gu
 ## 8. Keyword policy (contextual OO keywords)
 
 - The OO keywords `CLASS`, `OBJECT`, `METHOD`, `FACTORY`, `INTERFACE`, `SELF`, `SUPER`, `NEW`,
-  `NULL`, `PROPERTY`, `GET`, `INHERITS`, `IMPLEMENTS` are not reserved under `cobol85`, where only `CLASS` is reserved (GnuCOBOL's COBOL-85 word list),
-  `cobol2002` or `cobol2014`, where most are reserved (§19.4, O26). Where a dialect does not reserve one of them, it is
-  keywords only where the grammar expects them (for example `CLASS-ID` at the start of an
+  `NULL`, `PROPERTY`, `GET`, `INHERITS`, `IMPLEMENTS` are contextual keywords under every dialect. Among them,
+  `cobol85` reserves only `CLASS` (GnuCOBOL's COBOL-85 word list), and `cobol2002`, `cobol2014` and `ibm` reserve
+  none of them (§19.4, O26). Where a dialect does not reserve one of them, it is a
+  keyword only where the grammar expects it (for example `CLASS-ID` at the start of an
   identification division, `OBJECT REFERENCE` in a data description, `INVOKE` in a procedure).
   Everywhere else they are ordinary identifiers.
-- **`ibm`** (decided). The IBM word list reserves `CLASS`, `CLASS-ID`, `METHOD`, `METHOD-ID`,
-  `OBJECT`, `INVOKE`, `INHERITS`, `SELF`, `SUPER`, `ENTRY`, `ALTER` and others (§19.4). Using one of
-  them as a data name is an **error** under `ibm`.
+- **`ibm`** (decided). `ibm` reserves `ENTRY` and `ALTER` and no OO word (§19.4). `OBJECT`,
+  `METHOD` and `INVOKE` used as data names parse as ordinary data names under `ibm`, with their
+  statements intact.
 - A COBOL-85 program that uses any of the non-reserved OO words as a data name must parse exactly as it did before
   OO support was added. This is tested (§12, keyword regression).
 
@@ -155,6 +156,9 @@ source confirms a clause, the parser rejects it with a diagnostic rather than gu
   the same program. Qualified names (`p OF s`, `p IN s`) resolve through the section. A name
   that matches more than one paragraph and is not qualified is an unresolved reference with a
   diagnostic (see §10, unresolved `PERFORM`/`GO TO`).
+- **Same-section rule.** An unqualified `PERFORM` or `GO TO` procedure name (`THRU` endpoints
+  included) that several sections define resolves to the paragraph of the referencing section;
+  otherwise it stays ambiguous, as above (COBOL-85 IV-20 4.3.8.1 rule 6).
 - **`PERFORM p THRU q`** (decided): the range is every paragraph from `p` to `q` in source order,
   including paragraphs in other sections, and each one is a `calls` target.
 - **Programs.** `CALL "NAME"` (literal) resolves to the program whose `PROGRAM-ID` (or
@@ -293,7 +297,7 @@ Every test sits in one of the three tiers defined by `global.constraint.test-tie
 | **NIST scan** | e2e | the scanner's facts for a sample of NIST programs match expected facts |
 | **OO scan** | e2e | OO samples produce the Struct, Function, `uses` and `calls` facts of §10 |
 | **Keyword regression** | e2e | COBOL-85 programs using the OO keywords as data names produce the same facts under `cobol2002` as under `cobol85` (§8) |
-| **Dialect gating** | e2e | the same source gives the expected facts and diagnostics under each of `cobol85`, `cobol2002`, `cobol2014` and `ibm`; a reserved IBM word used as a data name is an error under `ibm`; area A violations are diagnostics under `cobol85` (§3, §8) |
+| **Dialect gating** | e2e | the same source gives the expected facts and diagnostics under each of `cobol85`, `cobol2002`, `cobol2014` and `ibm`; OO words (`OBJECT`, `METHOD`, `INVOKE`) used as data names parse intact with no error under `ibm`; area A violations are diagnostics under `cobol85` (§3, §8) |
 | **EXEC scan** | e2e | IBM samples: `LINK`/`XCTL` become program calls; `START TRANSID` does not; `INVOKE SERVICE` and `EXEC SQL CALL` to external targets are `unresolved_call` |
 | **Accessor and exception facts** | e2e | a `PROPERTY` item produces `GET-` and `SET-` Functions with the `AS` name, and `with no set` drops `SET-`; `RESUME AT p` produces a `calls` edge with kind `resume` (§10) |
 | Error recovery | e2e | a file with one bad paragraph keeps its other declarations; the error names the file and line |
@@ -327,7 +331,7 @@ Registration touchpoints (all follow the existing per-language pattern):
 | `src/structlib` discovery | stop claiming `.cob`, `.cbl`, `.cobol`, `.cpy` |
 | `src/lib.rs` | accept `cobol` in the `--language` usage text; accept `--copy-path` and `--std` on `apg scan`; read and write `cobol.dialect` in `apg/config.json` |
 | `opencode-suite` (`apg_scan`) | accept the dialect parameter and pass it to `apg scan --std` |
-| Packaging | `Formula/apg-cobol.rb`; `scripts/release.sh` and `release.yml` from 8 to 9 formulae; Linux packaging |
+| Packaging | `Formula/apg-cobol.rb`; `scripts/release.sh` and `release.yml` at 9 formulae; `install.sh` `cobol` component; `apg-cobol-linux` tarball |
 | Docs | README frontend dependency table; CHANGELOG |
 
 The frontend has no scan-time tool dependency (nothing is spawned), so no pre-spawn preflight
@@ -381,7 +385,7 @@ copybook (`src/impact/depindex.rs`).
 | O22 | Format detection and indicator set | P1 | decided (§3): follow `cobc`; the column check becomes a warning only; indicator set ` `, `*`, `-`, `D` |
 | O23 | Program-name matching: §9's case-insensitive fallback differs from GnuCOBOL's case-sensitive default (§19.2) | P2 | decided: keep the fallback, with the warning |
 | O24 | `ALTER`, `GO TO` without a name, and `ENTRY`: diagnostic only, no facts, through the dialect table (§14, §19.5) | P2 | decided (follows O26) |
-| O25 | Dialect flag. Decided: the frontend accepts `-std=<dialect>` (for example `cobol85` or `cobol2002`), which selects the reserved-word set; the keyword regression test passes it. Decided: user-facing on `apg scan`, recorded as `cobol.dialect` in `apg/config.json`. A user-facing option is a shared-code change to frontend spawning (§13) ; §1 principle 5, §3 and §8 are updated to match. The default reserves `CLASS`, `OBJECT`, `NEW`, `NULL`, `PROPERTY`, `PROTOTYPE` and `RAISE` (§19.4) | P1 | decided |
+| O25 | Dialect flag. Decided: the frontend accepts `-std=<dialect>` (for example `cobol85` or `cobol2002`), which selects the reserved-word set; the keyword regression test passes it. Decided: user-facing on `apg scan`, recorded as `cobol.dialect` in `apg/config.json`. A user-facing option is a shared-code change to frontend spawning (§13) ; §1 principle 5, §3 and §8 are updated to match. The default (`cobol85`) reserves `CLASS` as its only OO word (§8, §19.4) | P1 | decided |
 | O26 | Per-dialect feature table (ours, from the manual, §19) and its gating: which dialects enable OO recognition (`ibm` included?), whether EXEC blocks are recognised only under `ibm` or in every dialect, and the feature level of each construct | P0 | decided (§6, §8, §14, §19.4); the full per-construct table is written in P0 |
 | O27 | Source for the EXEC CICS and EXEC SQL mapping (§9, §10). None of GnuCOBOL, the other scanners or the sources so far covers it | P4 | needs a source (IBM), requested in P0 |
 
@@ -393,12 +397,14 @@ copybook (`src/impact/depindex.rs`).
 | **P1** COBOL-85 parser (`cobol85`) | format detection and area A checks (§3), lexer, preprocessor with source map, COBOL-85 AST and parser, recovery, `cobol85` reserved words, feature-level diagnostics (§14) | every program in the in-scope NIST modules (NC, IC, IF, IX, OB, RL, SG, SM, SQ, ST) parses with no error diagnostics under `cobol85`; keyword regression under `cobol85` passes, with `CLASS` data names expected to error |
 | **P2** Scanner v1 (`cobol85`) | COBOL-85 facts (§10 non-OO rows), resolver (§9), failure reporting (§14), `apg scan --std` and `cobol.dialect` (§2), the cache key (§13), APG integration (§13) | NIST scan passes on the in-scope modules; e2e scratch repo gives the expected graph; `apg scan --language cobol` works; `--std cobol2023` refuses with its message |
 | **P3** COBOL 2002 and 2014 OO | `cobol2002` and `cobol2014` gating, OO constructs (§6, §8), OO facts (§10), the Micro Focus `PROPERTY` form, `RAISE` and `RESUME` facts | OO scan suite passes; keyword regression under `cobol2002` matches `cobol85` for non-reserved words; no reference compiler exists for the OO syntax, so the OO samples and vendor manuals are the reference |
-| **P4** IBM dialect and EXEC | the `ibm` dialect, IBM reserved words (§8), EXEC CICS and EXEC SQL blocks (§9, §10); needs O27 | EXEC scan suite passes on the IBM samples; reserved-word error under `ibm` is tested |
+| **P4** IBM dialect and EXEC | the `ibm` dialect, IBM reserved words `ENTRY` and `ALTER` (§8), EXEC CICS and EXEC SQL blocks (§9, §10); needs O27 | EXEC scan suite passes on the IBM samples; OO words as data names parse intact under `ibm` is tested |
 | **P5** Later dialects | `xopen`, `mf`, `acu`, `rm`, on demand (§6) | each added dialect passes the dialect gating tests (§12) |
 | **P6** Hardening and release | fixed-format edge cases, diagnostics polish, performance against the O21 baseline, release steps (8 to 9 formulae, `release.sh`, `release.yml`, README, CHANGELOG), installed-binary finalisation (§13) | all suites pass; within 2× `cobc -fsyntax-only` on the same tree and machine; release steps done |
 | **P7** `cobol2023` features | the `cobol2023` placeholder gets its features, once the standard syntax is found (O7) | `cobol2023` dialect tests pass; `--std cobol2023` no longer refuses |
 
 P0 must finish before P1 starts, and P2 lands before P3 so that COBOL-85 scanning is usable early. The phase order is accepted (decided).
+
+The `cobol-frontend` plan's phase 5 corresponds to SPEC P6; its CHANGELOG release entry, version bump and tag are left to the release act. SPEC P5 (later dialects) and P7 (`cobol2023` features) are outside that plan.
 
 ## 17. Risks
 
@@ -468,12 +474,12 @@ P0 must finish before P1 starts, and P2 lands before P3 so that COBOL-85 scannin
 | Feature levels: `error` skips with a diagnostic; `warning`, `archaic`, `obsolete` diagnose and scan; `ok`, `ignore`, `skip` are silent (§14) | user |
 | The feature table is ours, written from the GnuCOBOL manual, not copied from GPL config files | user |
 | `ibm` in v1; EXEC CICS and EXEC SQL blocks move to P2 (superseded by the revised outline: P4, after O27) | user |
-| Under `ibm`, using `OBJECT`, `CLASS`, `METHOD`, `INVOKE`, `ENTRY`, `ALTER` (and other IBM reserved words) as a data name is an error | user |
+| `ibm` reserves `ENTRY` and `ALTER` and no OO word; `OBJECT`, `METHOD` and `INVOKE` as data names parse as ordinary data names with their statements intact | user |
 | Area A checks run as diagnostics under the `cobol85` format (§3) | user |
 | `EXEC CICS START`/`RETURN TRANSID` out of the call graph (O4) | user |
 | External invocations (`CALL`, `LINK`, `XCTL`, `INVOKE SERVICE`/`WEBSERVICE`, `EXEC SQL CALL`) to targets outside the scan are `unresolved_call`, category `external`, following the Java frontend (§9, §10) | user |
 | Dynamic `LINK`/`XCTL` with `PROGRAM(name)` is `unresolved_call`, category `func-value`; SQL user-defined functions emit no edge | user |
-| Reserved words follow GnuCOBOL's per-dialect word lists: `CLASS` is reserved under `cobol85`; most OO words are reserved under `cobol2002` and `cobol2014` (§8, §19.4, O26) | user |
+| Reserved words per dialect: `cobol85` `CLASS` and `ALTER`; `ibm` `ENTRY` and `ALTER`; `cobol2002` and `cobol2014` no OO word. OO words are contextual keywords under every dialect (§8, §19.4, O26) | user |
 | `unconformable` is treated as `error`: a diagnostic, and the construct is skipped (O26) | user |
 | Word, literal and PIC length limits follow the dialect and are diagnostics (§14, O26) | user |
 | OO recognition is on under `cobol2002`, `cobol2014` and `ibm`, and off under `cobol85` (O26) | user |
@@ -542,7 +548,7 @@ From the reserved-word list (Appendix B, default dialect), "Implemented" column:
   `FACTORY`, `INVOKE`, `INHERITS`, `IMPLEMENTS`, `OBJECT-REFERENCE`, `SELF`, `SUPER`, `GET`,
   `RESUME`.
 - The list depends on `-std` and on the reserved-word options. The `cobol85` list is not
-  recorded here in full. The OO-relevant entries are: `cobol85` reserves `CLASS` and `ALTER`; `cobol2002` and `cobol2014` reserve most OO words, with `IMPLEMENTS` context-sensitive; `ibm` reserves `CLASS`, `CLASS-ID`, `OBJECT`, `METHOD`, `INVOKE`, `INHERITS`, `SELF`, `SUPER`, `NULL`, `ENTRY` and `ALTER` (O26). Micro Focus reserves `PROPERTY`, `GET` and `SET`; ACUCOBOL-GT reserves `PROPERTY` only; RM-COBOL and IBM reserve neither.
+  recorded here in full. The OO-relevant entries are: `cobol85` reserves `CLASS` and `ALTER`; `cobol2002` and `cobol2014` reserve none of these OO words; `ibm` reserves `ENTRY` and `ALTER` and no OO word; the OO words are contextual keywords under every dialect (§8, O26). Micro Focus reserves `PROPERTY`, `GET` and `SET`; ACUCOBOL-GT reserves `PROPERTY` only; RM-COBOL and IBM reserve neither.
 - The manual gives no syntax for `CLASS-ID`, `METHOD-ID`, `INVOKE`, `OBJECT REFERENCE`,
   `PROPERTY`, `GET` or `RESUME`. It therefore does not confirm the OO syntax in §6 or the facts
   in §10.
