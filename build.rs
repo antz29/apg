@@ -10,7 +10,7 @@ use std::process::Command;
 /// `agent` is the standalone `agentfrontend` binary serving the
 /// `.opencode/agents/` definition stream.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-cobol` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
