@@ -36,7 +36,7 @@ jobs:
       - name: Build and install formulae with --build-bottle
         run: |
           brew install --build-bottle antz29/apg/scanner
-          brew install --build-bottle antz29/apg/apg-go antz29/apg/apg-java antz29/apg/apg-cpp antz29/apg/apg-rust antz29/apg/apg-ts antz29/apg/apg-csharp antz29/apg/apg-py
+          brew install --build-bottle antz29/apg/apg-go antz29/apg/apg-java antz29/apg/apg-cpp antz29/apg/apg-rust antz29/apg/apg-ts antz29/apg/apg-csharp antz29/apg/apg-py antz29/apg/apg-cobol
 
       - name: Create bottles
         working-directory: ${{ runner.temp }}
@@ -44,7 +44,7 @@ jobs:
           brew bottle \
             --json \
             --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
-            scanner apg-go apg-java apg-cpp apg-rust apg-ts apg-csharp apg-py
+            scanner apg-go apg-java apg-cpp apg-rust apg-ts apg-csharp apg-py apg-cobol
 
       - name: Upload bottle artifacts
         uses: actions/upload-artifact@v7
@@ -132,7 +132,7 @@ jobs:
           echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
 
       # build.rs compiles all frontends (Go, C++, Java, Rust, TS, C#, Python,
-      # the bundled structural scanner and the bundled agent frontend) and
+      # COBOL, the bundled structural scanner and the bundled agent frontend) and
       # stages them into target/release/frontends; the default
       # APG_BUILD_FRONTENDS (unset) does exactly what we want here.
       - name: Build apg + frontends
@@ -141,7 +141,7 @@ jobs:
       - name: Verify every frontend was built
         run: |
           for f in cppfrontend gofrontend rustfrontend csharpfrontend \
-                   java-classes tsfrontend pyfrontend structfrontend agentfrontend; do
+                   java-classes tsfrontend pyfrontend cobolfrontend structfrontend agentfrontend; do
             test -e "target/release/frontends/$f" \
               || { echo "frontend not staged: $f"; exit 1; }
           done
@@ -168,6 +168,7 @@ jobs:
           tar -C target/release/frontends -czf "dist/packages/apg-java-linux-${{ matrix.arch }}.tar.gz" java-classes
           tar -C target/release/frontends -czf "dist/packages/apg-ts-linux-${{ matrix.arch }}.tar.gz" tsfrontend
           tar -C target/release/frontends -czf "dist/packages/apg-py-linux-${{ matrix.arch }}.tar.gz" pyfrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-cobol-linux-${{ matrix.arch }}.tar.gz" cobolfrontend
 
           # 3. All-in-one bundle
           mkdir -p dist/all/frontends
