@@ -2,8 +2,8 @@
 //! (`tests/nist/`). Every in-scope program (the same selection as `cobollib_nist_e2e`) is run
 //! through `cobc -fsyntax-only -std=cobol85`; each program with a COPY statement must be
 //! cobc-accepted. The accepted programs, with the copybook folders, are then scanned by the release
-//! `cobolfrontend`, which must report no file with errors. Finally one cobc batch over the whole
-//! in-scope set is timed against the best of three release runs over the vendored corpus. Run via
+//! `cobolfrontend`, which must report no file with errors. Finally one cobc batch over that
+//! accepted tree (which must exit 0) is timed against the best of three release runs over it. Run via
 //! `cargo test --test cobollib_cobc_e2e -- --ignored --nocapture`.
 
 use std::path::{Path, PathBuf};
@@ -191,11 +191,13 @@ mod e2e {
         for dir in ["copy", "copyalt"] {
             copy_tree(&nist.join(dir), &tree.root.join(dir));
         }
+        let mut accepted_copies = Vec::new();
         for path in &accepted {
             let rel = path.strip_prefix(&nist).expect("program under the corpus");
             let dest = tree.root.join(rel);
             std::fs::create_dir_all(dest.parent().expect("parent dir")).expect("create dir");
             std::fs::copy(path, &dest).expect("copy accepted program");
+            accepted_copies.push(dest);
         }
         let out = Command::new(&frontend)
             .arg(&tree.root)
@@ -207,32 +209,41 @@ mod e2e {
         assert!(out.status.success(), "{stderr}");
         assert_eq!(last, "cobol: 0 files had errors", "{stderr}");
 
-        // Budget: one cobc batch over the whole in-scope set against the best of three frontend runs.
+        // Budget: one cobc batch over the accepted tree against the best of three frontend runs over
+        // it; a status-0 batch keeps a quickly failing cobc from flattering the ratio.
         let start = Instant::now();
-        cobc_command(&cobc, &nist, &scratch.root)
-            .args(&programs)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+        let batch = cobc_command(&cobc, &nist, &scratch.root)
+            .args(&accepted_copies)
+            .output()
             .expect("spawn cobc batch");
         let cobc_secs = start.elapsed().as_secs_f64();
+        assert!(
+            batch.status.success(),
+            "cobc batch over the accepted programs failed ({}): {}",
+            batch.status,
+            first_error(&batch)
+        );
         let frontend_secs = (0..3)
             .map(|_| {
                 let start = Instant::now();
                 let status = Command::new(&frontend)
-                    .arg(&nist)
+                    .arg(&tree.root)
                     .arg("-std=cobol85")
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
                     .status()
                     .expect("spawn cobolfrontend");
-                assert!(status.success(), "cobolfrontend failed over the corpus");
+                assert!(
+                    status.success(),
+                    "cobolfrontend failed over the accepted tree"
+                );
                 start.elapsed().as_secs_f64()
             })
             .fold(f64::INFINITY, f64::min);
         let ratio = frontend_secs / cobc_secs;
         eprintln!(
-            "cobc batch {cobc_secs:.2}s; cobolfrontend best-of-3 {frontend_secs:.2}s; ratio {ratio:.2} (budget <= 2.00)"
+            "{} accepted programs: cobc batch {cobc_secs:.2}s; cobolfrontend best-of-3 {frontend_secs:.2}s; ratio {ratio:.2} (budget <= 2.00)",
+            accepted.len()
         );
         assert!(
             ratio <= 2.0,
