@@ -384,8 +384,10 @@ tier moved OUT of the production module tree into the crate's own top-level
 (e.g. `tests/main_e2e.rs`, `tests/splice_e2e.rs`) plus the frontend crates'
 `src/structlib/tests/structlib_e2e.rs`, `src/pylib/tests/pylib_e2e.rs`,
 `src/agentlib/tests/agentlib_e2e.rs` and `src/cobollib/tests/*_e2e.rs`. Each
-is wrapped in `mod e2e` and shares its crate's `tests/common/mod.rs`, so its
-libtest paths are `e2e::…` (no longer `tests::e2e::…`). Every **e2e** test also
+is wrapped in `mod e2e`, so its libtest paths are `e2e::…` (no longer
+`tests::e2e::…`); the root, structlib and pylib e2e files share their crate's
+`tests/common/mod.rs`, while the agentlib and cobollib e2e files hold their
+helpers in the same file, outside `mod e2e`. Every **e2e** test also
 carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
 `cargo test` can never reach it. Each tier submodule starts with `use super::*;`.
 
@@ -393,8 +395,10 @@ carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
 non-test helper/fixture/builder/test-util is never moved into a tier and never
 duplicated per tier; a helper that sibling tiers — or the relocated e2e
 integration crate — must reach now lives on the shared public library harness
-`apg::testutil` (`src/testutil.rs`, an unconditional public module) or the
-crate's `tests/common/mod.rs`, never stranded in a production module's inline
+`apg::testutil` (`src/testutil.rs`, an unconditional public module) or — for
+the root, structlib and pylib crates — the crate's `tests/common/mod.rs`, and —
+for the agentlib and cobollib crates — the e2e file itself, outside `mod e2e`;
+never stranded in a production module's inline
 `mod tests`. Clippy `-D warnings` is what catches a stranded or unused helper.
 
 **A tier may select ZERO tests.** The repo has few genuine pure unit tests, and
