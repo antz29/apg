@@ -240,15 +240,15 @@ jobs:
       - name: Merge checksums
         working-directory: dist
         run: |
-          cat *.sha256 > sha256sums.txt
-          rm *.sha256
+          cat ./*.sha256 > sha256sums.txt
+          rm ./*.sha256
 
       # brew writes bottle files as <name>--<version>... but builds the fetch URL
       # as <name>-<version>...; rename to match what brew fetches.
       - name: Normalize bottle filenames
         run: |
           for f in bottles/*--*.bottle*.tar.gz; do
-            mv "$f" "$(echo "$f" | sed 's/--/-/')"
+            mv "$f" "${f/--/-}"
           done
 
       # Immutable releases forbid adding assets after publish, so the release is
