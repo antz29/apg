@@ -2,7 +2,7 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python), builds
+`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, COBOL), builds
 a program graph of its types, functions, and call/use relationships, and
 stores it in a LadybugDB graph database that you can query with Cypher from
 inside opencode. The bundled structural scanner also graphs the tracked
@@ -16,7 +16,8 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
 ## Features
 
 - **Per-language scanner frontends** installed separately via brew — install
-  only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python),
+  only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python,
+  COBOL),
   plus a **bundled structural scanner** in the base package that graphs the
   tracked text/config/packaging files the code frontends don't claim (Markdown,
   shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files),
@@ -51,7 +52,7 @@ The `scanner` formula builds the `apg` binary and ships the bundled
 **structural scanner** (`structfrontend`) and the bundled **agent-definition
 frontend** (`agentfrontend`); the per-language frontends are separate formulae
 (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`,
-`apg-py`). Install the base plus the frontends for the
+`apg-py`, `apg-cobol`). Install the base plus the frontends for the
 languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
@@ -66,10 +67,12 @@ stable toolchain (see [Building from source](#building-from-source)). A
 TypeScript repo's `node_modules` is always skipped, and workspace-package
 imports resolve even before `npm install`.
 
-The other three frontends need no runtime at scan time: the C++ frontend is a
+The other four frontends need no runtime at scan time: the C++ frontend is a
 native tree-sitter binary, the C# frontend (`apg-csharp`) is a self-contained
-single-file publish (its .NET SDK is build-time only), and the Python
-(`apg-py`) frontend resolves from filesystem markers and never shells out. The
+single-file publish (its .NET SDK is build-time only), the Python
+(`apg-py`) frontend resolves from filesystem markers and never shells out, and
+the COBOL frontend (`apg-cobol`) is a self-contained binary that never shells
+out. The
 bundled structural scanner and agent-definition frontend are likewise
 self-contained and never shell out — they need nothing on `PATH`. On Linux the
 base `apg` binary links OpenSSL dynamically, so `libssl.so.3` must be present
@@ -91,6 +94,7 @@ ceiling.
 | TypeScript (`apg-ts`) | `node` + `npm ci` | `node` on `PATH`, spawned `node <dir>/scanner.mjs` | `typescript 5.9.3` |
 | C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` |
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
+| COBOL (`apg-cobol`) | stable Rust `1.98.1` + crates.io (`serde`, `serde_json`) | none (self-contained binary, never shells out) | no engine pin (hand-written parser); ceiling = the dialect table: `cobol85` (default), `cobol2002`, `cobol2014`, `ibm` (`cobol2023` is refused) |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
 | Agent definitions (`agentfrontend`) | stable Rust + crates.io | none (self-contained binary reading `.opencode/agents/`, never shells out) | `serde` / `serde_json` 1 (no language-version ceiling) |
 | opencode chat plugin (`apg init`) | `bun install` (`@opencode/plugin`) | opencode 2.x (tool plugins into `~/.config/opencode/plugins/`) | `@opencode/plugin` (opencode 2.x plugin API) |
@@ -106,7 +110,8 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-rust \
              antz29/apg/apg-ts \
              antz29/apg/apg-csharp \
-             antz29/apg/apg-py
+             antz29/apg/apg-py \
+             antz29/apg/apg-cobol
 ```
 
 Install only the frontends you need:
@@ -152,7 +157,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 # Or use the --frontends flag:
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,ts
 
-# Install everything (scanner + all 7 frontends):
+# Install everything (scanner + all 8 frontends):
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 ```
 
@@ -162,7 +167,7 @@ Options:
 - `--version 0.28.x`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
-- `--frontends L,L...`: comma-separated list of frontends to install
+- `--frontends L,L...`: comma-separated list of frontends to install (`go`, `rust`, `cpp`, `csharp`, `java`, `ts`, `py`, `cobol`)
 - `--all`: install scanner and all frontends
 - `--force`: overwrite existing files without prompting
 - `--uninstall [component...]`: remove specific components or the entire install
@@ -255,6 +260,10 @@ apg scan --language go,ts /path/to/project   # mixed repo, one graph
 apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
 apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
+apg scan --language cobol --std ibm --copy-path copybooks --copy-path shared/cpy
+                                         # COBOL: --std <dialect> overrides cobol.dialect in apg/config.json for this run
+                                         # (cobol85 default; cobol2002, cobol2014, ibm; cobol2023 refused);
+                                         # --copy-path <dir> is a repeatable copybook search directory
 apg scan --no-progress                   # silence the live progress stream
 apg scan --force                         # true rebuild: discard db.lbug, bypass the fast path and fact cache, re-run every frontend (sources and apg/layers untouched)
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
@@ -617,8 +626,9 @@ is equally self-contained at scan time.
 The toolchains that compile or stage a frontend are pinned in repo-visible
 files consumed by every build path that compiles a frontend, exact where the
 mechanism can enforce it: Rust `1.98.1` (the repo-root `rust-toolchain.toml`,
-whose `channel` rustup's parent-walk applies to the main crate and all three
-cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`), Node on the
+whose `channel` rustup's parent-walk applies to the main crate and all five
+cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`,
+`src/agentlib`, `src/cobollib`), Node on the
 `26.x` line (`src/tslib/package.json`'s `engines.node` range `>=26.8.1 <27`,
 enforced fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the
 exact `26.9.0`), and Go on the release Linux CI path (`GOTOOLCHAIN` +
@@ -641,7 +651,7 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`;
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`, `cobol`;
 `0` to skip all; `struct` is the bundled structural scanner and `agent` the
 agent-definition frontend) to
 limit what build.rs compiles — the split brew formulae rely on this.
@@ -699,6 +709,7 @@ src/rustlib/         Rust scanner (rust-analyzer engine; separate Cargo project)
 src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
 src/csharplib/       C# scanner (Roslyn; separate build)
 src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
+src/cobollib/        COBOL scanner (hand-written COBOL parser; separate Cargo project)
 src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
 src/agentlib/        bundled agent-definition frontend — `.opencode/agents/*.md` → Agent nodes (standalone non-workspace Rust crate)
 opencode-suite/      install template for `apg init` (plugins/, lib/, agents/; embedded in src/main.rs)
@@ -711,6 +722,7 @@ Formula/apg-rust.rb    Rust scanner frontend
 Formula/apg-ts.rb      TypeScript scanner frontend
 Formula/apg-csharp.rb  C# scanner frontend
 Formula/apg-py.rb      Python scanner frontend
+Formula/apg-cobol.rb   COBOL scanner frontend
 ```
 
 ## License
