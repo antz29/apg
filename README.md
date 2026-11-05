@@ -660,14 +660,18 @@ The test suite is split into three tiers (`global.constraint.test-tier-boundarie
 **unit** (exactly one unit) and **int** (2+ units) are pure in-memory tests that
 fake filesystem/database/git/process; **e2e** is any test that does real I/O (a
 temp dir, `db.lbug`, git, or a spawned process) and is `#[ignore]`d by definition.
-Each test lives in a `unit`/`int`/`e2e` submodule of its module's `mod tests`, so
-the tiers run separately:
+Unit and int tests live in a sibling `src/<module>/tests.rs` (or `src/tests.rs`
+for a crate root) reached by a `#[cfg(test)] mod tests;` declaration, in inner
+`unit` and `int` submodules; e2e tests live in each crate's top-level
+`tests/<module>_e2e.rs` integration crate, wrapped in `mod e2e` (libtest paths
+`e2e::…`) and `#[ignore]`d; only the root, structlib and pylib crates share a
+`tests/common/mod.rs`; so the tiers run separately:
 
 ```sh
 cargo test          # fast default gate: unit+int only, seconds, no e2e
 cargo test-unit     # unit tier only       (cargo test tests::unit::)
 cargo test-int      # int tier only        (cargo test tests::int::)
-cargo test-e2e      # e2e tier only, opt-in (cargo test tests::e2e:: -- --ignored)
+cargo test-e2e      # e2e tier only, opt-in (cargo test e2e:: -- --ignored --test-threads=4)
 ```
 
 The e2e tier is the opt-in final gate; it exercises a scratch `/tmp` git repo and
