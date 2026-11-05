@@ -104,7 +104,7 @@ class Scanner < Formula
         brew install antz29/apg/apg-ts       # TypeScript (needs `node` at scan time)
         brew install antz29/apg/apg-csharp   # C# (needs `dotnet` at build time only)
         brew install antz29/apg/apg-py       # Python (no Python runtime needed at scan time)
-        brew install antz29/apg/apg-cobol   # COBOL (no runtime needed at scan time)
+        brew install antz29/apg/apg-cobol    # COBOL (no runtime needed at scan time)
     EOS
   end
 
