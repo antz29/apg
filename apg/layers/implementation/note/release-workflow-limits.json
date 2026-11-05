@@ -1,7 +1,7 @@
 {
   "layer": "implementation",
   "type": "note",
-  "name": "workflow-shellcheck-findings-deferred",
+  "name": "release-workflow-limits",
   "body": "The gate's workflow step runs `actionlint -shellcheck=`, so the workflow's embedded shell is not shellcheck-linted by the gate; a plain `actionlint` run with shellcheck integration reports this workflow clean. The normalize-bottle-filenames step renames with the bash-only `${f/--/-}` expansion and relies on the default bash shell of GitHub-hosted runners. Limit: a shell defect introduced into the workflow's embedded scripts is not caught by the gate, because shellcheck is an ambient tool and the flag keeps the gate's result machine-independent. Upgrade by dropping `-shellcheck=` from the gate step once shellcheck is a declared dev dependency, and by switching the rename back to `sed` if that step is ever given `shell: sh`.\n\nTwo further limits on this workflow. (1) The Go module cache key names the single file `src/golib/go.sum`; upgrade to a glob (e.g. `**/go.sum`) when a second Go module or a `go.work` is added, otherwise the cache key silently misses the new module's dependencies. (2) The `ubuntu-24.04` pin on the linux x86_64 leg is a deliberate stop-gap for the `ubuntu-latest` 24.04-to-26.04 migration; upgrade both legs together to `ubuntu-26.04` once `ubuntu-24.04-arm` is retired, otherwise the legs drift apart.",
   "properties": {},
   "out": [
