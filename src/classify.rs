@@ -160,6 +160,24 @@ fn js_bundle_filename(filename_lower: &str) -> bool {
     })
 }
 
+/// COBOL: copybooks (`.cpy`) are hand-written source, so they stay `src`.
+fn cobol_code_type(filename_lower: &str, has_seg: impl Fn(&[&str]) -> bool) -> &'static str {
+    if filename_lower.starts_with("test_")
+        || filename_lower.contains("_test.")
+        || filename_lower.contains("-test.")
+        || has_seg(&["test", "tests"])
+    {
+        return "test";
+    }
+    if has_seg(&["gen", "generated"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", "third_party", "thirdparty"]) {
+        return "external";
+    }
+    "src"
+}
+
 fn builtin_code_type(path: &str, language: &str) -> &'static str {
     let segments: Vec<&str> = path.split('/').collect();
     let has_seg = |names: &[&str]| segments.iter().any(|s| names.contains(s));
@@ -226,6 +244,7 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        "cobol" => cobol_code_type(&filename_lower, has_seg),
         "ts" => {
             if filename_lower.ends_with("_test.ts")
                 || filename_lower.ends_with("_test.tsx")

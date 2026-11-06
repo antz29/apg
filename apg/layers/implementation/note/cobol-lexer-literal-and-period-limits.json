@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-lexer-literal-and-period-limits",
+  "body": "The lexer joins continued words, numerics, PICTURE strings and literals, drops comma/semicolon separators before a space or line end, and keeps a '.' inside a word whenever a non-space follows, so `X.)` and `X.==` stay one word. It reads X\"...\" as a word plus a literal and treats column-7 'D' lines as comments. Limit: hexadecimal literals and debugging lines are not modelled, and a comma or semicolon followed by a continuation still yields a token. Upgrade when a dialect or corpus needs hex literals, debugging mode, `.==` pseudo-text or that separator form.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.lexer.Lexer",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

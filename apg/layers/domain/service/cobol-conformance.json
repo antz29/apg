@@ -1,0 +1,41 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "cobol-conformance",
+  "body": "The capability that proves the COBOL frontend against the NIST CCVS85 programs, the OO samples and the performance budget.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-verification",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-nist-parse",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-oo-samples",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-performance-budget",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cobol-test-suite",
+      "properties": {}
+    }
+  ]
+}

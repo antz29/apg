@@ -413,7 +413,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     let mut groups: RelGroup = BTreeMap::new();
     {
         let mut stage =
-            |table: &'static str, from: &str, to: &str, target_type: &str| -> anyhow::Result<()> {
+            |table: &'static str, from: &str, to: &str, payload: &str| -> anyhow::Result<()> {
                 // The delta authors an edge when it owns the SOURCE unit.
                 // `Contains` is the one exception (feedback-118): a seeded
                 // Module the delta did NOT re-decide still authors `Module ->
@@ -448,7 +448,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 groups
                     .entry((table, from_label, to_label))
                     .or_default()
-                    .push((from.to_string(), to.to_string(), target_type.to_string()));
+                    .push((from.to_string(), to.to_string(), payload.to_string()));
                 Ok(())
             };
         for (from, to) in &delta.graph.contains {
@@ -458,7 +458,15 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
             stage("Calls", from, to, "")?;
         }
         for (from, to) in &delta.graph.uses {
-            stage("Uses", from, to, "")?;
+            // A Struct→File `uses` is the copybook copy edge: its `kind=copy`
+            // properties ride the payload into the rel's `properties` column.
+            let props = delta
+                .graph
+                .edge_properties
+                .get(&("uses", from.clone(), to.clone()))
+                .map(crate::layers::properties_json)
+                .unwrap_or_default();
+            stage("Uses", from, to, &props)?;
         }
         for (from, to, tt) in &delta.graph.unresolved_calls {
             stage("UnresolvedCall", from, to, tt)?;
@@ -470,13 +478,20 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     for (&(table, from_label, to_label), edges) in &groups {
         let rows = edges
             .iter()
-            .map(|(from, to, target_type)| {
+            .map(|(from, to, payload)| {
                 if table == "UnresolvedCall" {
                     format!(
                         "{{from: {}, to: {}, tt: {}}}",
                         lit(from),
                         lit(to),
-                        lit(target_type)
+                        lit(payload)
+                    )
+                } else if table == "Uses" && to_label == "File" {
+                    format!(
+                        "{{from: {}, to: {}, props: {}}}",
+                        lit(from),
+                        lit(to),
+                        lit(payload)
                     )
                 } else {
                     format!("{{from: {}, to: {}}}", lit(from), lit(to))
@@ -489,6 +504,12 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 "UNWIND [{rows}] AS row MATCH (a:{from_label} {{fqn: row.from}}), \
                  (b:{to_label} {{fqn: row.to}}) MERGE (a)-[r:UnresolvedCall]->(b) \
                  SET r.target_type = row.tt"
+            ))?;
+        } else if table == "Uses" && to_label == "File" {
+            conn.query(&format!(
+                "UNWIND [{rows}] AS row MATCH (a:{from_label} {{fqn: row.from}}), \
+                 (b:{to_label} {{fqn: row.to}}) MERGE (a)-[r:Uses]->(b) \
+                 SET r.properties = row.props"
             ))?;
         } else {
             conn.query(&format!(
@@ -766,10 +787,11 @@ fn node_label_of(kind: NodeKind) -> Option<&'static str> {
 /// (`Calls`/`Uses`/`UnresolvedCall`/`UnresolvedUse`). The `Contains` code pairs
 /// need no entry here — they already appear in `rel_table_pairs` via
 /// `contains_pairs`.
-pub const CODE_REL_PAIRS: [(&str, &str, &str); 6] = [
+pub const CODE_REL_PAIRS: [(&str, &str, &str); 7] = [
     ("Calls", "Function", "Function"),
     ("Uses", "Function", "Struct"),
     ("Uses", "Struct", "Struct"),
+    ("Uses", "Struct", "File"),
     ("UnresolvedCall", "Function", "UnresolvedTarget"),
     ("UnresolvedUse", "Function", "UnresolvedTarget"),
     ("UnresolvedUse", "Struct", "UnresolvedTarget"),

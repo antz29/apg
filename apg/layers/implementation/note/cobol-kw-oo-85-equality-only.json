@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-kw-oo-85-equality-only",
+  "body": "kw_data_names_oo_85_facts_are_identical_across_dialects scans kw_data_names_oo_85.cob under cobol85, cobol2002, cobol2014 and ibm and asserts a successful exit, the kwoo program record under cobol85, and identical facts across the four dialects. Limit: it names neither the five 01 Structs (kwoo.OBJECT, kwoo.NEW, kwoo.NULL, kwoo.PROPERTY, kwoo.INVOKE) nor the absence of diagnostics, so a mis-parse shared by all four dialects passes. Upgrade by asserting those five Structs and an empty stderr for the fixture if the keyword rule ever regresses or the fixture README row must be fully test-backed.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobollib_oo_e2e.e2e.kw_data_names_oo_85_facts_are_identical_across_dialects",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

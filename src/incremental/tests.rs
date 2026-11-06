@@ -29,6 +29,12 @@ mod unit {
         assert_eq!(language_of("x.hxx"), "cpp");
         assert_eq!(language_of("x.tpp"), "cpp");
         assert_eq!(language_of("x.ipp"), "cpp");
+        // COBOL sources and copybooks land in the `cobol` bucket in any case.
+        assert_eq!(language_of("PAYROLL.cob"), "cobol");
+        assert_eq!(language_of("ledger.cbl"), "cobol");
+        assert_eq!(language_of("ledger.CBL"), "cobol");
+        assert_eq!(language_of("x.cobol"), "cobol");
+        assert_eq!(language_of("copy/REC.Cpy"), "cobol");
         assert_eq!(language_of("x.md"), "md");
         // A tracked `.opencode/agents/` definition is the agent frontend's
         // claim, so it lands in the agent stream's target set ahead of the

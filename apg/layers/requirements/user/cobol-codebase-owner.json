@@ -1,0 +1,15 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "cobol-codebase-owner",
+  "body": "A developer or team whose repository holds COBOL programs, copybooks and class definitions, and who scans them to read their program graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.cobol-frontend",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -39,7 +39,7 @@ pub enum CodeRefStatus {
 /// This literal mirrors [`crate::frontends::STRUCTURAL_LANGUAGES`] plus the
 /// code/agent ids; a `const` array cannot concatenate that slice, so the ids
 /// are repeated here and the two lists must move together.
-pub const LANGUAGE_ROOTS: [&str; 19] = [
+pub const LANGUAGE_ROOTS: [&str; 20] = [
     "rust",
     "java",
     "go",
@@ -48,6 +48,7 @@ pub const LANGUAGE_ROOTS: [&str; 19] = [
     "ts",
     "js",
     "py",
+    "cobol",
     "md",
     "agent",
     "sh",

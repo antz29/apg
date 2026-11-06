@@ -1,0 +1,38 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-verification",
+  "body": "The COBOL frontend is verified against the NIST CCVS85 programs, the OO samples and a performance budget set against cobc.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-nist-parse",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-oo-samples",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-performance-budget",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-conformance",
+      "properties": {}
+    }
+  ]
+}

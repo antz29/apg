@@ -36,6 +36,7 @@ pub fn granularity(language: &str) -> Granularity {
         "csharp" | "c#" => Granularity::Project,
         "python" | "py" => Granularity::PackageOrModule,
         "cpp" | "c++" | "c" => Granularity::File,
+        "cobol" => Granularity::File,
         "md" | "markdown" => Granularity::File,
         _ => Granularity::File,
     }

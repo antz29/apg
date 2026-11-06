@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-class-header-using-limit",
+  "body": "parse_class reads INHERITS and IMPLEMENTS through the shared OO header, which has no USING split, so the words of a CLASS-ID USING clause land in the inherits list; text in a method DATA area before PROCEDURE that does not start with DATA DIVISION is ignored. Limit: a parameterised class gets spurious INHERITS uses or unresolved uses for its parameters. Upgrade when SPEC states CLASS-ID USING facts, by splitting USING in the shared header as parse_interface does.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.oo.parse_class",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

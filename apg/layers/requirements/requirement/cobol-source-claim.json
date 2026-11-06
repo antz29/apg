@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-source-claim",
+  "body": "The COBOL frontend claims .cob, .cbl, .cobol and .cpy files in any letter case, and the structural scanner leaves those files unclaimed.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-source-classification",
+      "properties": {}
+    }
+  ]
+}

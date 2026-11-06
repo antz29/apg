@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-exec-host-var-indicator-adjacency",
+  "body": "host_vars treats a colon whose byte offset touches the end of the previous host variable as an indicator, so :HV:IND records only HV; SPEC names no indicator rule, so this is the conservative reading. Limit: a spaced indicator (:HV :IND) records IND as a bogus reference, and COPY REPLACING that rewrites the text can break the adjacency. Upgrade when an IBM source (SPEC O27) shows spaced indicators or a rule keyed on the INDICATOR keyword.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.procedure.Parser.host_vars",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

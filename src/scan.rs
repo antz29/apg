@@ -11,13 +11,13 @@ use std::path::PathBuf;
 
 use crate::frontends::{
     FrontendHandoff, STRUCTURAL_LANGUAGES, auto_detect_languages, available_languages,
-    should_spawn_language, spawn_frontend, targets_for_language,
+    should_spawn_language, spawn_frontend_args, targets_for_language,
 };
 use crate::logging::{Log, emit_timing};
 use crate::warm::{reuse_universe, warm_prepared, warm_universe};
 use crate::{
-    artifacts, cache, classify, find_or_create_apg_root, git, graph, incremental, ingest, layers,
-    progress, run_pipeline, schema, session, specs, timing, version_gate,
+    artifacts, cache, classify, cobol, find_or_create_apg_root, git, graph, incremental, ingest,
+    layers, progress, run_pipeline, schema, session, specs, timing, version_gate,
 };
 
 pub fn temp_dir() -> PathBuf {
@@ -83,6 +83,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut no_build_scripts = false;
     let mut no_progress = false;
     let mut force = false;
+    let mut std_flag: Option<String> = None;
+    let mut copy_paths: Vec<String> = Vec::new();
     let mut positional: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -96,6 +98,18 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                             language_args.push(l.to_string());
                         }
                     }
+                }
+            }
+            "--std" => {
+                i += 1;
+                if i < args.len() {
+                    std_flag = Some(args[i].clone());
+                }
+            }
+            "--copy-path" => {
+                i += 1;
+                if i < args.len() {
+                    copy_paths.push(args[i].clone());
                 }
             }
             "--exclude-path" => {
@@ -131,6 +145,12 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     };
     let blacklist: Vec<String> = positional.get(1..).unwrap_or(&[]).to_vec();
     let project_dir = project_dir.canonicalize()?;
+    // `--copy-path` dirs are resolved against the project so the frontend
+    // always receives absolute paths.
+    let copy_paths: Vec<String> = copy_paths
+        .iter()
+        .map(|d| project_dir.join(d).display().to_string())
+        .collect();
 
     // The checkout-independent identity base (`requirements.requirement.
     // repo-relative-file-identity`): the git toplevel, or the scan root when
@@ -255,6 +275,21 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     }
     log.ln(&format!("Languages: {}", languages.join(", ")));
 
+    // The COBOL dialect (`--std`, else `cobol.dialect` in apg/config.json, else
+    // cobol85). A refused dialect fails the scan here, before any spawn.
+    let cobol_dialect: Option<&str> = if languages.iter().any(|l| l == "cobol") {
+        let config_text = std::fs::read_to_string(project_dir.join("apg/config.json")).ok();
+        Some(cobol::effective_dialect(
+            std_flag.as_deref(),
+            config_text.as_deref(),
+        )?)
+    } else {
+        None
+    };
+    let cobol_args = cobol_dialect
+        .map(|d| cobol::frontend_args(d, &copy_paths))
+        .unwrap_or_default();
+
     if !blacklist.is_empty() {
         log.ln(&format!("Blacklist: {:?}", blacklist));
     }
@@ -274,6 +309,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         excludes: path_excludes.clone(),
         modules: module_dirs.clone(),
         classification: cache::classification_digest(config.as_ref()),
+        cobol_dialect: cobol_dialect.map(str::to_string),
     };
 
     // Win-B incremental preparation (phase-02 task-8): the content manifest,
@@ -434,7 +470,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 }
                 continue;
             }
-            match spawn_frontend(
+            match spawn_frontend_args(
                 lang,
                 &project_dir,
                 &module_dirs,
@@ -445,6 +481,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 &tmp,
                 &targets,
                 phase,
+                &cobol_args,
                 &mut log,
             )? {
                 Some(spool) => {

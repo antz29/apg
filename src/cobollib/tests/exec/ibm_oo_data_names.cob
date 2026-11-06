@@ -1,0 +1,15 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IBMOODATA.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 OBJECT PIC X(10) VALUE 'A'.
+       01 METHOD PIC X(10) VALUE 'B'.
+       01 INVOKE PIC X(10) VALUE 'C'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE 'X' TO OBJECT.
+           DISPLAY METHOD.
+           IF INVOKE = 'C'
+               DISPLAY OBJECT
+           END-IF.
+           STOP RUN.

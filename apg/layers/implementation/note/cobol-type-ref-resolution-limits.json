@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-type-ref-resolution-limits",
+  "body": "Emitter.resolve_types treats every REPOSITORY entry as a class name (the AST records no CLASS/INTERFACE kind), emits nothing and no diagnostic for a class name that matches several scanned classes, and maps resolved types back to Struct ids by the address of the stored compilation units. Limit: an ambiguous INHERITS, IMPLEMENTS, USING or OBJECT REFERENCE target is silently unlinked, and a later change that mutates the stored units after emission would break the address lookup. Upgrade by recording the REPOSITORY entry kind, adding an ambiguity diagnostic when one is wanted, or keying types by an emitted id instead of an address.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.Emitter.resolve_types",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

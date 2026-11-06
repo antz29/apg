@@ -12,6 +12,11 @@
       "kind": "is-role",
       "source": "solution.component.structural-build-staging",
       "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-build-artifact",
+      "properties": {}
     }
   ]
 }

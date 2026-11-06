@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "bottle-block-carries-no-checksum",
-  "body": "The eight Formula bottle blocks now carry only root_url and rebuild: the stale arm64_sonoma checksum was removed because the macos-15 pipeline will never publish a sonoma bottle, and no arm64_sequoia checksum was written by hand because the publish job's `brew bottle --merge --write` derives it from the build JSON. Limit: a checksumless bottle block is unvalidated locally — the implementer holds no ruby/brew/actionlint grant, so the first macOS 15 release run is the real validator, and the repo gate never parses Actions YAML or Ruby formula syntax. Upgrade when the first sequoia publish lands, or if the bottle job's `brew install --build-bottle` or a tap audit objects to a checksumless block: let the merge populate the block, or drop `rebuild` alongside the checksum.",
+  "body": "Eight of the nine Formula files carry a bottle block with root_url, rebuild and an arm64_sequoia sha256 that the release publish job's `brew bottle --merge --write` derives from the build JSON; Formula/apg-cobol.rb carries no bottle block, so until a tagged release merges one, `brew install antz29/apg/apg-cobol` builds from source. Limit: the repo gate checks formula syntax with `ruby -c` only, so a bottle block is validated by the macOS release run and not locally. Upgrade when the first tagged release after apg-cobol lands: confirm the merge wrote its bottle block, or add one by hand if the publish job skips a formula that has none.",
   "properties": {},
   "out": [
     {

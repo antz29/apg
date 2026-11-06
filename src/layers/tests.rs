@@ -895,7 +895,7 @@ mod unit {
     /// implementation constraint to a scan Language identity is accepted (a
     /// structural-stream id such as `sh` included), while a non-implementation
     /// source, an authored-node target or another code FQN is refused (every
-    /// target must be one of the nineteen `LANGUAGE_ROOTS`).
+    /// target must be one of the twenty `LANGUAGE_ROOTS`).
     #[test]
     fn edge_kind_matrix_is_complete_and_consistent() {
         let exempt = ["implemented-by", "details", "applies-to"];
@@ -1576,18 +1576,19 @@ mod unit {
     /// `code_identity` strips exactly ONE leading language root — every root in
     /// `LANGUAGE_ROOTS`, a bare FQN unchanged, and only a real `<root>.`
     /// boundary (so `rusty.main` is never mangled). `LANGUAGE_ROOTS` is the
-    /// complete `available_languages` vocabulary (nineteen ids: the code/agent
-    /// ids plus the structural streams, `md` included): `agent` is a member and
-    /// `agent.<file-stem>` strips to the bare stem exactly once, and a
-    /// structural root strips the same way.
+    /// complete `available_languages` vocabulary (twenty ids: the code/agent
+    /// ids including `cobol`, plus the structural streams, `md` included):
+    /// `agent` is a member and `agent.<file-stem>` strips to the bare stem
+    /// exactly once, and a structural root strips the same way.
     #[test]
     fn code_identity_strips_one_language_root() {
         assert!(
             LANGUAGE_ROOTS.contains(&"agent")
+                && LANGUAGE_ROOTS.contains(&"cobol")
                 && LANGUAGE_ROOTS.contains(&"sh")
                 && LANGUAGE_ROOTS.contains(&"misc")
-                && LANGUAGE_ROOTS.len() == 19,
-            "LANGUAGE_ROOTS must carry the nineteen available_languages ids: {LANGUAGE_ROOTS:?}"
+                && LANGUAGE_ROOTS.len() == 20,
+            "LANGUAGE_ROOTS must carry the twenty available_languages ids: {LANGUAGE_ROOTS:?}"
         );
         for root in LANGUAGE_ROOTS {
             assert_eq!(

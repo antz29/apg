@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "cobol-corpora-test-data-only",
+  "body": "External COBOL sources are test data only, each used after its licence is checked and its notices kept in the repository.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

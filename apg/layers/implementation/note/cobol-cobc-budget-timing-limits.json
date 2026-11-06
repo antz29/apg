@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-cobc-budget-timing-limits",
+  "body": "cobc_agreement_and_performance_budget times one cobc batch, which must exit 0, against the best of three release cobolfrontend runs, both over the same scratch tree of cobc-accepted programs, by wall clock on the machine running it; it detects COPY-using programs by a plain COPY word match on non-comment lines. Limits: the ratio can flake on a loaded machine, a COPY word inside a string literal counts as a COPY program, and the exit-0 and accepted-tree paths are unexercised against a cobc-rejected program because cobc accepts the whole NIST corpus. Upgrade by averaging several cobc runs or widening the bound if the budget check flakes, by a token-level COPY check if a string-literal false positive ever appears, and by a rejected-program fixture if the agreement path needs direct evidence.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobollib_cobc_e2e.e2e.cobc_agreement_and_performance_budget",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

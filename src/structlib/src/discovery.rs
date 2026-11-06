@@ -26,12 +26,14 @@ const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"]
 /// shipped code frontend's accepted extensions — Rust/Go/Java/C#/Python
 /// (`rs go java cs py pyi`), C++'s sources and headers
 /// (`cpp cc cxx c++ h hpp hh hxx tpp ipp`), and the unified JS/TS module
-/// variants (`ts tsx mts cts js jsx mjs cjs`). `.c` is deliberately absent —
+/// variants (`ts tsx mts cts js jsx mjs cjs`), and the COBOL frontend's
+/// (`cob cbl cobol cpy`). `.c` is deliberately absent —
 /// the C++ frontend does not claim it, so a tracked `.c` file falls to the
 /// residual `misc` stream.
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp", "ts",
-    "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi",
+    "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi", "cob", "cbl", "cobol",
+    "cpy",
 ];
 
 /// Reads the pinned `--targets` list: absolute source paths, one per line,

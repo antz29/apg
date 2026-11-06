@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-replace-pseudo-text-only",
+  "body": "replace matches pseudo-text pairs, including multi-line, period-bearing and empty BY pseudo-text, and honours REPLACE OFF; COPY REPLACING word, literal and identifier operands reach it already wrapped as pseudo-text by the preprocessor. A REPLACE statement starts at any token spelled REPLACE. Limit: a REPLACE statement accepts pseudo-text operands only, and REPLACE used as a data name would be misread. Upgrade when a dialect allows non-pseudo-text REPLACE operands or a corpus uses REPLACE as a name.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.replace.replace",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

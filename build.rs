@@ -3,14 +3,14 @@ use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
-/// `struct`, `py`, `agent`); `0`/`none`/empty skips all.
+/// `struct`, `py`, `agent`, `cobol`); `0`/`none`/empty skips all.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
 /// `agent` is the standalone `agentfrontend` binary serving the
 /// `.opencode/agents/` definition stream.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-cobol` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
@@ -27,6 +27,7 @@ fn build_frontends() -> Vec<String> {
             "struct".into(),
             "py".into(),
             "agent".into(),
+            "cobol".into(),
         ],
     }
 }
@@ -62,6 +63,7 @@ fn watch_frontend_sources() {
         "src/structlib",
         "src/pylib",
         "src/agentlib",
+        "src/cobollib",
     ];
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     while let Some(dir) = stack.pop() {
@@ -131,6 +133,9 @@ fn main() {
     }
     if enabled(&frontends, "py") {
         languages.extend(stage_py(&stage_dir));
+    }
+    if enabled(&frontends, "cobol") {
+        languages.extend(stage_cobol(&stage_dir));
     }
     if enabled(&frontends, "ts") {
         languages.extend(stage_ts(&out_dir, &stage_dir));
@@ -436,6 +441,39 @@ fn stage_py(stage_dir: &Path) -> Vec<String> {
         println!("cargo:rustc-env=APG_FRONTEND_PY={}", pyfrontend.display());
         let _ = std::fs::copy(&pyfrontend, stage_dir.join("pyfrontend"));
         return vec!["py".into()];
+    }
+
+    Vec::new()
+}
+
+/// COBOL frontend (standalone Rust crate, compiled in isolation).
+fn stage_cobol(stage_dir: &Path) -> Vec<String> {
+    // Compile cobollib with cargo into its own isolated target dir
+    // (src/cobollib/target). ALWAYS `--release`, independent of the outer
+    // cargo profile, and staged into the ACTIVE outer profile's frontends
+    // dir (same rationale as pylib above). cobollib is a standalone,
+    // non-workspace crate, so its lockfile and target tree stay independent.
+    // The staged artifact is the `cobolfrontend` binary. On failure, skip
+    // cobol rather than aborting the whole build (like the other frontends).
+    let cobolfrontend = Path::new("src/cobollib")
+        .join("target")
+        .join("release")
+        .join("cobolfrontend");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--manifest-path")
+        .arg("src/cobollib/Cargo.toml")
+        .arg("--release")
+        .arg("--bin")
+        .arg("cobolfrontend");
+    let cobol_ok = cmd.status().is_ok_and(|s| s.success()) && cobolfrontend.exists();
+    if cobol_ok {
+        println!(
+            "cargo:rustc-env=APG_FRONTEND_COBOL={}",
+            cobolfrontend.display()
+        );
+        let _ = std::fs::copy(&cobolfrontend, stage_dir.join("cobolfrontend"));
+        return vec!["cobol".into()];
     }
 
     Vec::new()

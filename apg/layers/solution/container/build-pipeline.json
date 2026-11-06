@@ -16,6 +16,11 @@
       "kind": "is-role",
       "target": "solution.role.pipeline-container",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-build-artifact",
+      "properties": {}
     }
   ],
   "in": [

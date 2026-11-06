@@ -680,12 +680,14 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 
     let mut u_fn = (Vec::new(), Vec::new());
     let mut u_st = (Vec::new(), Vec::new());
+    let mut u_sf = (Vec::new(), Vec::new());
     let mut u_person = (Vec::new(), Vec::new());
     for (a, b) in &graph.uses {
-        let dst = match graph.nodes[a].kind {
-            NodeKind::Function => &mut u_fn,
-            NodeKind::Struct => &mut u_st,
-            NodeKind::Person => &mut u_person,
+        let dst = match (graph.nodes[a].kind, graph.nodes[b].kind) {
+            (NodeKind::Function, _) => &mut u_fn,
+            (NodeKind::Struct, NodeKind::File) => &mut u_sf,
+            (NodeKind::Struct, _) => &mut u_st,
+            (NodeKind::Person, _) => &mut u_person,
             _ => unreachable!("unvalidated uses edge"),
         };
         dst.0.push(a.clone());
@@ -787,6 +789,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     rel_props("calls_actor.parquet", "calls", calls_actor.0, calls_actor.1)?;
     rel_props("uses_fn.parquet", "uses", u_fn.0, u_fn.1)?;
     rel_props("uses_struct.parquet", "uses", u_st.0, u_st.1)?;
+    rel_props("uses_struct_file.parquet", "uses", u_sf.0, u_sf.1)?;
     rel_props("uses_person.parquet", "uses", u_person.0, u_person.1)?;
     write_parquet(
         &dir.join("unresolved_call.parquet"),
@@ -1212,10 +1215,11 @@ fn kind_slug(k: NodeKind) -> &'static str {
 /// `uses_person.parquet`). They must NOT join [`spec_rel_pairs`]: that
 /// enumeration feeds `build_load_files` and `copy_from`, so a second entry
 /// would double-write those files and emit duplicate COPY statements.
-const AUTHORED_REL_PAIRS: [(&str, &str, &str); 3] = [
+const AUTHORED_REL_PAIRS: [(&str, &str, &str); 4] = [
     ("Calls", "Service", "Service"),
     ("Calls", "Actor", "Service"),
     ("Uses", "Person", "Component"),
+    ("Uses", "Struct", "File"),
 ];
 
 /// Every `(rel_table, from_label, to_label)` triple the DB schema declares —
@@ -1425,7 +1429,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service, FROM Actor TO Service, properties STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Person TO Component, properties STRING)",
+        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Struct TO File, FROM Person TO Component, properties STRING)",
     )?;
     conn.query(
         "CREATE REL TABLE UnresolvedCall(FROM Function TO UnresolvedTarget, target_type STRING)",
@@ -1511,7 +1515,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         conn.query(&stmt)?;
         Ok(())
     };
-    let stmts: [(&str, String); 43] = [
+    let stmts: [(&str, String); 44] = [
         (
             "module.parquet",
             format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
@@ -1711,6 +1715,13 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             format!(
                 r#"COPY Uses FROM "{}" (from="Struct", to="Struct")"#,
                 p("uses_struct.parquet")
+            ),
+        ),
+        (
+            "uses_struct_file.parquet",
+            format!(
+                r#"COPY Uses FROM "{}" (from="Struct", to="File")"#,
+                p("uses_struct_file.parquet")
             ),
         ),
         (

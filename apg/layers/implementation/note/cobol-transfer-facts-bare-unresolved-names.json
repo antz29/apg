@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-transfer-facts-bare-unresolved-names",
+  "body": "transfer_facts names an unresolved PERFORM, GO TO, CALL or data target by the bare name as written, and treats a data name ambiguous across records as declared with no edge. Limit: an unresolved target can share its FQN with a real node of the same name, and a GLOBAL index name is not inherited by contained programs. Upgrade to namespaced unresolved targets if a real scan shows such collisions, and add index inheritance when a corpus references a GLOBAL index.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.Emitter.transfer_facts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

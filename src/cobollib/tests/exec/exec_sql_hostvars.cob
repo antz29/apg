@@ -1,0 +1,15 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EXECHV.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-EMPNO PIC X(6).
+       01 WS-SALARY PIC S9(7)V99.
+       01 WS-SAL-IND PIC S9(4) COMP.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL
+               SELECT SALARY INTO :WS-SALARY:WS-SAL-IND
+                 FROM EMPLOYEE
+                WHERE EMPNO = :WS-EMPNO
+           END-EXEC.
+           STOP RUN.

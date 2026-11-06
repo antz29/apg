@@ -163,6 +163,7 @@ mod unit {
             excludes: vec![],
             modules: vec![],
             classification: classification_digest(None),
+            cobol_dialect: None,
         };
         let k = CacheKey::compute(&base);
         // The binary version is folded in.
@@ -214,6 +215,7 @@ mod unit {
                 excludes: vec![],
                 modules: vec![],
                 classification: classification_digest(cfg),
+                cobol_dialect: None,
             })
         };
 
@@ -320,6 +322,7 @@ mod unit {
             excludes: vec![],
             modules: vec![],
             classification: classification_digest(Some(&a)),
+            cobol_dialect: None,
         };
         let built = CacheKey::compute(&base);
         let mut lang = base.clone();
@@ -332,6 +335,26 @@ mod unit {
         mods.modules.push("core".into());
         assert!(!built.matches(&CacheKey::compute(&mods)));
         assert!(built.matches(&CacheKey::compute(&base)));
+    }
+
+    /// cobol-frontend phase-02 task-23: the effective COBOL dialect is part of
+    /// the key only when set, so a dialect change rebuilds the COBOL facts while
+    /// a non-COBOL key stays exactly as it was.
+    #[test]
+    fn cache_key_folds_the_cobol_dialect() {
+        let base = ScanConfigKey {
+            languages: vec!["cobol".into()],
+            ..Default::default()
+        };
+        let key = |dialect: &str| {
+            CacheKey::compute(&ScanConfigKey {
+                cobol_dialect: Some(dialect.into()),
+                ..base.clone()
+            })
+        };
+        assert!(!key("cobol85").matches(&key("ibm")));
+        assert!(key("cobol85").matches(&key("cobol85")));
+        assert!(!key("cobol85").matches(&CacheKey::compute(&base)));
     }
 
     #[test]

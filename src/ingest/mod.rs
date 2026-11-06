@@ -634,7 +634,10 @@ fn ingest_records(
                     start_line,
                     end_line,
                 } => {
-                    let fqn = format!("{}.{name}", rooted_scope(&lang, &parent, base));
+                    let fqn = format!(
+                        "{}.{name}",
+                        rooted_scope(&lang, &parent, &module_identities, base)
+                    );
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     let identity = repo_relative_identity(base, &path);
@@ -675,7 +678,7 @@ fn ingest_records(
                     end_line,
                 } => funcs.push(FuncDecl {
                     id,
-                    parent: rooted_scope(&lang, &parent, base),
+                    parent: rooted_scope(&lang, &parent, &module_identities, base),
                     name,
                     params,
                     file,
@@ -708,7 +711,7 @@ fn ingest_records(
                         if parent.is_empty() && crate::classify::is_structural_language(&lang) {
                             root_module_fqn(&lang, "", base)
                         } else {
-                            rooted_scope(&lang, &parent, base)
+                            rooted_scope(&lang, &parent, &module_identities, base)
                         };
                     let identity = repo_relative_identity(base, &path);
                     if is_blacklisted(&parent, Some(&identity), &lang, opts) {
@@ -1171,14 +1174,23 @@ fn ingest_records(
                     from,
                     to,
                     properties,
-                } => write_edge(
-                    &mut sw,
-                    Record::Uses {
-                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
-                        to: root_edge_endpoint(&lang, &to, &module_identities, base),
-                        properties,
-                    },
-                ),
+                } => {
+                    // A COBOL COPY target is a copybook File identity, not a symbol: leave it unrooted.
+                    let copy = properties.get("kind").map(String::as_str) == Some("copy");
+                    let to = if copy {
+                        to
+                    } else {
+                        root_edge_endpoint(&lang, &to, &module_identities, base)
+                    };
+                    write_edge(
+                        &mut sw,
+                        Record::Uses {
+                            from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                            to,
+                            properties,
+                        },
+                    )
+                }
                 Record::UnresolvedCall {
                     from,
                     to,
@@ -1413,8 +1425,15 @@ fn ingest_records(
                     to,
                     properties,
                 } => {
+                    // A COBOL COPY target is an absolute copybook path: render it
+                    // to the same repo-relative File identity Record::File uses.
+                    let copy = properties.get("kind").map(String::as_str) == Some("copy");
                     let a = resolve(&from);
-                    let b = resolve(&to);
+                    let b = if copy {
+                        repo_relative_identity(base, &to)
+                    } else {
+                        resolve(&to)
+                    };
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
                     {
@@ -1878,7 +1897,13 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
             && ((graph.nodes[b].kind == NodeKind::Struct
                 && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct))
                 || (graph.nodes[a].kind == NodeKind::Person
-                    && graph.nodes[b].kind == NodeKind::Component))
+                    && graph.nodes[b].kind == NodeKind::Component)
+                || (graph.nodes[a].kind == NodeKind::Struct
+                    && graph.nodes[b].kind == NodeKind::File
+                    && graph
+                        .edge_properties
+                        .get(&("uses", a.clone(), b.clone()))
+                        .is_some_and(|p| p.get("kind").map(String::as_str) == Some("copy"))))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)
