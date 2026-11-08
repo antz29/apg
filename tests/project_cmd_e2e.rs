@@ -3095,6 +3095,101 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/live session/db.lbug); run via cargo test-e2e"]
+    fn delete_refuses_while_a_live_session_owns_the_branch_db() {
+        // A live session owns the branch DB for its whole life; deleting the
+        // project removes the worktree and branch out from under it. Refuse
+        // before any removal, naming the save/end fix, and leave the worktree,
+        // the branch and the admitted-but-unsaved row exactly where they are.
+        let repo = Repo::new("del-live-session");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        let wt = repo.start_project("live");
+        // The started project's branch DB — the state the session owns.
+        testutil::scan_checkout(&wt).unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // One durable mutation is admitted into the live DB but never saved:
+        // a routed read sees it, and it must survive the refused delete.
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "timer",
+            "--body",
+            "A workitem can be started",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "node add through the session: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // From the main checkout: delete must refuse while the session lives.
+        let err = project_delete_at(&repo.apg_root(), "live").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("live `apg session`"), "{msg}");
+        assert!(msg.contains("apg session save"), "{msg}");
+        assert!(msg.contains("apg session end"), "{msg}");
+
+        // Nothing was removed: the worktree and its branch survive, and the
+        // admitted row is still in the branch DB (routed read through the
+        // live session).
+        assert_project_present(&repo, "live");
+        let routed = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.timer'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            routed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the refused delete must leave the admitted row in the branch DB"
+        );
+
+        // Clean up: abort discards the unsaved row and releases the session
+        // (nothing pending becomes durable), so the fixture leaves nothing
+        // running.
+        let abort = testutil::spawn_apg(&["session", "abort"], &wt);
+        assert!(
+            abort.status.success(),
+            "{}",
+            String::from_utf8_lossy(&abort.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
+
     /// spec-splice-guard phase-03 task-1 (e2e): a SPEC-ONLY `apg project
     /// merge` — no code change at all — must land the merged authored
     /// node/edge rows in main's `db.lbug`: the rebuild's one landing artifact,
