@@ -10,6 +10,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "domain.entity.agent",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.entity.classification-config",
       "properties": {}
     },
@@ -45,7 +50,7 @@
     },
     {
       "kind": "contains",
-      "target": "domain.service.graph-identity",
+      "target": "domain.entity.unresolved-target",
       "properties": {}
     },
     {
@@ -55,7 +60,12 @@
     },
     {
       "kind": "contains",
-      "target": "domain.entity.agent",
+      "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.unresolved-target-identity",
       "properties": {}
     }
   ],

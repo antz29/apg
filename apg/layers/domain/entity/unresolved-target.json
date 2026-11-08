@@ -1,0 +1,28 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "unresolved-target",
+  "body": "The foreign reference a frontend records when a call or constructor callee resolves to no project symbol: one node per identity, carrying that identity and its category.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.nameless-expression-sentinel",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.unresolved-target-identity",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-identity",
+      "properties": {}
+    }
+  ]
+}

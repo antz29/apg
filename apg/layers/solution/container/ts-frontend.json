@@ -13,6 +13,11 @@
       "properties": {}
     },
     {
+      "kind": "contains",
+      "target": "solution.component.ts-unresolved-target-identity",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-container",
       "properties": {}

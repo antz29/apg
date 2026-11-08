@@ -1,0 +1,51 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "unresolved-target-identity",
+  "body": "The capability that names a call or constructor callee no project symbol holds: a symbol name where one exists and a site-keyed sentinel where the callee owns none, in the TypeScript and Rust frontends.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bare-identifier-target-identity-preserved",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-target-category-follows-its-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-target-identity-is-a-name",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-target-identity-is-uncapped",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-target-identity-proven-by-frontend-tests",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.rust-unresolved-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ts-unresolved-target-identity",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "unresolved-target-identity-is-uncapped",
+  "body": "An unresolved target identity carries the whole name with no length cap, no truncation marker, and no byte-oriented bound that can split a multi-byte character.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.unresolved-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
+      "properties": {}
+    }
+  ]
+}

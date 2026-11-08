@@ -7,6 +7,16 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.apg-layout-scope-exclusion",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.bare-identifier-target-identity-preserved",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.frontend-dependency-contract",
       "properties": {}
     },
@@ -22,7 +32,22 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.apg-layout-scope-exclusion",
+      "target": "requirements.requirement.unresolved-target-category-follows-its-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.unresolved-target-identity-is-a-name",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.unresolved-target-identity-is-uncapped",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.unresolved-target-identity-proven-by-frontend-tests",
       "properties": {}
     }
   ],

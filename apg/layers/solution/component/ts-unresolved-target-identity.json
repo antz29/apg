@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ts-unresolved-target-identity",
+  "body": "The TypeScript frontend's unresolved-callee identity: the call and new walkers and their shared resolve helper derive a symbol name or a site sentinel, with no source-text fallback and no length cap.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-tsfrontend.walk.handleCall",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-tsfrontend.walk.handleNew",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.unresolved-target-identity",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.ts-frontend",
+      "properties": {}
+    }
+  ]
+}

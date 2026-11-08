@@ -7,6 +7,21 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.code-universe-read-from-the-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.graph-export-removed",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.graph-has-two-representations",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.graph-visible-tests",
       "properties": {}
     },
@@ -37,22 +52,17 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.graph-export-removed",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.graph-has-two-representations",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.code-universe-read-from-the-database",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
       "target": "requirements.requirement.two-representation-model-documented",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.unresolved-target-category-follows-its-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.unresolved-target-identity-is-a-name",
       "properties": {}
     }
   ],

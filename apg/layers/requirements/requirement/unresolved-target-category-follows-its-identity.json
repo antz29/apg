@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "unresolved-target-category-follows-its-identity",
+  "body": "An unresolved target takes a category from a resolved declaration only when its identity names that declaration's symbol, so a sentinel or a nameless expression never reports stdlib or external.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.unresolved-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    }
+  ]
+}

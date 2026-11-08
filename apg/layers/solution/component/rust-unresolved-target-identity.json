@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "rust-unresolved-target-identity",
+  "body": "The Rust frontend's unresolved-callee identity: the call walker names every callee expression form by its symbol or a site sentinel, and the emitter carries the identity whole.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend.emit.emit_unresolved_call",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend.walk.handle_call",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.unresolved-target-identity",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.rust-frontend",
+      "properties": {}
+    }
+  ]
+}

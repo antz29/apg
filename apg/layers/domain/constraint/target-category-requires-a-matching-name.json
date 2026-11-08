@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "target-category-requires-a-matching-name",
+  "body": "A target's category derives from a resolved declaration only when the emitted identity names that declaration's symbol, and a sentinel target is unknown.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

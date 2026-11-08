@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "unresolved-target-identity-is-not-source-text",
+  "body": "An unresolved target identity is a symbol name or a site-keyed sentinel for a callee that owns no symbol, never a span of source text, a truncated prefix, or a display ellipsis.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bare-identifier-target-identity-preserved",
+  "body": "An unresolved callee that is a bare identifier keeps that identifier, unchanged, as its target identity, so an unresolved global name holds one node from scan to scan.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.unresolved-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
+      "properties": {}
+    }
+  ]
+}

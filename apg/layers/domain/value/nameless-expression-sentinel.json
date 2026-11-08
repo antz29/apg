@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "nameless-expression-sentinel",
+  "body": "A target identity for a callee that owns no symbol, keyed to the calling site's repo-relative file and position so it names a place and never a fragment of source text.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.unresolved-target",
+      "properties": {}
+    }
+  ]
+}

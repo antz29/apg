@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "unresolved-target-identity",
+  "body": "The identity of an unresolved target: the callee's symbol name, or a site-keyed sentinel naming the call site where the callee owns no symbol.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.unresolved-target",
+      "properties": {}
+    }
+  ]
+}

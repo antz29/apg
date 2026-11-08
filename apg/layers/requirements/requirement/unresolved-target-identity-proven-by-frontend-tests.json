@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "unresolved-target-identity-proven-by-frontend-tests",
+  "body": "Each affected frontend proves the identity rule in its own test run — node --test in src/tslib and cargo test in src/rustlib — over a bare identifier, a compound callee, and a callee name longer than 64 characters.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.unresolved-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.frontend-maintainer",
+      "properties": {}
+    }
+  ]
+}
