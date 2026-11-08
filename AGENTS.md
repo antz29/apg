@@ -708,13 +708,17 @@ residual same-kind FQN collision rather than silently overwriting.
 > `pip install ladybug`, `npm install @ladybugdb/core`, `cargo add lbug`, or the
 > Go/Java/C++/CLI binaries.
 
-The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface.
+The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface. The dialect below is the pinned `lbug = "=0.22.3"` engine's (`Cargo.toml`); an installed binary may link an older engine.
 
 ### Query syntax
 
 - Only `MATCH/RETURN` Cypher (no raw SQL). End with `;` (tool adds it if missing).
-- Backtick the parser-reserved words — `end` and `group`: `` n.`end` ``. Ordinary
-  keywords (`limit`, `match`, `return`, `set`) are legal identifiers and need none.
+- Backtick parser-reserved words used as identifiers — `end` and `group` are the
+  two that collide with APG's schema: `` n.`end` ``. The reserved set is much
+  larger (`order`, `all`, `any`, `case`, `exists`, `index`, `table`, `null`,
+  `true`, `false`, `starts`, `ends`, `where`, `when`, `then`, `else`, `union`,
+  `with`, `optional`, `profile`, …), while ordinary keywords (`limit`, `match`,
+  `return`, `set`, `count`, `skip`) are legal identifiers and need none.
 - `labels(n)` works but returns a **string**, not a list (`size(labels(n))` is the
   string length); use `label(n)`, or `collect(DISTINCT label(x))` for a list.
   `n._LABEL` or `r._LABEL` does **NOT** work.
@@ -722,6 +726,8 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 - `ORDER BY`, `SKIP`, `LIMIT` work; there is no `OFFSET`.
 - **No `GROUP BY`** — grouping is implicit (every non-aggregate in the projection
   is a grouping key); `GROUP BY` is a parse error.
+- `collect()` over zero rows is `[]` on the pinned engine, not NULL — the NULL
+  result belongs to the older 0.19.1 engine.
 - `ORDER BY` takes an alias or expression, **never a position** — `ORDER BY 2`
   silently sorts by the constant. After `WITH`, `ORDER BY` must be followed by
   `SKIP` or `LIMIT`.
@@ -729,8 +735,11 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   free-standing subqueries; `EXISTS { … }` / `COUNT { … }` pattern subqueries do
   work. Introspection is `CALL show_tables()`, `CALL table_info('X')`,
   `CALL show_functions()` — there is no `db_info()`.
-- Comparisons use `=`/`<>` — `!=` is a parse error. List indexing is **1-based**
-  and slices are inclusive at both ends.
+- Comparisons use `=`/`<>` — `!=` is a parse error.
+- List indexing is **1-based**; slices are inclusive at both ends and accept
+  `[a:b]` or `[a..b]` — treating a slice end as exclusive is a Neo4j habit, not
+  this engine's.
+- `list_has_any`, `list_min`, and `list_max` exist on the pinned engine.
 - `PROFILE` and `EXPLAIN` work for debugging plans.
 - Scope every `MATCH` by label and confirm columns with `table_info('X')`: an
   unknown property is a binder error, while an unlabeled `MATCH (n) RETURN n.name`
@@ -741,11 +750,12 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   output) when the bound node's table has a **STRING** primary key, because a
   degree-count optimizer rewrite projected raw storage offsets as the group
   key, a failure mode the pinned engine (above that floor) does not have.
+- **The database is derived and disposable** — a database written by a pre-0.21
+  engine may be rejected or loudly warned about stale string hash indexes;
+  rebuild it with `apg scan`, never upgrade it in place.
 
 ### Quirks
 
-- **`end` and `group` are reserved by the Cypher parser itself** — you MUST quote
-  them: `` n.`end` ``
 - **Stderr is silenced** by `2>/dev/null` — if a query fails, you'll only see a parser/binder error.
 - **`_LABEL` is internal** — you see it in raw output like `{_LABEL: Module, fqn: ...}` but you cannot filter/return on it. Use `label(n)` instead.
 - **Node IDs encode the label index**: `0:29` = label 0 entry 29, `1:5` = label 1, `2:8265` = label 2.
