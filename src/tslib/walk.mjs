@@ -16,6 +16,7 @@ import {
   categoryOfDecl,
   unwrapAlias,
   nameLocation,
+  calleeIdentity,
   calleeText,
   isCallableDecl,
   typeNameLocation,
@@ -26,8 +27,8 @@ import {
 export function handleCall(node, sf, cur) {
   const loc = nameLocation(node.expression);
   if (!loc) {
-    emitUnresolved(calleeText(node.expression, sf), "func-value");
-    emitEdge("unresolved_call", cur, calleeText(node.expression, sf));
+    emitUnresolved(calleeIdentity(node.expression, sf), "func-value");
+    emitEdge("unresolved_call", cur, calleeIdentity(node.expression, sf));
     return;
   }
   const sym = ctx.checker.getSymbolAtLocation(loc);
@@ -43,14 +44,14 @@ export function handleCall(node, sf, cur) {
     return;
   }
   if (resolved) {
-    const target = calleeText(node.expression, sf);
+    const target = calleeIdentity(node.expression, sf);
     if (!target) return;
     emitUnresolved(target, categoryOfDecl(decl));
     emitEdge("unresolved_call", cur, target);
     return;
   }
-  emitUnresolved(calleeText(node.expression, sf), "unknown");
-  emitEdge("unresolved_call", cur, calleeText(node.expression, sf));
+  emitUnresolved(calleeIdentity(node.expression, sf), "unknown");
+  emitEdge("unresolved_call", cur, calleeIdentity(node.expression, sf));
 }
 
 export function handleNew(node, sf, cur) {
