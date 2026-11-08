@@ -15,7 +15,12 @@ use super::identity::structural_scope_excludes;
 ///   [`crate::classify::is_build_output_path`] predicate, or
 /// - that path is gitignored by the containing checkout: the scan's content
 ///   identity already excludes ignored content, so keeping it would make the
-///   graph a function of checkout state rather than of authored content.
+///   graph a function of checkout state rather than of authored content. A
+///   scan installs one [`crate::git::IgnoreProbe`] as its context, so the
+///   per-record question is answered from that single index read; with no
+///   probe installed the verdict falls back to
+///   [`crate::git::path_is_ignored`], which re-discovers the repository and
+///   re-reads the index on every call.
 ///
 /// A record on a STRUCTURAL stream (see
 /// [`crate::classify::is_structural_language`]) is additionally dropped when the
@@ -65,10 +70,13 @@ pub(crate) fn is_blacklisted(
             if crate::classify::is_build_output_path(identity) {
                 return true;
             }
-            if opts
-                .base
-                .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(identity)))
-            {
+            let ignored = crate::git::with_current_probe(|probe| match probe {
+                Some(probe) => probe.is_ignored(Path::new(identity)),
+                None => opts
+                    .base
+                    .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(identity))),
+            });
+            if ignored {
                 return true;
             }
         }
@@ -85,8 +93,12 @@ pub(crate) fn is_blacklisted(
     {
         return true;
     }
-    opts.base
-        .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(path)))
+    crate::git::with_current_probe(|probe| match probe {
+        Some(probe) => probe.is_ignored(Path::new(path)),
+        None => opts
+            .base
+            .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(path))),
+    })
 }
 
 /// True when a repo-relative identity is the tool-owned top-level `apg/` layout
