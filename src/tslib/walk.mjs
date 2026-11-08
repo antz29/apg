@@ -26,7 +26,7 @@ import {
 export function handleCall(node, sf, cur) {
   const loc = nameLocation(node.expression);
   if (!loc) {
-    emitUnresolved(calleeIdentity(node.expression, sf), "func-value");
+    emitUnresolved(calleeIdentity(node.expression, sf), "unknown");
     emitEdge("unresolved_call", cur, calleeIdentity(node.expression, sf));
     return;
   }
