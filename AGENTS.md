@@ -688,7 +688,8 @@ scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
 
 A `File` FQN is its repo-relative path (relative to the git toplevel, or the
 scan root outside a repo) and an `UnresolvedTarget` FQN is a foreign symbol
-name — neither is language-rooted.
+name, or a `<nameless@…>` site sentinel for a nameless callee — neither is
+language-rooted.
 
 Because the language roots are disjoint, a cross-language module/symbol FQN
 collision is impossible by construction (`rust.apg` and `py.apg` both survive).
