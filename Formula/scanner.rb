@@ -16,7 +16,7 @@ class Scanner < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.28.3"
-    rebuild 3
+    rebuild 4
     sha256 cellar: :any, arm64_sequoia: "c7e9ce1a69e8e05997ed7783bef06f9552bdd292c3b486fc134cc2c0c22ccf31"
   end
 
@@ -31,11 +31,11 @@ class Scanner < Formula
   # LBUG_LIBRARY_DIR/LBUG_INCLUDE_DIR.
   resource "lbug" do
     if Hardware::CPU.arm?
-      url "https://github.com/LadybugDB/ladybug/releases/download/v0.19.1/liblbug-static-osx-arm64.tar.gz"
-      sha256 "9d8bf7fd2a2b715e419db1f087f57777fd9413e214abdf32fa60ca3a9e51d883"
+      url "https://github.com/LadybugDB/ladybug/releases/download/v0.22.3/liblbug-static-osx-arm64.tar.gz"
+      sha256 "9a6e6903ed36ad58fbc31412cf4aae6d269b90219137a8e29b47472a89c350c8"
     else
-      url "https://github.com/LadybugDB/ladybug/releases/download/v0.19.1/liblbug-static-osx-x86_64.tar.gz"
-      sha256 "8ae8597da0295b14a06ee89cb632ab44c5f0e834be9576689d706eea16159f79"
+      url "https://github.com/LadybugDB/ladybug/releases/download/v0.22.3/liblbug-static-osx-x86_64.tar.gz"
+      sha256 "8220ab819917245ff45bbd61bb5603fdf9d8a99d2697fdc092585e9ce031d359"
     end
   end
 
