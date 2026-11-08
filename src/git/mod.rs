@@ -46,11 +46,13 @@
 
 pub mod commit;
 pub mod identity;
+pub mod ignore;
 pub mod state;
 pub mod time;
 
 pub use commit::*;
 pub use identity::*;
+pub use ignore::*;
 pub use state::*;
 pub use time::*;
 
