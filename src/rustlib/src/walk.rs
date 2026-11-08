@@ -165,7 +165,7 @@ pub(crate) fn handle_call(
                     ctx,
                     source,
                     &callee_identity(&callee, rel_path),
-                    "func-value",
+                    "unknown",
                     unresolved,
                     w,
                 ),
@@ -179,8 +179,7 @@ pub(crate) fn handle_call(
                 ),
                 None => {
                     let name = callee_identity(&callee, rel_path);
-                    let cat = path_category(&name);
-                    emit_unresolved_call(ctx, source, &name, cat, unresolved, w)
+                    emit_unresolved_call(ctx, source, &name, "unknown", unresolved, w)
                 }
             }
         }
@@ -188,7 +187,7 @@ pub(crate) fn handle_call(
             ctx,
             source,
             &callee_identity(&callee, rel_path),
-            "func-value",
+            "unknown",
             unresolved,
             w,
         ),
