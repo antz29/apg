@@ -160,7 +160,7 @@ Patch only.
         // template's growth is caught by its own cap.
         const CAPS: [(&str, usize); 9] = [
             ("agent-builder.md", 474),
-            ("codebase-navigator.md", 463),
+            ("codebase-navigator.md", 469),
             ("implementation-phase-reviewer.md", 258),
             ("spec-writer.md", 169),
             ("plan-writer.md", 167),
@@ -169,7 +169,7 @@ Patch only.
             ("spec-review.md", 84),
             ("researcher.md", 56),
         ];
-        const CORPUS_CAP: usize = 1_902;
+        const CORPUS_CAP: usize = 1_908;
 
         /// The template's lines, without the empty element a trailing newline
         /// would split out (so the count matches the file's line count).
@@ -517,6 +517,64 @@ Patch only.
             navigator,
             template(navigator),
             REQUEST.into_iter().chain(NAVIGATOR),
+        );
+    }
+
+    /// The pinned-engine query dialect the navigator prompt and the `apg_query`
+    /// tool description must both state: the reserved-word rule, implicit
+    /// grouping with no `GROUP BY`, `collect()` over zero rows as `[]`, the
+    /// `EXISTS`/`COUNT` pattern subqueries and read-only `CALL` table functions,
+    /// inclusive 1-based slices, and a non-positional `ORDER BY`. The navigator
+    /// must not restore the stale "no joins, subqueries, or `CALL`" line. Each
+    /// needle stays on one wrapped line, so a reflow — and the two files'
+    /// different wrap widths — cannot fail the pin.
+    #[test]
+    fn query_dialect_prose_is_pinned_in_the_navigator_and_the_query_tool() {
+        fn shipped<'a>(corpus: &'a [(&'static str, &'static str)], name: &str) -> &'a str {
+            corpus
+                .iter()
+                .find(|(shipped, _)| *shipped == name)
+                .map(|(_, content)| *content)
+                .unwrap_or_else(|| panic!("{name}: no shipped source with that name"))
+        }
+
+        const SHARED: [&str; 8] = [
+            "parser-reserved",
+            "ordinary keywords (`limit`, `match`, `return`, `set`,",
+            "no `GROUP BY` (a parse error)",
+            "over zero rows is `[]`",
+            "`EXISTS { … }`/`COUNT { … }`",
+            "pattern subqueries and read-only `CALL` table functions",
+            "`ORDER BY` takes an alias or expression, never a position",
+            "slices are inclusive at both ends (`[a:b]` or `[a..b]`)",
+        ];
+        // The tool description carries the `OFFSET`/`SKIP` rule as one phrase;
+        // the navigator wraps it across lines, so it is not shared.
+        const TOOL: [&str; 1] = ["No `OFFSET` (use `SKIP`)"];
+
+        let navigator = shipped(AGENTS, "codebase-navigator.md");
+        let query_tool = shipped(SUITE_TOOLS, "apg_query.ts");
+        for needle in SHARED {
+            assert!(
+                navigator.contains(needle),
+                "the navigator prompt must carry the pinned dialect prose {needle:?}"
+            );
+            assert!(
+                query_tool.contains(needle),
+                "the `apg_query` description must carry the pinned dialect prose {needle:?}"
+            );
+        }
+        for needle in TOOL {
+            assert!(
+                query_tool.contains(needle),
+                "the `apg_query` description must carry the pinned dialect prose {needle:?}"
+            );
+        }
+        // The retired wording: joins via shared variables, `EXISTS`/`COUNT`
+        // pattern subqueries and read-only `CALL` all work on the pinned engine.
+        assert!(
+            !navigator.contains("no joins, subqueries"),
+            "the navigator prompt must not restore the stale no-joins/no-subquery/no-CALL line"
         );
     }
 
