@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "dialect-pin-wrap-sensitive",
+  "body": "The query-dialect prose pin matches phrases that each sit on one wrapped line, so a reflow that splits a pinned phrase fails the test and forces a re-pin; upgrade to whitespace-normalised matching when reflow churn becomes routine.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.install.tests.unit.query_dialect_prose_is_pinned_in_the_navigator_and_the_query_tool",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
