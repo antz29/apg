@@ -27,6 +27,21 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.ignore-lookup-accepts-absolute-and-relative-paths",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.ignore-probe-built-once-per-scan",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.ignore-rules-drop-untracked-paths",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.main-checkout-reads-stay-legal",
       "properties": {}
     },
@@ -88,6 +103,16 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.plan-mutations-guard-before-store-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.plan-tasks-reports-a-truncated-page",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.plan-tasks-status-filter-runs-before-the-limit",
       "properties": {}
     },
     {
@@ -158,16 +183,6 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.verify-gate-judges-planned-realization",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.plan-tasks-reports-a-truncated-page",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.plan-tasks-status-filter-runs-before-the-limit",
       "properties": {}
     }
   ],

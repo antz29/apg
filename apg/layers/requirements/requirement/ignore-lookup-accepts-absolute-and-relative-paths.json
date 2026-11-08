@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ignore-lookup-accepts-absolute-and-relative-paths",
+  "body": "The ignore lookup accepts an absolute scanner path or a repo-relative identity, resolves both against the checkout's workdir, and reports a path outside the checkout as not ignored.",
+  "properties": {
+    "feature": "scan-hygiene"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ignore-probe-built-once-per-scan",
+  "body": "Every ingest-time ignore question about a git checkout is answered by one probe built once per scan and held for the whole scan, so the index is read and parsed once.",
+  "properties": {
+    "feature": "scan-hygiene"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

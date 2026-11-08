@@ -7,17 +7,32 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.apg-layout-scope-exclusion",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ignore-lookup-accepts-absolute-and-relative-paths",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ignore-probe-built-once-per-scan",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ignore-rules-drop-untracked-paths",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.no-self-ingestion",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.tool-owned-layout-excluded",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.apg-layout-scope-exclusion",
       "properties": {}
     }
   ],
