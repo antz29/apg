@@ -14,7 +14,7 @@ use crate::emit::{edge, emit_u_node, emit_unresolved_call};
 use crate::identity::module_fqn_full;
 use crate::load::Ctx;
 use crate::record::Rec;
-use crate::source::source_key;
+use crate::source::{path_of, source_key};
 use crate::state::Endpoints;
 
 pub(crate) fn walk_file(
@@ -27,14 +27,20 @@ pub(crate) fn walk_file(
 ) {
     let sf = ctx.sema.parse_guess_edition(file_id);
     let node = sf.syntax().clone();
-    walk_node(ctx, &node, None, root, eps, unresolved, w);
+    let abs = path_of(ctx, file_id);
+    let p = Path::new(&abs);
+    let rel = p
+        .strip_prefix(root)
+        .unwrap_or_else(|_| Path::new(p.file_name().unwrap_or_default()));
+    let rel_path = rel.to_string_lossy().replace('\\', "/");
+    walk_node(ctx, &node, None, &rel_path, eps, unresolved, w);
 }
 
 pub(crate) fn walk_node(
     ctx: &Ctx<'_>,
     node: &syntax::SyntaxNode,
     cur: Option<String>,
-    root: &Path,
+    rel_path: &str,
     eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
@@ -51,13 +57,13 @@ pub(crate) fn walk_node(
             .and_then(|k| eps.fn_id(&k))
             .or(cur);
         for child in node.children() {
-            walk_node(ctx, &child, new_cur.clone(), root, eps, unresolved, w);
+            walk_node(ctx, &child, new_cur.clone(), rel_path, eps, unresolved, w);
         }
         return;
     }
     if let Some(c) = current_item_id_for(ctx, eps, node.clone()) {
         for child in node.children() {
-            walk_node(ctx, &child, Some(c.clone()), root, eps, unresolved, w);
+            walk_node(ctx, &child, Some(c.clone()), rel_path, eps, unresolved, w);
         }
         return;
     }
@@ -65,7 +71,7 @@ pub(crate) fn walk_node(
     // Edge extraction for nodes directly in the current context.
     if let Some(c) = cur.as_ref() {
         if let Some(call) = ast::CallExpr::cast(node.clone()) {
-            handle_call(ctx, &call, c, root, eps, unresolved, w);
+            handle_call(ctx, &call, c, rel_path, eps, unresolved, w);
         } else if let Some(mc) = ast::MethodCallExpr::cast(node.clone()) {
             handle_method_call(ctx, &mc, c, eps, unresolved, w);
         } else if let Some(mac) = ast::MacroCall::cast(node.clone()) {
@@ -77,7 +83,7 @@ pub(crate) fn walk_node(
         }
     }
     for child in node.children() {
-        walk_node(ctx, &child, cur.clone(), root, eps, unresolved, w);
+        walk_node(ctx, &child, cur.clone(), rel_path, eps, unresolved, w);
     }
 }
 
@@ -105,17 +111,32 @@ pub(crate) fn current_item_id_for(
     source_key(ctx, src).and_then(|k| eps.struct_id(&k))
 }
 
+/// The callee's identity: a name path verbatim, or a site-keyed sentinel for a
+/// nameless callee expression (a place, never a span of source text).
+pub(crate) fn callee_identity(callee: &ast::Expr, rel_path: &str) -> String {
+    if let ast::Expr::PathExpr(pe) = callee {
+        if let Some(path) = pe.path() {
+            return path.syntax().text().to_string();
+        }
+    }
+    format!(
+        "<nameless@{}:{}>",
+        rel_path,
+        u32::from(callee.syntax().text_range().start())
+    )
+}
+
 pub(crate) fn handle_call(
     ctx: &Ctx<'_>,
     call: &ast::CallExpr,
     source: &str,
-    _root: &Path,
+    rel_path: &str,
     eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
     let Some(callee) = call.expr() else { return };
-    match callee {
+    match &callee {
         ast::Expr::PathExpr(pe) => {
             let Some(path) = pe.path() else { return };
             match ctx.sema.resolve_path(&path) {
@@ -143,7 +164,7 @@ pub(crate) fn handle_call(
                 Some(PathResolution::Local(_)) => emit_unresolved_call(
                     ctx,
                     source,
-                    &path.syntax().text().to_string(),
+                    &callee_identity(&callee, rel_path),
                     "func-value",
                     unresolved,
                     w,
@@ -151,30 +172,26 @@ pub(crate) fn handle_call(
                 Some(_) => emit_unresolved_call(
                     ctx,
                     source,
-                    &path.syntax().text().to_string(),
+                    &callee_identity(&callee, rel_path),
                     "unknown",
                     unresolved,
                     w,
                 ),
                 None => {
-                    let name = path.syntax().text().to_string();
+                    let name = callee_identity(&callee, rel_path);
                     let cat = path_category(&name);
                     emit_unresolved_call(ctx, source, &name, cat, unresolved, w)
                 }
             }
         }
-        ast::Expr::ClosureExpr(_) => {
-            emit_unresolved_call(ctx, source, "func", "func-value", unresolved, w)
-        }
-        _ => {
-            let name = callee.syntax().text().to_string();
-            let name = if name.len() > 64 {
-                format!("{}…", &name[..64])
-            } else {
-                name
-            };
-            emit_unresolved_call(ctx, source, &name, "func-value", unresolved, w)
-        }
+        _ => emit_unresolved_call(
+            ctx,
+            source,
+            &callee_identity(&callee, rel_path),
+            "func-value",
+            unresolved,
+            w,
+        ),
     }
 }
 
