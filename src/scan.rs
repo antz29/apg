@@ -139,6 +139,14 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // <repo>/subdir` mint the same File identity and two worktrees agree.
     let identity_base = git::repo_rel(&project_dir);
 
+    // One gitignore oracle for the whole scan: the ingestor asks "is this path
+    // ignored?" per record, and re-discovering the repository and re-reading
+    // the index each time would dominate the run. Held for the rest of
+    // `cmd_scan` so the three pre-ingest streams and the pipeline all consult
+    // the one probe — bound to a NAMED guard, because `let _ =` would drop it
+    // immediately and silently fall back to the per-call oracle.
+    let _probe_guard = git::ScanProbeGuard::install(git::IgnoreProbe::new(&identity_base));
+
     // The git state this scan runs under (repo HEAD sha + tree cleanliness),
     // recorded as the scan_meta control record and the DB's Scan node so later
     // spec/plan/review mutations can refuse to run against a stale DB.
