@@ -72,6 +72,11 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.scan-progress-reporting",
       "properties": {}
     },

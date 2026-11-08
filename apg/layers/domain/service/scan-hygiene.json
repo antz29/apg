@@ -49,6 +49,11 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.scan-driver",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.scan-hygiene",
       "properties": {}
     }
