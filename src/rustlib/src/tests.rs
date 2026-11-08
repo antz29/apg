@@ -13,3 +13,16 @@ fn callee_of(source: &str) -> String {
         .expect("snippet has a call expression");
     crate::walk::callee_identity(&call.expr().expect("call has a callee"), "site.rs")
 }
+
+mod unit {
+    use super::*;
+
+    /// A bare-identifier callee keeps its name verbatim — no sentinel, no cut.
+    #[test]
+    fn bare_identifier_identity_is_preserved() {
+        assert_eq!(
+            callee_of("fn f() { computeContentHash(); }"),
+            "computeContentHash"
+        );
+    }
+}
