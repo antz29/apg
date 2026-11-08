@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "nameless-expression-sentinel",
-  "body": "A target identity for a nameless callee expression, keyed to the calling site's repo-relative file and position so the identity names a place rather than a span of source text.",
+  "body": "A target identity for a nameless callee expression, keyed to the calling site's repo-relative file and position behind a marker that distinguishes it from a symbol name, so it names a place rather than a span of source text.",
   "properties": {},
   "out": [],
   "in": [
