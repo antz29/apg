@@ -612,7 +612,7 @@ rust-analyzer and Ruff/ty engine crates, `golang.org/x/tools`, the structural
 scanner's crates.io dependencies, and NuGet packages.
 
 The base binary does **not** bundle LadybugDB and needs no `cmake`: it links a
-**prebuilt static `liblbug`** (0.19.1, fetched from the LadybugDB release and
+**prebuilt static `liblbug`** (0.22.3, fetched from the LadybugDB release and
 pointed at with `LBUG_LIBRARY_DIR` / `LBUG_INCLUDE_DIR`) and links OpenSSL
 (`openssl@3` on macOS; `pkg-config` + `libssl-dev` on Linux) dynamically. The
 base scanner's build deps are therefore Rust + network + that prebuilt static
