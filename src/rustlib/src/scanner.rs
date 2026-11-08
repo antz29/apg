@@ -505,7 +505,7 @@ pub(crate) fn scan(
                 continue;
             }
             let _ = ctx.db.file_text(*fid).text(ctx.db);
-            walk_file(&ctx, *fid, &eps, &mut state.unresolved_seen, w);
+            walk_file(&ctx, *fid, root_abs, &eps, &mut state.unresolved_seen, w);
         }
     }
     let _ = w.flush();

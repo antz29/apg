@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::io::Write;
+use std::path::Path;
 
 use hir::{Adt, Crate, Function, HasSource, ModuleDef, PathResolution};
 use ide_db::base_db::CrateOrigin;
@@ -19,19 +20,21 @@ use crate::state::Endpoints;
 pub(crate) fn walk_file(
     ctx: &Ctx<'_>,
     file_id: FileId,
+    root: &Path,
     eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
     let sf = ctx.sema.parse_guess_edition(file_id);
     let node = sf.syntax().clone();
-    walk_node(ctx, &node, None, eps, unresolved, w);
+    walk_node(ctx, &node, None, root, eps, unresolved, w);
 }
 
 pub(crate) fn walk_node(
     ctx: &Ctx<'_>,
     node: &syntax::SyntaxNode,
     cur: Option<String>,
+    root: &Path,
     eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
@@ -48,13 +51,13 @@ pub(crate) fn walk_node(
             .and_then(|k| eps.fn_id(&k))
             .or(cur);
         for child in node.children() {
-            walk_node(ctx, &child, new_cur.clone(), eps, unresolved, w);
+            walk_node(ctx, &child, new_cur.clone(), root, eps, unresolved, w);
         }
         return;
     }
     if let Some(c) = current_item_id_for(ctx, eps, node.clone()) {
         for child in node.children() {
-            walk_node(ctx, &child, Some(c.clone()), eps, unresolved, w);
+            walk_node(ctx, &child, Some(c.clone()), root, eps, unresolved, w);
         }
         return;
     }
@@ -62,7 +65,7 @@ pub(crate) fn walk_node(
     // Edge extraction for nodes directly in the current context.
     if let Some(c) = cur.as_ref() {
         if let Some(call) = ast::CallExpr::cast(node.clone()) {
-            handle_call(ctx, &call, c, eps, unresolved, w);
+            handle_call(ctx, &call, c, root, eps, unresolved, w);
         } else if let Some(mc) = ast::MethodCallExpr::cast(node.clone()) {
             handle_method_call(ctx, &mc, c, eps, unresolved, w);
         } else if let Some(mac) = ast::MacroCall::cast(node.clone()) {
@@ -74,7 +77,7 @@ pub(crate) fn walk_node(
         }
     }
     for child in node.children() {
-        walk_node(ctx, &child, cur.clone(), eps, unresolved, w);
+        walk_node(ctx, &child, cur.clone(), root, eps, unresolved, w);
     }
 }
 
@@ -106,6 +109,7 @@ pub(crate) fn handle_call(
     ctx: &Ctx<'_>,
     call: &ast::CallExpr,
     source: &str,
+    _root: &Path,
     eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
