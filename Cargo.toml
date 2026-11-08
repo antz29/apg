@@ -14,7 +14,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 libc = "0.2"
-lbug = "0.19.1"
+lbug = "=0.22.3"
 parquet = { version = "55", default-features = false, features = ["snap"] }
 # git2 with default-features = false: no https/ssh transports → no OpenSSL.
 # The git CLI is never shelled out to; push/tag remain human-approved acts (R6).
