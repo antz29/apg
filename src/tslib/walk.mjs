@@ -17,7 +17,6 @@ import {
   unwrapAlias,
   nameLocation,
   calleeIdentity,
-  calleeText,
   isCallableDecl,
   typeNameLocation,
   isDeclName,
@@ -72,14 +71,14 @@ export function handleNew(node, sf, cur) {
     return;
   }
   if (resolved) {
-    const target = calleeText(node.expression, sf);
+    const target = calleeIdentity(node.expression, sf);
     if (!target) return;
     emitUnresolved(target, categoryOfDecl(decl));
     emitEdge("unresolved_use", cur, target);
     return;
   }
-  emitUnresolved(calleeText(node.expression, sf), "unknown");
-  emitEdge("unresolved_use", cur, calleeText(node.expression, sf));
+  emitUnresolved(calleeIdentity(node.expression, sf), "unknown");
+  emitEdge("unresolved_use", cur, calleeIdentity(node.expression, sf));
 }
 
 export function handleType(node, sf, cur) {

@@ -57,12 +57,6 @@ export function calleeIdentity(expr, sf) {
   return `<nameless@${rel}:${line + 1}:${character + 1}>`;
 }
 
-export function calleeText(expr, sf) {
-  if (!expr) return "?";
-  const t = expr.getText(sf).replace(/\s+/g, " ");
-  return t.length > 64 ? t.slice(0, 64) + "…" : t;
-}
-
 // A declaration node that is callable (emits a Calls edge target).
 export function isCallableDecl(decl) {
   return (
