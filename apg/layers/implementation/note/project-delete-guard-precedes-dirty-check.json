@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-delete-guard-precedes-dirty-check",
+  "body": "The project-delete live-session refusal runs before the dirty-worktree refusal, so a worktree that is both session-held and dirty reports the session; move the guard below the checkout_clean check if a later requirement puts the dirty-tree refusal first.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.delete.project_delete_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

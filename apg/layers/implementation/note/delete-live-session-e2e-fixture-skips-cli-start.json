@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delete-live-session-e2e-fixture-skips-cli-start",
+  "body": "The delete-refusal e2e builds its project with the raw-git2 Repo::start_project helper rather than the `apg project start` CLI, matching the other project-delete e2e tests; drive the CLI start path from this scenario if start-to-delete wiring ever needs coverage here.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.delete_refuses_while_a_live_session_owns_the_branch_db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
