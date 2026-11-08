@@ -292,12 +292,18 @@ from the current directory). Default output is CSV with a header row; pass
 ```sh
 apg query "MATCH (s:Struct) RETURN s.fqn, s.code_type"
 apg query "MATCH (f:Function)-[:Calls]->(t:Function) RETURN f.fqn, t.fqn"
-apg query "MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20"
+apg query "MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn AS target, count(f) AS n ORDER BY n DESC LIMIT 20"
 apg query --json "MATCH (s:Struct) RETURN s.fqn, s.code_type LIMIT 5"
 ```
 
-Query syntax: `MATCH`/`RETURN` only (no raw SQL). `ORDER BY`, `LIMIT`,
-`GROUP BY`, `labels()`, `count(*)` work. Backtick reserved words (`` n.`end` ``).
+Query syntax: `MATCH`/`RETURN` only (no raw SQL). `ORDER BY`, `SKIP`, `LIMIT`,
+`labels()` and `count(*)` work; there is no `OFFSET`. Aggregation groups
+**implicitly** — every non-aggregate in the projection is a grouping key, so
+`GROUP BY` is a parse error. `ORDER BY` takes an alias or expression, never a
+position (`ORDER BY 2` silently sorts by the constant), and after `WITH` it must
+be followed by `SKIP`/`LIMIT`. Backtick the two parser-reserved words, `end` and
+`group` (`` n.`end` ``). `labels(n)` returns a string, not a list. Unknown
+properties are binder errors, so scope every `MATCH` by label.
 
 ## Querying from opencode
 

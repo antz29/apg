@@ -712,18 +712,35 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 ### Query syntax
 
 - Only `MATCH/RETURN` Cypher (no raw SQL). End with `;` (tool adds it if missing).
-- Use backticks for reserved words: `` n.`end` ``
-- `labels(n)` works (returns array), but `n._LABEL` or `r._LABEL` does **NOT**.
+- Backtick the parser-reserved words — `end` and `group`: `` n.`end` ``. Ordinary
+  keywords (`limit`, `match`, `return`, `set`) are legal identifiers and need none.
+- `labels(n)` works but returns a **string**, not a list (`size(labels(n))` is the
+  string length); use `label(n)`, or `collect(DISTINCT label(x))` for a list.
+  `n._LABEL` or `r._LABEL` does **NOT** work.
 - `count(*)` works. Prefer it over `count(r)`.
-- `ORDER BY`, `LIMIT`, `GROUP BY` work. Use `GROUP BY` (not `GROUP`).
-- No joins, no subqueries, no `CALL db_info()`.
+- `ORDER BY`, `SKIP`, `LIMIT` work; there is no `OFFSET`.
+- **No `GROUP BY`** — grouping is implicit (every non-aggregate in the projection
+  is a grouping key); `GROUP BY` is a parse error.
+- `ORDER BY` takes an alias or expression, **never a position** — `ORDER BY 2`
+  silently sorts by the constant. After `WITH`, `ORDER BY` must be followed by
+  `SKIP` or `LIMIT`.
+- No `JOIN` keyword (joins are implicit through shared variables) and no
+  free-standing subqueries; `EXISTS { … }` / `COUNT { … }` pattern subqueries do
+  work. Introspection is `CALL show_tables()`, `CALL table_info('X')`,
+  `CALL show_functions()` — there is no `db_info()`.
+- Comparisons use `=`/`<>` — `!=` is a parse error. List indexing is **1-based**
+  and slices are inclusive at both ends.
 - `PROFILE` and `EXPLAIN` work for debugging plans.
+- Scope every `MATCH` by label and confirm columns with `table_info('X')`: an
+  unknown property is a binder error, while an unlabeled `MATCH (n) RETURN n.name`
+  returns **zero rows silently**.
 
 ### Quirks
 
-- **`end` is a DuckDB reserved word** — you MUST quote it: `` n.`end` ``
+- **`end` and `group` are reserved by the Cypher parser itself** — you MUST quote
+  them: `` n.`end` ``
 - **Stderr is silenced** by `2>/dev/null` — if a query fails, you'll only see a parser/binder error.
-- **`_LABEL` is internal** — you see it in raw output like `{_LABEL: Module, fqn: ...}` but you cannot filter/return on it. Use `labels(n)` instead.
+- **`_LABEL` is internal** — you see it in raw output like `{_LABEL: Module, fqn: ...}` but you cannot filter/return on it. Use `label(n)` instead.
 - **Node IDs encode the label index**: `0:29` = label 0 entry 29, `1:5` = label 1, `2:8265` = label 2.
 
 ### Data model
@@ -970,7 +987,7 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   database. Opaque ids are namespaced per language (`--id-prefix`, `g1`/`t1`/…);
   a `lang_switch` control record before each stream drives per-record
   `code_type` classification and FQN rendering.
-- To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
+- To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn AS target, count(f) AS n ORDER BY n DESC LIMIT 20`
 
 ### Other tools
 
