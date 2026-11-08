@@ -20,6 +20,8 @@ mod record;
 mod scanner;
 mod source;
 mod state;
+#[cfg(test)]
+mod tests;
 mod walk;
 
 // ── CLI ───────────────────────────────────────────────────────────────
