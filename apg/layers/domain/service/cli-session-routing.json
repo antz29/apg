@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.admission-checks-the-model-not-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.cli-session-caller-controlled-durability",
       "properties": {}
     },
@@ -52,17 +57,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.project-delete-refuses-a-live-session",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.session-start-requires-project-context",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.session-write-through-to-the-database",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.admission-checks-the-model-not-persistence",
       "properties": {}
     }
   ],

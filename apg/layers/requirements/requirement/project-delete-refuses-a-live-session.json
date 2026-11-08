@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "project-delete-refuses-a-live-session",
+  "body": "`apg project delete` refuses while a live session owns the target worktree's branch database, leaving the worktree and branch intact, naming `apg session save` then `apg session end` as the fix, after the worktree-and-branch match check.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cli-session-substrate",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cli-session-routing",
+      "properties": {}
+    }
+  ]
+}
