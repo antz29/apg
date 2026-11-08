@@ -148,3 +148,15 @@ impl Drop for ScanProbeGuard {
         });
     }
 }
+
+/// Run `f` with the probe installed as the current thread's scan context, or
+/// with `None` when no scan installed one.
+///
+/// The probe is borrowed from the thread-local for the caller's closure
+/// lifetime only — a `&IgnoreProbe` cannot outlive the call, so it can never be
+/// stashed in a `'static` slot. The scan asking the question is
+/// single-threaded by construction, which is why a thread-local is the right
+/// context rather than shared state.
+pub fn with_current_probe<R>(f: impl FnOnce(Option<&IgnoreProbe>) -> R) -> R {
+    SCAN_PROBE.with(|slot| f(slot.borrow().as_ref()))
+}
