@@ -296,14 +296,35 @@ apg query "MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn AS target, count(f) AS 
 apg query --json "MATCH (s:Struct) RETURN s.fqn, s.code_type LIMIT 5"
 ```
 
-Query syntax: `MATCH`/`RETURN` only (no raw SQL). `ORDER BY`, `SKIP`, `LIMIT`,
-`labels()` and `count(*)` work; there is no `OFFSET`. Aggregation groups
-**implicitly** — every non-aggregate in the projection is a grouping key, so
-`GROUP BY` is a parse error. `ORDER BY` takes an alias or expression, never a
-position (`ORDER BY 2` silently sorts by the constant), and after `WITH` it must
-be followed by `SKIP`/`LIMIT`. Backtick the two parser-reserved words, `end` and
-`group` (`` n.`end` ``). `labels(n)` returns a string, not a list. Unknown
-properties are binder errors, so scope every `MATCH` by label.
+Query syntax: `MATCH`/`RETURN` only (no raw SQL) — the CLI's read-only contract,
+against the pinned engine's dialect (the build section pins `liblbug` 0.22.3; an
+installed binary may link an older engine):
+
+- `ORDER BY`, `SKIP`, `LIMIT`, `labels()` and `count(*)` work, and `labels(n)`
+  returns a **string**, not a list. `ORDER BY` takes an alias or expression,
+  never a position (`ORDER BY 2` silently sorts by the constant), and after
+  `WITH` it must be followed by `SKIP`/`LIMIT`. There is no `OFFSET` and no
+  `NULLS FIRST/LAST`.
+- Aggregation groups **implicitly** — every non-aggregate in the projection is a
+  grouping key, so `GROUP BY` is a parse error — and `collect()` over zero rows
+  is `[]` on the pinned engine.
+- Backtick a reserved word used as an identifier: `end` is the canonical APG
+  column (`` n.`end` ``), and `group` needs it when naming a property or label.
+  The reserved set is much larger (`order`, `all`, `any`, `case`, `exists`,
+  `index`, `table`, `null`, `true`, `false`, `starts`, `ends`, `where`, `when`,
+  `then`, `else`, `union`, `with`, `optional`, `profile`, …), while ordinary
+  keywords (`limit`, `match`, `return`, `set`, `count`, `skip`) are legal
+  identifiers.
+- `EXISTS { … }` / `COUNT { … }` pattern subqueries and read-only `CALL` table
+  functions (`show_tables()`, `table_info('X')`, `show_functions()`,
+  `db_version()`) work; there is no `CALL {}` and no `JOIN` keyword.
+- Comparisons use `=`/`<>` (`!=` is a parse error). List indexing is 1-based;
+  slices are inclusive at both ends and accept `[a:b]` or `[a..b]`.
+  `list_has_any`, `list_min` and `list_max` exist on the pinned engine.
+- Unknown properties are binder errors, so scope every `MATCH` by label. The
+  database is derived and disposable: one written by a pre-0.21 engine may be
+  rejected or warned about stale string hash indexes — rebuild it with
+  `apg scan`, never upgrade in place.
 
 ## Querying from opencode
 
