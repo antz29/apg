@@ -89,4 +89,45 @@ mod unit {
         assert!(msg.contains("/repo/apg/.worktrees/foo"), "{msg}");
         assert_fix(&msg);
     }
+
+    /// The pure ignore verdict (R1): paths are already workdir-relative, the
+    /// tracked set and the ignore oracle are fakes, so every verdict is decided
+    /// without git, filesystem or process I/O.
+    #[test]
+    fn decide_ignored_honours_tracked_and_empty_precedence() {
+        use std::collections::HashSet;
+        use std::path::{Path, PathBuf};
+
+        // Fakes: a tracked set, and an ignore oracle that answers "ignored" for
+        // exactly the two glob-matching inputs below.
+        let tracked: HashSet<PathBuf> = HashSet::from([PathBuf::from("target/debug/app")]);
+        let oracle = |rel: &Path| {
+            rel == Path::new("target/debug/app") || rel == Path::new("node_modules/dep/index.js")
+        };
+
+        // 1. tracked_path_declined_despite_matching_ignore_glob: the oracle
+        //    would say ignored, the tracked set wins.
+        assert!(
+            !decide_ignored(Path::new("target/debug/app"), &tracked, oracle),
+            "tracked path must never be ignored, even when it matches an ignore glob"
+        );
+
+        // 2. untracked_ignored_path_ignored: the oracle decides.
+        assert!(
+            decide_ignored(Path::new("node_modules/dep/index.js"), &tracked, oracle),
+            "an untracked path the rules ignore is ignored"
+        );
+
+        // 3. untracked_unignored_path_kept.
+        assert!(
+            !decide_ignored(Path::new("src/main.rs"), &tracked, oracle),
+            "an untracked path the rules keep is kept"
+        );
+
+        // 4. empty_relative_path_kept: declined before the oracle is consulted.
+        assert!(
+            !decide_ignored(Path::new(""), &tracked, oracle),
+            "an empty relative path is never ignored"
+        );
+    }
 }
