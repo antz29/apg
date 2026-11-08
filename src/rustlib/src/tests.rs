@@ -49,4 +49,18 @@ mod unit {
         assert!(at_a.starts_with('<'));
         assert_ne!(at_a, "f");
     }
+
+    /// A callee name longer than 64 bytes comes back whole — no cut, no ellipsis.
+    #[test]
+    fn long_callee_name_is_not_truncated() {
+        let name = "a".repeat(70);
+        let identity = callee_of(&format!("fn f() {{ {name}(); }}"));
+
+        assert_eq!(identity, name);
+        assert!(identity.len() > 64);
+        // The tail past the old 64-byte cut survives: not a truncated prefix.
+        assert!(identity.get(64..).is_some_and(|tail| !tail.is_empty()));
+        // No ellipsis marker (U+2026).
+        assert!(!identity.contains('…'));
+    }
 }
