@@ -7,12 +7,22 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.graph-first-navigation",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.navigator-cadence-marks-done-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.navigator-dispatches-task-implementer",
       "properties": {}
     },
     {
@@ -42,22 +52,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.query-dialect-guidance-matches-pinned-engine",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.research-escalation-triage",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.navigator-dispatches-task-implementer",
       "properties": {}
     }
   ],

@@ -92,6 +92,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.query-dialect-guidance-matches-pinned-engine",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.researcher-agent-external-directory-ask",
       "properties": {}
     },

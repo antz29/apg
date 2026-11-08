@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "query-dialect-guidance-matches-pinned-engine",
+  "body": "The agent guide, the readme and the navigator prompt state the query dialect of the engine the binary pins: its reserved words, unsupported clauses, aggregate semantics and introspection surface.",
+  "properties": {
+    "feature": "agent-prompt-clarity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    }
+  ]
+}
