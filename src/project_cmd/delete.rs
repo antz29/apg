@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::artifacts::parse_args;
 use crate::git;
+use crate::specs;
 
 use super::{require_apg_root, validate_project_name};
 
@@ -34,8 +35,10 @@ pub(crate) fn project_delete(args: &[String]) -> anyhow::Result<()> {
 /// nothing to delete from here); the branch IS hosted in the project's own
 /// worktree at the fixed location `<main>/apg/.worktrees/<name>` (leftover
 /// branch / mismatched worktree states are refused with a manual fix, never
-/// guessed); and the worktree has no tracked uncommitted changes (commit or
-/// stash first, mirroring merge's dirty refusal). The branch may be unmerged —
+/// guessed); the worktree has no tracked uncommitted changes (commit or
+/// stash first, mirroring merge's dirty refusal); and no live `apg session`
+/// owns the branch DB (save and end it first, mirroring merge). The branch may
+/// be unmerged —
 /// delete is the abandon path. On success `git::remove_worktree` +
 /// `git::delete_branch` remove the project; the default branch and the main
 /// checkout are never touched.
@@ -103,6 +106,18 @@ pub fn project_delete_at(main_apg_root: &Path, name: &str) -> anyhow::Result<()>
             wt_dir.display(),
             on_branch.as_deref().unwrap_or("<none>"),
             wt_dir.display()
+        );
+    }
+
+    // Lifecycle exclusivity: a live session owns the branch DB, so deleting
+    // (which removes the worktree/branch) must not race it. Refuse before any
+    // removal — the caller must save the buffered state (`apg session save`)
+    // and end the session (`apg session end`) first.
+    let wt_apg = wt_dir.join(specs::LAYOUT);
+    if crate::session::live_session(&wt_apg) {
+        anyhow::bail!(
+            "refused: a live `apg session` owns the branch DB at {} — save its buffered changes and end it first (`apg session save`, then `apg session end`, inside the project worktree) before deleting",
+            wt_apg.join(specs::TRANS).join("db.lbug").display()
         );
     }
 
