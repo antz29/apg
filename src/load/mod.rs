@@ -2,9 +2,10 @@
 //! (SPEC §6 step 4) — the only artifact `apg/.trans` holds.
 //!
 //! Load files are written with the low-level `parquet` writer so that string
-//! columns carry the legacy `ConvertedType::UTF8` annotation. lbug 0.19.1's
-//! PARQUET reader derives logical types from `converted_type` only, so the
-//! arrow-rs default (`LogicalType::String`) would be misread as `BLOB`.
+//! columns carry the legacy `ConvertedType::UTF8` annotation. lbug 0.22.3's
+//! PARQUET reader derives a column's logical type from `converted_type` — it
+//! consults the modern `logical_type` only for `UUID` — so `ConvertedType::UTF8`
+//! yields `STRING`, while an unannotated `BYTE_ARRAY` is read as `BLOB`.
 //!
 //! The cohesive groups live in submodules — the low-level PARQUET sink
 //! ([`parquet`]) and the load tables and their pair enumerations ([`tables`]) —
