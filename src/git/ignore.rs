@@ -9,6 +9,7 @@
 //! behind a weak pointer, so keeping the Rust `Index` alive is what stops the
 //! next lookup re-reading the whole (tens-of-MB) index from disk.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -110,4 +111,40 @@ pub fn decide_ignored(
         return false;
     }
     ignored_by_rules(rel)
+}
+
+thread_local! {
+    /// The probe installed for the current scan on this thread.
+    ///
+    /// [`IgnoreProbe`] holds a `git2::Repository`/`git2::Index`, neither of
+    /// which is `Sync`, so the context cannot be a plain global — and the scan
+    /// path that asks the question is single-threaded by construction.
+    static SCAN_PROBE: RefCell<Option<IgnoreProbe>> = const { RefCell::new(None) };
+}
+
+/// Installs an [`IgnoreProbe`] as the current thread's scan context for as long
+/// as the guard lives, restoring the displaced context on drop.
+///
+/// RAII rather than paired install/uninstall calls so an early `?` return or a
+/// panic still unwinds the previous context.
+pub struct ScanProbeGuard {
+    /// The context this install displaced, put back by [`Drop`].
+    previous: Option<IgnoreProbe>,
+}
+
+impl ScanProbeGuard {
+    /// Move `probe` into the thread-local context, handing back whatever probe
+    /// it replaced.
+    pub fn install(probe: IgnoreProbe) -> Self {
+        let previous = SCAN_PROBE.with(|slot| slot.borrow_mut().replace(probe));
+        Self { previous }
+    }
+}
+
+impl Drop for ScanProbeGuard {
+    fn drop(&mut self) {
+        SCAN_PROBE.with(|slot| {
+            *slot.borrow_mut() = self.previous.take();
+        });
+    }
 }
