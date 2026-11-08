@@ -7,7 +7,8 @@
 // never a fabricated FQN.
 
 import ts from "typescript";
-import { ctx, declIdByKey, structFqnByKey } from "./state.mjs";
+import path from "node:path";
+import { ctx, declIdByKey, structFqnByKey, config } from "./state.mjs";
 import { docStart } from "./declarations.mjs";
 
 export function idForDecl(decl) {
@@ -43,6 +44,17 @@ export function nameLocation(expr) {
   if (ts.isCallExpression(expr) || ts.isNewExpression(expr)) return nameLocation(expr.expression);
   if (ts.isNonNullExpression(expr)) return nameLocation(expr.expression);
   return null;
+}
+
+// An unresolved callee's identity: its symbol name at full length, or — for a
+// nameless callee expression — a sentinel keyed to the call site's repo-relative
+// file and position, never a span of source text.
+export function calleeIdentity(expr, sf) {
+  const loc = nameLocation(expr);
+  if (loc) return loc.getText(sf);
+  const rel = path.relative(config.root, sf.fileName);
+  const { line, character } = sf.getLineAndCharacterOfPosition(expr.getStart(sf));
+  return `<nameless@${rel}:${line + 1}:${character + 1}>`;
 }
 
 export function calleeText(expr, sf) {
