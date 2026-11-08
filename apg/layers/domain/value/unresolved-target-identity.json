@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "unresolved-target-identity",
-  "body": "The identity of an unresolved target: the callee's symbol name, or a site-keyed sentinel naming the call site where the callee owns no symbol.",
+  "body": "The identity of an unresolved target: the callee's symbol name, or a site-keyed sentinel naming the call site of a nameless callee expression.",
   "properties": {},
   "out": [],
   "in": [

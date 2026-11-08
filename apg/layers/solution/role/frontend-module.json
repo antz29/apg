@@ -10,6 +10,11 @@
   "in": [
     {
       "kind": "is-role",
+      "source": "solution.component.agent-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.cpp-frontend-artifact",
       "properties": {}
     },
@@ -40,12 +45,17 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.rust-unresolved-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.ts-package-rooting",
       "properties": {}
     },
     {
       "kind": "is-role",
-      "source": "solution.component.agent-frontend-artifact",
+      "source": "solution.component.ts-unresolved-target-identity",
       "properties": {}
     }
   ]

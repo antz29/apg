@@ -16,6 +16,11 @@
       "properties": {}
     },
     {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.unresolved-target-identity",
       "properties": {}

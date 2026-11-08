@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "unresolved-target-category-follows-its-identity",
-  "body": "An unresolved target takes a category from a resolved declaration only when its identity names that declaration's symbol, so a sentinel or a nameless expression never reports stdlib or external.",
+  "body": "An unresolved target takes a category from a resolved declaration exactly when its identity names that declaration's symbol, so stdlib and external carry named symbols alone.",
   "properties": {
     "feature": "graph-identity"
   },

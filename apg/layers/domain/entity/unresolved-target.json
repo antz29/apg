@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "unresolved-target",
-  "body": "The foreign reference a frontend records when a call or constructor callee resolves to no project symbol: one node per identity, carrying that identity and its category.",
+  "body": "The foreign reference a frontend records when a call or constructor callee resolves outside the project's own symbols: one node per identity, carrying that identity and its category.",
   "properties": {
     "kind": "entity"
   },

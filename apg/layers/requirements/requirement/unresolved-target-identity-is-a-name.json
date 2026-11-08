@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "unresolved-target-identity-is-a-name",
-  "body": "The TypeScript and Rust frontends give an unresolved call or constructor callee a target identity that is the callee's symbol name, or a site-keyed sentinel where the callee owns no symbol.",
+  "body": "The TypeScript and Rust frontends give an unresolved call or constructor callee a target identity drawn from its symbol name, or from a site-keyed sentinel for a nameless callee expression.",
   "properties": {
     "feature": "graph-identity"
   },
