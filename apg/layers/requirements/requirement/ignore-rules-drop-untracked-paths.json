@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ignore-rules-drop-untracked-paths",
-  "body": "A path the checkout's ignore rules cover is dropped from the graph while it is untracked, and a tracked path is graphed whatever ignore rule matches it.",
+  "body": "The ignore decision removes an untracked path the checkout's ignore rules cover and keeps a tracked path and an untracked unignored path.",
   "properties": {
     "feature": "scan-hygiene"
   },
