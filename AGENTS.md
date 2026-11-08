@@ -735,6 +735,12 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 - Scope every `MATCH` by label and confirm columns with `table_info('X')`: an
   unknown property is a binder error, while an unlabeled `MATCH (n) RETURN n.name`
   returns **zero rows silently**.
+- **Aggregating over an unlabelled destination you sort by** — e.g. `MATCH
+  (f:File)-[:Contains]->(c) RETURN f.fqn, count(c) AS n ORDER BY n DESC LIMIT
+  12` — segfaults a LadybugDB engine older than **v0.21.0** (exit 139, empty
+  output) when the bound node's table has a **STRING** primary key, because a
+  degree-count optimizer rewrite projected raw storage offsets as the group
+  key, a failure mode the pinned engine (above that floor) does not have.
 
 ### Quirks
 
