@@ -440,4 +440,89 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git); run via cargo test-e2e"]
+    fn manifest_build_matches_walk_files_over_full_fixture_shape() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("manifest-build");
+
+        // Base commit: a plain file, a symlink (created with std, not a new
+        // testutil surface), a nested file for the scan-subdirectory arm, and
+        // the ignore rules the later arms need.
+        repo.write("committed.txt", "committed\n");
+        repo.write("sub/a.rs", "fn a() {}\n");
+        repo.write(
+            ".gitignore",
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\nignored.txt\nignored_dir/\n",
+        );
+        std::os::unix::fs::symlink("committed.txt", repo.root.join("link.txt")).unwrap();
+        repo.write("modified.txt", "before\n");
+        repo.write("deleted.txt", "gone soon\n");
+        let base = repo.commit_all("fixture base");
+        assert_eq!(repo.head_sha(), base, "the base fixture must be committed");
+
+        // A worktree-only (unstaged) modification of a tracked file.
+        repo.write("modified.txt", "after\n");
+        // A tracked file deleted from the worktree.
+        std::fs::remove_file(repo.root.join("deleted.txt")).unwrap();
+        // A staged addition whose working tree matches the index.
+        repo.write("staged.txt", "staged\n");
+        // A path staged AND worktree-modified: its manifest value must be the
+        // working-tree hash, not the index blob OID (the keying discriminator).
+        repo.write("both.txt", "index version\n");
+        let git = git2::Repository::open(&repo.root).unwrap();
+        let mut index = git.index().unwrap();
+        index.add_path(Path::new("staged.txt")).unwrap();
+        index.add_path(Path::new("both.txt")).unwrap();
+        index.write().unwrap();
+        repo.write("both.txt", "worktree version\n");
+
+        // Untracked root and nested files, a gitignored file, a gitignored
+        // nested directory, and an unignored node_modules-style directory
+        // (the SKIP_DIRS pruning arm).
+        repo.write("untracked.txt", "untracked\n");
+        repo.write("nested/untracked.txt", "nested untracked\n");
+        repo.write("ignored.txt", "ignored\n");
+        repo.write("ignored_dir/keep.txt", "ignored dir\n");
+        repo.write("node_modules/pkg.js", "module.exports = 1;\n");
+        assert!(
+            repo.root.join("node_modules/pkg.js").is_file(),
+            "the SKIP_DIRS fixture file must exist"
+        );
+
+        // The canonical root the manifest and the baseline both key against.
+        let root = std::fs::canonicalize(&repo.root).unwrap();
+        let git = git2::Repository::open(&root).unwrap();
+        let manifest = Manifest::build(&root);
+        let mut baseline = std::collections::BTreeMap::new();
+        walk_files(&root, &root, Some(&git), &mut baseline);
+        assert_eq!(
+            manifest.entries, baseline,
+            "Manifest::build must equal the walk_files baseline entry for entry"
+        );
+
+        // The arms whose intent an entry-for-entry diff alone understates.
+        assert!(
+            !manifest.entries.contains_key("deleted.txt"),
+            "a worktree-deleted tracked path must be absent"
+        );
+        assert!(
+            !manifest.entries.contains_key("node_modules/pkg.js"),
+            "a SKIP_DIRS directory must be pruned"
+        );
+        assert!(manifest.entries.contains_key("link.txt"));
+
+        // A scan rooted at a repo subdirectory keeps scan-root-relative keys.
+        let sub = std::fs::canonicalize(repo.root.join("sub")).unwrap();
+        let sub_manifest = Manifest::build(&sub);
+        let mut sub_baseline = std::collections::BTreeMap::new();
+        walk_files(&sub, &sub, Some(&git), &mut sub_baseline);
+        assert_eq!(sub_manifest.entries, sub_baseline);
+        assert!(sub_manifest.entries.contains_key("a.rs"));
+        assert!(!sub_manifest.entries.contains_key("sub/a.rs"));
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+    }
 }
