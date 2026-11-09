@@ -2,12 +2,12 @@
   "layer": "implementation",
   "type": "note",
   "name": "freshness-four-read-only-opens",
-  "body": "`is_fresh` performs up to five separate read-only `db.lbug` opens on the no-live-session path — the pending-state probe, the schema-shape diff, `db_recorded_scan`, `seed_authored_identity`, and `tree_authored_identity`'s internal `PreviousScan::capture` — each taking its own handle rather than sharing one (the `.four-` half of this note's name is superseded). It is a pre-scan gate today; upgrade to a single shared read-only handle if freshness ever becomes hot, or if the probes must observe one consistent snapshot.",
+  "body": "The freshness predicate `is_fresh_with_state` performs up to five separate read-only `db.lbug` opens on the no-live-session path — the pending-state probe, the schema-shape diff, `db_recorded_scan`, `seed_authored_identity`, and `tree_authored_identity`'s internal `PreviousScan::capture` — each taking its own handle rather than sharing one, while the `is_fresh` wrapper captures a state once and delegates to it. It is a pre-scan gate today; upgrade to a single shared read-only handle if freshness ever becomes hot, or if the probes must observe one consistent snapshot.",
   "properties": {},
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.git.state.is_fresh",
+      "target": "rust.apg.git.state.is_fresh_with_state",
       "properties": {}
     }
   ],
