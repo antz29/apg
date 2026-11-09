@@ -212,17 +212,87 @@ const SKIP_DIRS: &[&str] = &[".git", ".worktrees", "target", "node_modules"];
 
 impl Manifest {
     /// Builds the manifest for the scan root `root` (the scanned directory, an
-    /// absolute path) by walking its tree and hashing every non-ignored file's
-    /// bytes. The root itself is recorded (`root`) so a reading worktree can
-    /// re-base stored paths. Gitignored content (the scan's own `apg/.trans/`
-    /// outputs, `.worktrees/`) never enters — the manifest is a content
-    /// identity of the *scanned* tree, so a scan's own writes cannot invalidate
-    /// it.
+    /// absolute path). In a git checkout the identity is read, not walked: each
+    /// tracked stage-0 index entry contributes its index blob OID, and only the
+    /// paths `statuses()` reports (modified, staged, untracked) are re-hashed
+    /// from their working-tree bytes — a deleted path simply does not appear.
+    /// Every workdir-relative path is re-based onto the canonical scan root
+    /// (dropping paths outside it) with the same `/`-separated, scan-root-
+    /// relative keys the walk produced, so [`Manifest::diff`] and a reading
+    /// worktree keep seeing them. Outside a repository — or when git cannot
+    /// read the index/status — the whole tree is walked and hashed via
+    /// [`walk_files`], so the manifest is never silently empty. The root itself
+    /// is recorded (`root`) so a reading worktree can re-base stored paths.
+    /// Gitignored content (the scan's own `apg/.trans/` outputs, `.worktrees/`)
+    /// never enters — the manifest is a content identity of the *scanned* tree,
+    /// so a scan's own writes cannot invalidate it.
     pub fn build(root: &Path) -> Manifest {
         let base = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let repo = git2::Repository::discover(&base).ok();
         let mut entries = BTreeMap::new();
-        walk_files(&base, &base, repo.as_ref(), &mut entries);
+        let mut from_repo = false;
+        if let Some(repo) = repo.as_ref()
+            && let Some(workdir) = repo
+                .workdir()
+                .map(|w| std::fs::canonicalize(w).unwrap_or_else(|_| w.to_path_buf()))
+            && let Ok(base_rel) = base.strip_prefix(&workdir)
+            && let Ok(index) = repo.index()
+        {
+            // Re-base a workdir-relative path onto the scan root (dropping any
+            // path outside it) and apply the same exclusions the tree walk
+            // applies: a `SKIP_DIRS` directory component and a linked worktree's
+            // `.git` file never enter.
+            let scan_rel = |path: &str| -> Option<String> {
+                let rel = Path::new(path).strip_prefix(base_rel).ok()?;
+                let text = rel.to_string_lossy().replace('\\', "/");
+                let mut parts = text.split('/');
+                let name = parts.next_back()?;
+                if name.is_empty() || name == ".git" || parts.any(|c| SKIP_DIRS.contains(&c)) {
+                    return None;
+                }
+                Some(text)
+            };
+            for entry in index.iter() {
+                // Only stage-0 entries are tracked; a gitlink is a submodule
+                // commit pointer, not blob content.
+                if entry.flags & 0x3000 != 0 || entry.mode == git2::FileMode::Commit as u32 {
+                    continue;
+                }
+                let path = String::from_utf8_lossy(&entry.path);
+                if let Some(rel) = scan_rel(&path) {
+                    entries.insert(rel, entry.id.to_string());
+                }
+            }
+            let mut opts = git2::StatusOptions::new();
+            opts.include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .include_ignored(false);
+            if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+                for entry in statuses.iter() {
+                    let Some(path) = entry.path() else {
+                        continue;
+                    };
+                    let Some(rel) = scan_rel(path) else {
+                        continue;
+                    };
+                    match blob_oid_of_file(&workdir.join(path)) {
+                        Some(oid) => {
+                            entries.insert(rel, oid);
+                        }
+                        // A reported path with no readable working-tree file is
+                        // a deletion: it simply does not appear.
+                        None => {
+                            entries.remove(&rel);
+                        }
+                    }
+                }
+                from_repo = true;
+            }
+        }
+        if !from_repo {
+            entries.clear();
+            walk_files(&base, &base, repo.as_ref(), &mut entries);
+        }
         Manifest {
             root: base.to_string_lossy().into_owned(),
             entries,
