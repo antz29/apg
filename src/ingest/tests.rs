@@ -1209,4 +1209,204 @@ mod int {
             "the module placeholder keeps the row its recorded kind pairs"
         );
     }
+
+    /// phase-01 task-11: [`finalize_delta_graph`] and the universe-aware
+    /// [`crate::cleanup::cleanup`], wired in sequence over one in-memory graph,
+    /// keep every code edge and every `contains` row whose far endpoint lives
+    /// only in the pre-scan universe (`previous.scanned` ∪
+    /// `previous.planned`): the finalizer flips the delta-spooled references it
+    /// can resolve against `previous.scanned` into dangling resolved edges, and
+    /// the cleanup then keeps those — plus a `contains` parent the snapshot
+    /// records — for the splice to land against the seeded copy. The universe
+    /// never resurrects a path-excluded node (`CleanupOptions::user_excludes`
+    /// still removes it and drops its edges), and a genuinely dangling endpoint
+    /// (in neither the graph nor the universe) is still pruned.
+    ///
+    /// Two real units under test, pure in-memory: the graph and the snapshot
+    /// are built by hand.
+    #[test]
+    fn finalize_delta_graph_keeps_universe_endpoints() {
+        use std::collections::BTreeSet;
+
+        use crate::cleanup::{CleanupOptions, cleanup};
+
+        let caller = "rust.apg.caller";
+        let caller_struct = "rust.apg.caller_struct";
+        let delta_file = "rust.apg.delta_file";
+        let seed_fn = "rust.apg.seed_only_fn";
+        let seed_struct = "rust.apg.seed_only_struct";
+        let seed_file = "rust.apg.seed_only_file";
+        let planned_file = "rust.apg.planned_file";
+        let excluded = "rust.apg.vendor_excluded";
+        let gone = "rust.apg.gone_fn";
+        let real = |kind| Node {
+            kind,
+            ..Node::default()
+        };
+
+        // The delta graph: the changed file's declarations and File node.
+        let mut graph = Graph::default();
+        for (fqn, kind) in [
+            (caller, NodeKind::Function),
+            (caller_struct, NodeKind::Struct),
+            (delta_file, NodeKind::File),
+        ] {
+            graph.nodes.insert(fqn.to_string(), real(kind));
+        }
+        // A path-excluded declaration the delta graph carries; the previous
+        // scan records it too, so only the exclusion pass may remove it.
+        graph.nodes.insert(
+            excluded.to_string(),
+            Node {
+                kind: NodeKind::Function,
+                location: Some(crate::graph::Location {
+                    path: std::path::PathBuf::from("vendor/generated.rs"),
+                    start: 0,
+                    end: 10,
+                    start_line: 1,
+                    end_line: 3,
+                }),
+                ..Node::default()
+            },
+        );
+        // The shared `UnresolvedTarget` rows the delta spool materialises.
+        for fqn in [seed_fn, seed_struct] {
+            graph
+                .nodes
+                .insert(fqn.to_string(), real(NodeKind::UnresolvedTarget));
+        }
+        // Delta-spooled references: two resolve against the previous scan's
+        // universe, the excluded one against the delta graph itself, and `gone`
+        // against neither.
+        for to in [seed_fn, excluded, gone] {
+            graph
+                .unresolved_calls
+                .insert((caller.to_string(), to.to_string(), String::new()));
+        }
+        graph
+            .unresolved_uses
+            .insert((caller_struct.to_string(), seed_struct.to_string()));
+
+        // A seed-only file's `contains` parent and a plan-declared file's, plus
+        // a `contains` row into the excluded declaration.
+        graph
+            .contains
+            .insert((seed_file.to_string(), caller.to_string()));
+        graph
+            .contains
+            .insert((planned_file.to_string(), caller_struct.to_string()));
+        graph
+            .contains
+            .insert((delta_file.to_string(), excluded.to_string()));
+        // A genuinely dangling code edge — no node, no universe entry.
+        graph.calls.insert((caller.to_string(), gone.to_string()));
+
+        let previous = PreviousScan {
+            scanned: [seed_fn, seed_struct, seed_file, excluded]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            planned: [planned_file].into_iter().map(str::to_string).collect(),
+            kinds: [
+                (seed_fn, "function"),
+                (seed_struct, "struct"),
+                (seed_file, "file"),
+                (excluded, "function"),
+                (planned_file, "file"),
+            ]
+            .into_iter()
+            .map(|(fqn, kind)| (fqn.to_string(), kind.to_string()))
+            .collect(),
+            agents: Vec::new(),
+        };
+
+        finalize_delta_graph(&mut graph, Some(&previous));
+
+        // The references resolving against `previous.scanned` are now dangling
+        // resolved edges (their placeholder rows GC'd) — the splice's input.
+        assert!(
+            graph
+                .calls
+                .contains(&(caller.to_string(), seed_fn.to_string()))
+        );
+        assert!(
+            graph
+                .uses
+                .contains(&(caller_struct.to_string(), seed_struct.to_string()))
+        );
+        assert!(!graph.nodes.contains_key(seed_fn));
+        assert!(!graph.nodes.contains_key(seed_struct));
+        // `gone` is in neither universe, so it stays unresolved.
+        assert!(graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            gone.to_string(),
+            String::new(),
+        )));
+
+        let report = cleanup(
+            &mut graph,
+            &CleanupOptions {
+                user_excludes: vec!["vendor/**".to_string()],
+                language: "rust".to_string(),
+                universe: previous
+                    .scanned
+                    .union(&previous.planned)
+                    .cloned()
+                    .collect::<BTreeSet<String>>(),
+            },
+        );
+
+        // Cross-cut code edges to a seed-only endpoint survive the cleanup.
+        assert!(
+            graph
+                .calls
+                .contains(&(caller.to_string(), seed_fn.to_string()))
+        );
+        assert!(
+            graph
+                .uses
+                .contains(&(caller_struct.to_string(), seed_struct.to_string()))
+        );
+        // `contains` parents that live only in the universe survive too — one
+        // from `previous.scanned`, one from `previous.planned`.
+        assert!(
+            graph
+                .contains
+                .contains(&(seed_file.to_string(), caller.to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&(planned_file.to_string(), caller_struct.to_string()))
+        );
+
+        // The path-excluded node is removed — its universe membership does not
+        // rescue it — and its edges go with it.
+        assert!(!graph.nodes.contains_key(excluded));
+        assert!(
+            !graph
+                .calls
+                .contains(&(caller.to_string(), excluded.to_string()))
+        );
+        assert!(
+            !graph
+                .contains
+                .contains(&(delta_file.to_string(), excluded.to_string()))
+        );
+        assert_eq!(report.nodes_removed, 1);
+
+        // A genuinely dangling endpoint (in neither the graph nor the universe)
+        // is pruned from both resolved and unresolved rows.
+        assert!(
+            !graph
+                .calls
+                .contains(&(caller.to_string(), gone.to_string()))
+        );
+        assert_eq!(report.unresolved_calls_removed, 1);
+        assert!(!graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            gone.to_string(),
+            String::new(),
+        )));
+    }
 }
