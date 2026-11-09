@@ -130,4 +130,156 @@ mod unit {
             "an empty relative path is never ignored"
         );
     }
+
+    /// The content-identity fold is a pure function of HEAD + entries: the same
+    /// input twice yields the same `(clean, key)`, and the fold's own
+    /// `(path, bits)` sort makes entry order irrelevant. Constructed values
+    /// only — no repository, index or filesystem.
+    #[test]
+    fn fold_status_entries_is_deterministic_and_order_independent() {
+        let entries = [
+            StatusEntry {
+                path: "src/b.rs".into(),
+                bits: 0x0000_0100,
+                index_oid: Some("bbbb".into()),
+                content: Some(b"b".to_vec()),
+            },
+            StatusEntry {
+                path: "src/a.rs".into(),
+                bits: 0x0000_0001,
+                index_oid: None,
+                content: Some(b"a".to_vec()),
+            },
+            StatusEntry {
+                path: "src/c.rs".into(),
+                bits: 0x0000_0080,
+                index_oid: None,
+                content: None,
+            },
+        ];
+        let first = fold_status_entries("deadbeef", &entries);
+        assert_eq!(first, fold_status_entries("deadbeef", &entries));
+        let mut shuffled = entries.clone();
+        shuffled.reverse();
+        assert_eq!(
+            first,
+            fold_status_entries("deadbeef", &shuffled),
+            "the fold sorts by (path, bits)"
+        );
+        assert_eq!(first.1.len(), 16, "a 16-hex-digit key");
+    }
+
+    /// `clean` is exactly "the collection is empty": an empty slice is clean,
+    /// and any entry at all is not, whatever its status bits or content.
+    #[test]
+    fn fold_status_entries_is_clean_only_when_empty() {
+        assert!(fold_status_entries("deadbeef", &[]).0);
+        let entry = StatusEntry {
+            path: "src/lib.rs".into(),
+            bits: 0,
+            index_oid: None,
+            content: None,
+        };
+        assert!(
+            !fold_status_entries("deadbeef", &[entry]).0,
+            "one entry is a change"
+        );
+    }
+
+    /// Every folded field moves the key: the working-tree bytes, the status
+    /// bits, and membership itself.
+    #[test]
+    fn fold_status_entries_key_flips_on_content_bits_and_membership() {
+        let base = StatusEntry {
+            path: "src/lib.rs".into(),
+            bits: 0x0000_0100,
+            index_oid: Some("0123abcd".into()),
+            content: Some(b"one".to_vec()),
+        };
+        let key = |e: &StatusEntry| fold_status_entries("head", std::slice::from_ref(e)).1;
+
+        let mut content_edit = base.clone();
+        content_edit.content = Some(b"two".to_vec());
+        assert_ne!(key(&base), key(&content_edit), "bytes change the key");
+
+        let mut bits_edit = base.clone();
+        bits_edit.bits = 0x0000_0200;
+        assert_ne!(key(&base), key(&bits_edit), "status bits change the key");
+
+        let (clean, with_extra) = fold_status_entries(
+            "head",
+            &[
+                base.clone(),
+                StatusEntry {
+                    path: "src/new.rs".into(),
+                    bits: 0x0000_0002,
+                    index_oid: None,
+                    content: None,
+                },
+            ],
+        );
+        assert!(!clean);
+        assert_ne!(key(&base), with_extra, "an added entry changes the key");
+        assert_ne!(
+            fold_status_entries("head", &[]).1,
+            key(&base),
+            "a removed entry changes the key"
+        );
+    }
+
+    /// Pins the digest byte-for-byte. Derivation: an independent reference
+    /// FNV-1a 64 loop (seed `0xcbf2_9ce4_8422_2325`) over the HEAD sha, then
+    /// the entries sorted by `(path, bits)` — `a.txt`, `b.txt`, `c.txt`,
+    /// `d.txt` — each folding path bytes → status bits little-endian
+    /// (`01000000`, `00010000`, `20000000`, `00800000`) → index-oid string →
+    /// working-tree bytes, rendered `{h:016x}`. The entries cover `index_oid`
+    /// `Some`/`None` and `content` `Some`/`None` with nonzero asymmetric bits.
+    #[test]
+    fn fold_status_entries_matches_the_pinned_digest() {
+        let head = "0123456789abcdef0123456789abcdef01234567";
+        let entries = [
+            StatusEntry {
+                path: "a.txt".into(),
+                bits: 0x0000_0001,
+                index_oid: Some("1111111111111111111111111111111111111111".into()),
+                content: Some(b"alpha".to_vec()),
+            },
+            StatusEntry {
+                path: "b.txt".into(),
+                bits: 0x0000_0100,
+                index_oid: Some("2222222222222222222222222222222222222222".into()),
+                content: None,
+            },
+            StatusEntry {
+                path: "c.txt".into(),
+                bits: 0x0000_0020,
+                index_oid: None,
+                content: Some(b"gamma".to_vec()),
+            },
+            StatusEntry {
+                path: "d.txt".into(),
+                bits: 0x0000_8000,
+                index_oid: None,
+                content: None,
+            },
+        ];
+        assert_eq!(
+            fold_status_entries(head, &entries),
+            (false, "88227b9c35351ba6".to_string()),
+            "pinned fold over the fixed input"
+        );
+        let mut reversed = entries.clone();
+        reversed.reverse();
+        assert_eq!(
+            fold_status_entries(head, &reversed).1,
+            "88227b9c35351ba6",
+            "the pinned digest is order-independent"
+        );
+        // The head-only key (the `statuses()`-error digest): seed + HEAD alone.
+        assert_eq!(
+            fold_status_entries(head, &[]),
+            (true, "1b6e0c21d8c6042d".to_string()),
+            "an empty collection folds to the head-only key"
+        );
+    }
 }
