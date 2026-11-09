@@ -224,12 +224,23 @@ fn select_language(progress: &mut Option<&mut Progress<'_>>, language: &str) {
     }
 }
 
+/// Which final prune/validate pass [`ingest_records`] runs at the end.
+///
+/// `Deferred` leaves it to the caller (the win-B splice path finalizes once
+/// after the cached facts merge); `Full` is the ordinary [`finalize_graph`];
+/// `Delta` is [`finalize_delta_graph`] against the captured previous scan.
+enum Finalizer<'a> {
+    Deferred,
+    Full,
+    Delta(Option<&'a PreviousScan>),
+}
+
 pub fn ingest(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
     progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
-    ingest_records(records, opts, false, progress)
+    ingest_records(records, opts, Finalizer::Full, progress)
 }
 
 /// [`ingest`] with win-B cached-fact reuse (phase-02 task-7).
@@ -263,7 +274,8 @@ pub fn ingest_with_reuse(
     reuse: Option<&Reuse>,
     mut progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
-    let (mut graph, report) = ingest_records(records, opts, true, progress.as_deref_mut());
+    let (mut graph, report) =
+        ingest_records(records, opts, Finalizer::Deferred, progress.as_deref_mut());
     if let Some(reuse) = reuse {
         splice_cached(&mut graph, reuse, progress);
         // One finalize after the cached facts land, so an edge to a cached
@@ -283,9 +295,9 @@ pub fn ingest_with_reuse(
 /// graph** the splicer derives its DML from, never the full fact-spliced
 /// assembly, and no second `db.lbug` read happens here.
 ///
-/// The finalizer is deferred to [`finalize_delta_graph`], which judges the
-/// delta's references against `previous` (the snapshot the caller captured) so
-/// a cross-cut edge into unchanged code survives instead of being pruned as
+/// The finalizer is [`finalize_delta_graph`], which judges the delta's
+/// references against `previous` (the snapshot the caller captured) so a
+/// cross-cut edge into unchanged code survives instead of being pruned as
 /// dangling.
 pub fn ingest_delta(
     records: impl IntoIterator<Item = Record>,
@@ -293,9 +305,7 @@ pub fn ingest_delta(
     previous: Option<&PreviousScan>,
     progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
-    let (mut graph, report) = ingest_records(records, opts, true, progress);
-    finalize_delta_graph(&mut graph, previous);
-    (graph, report)
+    ingest_records(records, opts, Finalizer::Delta(previous), progress)
 }
 
 /// Merges cached per-file fact units into an assembled graph. A fresh node at
@@ -558,14 +568,14 @@ fn load_reusable(
 /// The core single-pass ingestor: renders canonical FQNs, inserts nodes, and
 /// resolves edges. See [`ingest`] / [`ingest_with_reuse`].
 ///
-/// `defer_finalize` suppresses the dangling-edge cleanup / edge validation
-/// (the win-B path runs it once after the cached facts merge). `progress`
-/// streams one symbol per admitted code node ([`insert_node`]); the spec/plan
-/// records and the `ScanMeta`/`Unresolved` control kinds stay silent.
+/// `finalizer` selects the dangling-edge cleanup / edge validation run after
+/// the records land (see [`Finalizer`]). `progress` streams one symbol per
+/// admitted code node ([`insert_node`]); the spec/plan records and the
+/// `ScanMeta`/`Unresolved` control kinds stay silent.
 fn ingest_records(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
-    defer_finalize: bool,
+    finalizer: Finalizer<'_>,
     mut progress: Option<&mut Progress<'_>>,
 ) -> (Graph, IngestReport) {
     let mut graph = Graph::default();
@@ -1798,12 +1808,14 @@ fn ingest_records(
     }
     let _ = std::fs::remove_file(&spool);
 
-    // The final prune/validate pass runs HERE for the full path; on the win-B
-    // splice path the deferred cached facts are merged first, then the caller
-    // re-runs `finalize_graph` (phase-02 task-7), so a freshly-emitted edge to a
-    // cached symbol survives.
-    if !defer_finalize {
-        finalize_graph(&mut graph);
+    // The final prune/validate pass runs HERE unless the caller deferred it; on
+    // the win-B splice path the deferred cached facts are merged first, then
+    // the caller re-runs `finalize_graph` (phase-02 task-7), so a freshly-emitted
+    // edge to a cached symbol survives.
+    match finalizer {
+        Finalizer::Deferred => {}
+        Finalizer::Full => finalize_graph(&mut graph),
+        Finalizer::Delta(previous) => finalize_delta_graph(&mut graph, previous),
     }
 
     (
