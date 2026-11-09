@@ -40,7 +40,27 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.cobol-driver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.code-universe-read",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.constraint-scope",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.delta-splice",
       "properties": {}
     },
     {
@@ -190,6 +210,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.session-pending-state",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.spec-lint",
       "properties": {}
     },
@@ -211,26 +236,6 @@
     {
       "kind": "is-role",
       "source": "solution.component.verify-feedback-stage",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.session-pending-state",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.code-universe-read",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-driver",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-source-claim",
       "properties": {}
     }
   ]

@@ -16,6 +16,11 @@
       "properties": {}
     },
     {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.incremental-delta-splice",
       "properties": {}

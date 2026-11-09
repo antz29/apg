@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-driver",
-  "body": "The scan orchestrator: the scan and project-start path choosing full or incremental work, the frontends, the delta graph handed to the splice, the warm cached-fact assembly, branch-database seeding by copy, and the cache-key classification identity.",
+  "body": "The scan orchestrator: the scan and project-start path choosing full or incremental work, the frontends, the delta graph handed to the splice, the warm assembly, branch-database seeding by copy, and the cache-key classification identity.",
   "properties": {},
   "out": [
     {
