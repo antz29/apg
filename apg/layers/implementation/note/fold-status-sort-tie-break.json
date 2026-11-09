@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "fold-status-sort-tie-break",
+  "body": "The status fold orders entries by (path, status bits) alone, so two entries sharing both keys fold in the status collection's iteration order; the pre-existing content_key has the same tie-break, so the key is stable for every collection the git status walk produces. Upgrade to a total order over the remaining payload when a status collection can report one path twice with identical bits.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.fold_status_entries",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
