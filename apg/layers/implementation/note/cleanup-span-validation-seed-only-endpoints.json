@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cleanup-span-validation-seed-only-endpoints",
+  "body": "The Java/TS/JS/C# struct-span validation in cleanup consults graph.nodes only, so a contains edge whose Struct or Function far endpoint lives only in the pre-scan universe is retained by the universe-aware prune but then dropped for those languages; upgrade when a delta scan of those languages needs seed-only struct/function contains parents preserved.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cleanup.cleanup",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
