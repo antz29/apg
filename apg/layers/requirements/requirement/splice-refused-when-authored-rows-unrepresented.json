@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "splice-refused-when-authored-rows-unrepresented",
-  "body": "When a splice is selected and the assembled graph's durable-layer or transient rows are unrepresented in the seed, the splice is refused and the full load, the correctness reference, runs.",
+  "body": "When a splice is selected and the scan's durable-layer or transient rows are unrepresented in the seed, the splice is refused and the full load, the correctness reference, runs.",
   "properties": {
     "feature": "splice-equivalence"
   },
@@ -16,6 +16,11 @@
     {
       "kind": "driven-by",
       "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
     }
   ]

@@ -42,12 +42,27 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.pre-scan-universe-from-the-previous-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.scan-reads-the-previous-database-first",
       "properties": {}
     },
     {
       "kind": "requires",
       "target": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.splice-db-equals-full-rebuild-for-all-tables",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
       "properties": {}
     }
   ],

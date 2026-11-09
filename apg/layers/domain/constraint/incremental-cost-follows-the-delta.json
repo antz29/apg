@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "incremental-cost-follows-the-delta",
+  "body": "An incremental scan's work follows its delta and a fixed per-scan cost, so a larger repository leaves a one-file rescan's time and memory unchanged.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

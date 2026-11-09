@@ -1,0 +1,25 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "one-file-rescan-stays-under-the-value-threshold",
+  "body": "A one-file rescan of a netbeans-scale checkout completes under the sixty-second value threshold, and its cost follows the delta rather than the tracked file count.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

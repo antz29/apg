@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "splice-db-equals-full-rebuild-for-all-tables",
-  "body": "A scan's database equals a full rebuild of the same assembled graph on every table, authored and transient rows exactly as for code, and a divergent splice yields to the full load.",
+  "body": "A scan's database equals a full rebuild of the scanned tree on every table, authored and transient rows exactly as for code, and a divergent splice yields to the full load.",
   "properties": {
     "feature": "splice-equivalence"
   },
@@ -16,6 +16,11 @@
     {
       "kind": "driven-by",
       "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
     }
   ]

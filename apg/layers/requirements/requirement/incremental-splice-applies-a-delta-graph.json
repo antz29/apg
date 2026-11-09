@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "incremental-splice-applies-a-delta-graph",
+  "body": "An incremental scan hands the splice a delta graph — its re-emitted units with the delete scope and the removed-FQN set — and the seeded database supplies every unchanged row.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

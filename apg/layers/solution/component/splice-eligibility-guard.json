@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "splice-eligibility-guard",
-  "body": "The splice-eligibility decision and its seed-equivalence guard: it folds the assembled graph's authored rows and the seed database's matching rows into digests, admits the splice when they compare equal, and falls back to a full load otherwise.",
+  "body": "The splice-eligibility decision and seed-equivalence guard: it folds the scan graph's authored rows and the seed database's matching rows into digests, admits the splice when they compare equal, and falls back to a full load otherwise.",
   "properties": {},
   "out": [
     {
@@ -37,12 +37,17 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.splice-eligibility",
+      "target": "domain.service.graph-materialization",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.graph-materialization",
+      "target": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.splice-eligibility",
       "properties": {}
     }
   ],

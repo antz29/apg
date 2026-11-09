@@ -1,0 +1,61 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "incremental-delta-splice",
+  "body": "The capability that applies an incremental scan's delta graph — its re-emitted units, delete scope and removed FQNs — to a copy of the previous database and re-resolves within it only the unresolved edges that delta realizes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.delta-contains-parent-may-live-only-in-the-seed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.delta-splice-supersedes-a-realized-planned-node",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.incremental-splice-applies-a-delta-graph",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.one-file-rescan-stays-under-the-value-threshold",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.unresolved-reresolution-is-bounded-by-the-delta",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.splice-equivalence",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-driver",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.splice-eligibility-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.splice-equivalence-tests",
+      "properties": {}
+    }
+  ]
+}

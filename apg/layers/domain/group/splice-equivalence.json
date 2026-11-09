@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "splice-equivalence",
-  "body": "The correctness law of the incremental database build: the spliced database equals a full rebuild's projection of the assembled graph for every table, code and authored alike.",
+  "body": "The correctness law of the incremental database build: the spliced database equals a full rebuild's projection of the scanned tree for every table, code and authored alike.",
   "properties": {
     "attribute": "core",
     "root": "incremental-splice"
@@ -40,12 +40,17 @@
     },
     {
       "kind": "contains",
-      "target": "domain.service.splice-eligibility",
+      "target": "domain.service.incremental-delta-splice",
       "properties": {}
     },
     {
       "kind": "contains",
       "target": "domain.service.scan-rebuild-control",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.splice-eligibility",
       "properties": {}
     }
   ],

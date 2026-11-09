@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "delta-splice",
+  "body": "The delta-splice engine: builds the SpliceDelta from the target spool, delete scope and removed-FQN set, applies it to the seeded copy, supersedes realized planned nodes, and re-resolves in the seed only the delta's realized edges.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.apply.SpliceDelta",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.apply.apply",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.incremental-delta-splice",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

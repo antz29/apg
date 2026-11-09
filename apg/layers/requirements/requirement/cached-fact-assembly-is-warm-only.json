@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cached-fact-assembly-is-warm-only",
+  "body": "Cached-fact assembly builds the full graph for the warm path alone, rebuilding a worktree's database from the shared store at an unchanged HEAD.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

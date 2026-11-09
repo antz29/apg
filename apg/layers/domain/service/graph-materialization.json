@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.cached-fact-assembly-is-warm-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.code-universe-read-from-the-database",
       "properties": {}
     },
@@ -28,6 +33,16 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.merge-validates-against-the-branch-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.one-file-rescan-stays-under-the-value-threshold",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.pre-scan-universe-from-the-previous-database",
       "properties": {}
     },
     {

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-driver",
-  "body": "The scan orchestrator: the scan command and project-start path choosing full versus incremental work, the frontends to spawn, fragment splice, branch-database seeding by copy, and the classification identity folded into the cache key.",
+  "body": "The scan orchestrator: the scan and project-start path choosing full or incremental work, the frontends, the delta graph handed to the splice, the warm cached-fact assembly, branch-database seeding by copy, and the cache-key classification identity.",
   "properties": {},
   "out": [
     {
@@ -73,6 +73,11 @@
     {
       "kind": "realises",
       "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.incremental-delta-splice",
       "properties": {}
     },
     {

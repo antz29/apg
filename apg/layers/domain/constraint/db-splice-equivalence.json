@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "db-splice-equivalence",
-  "body": "A scan's spliced database must equal a full rebuild of the same assembled graph on every table, code and authored alike, and a splice must be refused when the seed holds divergent rows.",
+  "body": "A scan's spliced database equals a full rebuild of the scanned tree on every table, code and authored alike, and a splice is refused when the seed holds divergent rows.",
   "properties": {},
   "out": [],
   "in": []

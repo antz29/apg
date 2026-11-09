@@ -12,6 +12,16 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.delta-contains-parent-may-live-only-in-the-seed",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.delta-splice-supersedes-a-realized-planned-node",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.graph-export-removed",
       "properties": {}
     },

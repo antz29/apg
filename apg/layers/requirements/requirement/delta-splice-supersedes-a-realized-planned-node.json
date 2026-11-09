@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "delta-splice-supersedes-a-realized-planned-node",
+  "body": "A delta that carries a real declaration at a planned node's FQN supersedes that placeholder for every code kind, while a still-planned FQN keeps its row and its incident edges.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.graph-consumer",
+      "properties": {}
+    }
+  ]
+}

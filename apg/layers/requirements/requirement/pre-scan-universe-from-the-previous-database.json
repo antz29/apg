@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "pre-scan-universe-from-the-previous-database",
+  "body": "An incremental scan's pre-scan code universe is the previous database's recorded snapshot with the delta's removed FQNs subtracted and its emitted real code FQNs added.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

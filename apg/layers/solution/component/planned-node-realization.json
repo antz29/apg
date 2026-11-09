@@ -22,11 +22,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.splice.apply.apply",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.splice.apply.upsert_node",
       "properties": {}
     },

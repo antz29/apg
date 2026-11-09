@@ -27,6 +27,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.cached-fact-assembly-is-warm-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.dirty-checkout-refusal-keeps-its-verdict",
       "properties": {}
     },
@@ -53,6 +58,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.ignore-rules-drop-untracked-paths",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.incremental-splice-applies-a-delta-graph",
       "properties": {}
     },
     {
@@ -108,6 +118,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.navigator-task-cadence",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.one-file-rescan-stays-under-the-value-threshold",
       "properties": {}
     },
     {
@@ -193,6 +208,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.task-record-field-set",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.unresolved-reresolution-is-bounded-by-the-delta",
       "properties": {}
     },
     {

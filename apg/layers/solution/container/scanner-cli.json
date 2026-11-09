@@ -39,7 +39,22 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.cobol-driver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.constraint-scope",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.delta-splice",
       "properties": {}
     },
     {
@@ -215,16 +230,6 @@
     {
       "kind": "is-role",
       "target": "solution.role.scanner-container",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.cobol-driver",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.cobol-source-claim",
       "properties": {}
     }
   ],

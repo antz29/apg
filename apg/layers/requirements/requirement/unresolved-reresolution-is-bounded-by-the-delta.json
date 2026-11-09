@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "unresolved-reresolution-is-bounded-by-the-delta",
+  "body": "On the seeded copy, an incremental scan re-resolves the unresolved edges that target the delta's newly-real Function or Struct FQNs, then removes orphan UnresolvedTarget rows, so the work follows the delta.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

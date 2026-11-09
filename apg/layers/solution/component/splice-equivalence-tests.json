@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "splice-equivalence-tests",
-  "body": "The end-to-end equivalence surface: the splice fixture, oracles, and publish path and the merge round trip, exercising a spec-only delta against a full rebuild and a seed with a dropped authored row.",
+  "body": "The end-to-end equivalence surface: the splice fixture, oracles, and publish path and the merge round trip, exercising a delta graph against a full rebuild, a spec-only delta, and a seed with a dropped authored row.",
   "properties": {},
   "out": [
     {
@@ -23,6 +23,11 @@
     {
       "kind": "is-role",
       "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.incremental-delta-splice",
       "properties": {}
     },
     {
