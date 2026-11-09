@@ -26,6 +26,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
+use crate::artifacts::PreviousScan;
 use crate::classify::{ApgConfig, classify_code_type};
 use crate::graph::{Graph, Location, Node, NodeKind};
 use crate::progress::Progress;
@@ -2028,6 +2029,146 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     graph.function_delete = filter_task_ops(graph, &graph.function_delete, NodeKind::Function);
     graph.function_move = filter_task_ops(graph, &graph.function_move, NodeKind::Function);
     graph.function_rename = filter_task_ops(graph, &graph.function_rename, NodeKind::Function);
+}
+
+/// The target-only counterpart of [`finalize_graph`] (phase-01 task-5).
+///
+/// A delta scan's spool emits only the changed files' facts, so the delta graph
+/// has no node for the unchanged files' code — yet a delta-emitted edge may
+/// target it. The full finalizer's "both endpoints must exist" prune would drop
+/// such a cross-cut edge, so this finalizer judges code endpoints against the
+/// **previous scan's universe** instead:
+///
+/// * a delta-emitted `unresolved_call`/`unresolved_use` whose target FQN+kind is
+///   real in the delta graph or in [`PreviousScan::scanned`] becomes the
+///   resolved `calls`/`uses` edge a full scan produces — the target node stays
+///   absent, so the edge is deliberately left dangling for the splice's
+///   DB-backed `endpoint_label`/`pair_allowed` to land against the seed. A
+///   still-planned target (`previous.planned`, or a delta graph node carrying
+///   `status: planned`) and a target absent from both universes stay
+///   unresolved;
+/// * the code-targeted authored edges — `details`, `reviews`,
+///   `spec_implemented_by` — keep their target when it lives in the delta graph
+///   or in `previous.scanned` ∪ `previous.planned`, and are dropped only when it
+///   lives in neither. The target's kind resolves from the captured snapshot
+///   when the delta graph has no node for it.
+///
+/// The exact endpoint-kind pairing a `calls`/`uses` table declares stays
+/// deferred to the splice (the DB-backed `pair_allowed`); only the target kind
+/// decides which table an unresolved reference flips into, because that is what
+/// tells a full scan's re-resolution whether the edge is a call (Function) or a
+/// use (Struct). Every other code edge and `contains` parent is left for the
+/// universe-aware [`crate::cleanup::cleanup`].
+// `dead_code`: the delta ingest path (phase-01 task-4) wires this in next.
+#[allow(dead_code)]
+pub(crate) fn finalize_delta_graph(graph: &mut Graph, previous: Option<&PreviousScan>) {
+    // Re-resolve delta-emitted references against the full universe.
+    let resolved_calls: Vec<(String, String)> = graph
+        .unresolved_calls
+        .iter()
+        .filter(|(_, to, _)| delta_real_code_kind(graph, previous, to) == Some(NodeKind::Function))
+        .map(|(from, to, _)| (from.clone(), to.clone()))
+        .collect();
+    for (from, to) in resolved_calls {
+        graph
+            .unresolved_calls
+            .retain(|(f, t, _)| !(f == &from && t == &to));
+        graph.calls.insert((from, to));
+    }
+
+    let resolved_uses: Vec<(String, String)> = graph
+        .unresolved_uses
+        .iter()
+        .filter(|(_, to)| delta_real_code_kind(graph, previous, to) == Some(NodeKind::Struct))
+        .map(|(from, to)| (from.clone(), to.clone()))
+        .collect();
+    for (from, to) in resolved_uses {
+        graph.unresolved_uses.remove(&(from.clone(), to.clone()));
+        graph.uses.insert((from, to));
+    }
+
+    // The reference GC mirrors the full scan's re-resolution: a shared
+    // `UnresolvedTarget` row lives only while some unresolved edge names it, so
+    // a now-resolved target's placeholder must not survive as a stray row.
+    let referenced: HashSet<String> = graph
+        .unresolved_calls
+        .iter()
+        .map(|(_, to, _)| to.clone())
+        .chain(graph.unresolved_uses.iter().map(|(_, to)| to.clone()))
+        .collect();
+    graph
+        .nodes
+        .retain(|fqn, node| node.kind != NodeKind::UnresolvedTarget || referenced.contains(fqn));
+
+    // Authored edges whose far endpoint may live only in the seed.
+    graph.details = filter_edges(graph, &graph.details, |g, a, b| {
+        kind_is(g, a, NodeKind::Note) && delta_universe_kind(g, previous, b).is_some()
+    });
+    graph.reviews = filter_edges(graph, &graph.reviews, |g, a, b| {
+        kind_is(g, a, NodeKind::Feedback) && delta_universe_kind(g, previous, b).is_some()
+    });
+    graph.spec_implemented_by = filter_edges(graph, &graph.spec_implemented_by, |g, a, b| {
+        kind_is(g, a, NodeKind::Component)
+            && matches!(
+                delta_universe_kind(g, previous, b),
+                Some(NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function)
+            )
+    });
+}
+
+/// Maps a [`PreviousScan::kinds`] entry (`module`/`file`/`struct`/`function`)
+/// back to its [`NodeKind`].
+fn code_kind_from_label(label: Option<&str>) -> Option<NodeKind> {
+    match label {
+        Some("module") => Some(NodeKind::Module),
+        Some("file") => Some(NodeKind::File),
+        Some("struct") => Some(NodeKind::Struct),
+        Some("function") => Some(NodeKind::Function),
+        _ => None,
+    }
+}
+
+/// The real (not still-planned) Implementation kind `fqn` resolves to across
+/// the delta universe: the delta graph's node (an `UnresolvedTarget` placeholder
+/// is not a declaration, so it falls through), else a [`PreviousScan::scanned`]
+/// FQN whose kind comes from the captured snapshot. A `planned` delta node, a
+/// `previous.planned` FQN, and an FQN in neither universe all yield `None`.
+fn delta_real_code_kind(
+    graph: &Graph,
+    previous: Option<&PreviousScan>,
+    fqn: &str,
+) -> Option<NodeKind> {
+    if let Some(node) = graph.nodes.get(fqn) {
+        if node.kind == NodeKind::UnresolvedTarget {
+            // Not a declaration — judge by the previous scan below.
+        } else if node.status.as_deref() == Some("planned") {
+            return None;
+        } else {
+            return Some(node.kind);
+        }
+    }
+    let previous = previous?;
+    if previous.scanned.contains(fqn) {
+        code_kind_from_label(previous.kinds.get(fqn).map(String::as_str))
+    } else {
+        None
+    }
+}
+
+/// The kind `fqn` resolves to across the delta universe for an authored code
+/// edge: the delta graph's node (any status, so a planned target resolves) or a
+/// code FQN recorded in the previous scan's kind map (`scanned` ∪ `planned`).
+fn delta_universe_kind(
+    graph: &Graph,
+    previous: Option<&PreviousScan>,
+    fqn: &str,
+) -> Option<NodeKind> {
+    if let Some(node) = graph.nodes.get(fqn)
+        && node.kind != NodeKind::UnresolvedTarget
+    {
+        return Some(node.kind);
+    }
+    code_kind_from_label(previous?.kinds.get(fqn).map(String::as_str))
 }
 
 #[cfg(test)]
