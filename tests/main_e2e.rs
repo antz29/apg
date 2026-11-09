@@ -716,6 +716,8 @@ fn win_c_input(base: &Path, scan_root: &Path, targets_rel: &[&str]) -> increment
             reader_root: scan_root.to_string_lossy().into_owned(),
             skipped_langs: BTreeSet::new(),
         }),
+        warm: false,
+        previous: None,
         targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
         removed_fqns: BTreeSet::new(),
         recorded_content_key: Some("key-old".to_string()),

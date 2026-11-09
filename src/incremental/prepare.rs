@@ -190,6 +190,14 @@ pub struct PipelineInput {
     pub sha: String,
     /// The fact-reuse plan for the win-B assembly (`None` on a full scan).
     pub reuse: Option<ReusePlan>,
+    /// The assembly discriminator: `true` only when the warm-cached path
+    /// completed for this scan, so `run_pipeline` keeps `ingest_with_reuse` +
+    /// `splice_cached`; `false` selects the ordinary full/incremental assembly.
+    pub warm: bool,
+    /// The previous database's snapshot ([`Prepared::previous`]), captured once
+    /// by the caller and carried here so `ingest_delta`, `finalize_delta_graph`,
+    /// the universe-aware cleanup and the digest never re-open `db.lbug`.
+    pub previous: Option<crate::artifacts::PreviousScan>,
     /// The FINAL phase-2 re-emission target set (checkout-relative): changed
     /// files ∪ the signature-cascade reverse-dependency closure ∪ overload
     /// peers. This is the win-C splice's delete scope (phase-03 task-4) and the
