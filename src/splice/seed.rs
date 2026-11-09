@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database, SystemConfig};
 
+use crate::artifacts::PreviousScan;
 use crate::graph::{Graph, Node, NodeKind};
 use crate::load;
 use crate::schema::Record;
@@ -181,8 +182,30 @@ pub fn seed_key_matches(seed: Option<&str>, expected: Option<&str>) -> bool {
 ///
 /// The rows are sorted (so set iteration order never matters) and folded into a
 /// 64-bit FNV-1a digest rendered as 16 lowercase hex digits. Pure: it reads
-/// only `graph` — no filesystem, database, git, or process.
+/// only `graph` — no filesystem, database, git, or process. A code target
+/// absent from `graph` contributes no edge row; the snapshot-aware sibling
+/// [`assembled_authored_identity_with_previous`] resolves such a target from
+/// the captured previous scan.
 pub fn assembled_authored_identity(graph: &Graph) -> String {
+    assembled_authored_identity_with_previous(graph, None)
+}
+
+/// The snapshot-aware sibling of [`assembled_authored_identity`]: the same
+/// canonical form and digest, except that an authored→code edge whose target
+/// code node is absent from `graph` (the delta graph carries only the
+/// re-emitted and affected nodes) resolves that target's kind from `previous`
+/// — `graph`'s own declaration first, then [`PreviousScan::kinds`]. A target
+/// unknown to both contributes no row, exactly as the snapshot-free entry
+/// point does. This makes a delta graph's digest equal the seed DB's own digest
+/// ([`seed_authored_identity`]) when the spec is unchanged, so the seed
+/// equivalence guard ([`seed_checked`]) accepts a code-only splice.
+///
+/// `None` is exactly [`assembled_authored_identity`]; every existing full-graph
+/// caller keeps that snapshot-free entry point.
+pub(crate) fn assembled_authored_identity_with_previous(
+    graph: &Graph,
+    previous: Option<&PreviousScan>,
+) -> String {
     // The Option→value normalization `build_load_files` applies: an absent
     // string is written as "", never NULL, so both sides agree.
     let empty = |v: &Option<String>| v.clone().unwrap_or_default();
@@ -397,10 +420,22 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
             if !is_authored(from_node.kind) {
                 continue;
             }
-            let Some(to_node) = graph.nodes.get(to) else {
+            // The graph's own declaration first, then the captured snapshot's
+            // recorded kind: a delta graph omits the seed-only code nodes, so
+            // an authored→code edge must resolve its target's kind from
+            // `previous` to contribute the row a full graph would. An
+            // `UnresolvedTarget` placeholder is not a declaration, and a target
+            // unknown to both keeps the old behaviour of contributing nothing.
+            let to_kind = match graph.nodes.get(to) {
+                Some(node) if node.kind != NodeKind::UnresolvedTarget => Some(node.kind),
+                _ => previous
+                    .and_then(|p| p.kinds.get(to))
+                    .and_then(|label| snapshot_code_kind(label.as_str())),
+            };
+            let Some(to_kind) = to_kind else {
                 continue;
             };
-            if !pair_allowed(table, from_node.kind, to_node.kind) {
+            if !pair_allowed(table, from_node.kind, to_kind) {
                 continue;
             }
             rows.push(
@@ -444,6 +479,19 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{hash:016x}")
+}
+
+/// Maps a [`PreviousScan::kinds`] entry (`module`/`file`/`struct`/`function`)
+/// back to its [`NodeKind`] — the four Implementation labels the snapshot
+/// records.
+fn snapshot_code_kind(label: &str) -> Option<NodeKind> {
+    match label {
+        "module" => Some(NodeKind::Module),
+        "file" => Some(NodeKind::File),
+        "struct" => Some(NodeKind::Struct),
+        "function" => Some(NodeKind::Function),
+        _ => None,
+    }
 }
 
 /// The canonical digest of a **seed DB's own** authored/transient rows — the
