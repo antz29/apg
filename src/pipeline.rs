@@ -83,8 +83,26 @@ pub(crate) fn run_pipeline(
             // stops matching the seed's own, and `seed_checked` refuses with
             // `UnrepresentedAuthored` on every incremental scan. The tree-side
             // digest re-emits the same roster (`splice::seed`'s record stream).
-            if let Some(previous) = input.and_then(|i| i.previous.as_ref()) {
-                delta_spool.extend(previous.agents.iter().cloned());
+            //
+            // Carry only the UNCHANGED definitions: the agent frontend re-emits
+            // a CHANGED definition into the target spool (a second, stale record
+            // for the same FQN would panic in `ingest_records` with a duplicate
+            // project node) and emits nothing for a DELETED one (a stale record
+            // would resurrect a ghost Agent the splice's disappear-by-path
+            // removal cannot detach). Both cases are in `targets_rel`.
+            if let Some(input) = input
+                && let Some(previous) = input.previous.as_ref()
+            {
+                delta_spool.extend(
+                    previous
+                        .agents
+                        .iter()
+                        .filter(|record| match record {
+                            schema::Record::Agent { path, .. } => !input.targets_rel.contains(path),
+                            _ => true,
+                        })
+                        .cloned(),
+                );
             }
             ingest::ingest_delta(
                 delta_spool.iter().cloned(),

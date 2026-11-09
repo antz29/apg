@@ -5493,6 +5493,12 @@ mod e2e {
     /// authored→seed-only-code edge and the `Task`→`Agent` assignment, exactly
     /// as a `--force` full rebuild of the same tree does.
     ///
+    /// A later one-file delta EDITS the agent definition: the agent frontend
+    /// re-emits it into the target spool, so the roster extension must not carry
+    /// a second, stale record for the same FQN (which panics the ingestor on a
+    /// duplicate project node), and the published `Agent` row must equal a
+    /// `--force` rebuild's.
+    ///
     /// Scratch /tmp repo + candidate binary only
     /// (`global.constraint.no-real-project-test`); a real Go frontend scan, real
     /// `db.lbug` files and a real git checkout are real I/O, so this is
@@ -5584,6 +5590,27 @@ mod e2e {
                 (
                     r["t"].as_str().unwrap().to_string(),
                     r["a"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+        }
+
+        /// The DB's `Agent` rows, as sorted `(fqn, path, start_line,
+        /// end_line)` tuples — the whole row a full rebuild would write.
+        fn agent_rows(dir: &Path, home: &str) -> BTreeSet<(String, String, String, String)> {
+            query_json(
+                dir,
+                home,
+                "MATCH (a:Agent) RETURN a.fqn AS fqn, a.path AS path, \
+                 a.start_line AS start_line, a.end_line AS end_line",
+            )
+            .iter()
+            .map(|r| {
+                (
+                    r["fqn"].as_str().unwrap().to_string(),
+                    r["path"].as_str().unwrap().to_string(),
+                    r["start_line"].as_str().unwrap().to_string(),
+                    r["end_line"].as_str().unwrap().to_string(),
                 )
             })
             .collect()
@@ -5788,6 +5815,42 @@ mod e2e {
             assigned_rows(&repo.root, &home_s),
             expected_assigned,
             "the spliced `AssignedTo` row must equal a full rebuild's"
+        );
+
+        // (5) A CHANGED agent definition on a one-file delta rescan: the agent
+        // frontend re-emits the definition into the target spool, so the roster
+        // extension must NOT carry a second, stale record for the same FQN (the
+        // ingestor panics on a duplicate project node). The fresh record is the
+        // sole source of the row.
+        repo.write(
+            ".opencode/agents/implementer.md",
+            "# Implementer\n\nEdited implementation guidance.\n",
+        );
+        let changed_log = scan_log(&repo.root, &home_s, &[]);
+        assert!(
+            !changed_log.contains("duplicate project node FQN"),
+            "a changed agent definition must not re-admit its stale roster record: {changed_log}"
+        );
+        let changed_agents = agent_rows(&repo.root, &home_s);
+        assert!(
+            changed_agents
+                .iter()
+                .any(|(fqn, path, ..)| fqn == AGENT && path == ".opencode/agents/implementer.md"),
+            "the changed definition must be re-emitted as its `Agent` row: {changed_agents:?}"
+        );
+
+        // (6) The full-rebuild reference for the edited definition: the changed
+        // definition's row must equal what a `--force` rebuild of the same tree
+        // writes.
+        let changed_force_log = scan_log(&repo.root, &home_s, &["--force"]);
+        assert!(
+            !spliced(&changed_force_log),
+            "--force must full-rebuild, not splice: {changed_force_log}"
+        );
+        assert_eq!(
+            agent_rows(&repo.root, &home_s),
+            changed_agents,
+            "the spliced changed-definition `Agent` rows must equal a full rebuild's"
         );
 
         let _ = std::fs::remove_dir_all(&repo.root);
