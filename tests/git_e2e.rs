@@ -309,6 +309,77 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// `is_fresh_with_state` consumes the caller's captured `GitState`: on the
+    /// same state it agrees with `is_fresh` in both directions (fresh, a
+    /// byte-identical touch, a one-byte edit), and a state captured before the
+    /// tree moved keeps its recorded verdict even after the tree dirties —
+    /// proving the predicate uses its argument rather than re-reading the tree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn is_fresh_with_state_consumes_the_captured_state() {
+        let repo = fixture_repo("state-agree");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        // Fresh agreement: the captured state is exactly what is_fresh reads.
+        let fresh = git_state(&apg);
+        assert!(
+            is_fresh(&apg) && is_fresh_with_state(&apg, &fresh),
+            "a fresh tree must read fresh through both entry points"
+        );
+
+        // Byte-identical touch: mtime is never consulted — both stay fresh.
+        let p = repo.root.join("apg/config.json");
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+            .unwrap();
+        drop(f);
+        let touched = git_state(&apg);
+        assert!(
+            is_fresh(&apg) && is_fresh_with_state(&apg, &touched),
+            "a touch without a byte change must stay fresh through both entry points"
+        );
+
+        // Divergent-state discriminator: capture the state while fresh, then
+        // dirty the tree with an untracked file. The captured state still
+        // matches the recorded scan, while is_fresh re-reads the dirty tree.
+        let s1 = git_state(&apg);
+        repo.write("untracked-after-capture.txt", "x");
+        assert!(
+            !git_state(&apg).clean,
+            "the untracked file must dirty the tree"
+        );
+        assert!(
+            is_fresh_with_state(&apg, &s1),
+            "the predicate must consume the captured state, not re-read the tree"
+        );
+        assert!(
+            !is_fresh(&apg),
+            "is_fresh re-reads the dirty tree and reads stale"
+        );
+        testutil::remove(&repo);
+
+        // Stale agreement: one byte edited in a tracked file — both false.
+        let repo = fixture_repo("state-stale");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg));
+        repo.write(
+            "apg/config.json",
+            "{\n  \"default\": \"edited\",\n  \"types\": []\n}\n",
+        );
+        let edited = git_state(&apg);
+        assert!(
+            !is_fresh(&apg) && !is_fresh_with_state(&apg, &edited),
+            "a one-byte edit at the same sha must read stale through both entry points"
+        );
+        testutil::remove(&repo);
+    }
+
     /// A recorded DIRTY tree matched by content stays fresh; a content change
     /// of that same dirty tree at the same sha invalidates it (recorded
     /// `clean=false` alone is not enough — the digest must match too).
