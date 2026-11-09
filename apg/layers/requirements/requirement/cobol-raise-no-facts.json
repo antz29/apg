@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-raise-no-facts",
-  "body": "A standard `RAISE EXCEPTION` with a condition name and a Micro Focus `RAISE` of an object add no fact, so their operands produce no calls or uses edge.",
+  "body": "A standard `RAISE EXCEPTION` with a condition name and a Micro Focus `RAISE` of an object take inert operands, so the fact stream emits neither a call nor a use for them.",
   "properties": {
     "feature": "cobol-frontend"
   },
