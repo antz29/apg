@@ -1,8 +1,17 @@
+use std::collections::{BTreeSet, HashSet};
+
 use crate::classify::matches_glob;
 use crate::graph::{Graph, NodeKind};
 
 pub struct CleanupOptions {
     pub user_excludes: Vec<String>,
+    /// The pre-scan code-FQN universe (`previous.scanned` ∪ `previous.planned`).
+    ///
+    /// A delta graph carries only the changed files' code, so a code edge or a
+    /// `contains` parent whose far endpoint is unchanged has no node here and
+    /// lives only in this universe; keeping it lets the splice land it against
+    /// the seeded copy. Empty on a full scan, where the graph is the universe.
+    pub universe: BTreeSet<String>,
     /// Language of the scan. Span validation is Java-, TS-, JS-, and C#-only:
     /// their methods are declared inside the class/interface body (the unified
     /// JS/TS frontend shares TS's struct-body span semantics for JS too). Go
@@ -53,19 +62,22 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         graph.nodes.remove(fqn);
         nodes_removed += 1;
     }
-    let is_removed = |fqn: &String| graph.nodes.contains_key(fqn);
+    // Keep an edge endpoint that is still a node, or that lives only in the
+    // pre-scan universe because this delta graph never carried its file — but
+    // never one this call removed for exclusion/blacklisting.
+    let removed_fqns: HashSet<&str> = removed.iter().map(String::as_str).collect();
+    let keep = |fqn: &String| {
+        graph.nodes.contains_key(fqn)
+            || (opts.universe.contains(fqn) && !removed_fqns.contains(fqn.as_str()))
+    };
 
-    graph
-        .contains
-        .retain(|(a, b)| is_removed(a) && is_removed(b));
-    graph.calls.retain(|(a, b)| is_removed(a) && is_removed(b));
-    graph.uses.retain(|(a, b)| is_removed(a) && is_removed(b));
+    graph.contains.retain(|(a, b)| keep(a) && keep(b));
+    graph.calls.retain(|(a, b)| keep(a) && keep(b));
+    graph.uses.retain(|(a, b)| keep(a) && keep(b));
     graph
         .unresolved_calls
-        .retain(|(a, b, _)| is_removed(a) && is_removed(b));
-    graph
-        .unresolved_uses
-        .retain(|(a, b)| is_removed(a) && is_removed(b));
+        .retain(|(a, b, _)| keep(a) && keep(b));
+    graph.unresolved_uses.retain(|(a, b)| keep(a) && keep(b));
     // Spec/plan edges reference code nodes (Details/Reviews on excluded
     // units, plan edges into excluded code); drop those that dangle. The task
     // edges (SCHEMA.md, phase 4) point at code the operation touches, so they
@@ -109,7 +121,7 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         &mut graph.function_move,
         &mut graph.function_rename,
     ] {
-        edges.retain(|(a, b)| is_removed(a) && is_removed(b));
+        edges.retain(|(a, b)| keep(a) && keep(b));
     }
 
     // Containment span validation: a Struct may only contain Functions whose

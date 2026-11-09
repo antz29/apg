@@ -102,6 +102,9 @@ pub(crate) fn run_pipeline(
         &CleanupOptions {
             user_excludes: path_excludes.to_vec(),
             language: language.to_string(),
+            // Filled by phase-01 task-9 with `previous.scanned` ∪
+            // `previous.planned`; empty here is the full-scan-neutral placeholder.
+            universe: BTreeSet::new(),
         },
     );
     log.ln(&format!(
