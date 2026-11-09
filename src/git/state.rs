@@ -164,17 +164,53 @@ pub fn git_state(dir: &Path) -> GitState {
             content_key: None,
         };
     };
-    match head_sha(&repo) {
-        Some(sha) => GitState {
-            sha: Some(sha),
-            clean: repo_is_clean(&repo),
-            content_key: Some(content_key(&repo)),
-        },
-        None => GitState {
+    let Some(sha) = head_sha(&repo) else {
+        return GitState {
             sha: None,
             clean: false,
             content_key: None,
-        },
+        };
+    };
+    // ONE status collection yields both facts (cleanliness and content key).
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let (clean, key) = match repo.statuses(Some(&mut opts)) {
+        Ok(statuses) => {
+            let workdir = repo.workdir().map(Path::to_path_buf);
+            let index = repo.index().ok();
+            let entries: Vec<StatusEntry> = statuses
+                .iter()
+                .map(|e| {
+                    let path = e.path().unwrap_or_default().to_string();
+                    let index_oid = index
+                        .as_ref()
+                        .and_then(|i| i.get_path(Path::new(&path), 0))
+                        .map(|ie| ie.id.to_string());
+                    let content = workdir
+                        .as_ref()
+                        .map(|wd| wd.join(&path))
+                        .filter(|full| full.is_file())
+                        .and_then(|full| std::fs::read(full).ok());
+                    StatusEntry {
+                        path,
+                        bits: e.status().bits(),
+                        index_oid,
+                        content,
+                    }
+                })
+                .collect();
+            fold_status_entries(&sha, &entries)
+        }
+        // A failed walk fails closed: not clean, and the HEAD-only digest — an
+        // empty collection cannot express the error.
+        Err(_) => (false, fold_status_entries(&sha, &[]).1),
+    };
+    GitState {
+        sha: Some(sha),
+        clean,
+        content_key: Some(key),
     }
 }
 
@@ -186,6 +222,41 @@ fn fnv1a(h: &mut u64, bytes: &[u8]) {
         *h ^= b as u64;
         *h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
+}
+
+/// One `git status` entry flattened to plain data, so [`fold_status_entries`]
+/// needs no repository, index or filesystem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusEntry {
+    pub path: String,
+    /// The entry's `git2` status bits.
+    pub bits: u32,
+    /// The staged (index) blob oid for the path, when it is in the index.
+    pub index_oid: Option<String>,
+    /// The working-tree file's bytes, when the path is an existing file.
+    pub content: Option<Vec<u8>>,
+}
+
+/// Folds one status collection into `(clean, content_key)`: clean when the
+/// collection is empty, and the content-identity digest over the HEAD sha plus
+/// each entry's path, status bits, index oid and working-tree bytes. Entries
+/// are sorted by `(path, bits)` first, so the digest is order-independent.
+pub fn fold_status_entries(head: &str, entries: &[StatusEntry]) -> (bool, String) {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+    fnv1a(&mut h, head.as_bytes());
+    let mut ordered: Vec<&StatusEntry> = entries.iter().collect();
+    ordered.sort_by(|a, b| (a.path.as_str(), a.bits).cmp(&(b.path.as_str(), b.bits)));
+    for e in ordered {
+        fnv1a(&mut h, e.path.as_bytes());
+        fnv1a(&mut h, &e.bits.to_le_bytes());
+        if let Some(oid) = &e.index_oid {
+            fnv1a(&mut h, oid.as_bytes());
+        }
+        if let Some(bytes) = &e.content {
+            fnv1a(&mut h, bytes);
+        }
+    }
+    (entries.is_empty(), format!("{h:016x}"))
 }
 
 /// The content-identity key of a repo's tree (win A): a digest over the HEAD
