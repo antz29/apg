@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pinned-digest-literals-track-the-fold",
+  "body": "The expected-digest literals are pinned against the fold's current field order and seed, so any deliberate change to the fold's field set, order or seed must update these literals in the same change rather than be treated as a test regression.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.tests.unit.fold_status_entries_matches_the_pinned_digest",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
