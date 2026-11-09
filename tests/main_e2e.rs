@@ -7,7 +7,7 @@ mod common;
 use apg::testutil::with_cwd;
 use apg::*;
 use lbug::{Connection, Database, SystemConfig};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -699,7 +699,9 @@ fn win_c_fixture(abs_file: &str, scan_sha: &str) -> graph::Graph {
 }
 
 /// The incremental `PipelineInput` the dispatch fixtures pass: the win-B
-/// reuse plan (the eligibility marker) plus the phase-2 target set.
+/// reuse plan (the eligibility marker) plus the phase-2 target set. `warm`
+/// stays false (this drives the incremental splice path) and `previous` is the
+/// empty snapshot — the fixture carries no captured previous-scan universe.
 fn win_c_input(base: &Path, scan_root: &Path, targets_rel: &[&str]) -> incremental::PipelineInput {
     use apg::cache::{CacheKey, Manifest, ScanConfigKey};
     let key = CacheKey::compute(&ScanConfigKey::default());
@@ -717,7 +719,12 @@ fn win_c_input(base: &Path, scan_root: &Path, targets_rel: &[&str]) -> increment
             skipped_langs: BTreeSet::new(),
         }),
         warm: false,
-        previous: None,
+        previous: Some(artifacts::PreviousScan {
+            scanned: BTreeSet::new(),
+            planned: BTreeSet::new(),
+            kinds: BTreeMap::new(),
+            agents: Vec::new(),
+        }),
         targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
         removed_fqns: BTreeSet::new(),
         recorded_content_key: Some("key-old".to_string()),
