@@ -273,6 +273,31 @@ pub fn ingest_with_reuse(
     (graph, report)
 }
 
+/// The target-only delta assembly (phase-01 task-4) — the win-C splice path's
+/// counterpart of [`ingest_with_reuse`].
+///
+/// `records` is exactly what the caller buffered: the changed files'
+/// re-emitted spool plus the authored/transient layer+plan records. The
+/// unaffected files' facts are deliberately NOT spliced in — the splice lands
+/// them against the seed database instead — so the result is the **delta
+/// graph** the splicer derives its DML from, never the full fact-spliced
+/// assembly, and no second `db.lbug` read happens here.
+///
+/// The finalizer is deferred to [`finalize_delta_graph`], which judges the
+/// delta's references against `previous` (the snapshot the caller captured) so
+/// a cross-cut edge into unchanged code survives instead of being pruned as
+/// dangling.
+pub fn ingest_delta(
+    records: impl IntoIterator<Item = Record>,
+    opts: &IngestOptions,
+    previous: Option<&PreviousScan>,
+    progress: Option<&mut Progress<'_>>,
+) -> (Graph, IngestReport) {
+    let (mut graph, report) = ingest_records(records, opts, true, progress);
+    finalize_delta_graph(&mut graph, previous);
+    (graph, report)
+}
+
 /// Merges cached per-file fact units into an assembled graph. A fresh node at
 /// an FQN wins; a cached node fills a gap and supersedes a `planned`
 /// placeholder — the plan store's placeholder never masks the real declaration
@@ -2059,8 +2084,6 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
 /// tells a full scan's re-resolution whether the edge is a call (Function) or a
 /// use (Struct). Every other code edge and `contains` parent is left for the
 /// universe-aware [`crate::cleanup::cleanup`].
-// `dead_code`: the delta ingest path (phase-01 task-4) wires this in next.
-#[allow(dead_code)]
 pub(crate) fn finalize_delta_graph(graph: &mut Graph, previous: Option<&PreviousScan>) {
     // Re-resolve delta-emitted references against the full universe.
     let resolved_calls: Vec<(String, String)> = graph
