@@ -27,6 +27,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.git.state.is_fresh_with_state",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.splice.seed.tree_authored_identity",
       "properties": {}
     },
