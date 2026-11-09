@@ -8,8 +8,8 @@ class ApgCobol < Formula
   desc "COBOL scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.28.3",
-      revision: "f35ae1ad56d83c113b866e7434ba1179d8a97905"
+      tag:      "v0.29.0",
+      revision: "713781244afc05df34b4405eb9599f42c0f1dd53"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
