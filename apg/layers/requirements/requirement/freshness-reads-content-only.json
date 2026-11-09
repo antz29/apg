@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "freshness-reads-content-only",
-  "body": "Freshness reads content alone: an unchanged tree and a touched byte-identical file stay fresh, one changed byte is stale, and ignored content never counts.",
+  "body": "Freshness reads content alone: an unchanged tree and a touched byte-identical file are fresh, one changed byte is stale, and ignored content is outside the verdict.",
   "properties": {
     "feature": "scan-change-identity"
   },
