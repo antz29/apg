@@ -13,6 +13,12 @@ class ApgCobol < Formula
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
+  bottle do
+    root_url "https://github.com/antz29/apg/releases/download/v0.29.0"
+    rebuild 1
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "696a6057f65e22973f15276979840fdcebc741fb979c47a4a2fd703a2ac9e6b1"
+  end
+
   # A bottle block is merged here by the bottle workflow once this formula is
   # registered there and a tagged release publishes a bottle.
 
