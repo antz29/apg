@@ -1,0 +1,9 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "freshness-e2e-second-fixture",
+  "body": "The stale-agreement arm builds a second fixture repository instead of dirtying the first, matching the existing multi-fixture style in the freshness e2e suite; upgrade to a single shared repository only if an arm ever needs ordering across every case.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
