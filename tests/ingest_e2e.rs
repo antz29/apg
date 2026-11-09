@@ -2397,4 +2397,142 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Task-59 regression for task-58 (34c6b1e1): a COBOL `kind=copy` uses
+    /// target is an absolute copybook path. Pass A must leave it unrooted. The
+    /// fixture makes the root module `""` known for `cobol`, which arms the
+    /// root-level fallback (`cobol..` + path) that used to rewrite the target to
+    /// `cobol../abs/...` and drop the edge.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn cobol_copy_uses_target_survives_root_module_fallback() {
+        let base = std::env::temp_dir().join(format!("apg-cobol-copy-{}", std::process::id()));
+        let prog = base.join("PROG.cbl").to_string_lossy().into_owned();
+        let copy = base
+            .join("copy")
+            .join("CPY.cpy")
+            .to_string_lossy()
+            .into_owned();
+        let kind_copy: NodeProperties = [("kind".to_string(), "copy".to_string())]
+            .into_iter()
+            .collect();
+        let records = vec![
+            Record::LangSwitch {
+                language: "cobol".to_string(),
+            },
+            Record::Module { fqn: String::new() },
+            file_rec(&prog, "", 10),
+            file_rec(&copy, "", 5),
+            srec("cb1", "", "PROG", &prog),
+            Record::Uses {
+                from: "cb1".to_string(),
+                to: copy,
+                properties: kind_copy.clone(),
+            },
+        ];
+        let (graph, report) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "cobol",
+                config: None,
+                base: Some(base.as_path()),
+            },
+            None,
+        );
+        assert_eq!(report.skipped, 0);
+        // The root-level program is rooted by the empty root module (`cobol.`).
+        assert_eq!(
+            graph.nodes.get("cobol..PROG").map(|n| n.kind),
+            Some(NodeKind::Struct)
+        );
+        // The copybook target is the repo-relative File identity, never rewritten
+        // into the fallback's `cobol../abs/...` form.
+        assert!(
+            !graph.nodes.keys().any(|k| k.starts_with("cobol../")),
+            "no fallback-rooted path may leak: {:?}",
+            graph.nodes.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            graph
+                .uses
+                .contains(&("cobol..PROG".to_string(), "copy/CPY.cpy".to_string())),
+            "the kind=copy uses must survive as Struct->File: {:?}",
+            graph.uses
+        );
+        assert_eq!(
+            graph.edge_properties.get(&(
+                "uses",
+                "cobol..PROG".to_string(),
+                "copy/CPY.cpy".to_string()
+            )),
+            Some(&kind_copy),
+            "the surviving copy edge keeps kind=copy"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Task-53 negative (moved from the int tier, feedback-25): a Struct→File
+    /// `Uses` without `kind=copy` (absent, or any other kind) is dropped, while
+    /// an ordinary Struct→Struct `Uses` is kept.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn non_copy_struct_to_file_uses_is_dropped_and_ordinary_uses_kept() {
+        let base = std::env::temp_dir().join(format!("apg-cobol-noncopy-{}", std::process::id()));
+        let prog = base.join("PROG.cbl").to_string_lossy().into_owned();
+        let copy = base
+            .join("copy")
+            .join("CPY.cpy")
+            .to_string_lossy()
+            .into_owned();
+        for kind in [None, Some("other")] {
+            let properties: NodeProperties = kind
+                .map(|k| ("kind".to_string(), k.to_string()))
+                .into_iter()
+                .collect();
+            let records = vec![
+                Record::LangSwitch {
+                    language: "cobol".to_string(),
+                },
+                Record::Module { fqn: String::new() },
+                file_rec(&prog, "", 40),
+                file_rec(&copy, "", 12),
+                srec("cb1", "", "PROG", &prog),
+                srec("cb2", "", "HELPER", &prog),
+                Record::Uses {
+                    from: "cb1".to_string(),
+                    to: copy.clone(),
+                    properties,
+                },
+                Record::Uses {
+                    from: "cb1".to_string(),
+                    to: "cb2".to_string(),
+                    properties: Default::default(),
+                },
+            ];
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "cobol",
+                    config: None,
+                    base: Some(base.as_path()),
+                },
+                None,
+            );
+            assert!(
+                graph.uses.iter().all(|(_, b)| b != "copy/CPY.cpy"),
+                "a Struct→File Uses without kind=copy ({kind:?}) must be dropped: {:?}",
+                graph.uses
+            );
+            assert!(
+                graph
+                    .uses
+                    .contains(&("cobol..PROG".to_string(), "cobol..HELPER".to_string())),
+                "an ordinary Struct→Struct Uses must be unchanged ({kind:?}): {:?}",
+                graph.uses
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-build-staging",
+  "body": "The build compiles cobolfrontend when APG_BUILD_FRONTENDS names cobol, and stages it into the frontends directory beside the other frontends.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-language-integration",
+      "properties": {}
+    }
+  ]
+}

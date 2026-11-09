@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-reserved-words-spec-named-only",
+  "body": "Dialect::is_reserved encodes only the reserved words the COBOL SPEC names: cobol85 reserves CLASS and ALTER, ibm reserves ENTRY and ALTER, and cobol2002 and cobol2014 reserve nothing beyond the contextual OO-word rule. Limit: no full per-dialect reserved-word list is sourced (SPEC §19.4, §19.6), so a word another dialect reserves still parses as an ordinary name. Upgrade when a sourced per-dialect list exists, written from the GnuCOBOL manual and never copied from its GPL config.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.dialect.Dialect.is_reserved",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

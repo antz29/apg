@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-data-division-model-limits",
+  "body": "parse_data_division consumes FD/SD headers without an AST node, checks PICTURE length as written (X(40) counts 5), attaches 66 to the outermost open record and 88 to the item before it, and stops a PICTURE at an unlisted clause word. Limit: file descriptions are not modelled and the clause list is heuristic. Upgrade when file-record facts need FD/SD nodes or a corpus shows a mis-absorbed clause.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.data.parse_data_division",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

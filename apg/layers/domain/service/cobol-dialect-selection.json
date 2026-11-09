@@ -1,0 +1,86 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "cobol-dialect-selection",
+  "body": "The capability that selects one COBOL dialect for a scan and gates its OO syntax, reserved words, length limits and feature diagnostics.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-dialect-control",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-dialect-selection",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-dialect-values",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-cobol2023-refusal",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-oo-recognition",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol85-oo-words-as-names",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-keyword-regression",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-ibm-reserved-words",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-exec-blocks",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-length-limits",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-feature-levels",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-dialect-cache-key",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cobol-dialect-table",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cobol-driver",
+      "properties": {}
+    }
+  ]
+}

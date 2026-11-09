@@ -26,8 +26,9 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// would assemble (and export) a graph missing that scaffolding. Bumping the
 /// projection version changes the cache-key token, every `1` unit and its
 /// missing scaffolding miss, and the drift forces one correctness full scan
-/// that records the scaffolding before any reuse can happen.
-pub const PROJECTION_RULES_VERSION: &str = "2";
+/// that records the scaffolding before any reuse can happen. v3: Struct→File
+/// kind=copy `uses` edges are admitted, so `2` projections lack them.
+pub const PROJECTION_RULES_VERSION: &str = "3";
 
 /// The scan config identity folded into the global cache key: the exact set of
 /// languages, path excludes, and module restrictions a scan ran with, plus the
@@ -44,6 +45,11 @@ pub struct ScanConfigKey {
     /// scope), or the distinct sentinel when no config is present — see
     /// [`classification_digest`]. The binary-managed `version` is excluded.
     pub classification: String,
+    /// The effective COBOL dialect (`--std`, else `cobol.dialect`, else
+    /// `cobol85`) when a `cobol` language is selected; `None` otherwise, so a
+    /// non-COBOL key is unchanged. Folded into the key so a dialect change
+    /// rebuilds the COBOL facts.
+    pub cobol_dialect: Option<String>,
 }
 
 /// The classification-config identity digest folded into the cache key: a
@@ -126,6 +132,9 @@ impl CacheKey {
             }
         }
         parts.push(format!("classify={}", config.classification));
+        if let Some(dialect) = &config.cobol_dialect {
+            parts.push(format!("cobol_dialect={dialect}"));
+        }
         CacheKey {
             binary_version: env!("CARGO_PKG_VERSION").to_string(),
             jsonl_schema: JSONL_SCHEMA_VERSION.to_string(),

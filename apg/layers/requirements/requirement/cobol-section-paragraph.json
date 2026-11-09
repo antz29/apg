@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-section-paragraph",
+  "body": "A section, declarative sections included, is a Struct contained by its program's Struct, and each paragraph is a Function contained by its section or by its program outside any section.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-program-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-program-scanning",
+      "properties": {}
+    }
+  ]
+}

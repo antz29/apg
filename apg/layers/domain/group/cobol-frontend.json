@@ -1,0 +1,47 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "cobol-frontend",
+  "body": "The COBOL source-scanning subdomain: programs, classes and records read from COBOL files, the calls and uses between them, and the dialect and scan settings that govern them.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-program-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-call-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-source-reading",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-dialect-selection",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.cobol-conformance",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

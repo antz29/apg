@@ -1,9 +1,10 @@
 # Scanner formula — the `apg` binary (ingestor + query CLI) plus the bundled
 # structural scanner. The structural scanner is built from src/structlib and
 # installed into the shared frontends dir alongside the per-language frontend
-# formulae (apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py),
-# which drop their artifacts into $(brew --prefix)/share/apg/frontends. The
-# bin/apg wrapper points the binary at that directory via APG_FRONTEND_DIR.
+# formulae (apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py,
+# apg-cobol), which drop their artifacts into
+# $(brew --prefix)/share/apg/frontends. The bin/apg wrapper points the binary
+# at that directory via APG_FRONTEND_DIR.
 
 class Scanner < Formula
   desc "Program graph scanner + LadybugDB query CLI for opencode"
@@ -50,9 +51,9 @@ class Scanner < Formula
 
     # Do not compile any per-language scanner frontends in this build; the
     # separate apg-go / apg-java / apg-cpp / apg-rust / apg-ts / apg-csharp /
-    # apg-py formulae provide them. The two bundled frontends (the structural
-    # scanner from src/structlib and the agent frontend from src/agentlib) are
-    # built separately below.
+    # apg-py / apg-cobol formulae provide them. The two bundled frontends (the
+    # structural scanner from src/structlib and the agent frontend from
+    # src/agentlib) are built separately below.
     ENV["APG_BUILD_FRONTENDS"] = "0"
 
     # Install the real binary into libexec (not bin/), then bin/apg becomes a
@@ -103,6 +104,7 @@ class Scanner < Formula
         brew install antz29/apg/apg-ts       # TypeScript (needs `node` at scan time)
         brew install antz29/apg/apg-csharp   # C# (needs `dotnet` at build time only)
         brew install antz29/apg/apg-py       # Python (no Python runtime needed at scan time)
+        brew install antz29/apg/apg-cobol    # COBOL (no runtime needed at scan time)
     EOS
   end
 

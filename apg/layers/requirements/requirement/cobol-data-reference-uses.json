@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-data-reference-uses",
+  "body": "A data reference in a statement is a uses edge from the enclosing procedure Function to the 01-level record Struct that holds the item.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-call-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-call-resolution",
+      "properties": {}
+    }
+  ]
+}

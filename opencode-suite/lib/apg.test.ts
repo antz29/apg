@@ -935,3 +935,13 @@ test("apg_scan declares a boolean force input and names the from-scratch rebuild
   expect(tool.input?.properties?.force?.description).toContain("from-scratch rebuild")
   expect(tool.description ?? "").toContain("from-scratch rebuild")
 })
+
+// cobol-frontend P2 task-26: the `apg_scan` tool declares a `dialect` string input
+// and lists `cobol` among the scannable languages. The argv it forwards as
+// `--std <dialect>` is pinned in the opt-in boundary e2e (it spawns a stub binary).
+test("apg_scan declares a string dialect input and lists cobol as a language", async () => {
+  const tool = await registeredTool(apgScan)
+  expect(tool.input?.properties?.dialect?.type).toBe("string")
+  expect(tool.input?.properties?.dialect?.description).toContain("--std")
+  expect(tool.input?.properties?.language?.description).toContain("cobol")
+})

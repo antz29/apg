@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cobol-build-artifact",
+  "body": "The build-pipeline COBOL arm: the build.rs compile and staging of cobolfrontend, the apg-cobol formula, and its entry in the release set.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.pipeline-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.cobol-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.build_script_build.stage_cobol",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "Formula/apg-cobol.rb",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.build-pipeline",
+      "properties": {}
+    }
+  ]
+}

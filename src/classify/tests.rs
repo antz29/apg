@@ -35,6 +35,52 @@ mod unit {
         }
     }
 
+    /// cobol-frontend phase-02 task-18: a COBOL file is `test` under a
+    /// test/tests segment or a test filename marker (matched
+    /// case-insensitively), `generated` under gen/generated, `external` under
+    /// vendor/third_party/thirdparty, and `src` otherwise (copybooks included).
+    #[test]
+    fn cobol_code_type_follows_segments_and_filename_markers() {
+        for p in [
+            "tests/payroll.cbl",
+            "src/test/payroll.cob",
+            "src/test_payroll.cbl",
+            "src/Test_Payroll.CBL",
+            "src/payroll_test.cbl",
+            "src/payroll-test.cob",
+            "src/payroll_TEST.cbl",
+        ] {
+            assert_eq!(builtin_code_type(p, "cobol"), "test", "{p} must be test");
+        }
+        for p in ["gen/payroll.cbl", "src/generated/payroll.cob"] {
+            assert_eq!(
+                builtin_code_type(p, "cobol"),
+                "generated",
+                "{p} must be generated"
+            );
+        }
+        for p in [
+            "vendor/lib/payroll.cbl",
+            "third_party/payroll.cob",
+            "thirdparty/payroll.cbl",
+        ] {
+            assert_eq!(
+                builtin_code_type(p, "cobol"),
+                "external",
+                "{p} must be external"
+            );
+        }
+        for p in [
+            "src/payroll.cbl",
+            "src/copy/PAYROLL.cpy",
+            "src/contest.cbl",
+            "src/testing.cbl",
+            "src/latest-payroll.cbl",
+        ] {
+            assert_eq!(builtin_code_type(p, "cobol"), "src", "{p} must be src");
+        }
+    }
+
     /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-root-scope-module-name-clash",
+  "body": "rooted_scope roots a cobol scope parent under cobol.. only when no known non-empty module identity prefixes it and the empty root module is known, using the longest-prefix walk shared with root_edge_endpoint. Limit: a root-level program or class whose name equals a subdirectory module identity roots under that module instead of the root. Upgrade by passing the scanning file's module with each scope if such a clash appears.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.identity.rooted_scope",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

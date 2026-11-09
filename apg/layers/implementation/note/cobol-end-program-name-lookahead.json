@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-end-program-name-lookahead",
+  "body": "closed_later decides nesting by finding an END PROGRAM with the current program's name later in the file. Limit: a host whose END PROGRAM name differs from its PROGRAM-ID does not nest its children, and the scan is quadratic in the number of nested headers. Upgrade to a balanced END PROGRAM count if a dialect or corpus needs it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.closed_later",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

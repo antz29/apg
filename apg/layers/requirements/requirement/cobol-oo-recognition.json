@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-oo-recognition",
+  "body": "Class, interface and method syntax is recognised under cobol2002, cobol2014 and ibm, where OO words are contextual keywords recognised only in OO context, and is off under cobol85.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-dialect-control",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-dialect-selection",
+      "properties": {}
+    }
+  ]
+}

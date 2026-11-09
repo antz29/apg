@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-exec-unterminated-block-scan",
+  "body": "past_block skips an EXEC block to the next END-EXEC anywhere later in the procedure division when it looks for the sentence period, so a block whose END-EXEC is missing reports its diagnostic but the period scan can swallow following sentences up to a later block's END-EXEC. Limit: one unterminated EXEC block can hide the statements after it. Upgrade by bounding the search at the next paragraph or section header or END PROGRAM when a corpus shows unterminated blocks.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.procedure.Parser.past_block",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

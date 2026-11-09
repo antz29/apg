@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-error-count-by-message-wording",
+  "body": "is_warning classifies a diagnostic as a warning by its wording (a warning: prefix, the Warning, Archaic or Obsolete feature-level suffixes, or the case-insensitive CALL match), and the error count keys by the diagnostic's own file, so an error inside a copybook counts the copybook. Limit: a reworded or new warning is miscounted as an error. Upgrade with a severity field on Diagnostic.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.is_warning",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

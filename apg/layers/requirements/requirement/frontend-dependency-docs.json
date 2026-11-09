@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "frontend-dependency-docs",
-  "body": "The user documentation records the frontend dependency contract, naming all seven per-language frontends and the bundled structural scanner with their sources, scan-time dependencies, and the base build's accurate shape.",
+  "body": "The user documentation records the frontend dependency contract, naming all eight per-language frontends and the bundled structural scanner with their sources, scan-time dependencies, and the base build's accurate shape.",
   "properties": {
     "feature": "frontend-dependencies"
   },

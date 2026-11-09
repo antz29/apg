@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-invoke-method-name-case",
+  "body": "ClassIndex.resolve_invoke matches method names (literal or word) and class names case-insensitively, like COBOL words, because SPEC is silent on method-name case; a dynamic (identifier) method name resolves to nothing. Limit: a compiler that treats method literals case-sensitively would resolve two methods differing only in case to one target. Upgrade if a vendor manual or GnuCOBOL rule makes method literals case-sensitive.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.resolve.ClassIndex.resolve_invoke",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

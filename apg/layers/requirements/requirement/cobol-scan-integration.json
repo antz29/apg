@@ -1,0 +1,63 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-scan-integration",
+  "body": "The apg scan admits COBOL as one language with its own claim, code types, scan flags, build artefact and packaging.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-language-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-code-type",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-impact-unit",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-scan-language-flag",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-scan-flags",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-packaging",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-language-integration",
+      "properties": {}
+    }
+  ]
+}

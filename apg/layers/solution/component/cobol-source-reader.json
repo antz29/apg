@@ -1,0 +1,81 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cobol-source-reader",
+  "body": "The COBOL source reader: format detection, the lexer, the COPY and REPLACE preprocessor with its source map, and the recursive-descent parser with sentence and header recovery.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.cobol-source-reading",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.format",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.lexer",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.preprocess",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.replace",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.source_map",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.data",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.procedure",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.oo",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.parser.exec",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.ast",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.cobol-frontend",
+      "properties": {}
+    }
+  ]
+}

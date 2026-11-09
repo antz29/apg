@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-impact-unit",
+  "body": "Each COBOL source file is its own impact unit, so a copybook change reaches each program that COPYs it through the file dependency.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-language-integration",
+      "properties": {}
+    }
+  ]
+}

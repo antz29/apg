@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-call-path-service-naming",
+  "body": "Emitter.finish never resolves an EXEC CICS INVOKE SERVICE or WEBSERVICE target: it is an external unresolved call named by its literal text, or by the identifier's name when the target is a data item, even when the name matches a scanned program. Limit: a service given by a variable is reported under the variable's name rather than the runtime service name. Upgrade if facts need the service's runtime value traced.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.Emitter.finish",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

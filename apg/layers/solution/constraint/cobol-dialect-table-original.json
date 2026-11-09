@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "cobol-dialect-table-original",
+  "body": "The COBOL dialect feature table is written from the GnuCOBOL manual and never copied from GnuCOBOL's GPL configuration files.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

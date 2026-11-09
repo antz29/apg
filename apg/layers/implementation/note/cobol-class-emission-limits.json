@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-class-emission-limits",
+  "body": "Emitter.class emits no record Structs for class FACTORY/OBJECT data or method data, so an OBJECT REFERENCE there is a uses from the class Struct or the method Function; a method body's data references resolve only to records of an enclosing program; PROPERTY accessors come only from top-level (01/77) items; a repeated (factory/instance, name) method or accessor keeps the first silently; method records carry params [\"factory\"] or [\"instance\"] so a same-named pair renders distinct overload FQNs. Limit: references to class or method data draw no edge, nested PROPERTY items yield no accessors, and duplicates are not diagnosed. Upgrade when the Contains matrix admits records under a Function or class records get collision-free FQNs, when a vendor form nests PROPERTY items, or when SPEC names a duplicate-method diagnostic.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.Emitter.class",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

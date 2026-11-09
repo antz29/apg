@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-area-a-line-heuristic",
+  "body": "area_a_departure judges each sentence's header: inside the PROCEDURE DIVISION a one-word sentence (digits allowed, period possibly after a space) is a paragraph name, outside it only the twelve IDENTIFICATION/ENVIRONMENT paragraph headers are; the 19 COBOL-85 scope terminators plus EXIT, CONTINUE, GOBACK, NEXT and ELSE are never names, COPY and REPLACE may start in either area, and comment-entry lines are exempt. Limit: a statement starting mid-line after a period is not checked, and the comment-entry region ends at any area-A line. Upgrade if a corpus shows false or missed area-A diagnostics.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.format.area_a_departure",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

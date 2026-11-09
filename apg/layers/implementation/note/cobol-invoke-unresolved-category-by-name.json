@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-invoke-unresolved-category-by-name",
+  "body": "Emitter.invoke_facts names an unresolved INVOKE target by the method name alone, with category external (class outside the scan, a REPOSITORY external, an external parent) or unknown (untyped receiver, NULL, dynamic method name, unknown name), and unresolved targets are deduplicated by name. Limit: when the same method name is unresolved as external in one place and unknown in another, the graph keeps one category for both. Upgrade when unresolved targets are keyed by name and category, or when INVOKE targets are qualified by their receiver class.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.Emitter.invoke_facts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-header-resync-area-a-local",
+  "body": "header_at ends a period-less sentence at a fixed-layout procedure name plus period, or section header, in area A, at a free-layout section header, or never for a file with no recorded layout; it skips a token repeating the previous token's origin. Area A is a local 8..=11 constant duplicating format.rs. Limit: a statement's last word in area A followed by a period splits there, and the two area-A definitions can drift. Upgrade by sharing format.rs's constant, or narrowing the split if a corpus shows false headers.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.procedure.Parser.header_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

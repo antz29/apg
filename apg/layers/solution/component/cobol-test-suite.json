@@ -1,0 +1,46 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cobol-test-suite",
+  "body": "The COBOL test suites: unit and int tests beside the crate's sources, and e2e scans of the NIST, OO, keyword, dialect and plumbing samples in a per-crate integration crate.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.tests",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.tests.int",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.tests.unit",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobollib_e2e",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.cobol-conformance",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.cobol-frontend",
+      "properties": {}
+    }
+  ]
+}

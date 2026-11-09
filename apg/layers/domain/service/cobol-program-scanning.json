@@ -1,0 +1,66 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "cobol-program-scanning",
+  "body": "The capability that turns the programs, classes, interfaces, sections, paragraphs and records of each COBOL file into graph units located in that file.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-program-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-unit-structs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-section-paragraph",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-record-structs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-method-functions",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-interface-prototypes",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cobol-property-accessors",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cobol-call-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cobol-fact-emitter",
+      "properties": {}
+    }
+  ]
+}

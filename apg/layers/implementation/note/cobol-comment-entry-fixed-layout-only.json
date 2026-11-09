@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-comment-entry-fixed-layout-only",
+  "body": "comment_header recognises an AUTHOR, INSTALLATION, DATE-WRITTEN, DATE-COMPILED, SECURITY or REMARKS header in area A under fixed layout, and the lexer then drops lines until the next line with a non-blank in area A. Limit: free-format sources keep their comment-entry text as tokens, and a header with a stray period before the word is missed. Upgrade when free-format programs with comment entries appear in a corpus.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.lexer.comment_header",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

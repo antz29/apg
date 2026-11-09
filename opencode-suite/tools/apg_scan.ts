@@ -37,7 +37,11 @@ export default Plugin.define({
             },
             language: {
               type: "string",
-              description: "Language(s) to scan: go, java, cpp, rust, ts, js, csharp, py, agent, plus the structural stream ids md, sh, yaml, json, toml, xml, dockerfile, makefile, ini, misc — each must be an installed frontend. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted.",
+              description: "Language(s) to scan: go, java, cpp, rust, ts, js, csharp, py, cobol, agent, plus the structural stream ids md, sh, yaml, json, toml, xml, dockerfile, makefile, ini, misc — each must be an installed frontend. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted.",
+            },
+            dialect: {
+              type: "string",
+              description: "COBOL dialect passed as --std: cobol85, cobol2002, cobol2014, or ibm. Only meaningful when scanning cobol.",
             },
             blacklist: {
               type: "string",
@@ -78,6 +82,9 @@ export default Plugin.define({
           }
           if (input.language) {
             spawnArgs.push("--language", input.language)
+          }
+          if (input.dialect) {
+            spawnArgs.push("--std", input.dialect)
           }
           for (const pat of (input.excludePath ?? "").split(",").filter(Boolean)) {
             spawnArgs.push("--exclude-path", pat)

@@ -398,6 +398,68 @@ mod unit {
             );
         }
     }
+
+    /// cobol-dialect-selection: `--std` wins, else `cobol.dialect`, else cobol85.
+    #[test]
+    fn cobol_dialect_precedence_std_then_config_then_default() {
+        assert_eq!(cobol::effective_dialect(None, None).unwrap(), "cobol85");
+        assert_eq!(
+            cobol::effective_dialect(None, Some(r#"{"version":"0.1"}"#)).unwrap(),
+            "cobol85"
+        );
+        assert_eq!(
+            cobol::effective_dialect(None, Some(r#"{"cobol":{"dialect":"ibm"}}"#)).unwrap(),
+            "ibm"
+        );
+        assert_eq!(
+            cobol::effective_dialect(Some("cobol2002"), Some(r#"{"cobol":{"dialect":"ibm"}}"#))
+                .unwrap(),
+            "cobol2002"
+        );
+        for name in ["cobol85", "cobol2002", "cobol2014", "ibm"] {
+            assert_eq!(cobol::validate_dialect(name).unwrap(), name);
+        }
+    }
+
+    /// cobol-cobol2023-refusal: the placeholder refuses with the dialect-table
+    /// message, from either the flag or the config; unknown names refuse too.
+    #[test]
+    fn cobol2023_and_unknown_dialects_are_refused() {
+        let msg = cobol::validate_dialect("cobol2023")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            msg,
+            "dialect cobol2023 is a placeholder with no features yet; use cobol85, cobol2002, cobol2014 or ibm"
+        );
+        let from_config =
+            cobol::effective_dialect(None, Some(r#"{"cobol":{"dialect":"cobol2023"}}"#))
+                .unwrap_err()
+                .to_string();
+        assert_eq!(from_config, msg);
+        assert!(
+            cobol::effective_dialect(Some("cobol2023"), None).is_err(),
+            "--std cobol2023 refuses"
+        );
+        assert_eq!(
+            cobol::validate_dialect("cobol1999")
+                .unwrap_err()
+                .to_string(),
+            "unknown dialect `cobol1999`; expected cobol85, cobol2002, cobol2014 or ibm"
+        );
+        assert!(cobol::effective_dialect(None, Some("{not json")).is_err());
+    }
+
+    /// cobol-scan-flags: `-std=<d>` then a repeated `--copy-path <dir>` pair.
+    #[test]
+    fn cobol_frontend_args_carry_std_and_repeated_copy_paths() {
+        assert_eq!(cobol::frontend_args("cobol85", &[]), vec!["-std=cobol85"]);
+        let copies = vec!["copy".to_string(), "lib/cpy".to_string()];
+        assert_eq!(
+            cobol::frontend_args("ibm", &copies),
+            vec!["-std=ibm", "--copy-path", "copy", "--copy-path", "lib/cpy"]
+        );
+    }
 }
 
 // -----------------------------------------------------------------------

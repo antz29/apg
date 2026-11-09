@@ -408,10 +408,12 @@ mod unit {
         // shipped code frontend's extensions: the C++ extras
         // (`.cxx/.c++/.hpp/.hh/.hxx/.tpp/.ipp`) and the unified JS/TS module
         // variants (`.mts/.cts/.mjs/.cjs`) are code-claimed too, while `.c`
-        // stays residual `misc` (the C++ frontend does not claim it).
+        // stays residual `misc` (the C++ frontend does not claim it). The COBOL
+        // extensions are skipped in any letter case.
         let code = [
             "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
-            "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi",
+            "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi", "cob", "cbl",
+            "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy",
         ];
         for ext in code {
             assert_eq!(

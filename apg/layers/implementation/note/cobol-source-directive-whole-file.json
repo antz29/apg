@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-source-directive-whole-file",
+  "body": "directive takes the first >>SOURCE line and applies its format to the whole file; FIXED, FREE and COBOL85 are implemented, while VARIABLE, XOPEN, XCARD, CRT, TERMINAL and COBOLX are diagnosed and read with the dialect default. Limit: a mid-file format switch and the six other formats are not honoured. Upgrade when a corpus needs a mid-file directive or one of those formats.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.format.directive",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

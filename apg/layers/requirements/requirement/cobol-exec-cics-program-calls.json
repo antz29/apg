@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-exec-cics-program-calls",
+  "body": "An EXEC CICS LINK or XCTL with a literal PROGRAM name resolves like a literal CALL, and a PROGRAM given by a variable is an unresolved call of category func-value.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-call-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-call-resolution",
+      "properties": {}
+    }
+  ]
+}

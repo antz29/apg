@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-scan-language-flag",
+  "body": "apg scan accepts cobol as a --language value, and auto-detection selects the COBOL frontend for every COBOL-extension file it finds.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-language-integration",
+      "properties": {}
+    }
+  ]
+}

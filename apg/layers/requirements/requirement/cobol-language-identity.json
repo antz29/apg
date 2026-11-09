@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-language-identity",
+  "body": "COBOL modules, files and symbols carry the cobol language id, and each COBOL directory is the module cobol.dir rooted under it.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-language-integration",
+      "properties": {}
+    }
+  ]
+}

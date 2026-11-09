@@ -1086,3 +1086,54 @@ test.skipIf(!enabled)(
   },
   15000,
 )
+
+// cobol-frontend P2 task-26: the `apg_scan` tool forwards its `dialect` input as
+// `--std <dialect>` (and nothing when omitted), mirroring the stub-argv pattern above.
+test.skipIf(!enabled)(
+  "e2e: apg_scan passes dialect to the spawned scan as --std only when set",
+  async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-scan-std-"))
+    const repo = path.join(base, "repo")
+    fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
+
+    const recorded = path.join(base, "argv.txt")
+    const stub = path.join(base, "stub-apg")
+    fs.writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" > '${recorded}'\nexit 0\n`, {
+      mode: 0o755,
+    })
+    const argv = () => fs.readFileSync(recorded, "utf8").split("\n").filter(Boolean)
+
+    type AddedTool = {
+      execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
+    }
+    const added: AddedTool[] = []
+    const editor = { add: (tool: AddedTool) => added.push(tool) }
+
+    const previousBinary = process.env.APG_BINARY
+    process.env.APG_BINARY = stub
+    try {
+      await apgScan.setup({
+        location: { directory: repo },
+        permission: { assert: async () => {} },
+        tool: { transform: async (fn: (e: typeof editor) => void) => void fn(editor) },
+      } as never)
+      expect(added).toHaveLength(1)
+      const tool = added[0]
+
+      expect(await tool.execute!({ language: "cobol", dialect: "cobol2002" }, v2Context(repo))).toEqual({
+        content: "Scan completed successfully.",
+      })
+      expect(argv()).toEqual(["scan", repo, "--language", "cobol", "--std", "cobol2002"])
+
+      expect(await tool.execute!({}, v2Context(repo))).toEqual({
+        content: "Scan completed successfully.",
+      })
+      expect(argv()).toEqual(["scan", repo])
+    } finally {
+      if (previousBinary === undefined) delete process.env.APG_BINARY
+      else process.env.APG_BINARY = previousBinary
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+  15000,
+)

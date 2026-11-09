@@ -11,6 +11,7 @@ pub mod artifacts;
 pub mod cache;
 pub mod classify;
 pub mod cleanup;
+pub mod cobol;
 pub mod delta;
 pub mod frontends;
 pub mod git;
@@ -134,12 +135,16 @@ USAGE:
 
 SCAN OPTIONS:
   --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
-                               csharp, py (comma-separated or repeated;
+                               csharp, py, cobol (comma-separated or repeated;
                                auto-detected for every language present if
                                omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
   --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
                                repeatable)
+  --std <dialect>             COBOL dialect: cobol85 (default), cobol2002,
+                               cobol2014 or ibm (overrides cobol.dialect in
+                               apg/config.json; cobol2023 is refused)
+  --copy-path <dir>           COBOL copybook search directory (repeatable)
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)
   --no-progress               Progress is on by default when stderr is a

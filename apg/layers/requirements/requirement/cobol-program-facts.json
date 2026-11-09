@@ -1,0 +1,68 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-program-facts",
+  "body": "The programs, classes, interfaces, sections, paragraphs and records of each COBOL source file are graph units located in that file.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-unit-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-section-paragraph",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-record-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-method-functions",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-interface-prototypes",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-property-accessors",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-object-reference-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-inheritance-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cobol-external-type-targets",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-program-scanning",
+      "properties": {}
+    }
+  ]
+}

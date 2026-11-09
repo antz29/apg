@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-free-format-heuristic-column-80",
+  "body": "free_reason flags a likely free-format file for code in column 1 or text past column 80, not past column 72 as the SPEC example says, because real fixed-format sources use columns 73-80 for identification. Limit: text in columns 73-80 never triggers the warning. Upgrade to a column-72 threshold only if a corpus shows free-format files that the column-80 rule misses.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.format.free_reason",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

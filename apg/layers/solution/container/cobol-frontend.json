@@ -1,0 +1,48 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "cobol-frontend",
+  "body": "The COBOL frontend artifact: build-time stable Rust 1.98.1 plus crates.io (serde and serde_json only), zero scan-time dependencies, and an unset engine pin, its hand-written parser's language ceiling set by the dialect table.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-call-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-dialect-table",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cobol-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg",
+      "properties": {}
+    }
+  ]
+}

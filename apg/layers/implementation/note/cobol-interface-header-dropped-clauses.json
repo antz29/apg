@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-interface-header-dropped-clauses",
+  "body": "parse_interface splits the header at the first USING and drops an INTERFACE-ID AS literal and IMPLEMENTS clause, since the Interface AST has no field for them; INHERITS names are read only before USING. Limit: an interface's external name and a USING placed before INHERITS are lost. Upgrade when the AST gains those fields or a source shows the other clause order.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.parser.oo.parse_interface",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

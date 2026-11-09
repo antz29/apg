@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-byte-offsets-from-line-col",
+  "body": "scan_file computes each record's byte start from its origin's line and character column over the origin file's text, and its end as the end of the span's end line, because the AST keeps no byte offsets. Limit: a span crossing from a program into a copybook takes its end from a different file than its path, and a copybook that is not valid UTF-8 gets no File record. Upgrade to token byte offsets in the AST if a corpus shows cross-file spans or Latin-1 copybooks.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.Emitter.scan_file",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

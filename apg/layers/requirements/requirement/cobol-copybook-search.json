@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-copybook-search",
+  "body": "A copybook is searched in the including file's directory, the scan root, copybooks/ and copy/ under the scan root, and then each --copy-path directory.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-source-reading",
+      "properties": {}
+    }
+  ]
+}

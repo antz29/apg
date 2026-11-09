@@ -85,6 +85,14 @@ pub fn language_of(rel: &str) -> &'static str {
         "cs" | "csx" => "csharp",
         "py" | "pyi" => "py",
         _ if CPP_EXTENSIONS.contains(&ext) => "cpp",
+        // COBOL extensions match in any letter case (`.CBL`, `.Cpy`), like the
+        // `cobolfrontend` scanner's `is_cobol_source`.
+        _ if ["cob", "cbl", "cobol", "cpy"]
+            .iter()
+            .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "cobol"
+        }
         "md" | "markdown" => "md",
         "sh" | "bash" | "zsh" | "ksh" => "sh",
         "yaml" | "yml" => "yaml",

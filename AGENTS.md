@@ -14,7 +14,9 @@ files — the system of record at rest).
   compiler API, npm-installed with a committed `package-lock.json`, C#:
   `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary
   built on Roslyn `Microsoft.CodeAnalysis.CSharp`, Python: `src/pylib` — a
-  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, the bundled
+  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, COBOL:
+  `src/cobollib` — a standalone `cobolfrontend` binary with a hand-written
+  COBOL parser, the bundled
   structural scanner: `src/structlib` — a standalone `structfrontend` binary
   that graphs every tracked text/config/packaging file the code frontends don't
   claim, serving the Markdown stream (absorbing the retired `src/mdlib`
@@ -37,18 +39,18 @@ files — the system of record at rest).
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
   tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
-  the Python (`src/pylib`), bundled structural (`src/structlib`) and bundled
-  agent (`src/agentlib`) crates) and stages them to
+  the Python (`src/pylib`), COBOL (`src/cobollib`), bundled structural
+  (`src/structlib`) and bundled agent (`src/agentlib`) crates) and stages them to
   `target/<profile>/frontends`. The base `apg` binary itself is
   built against a prebuilt static liblbug plus `openssl@3` (no bundled
   LadybugDB and no `cmake`); the Homebrew `scanner` formula installs it together
-  with the bundled `structfrontend` and `agentfrontend`, while the seven
+  with the bundled `structfrontend` and `agentfrontend`, while the eight
   per-language frontends ship as their own formulae. Run a scan with
   `apg scan <dir>` (or the `apg_scan` tool). `apg` resolves frontends at
   runtime relative to the binary (`<exe_dir>/frontends` or
   `<exe_dir>/../libexec/frontends`) or via `APG_FRONTEND_DIR`.
   `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`, `cpp`, `rust`, `ts`,
-  `csharp`, `struct`, `py`, `agent`; `0` to skip) limits what build.rs
+  `csharp`, `struct`, `py`, `agent`, `cobol`; `0` to skip) limits what build.rs
   compiles — `struct` and `agent` are the bundled structural and
   agent-definition scanners.
 - **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
@@ -68,7 +70,11 @@ files — the system of record at rest).
   .NET SDK (`net9.0`) + NuGet, is self-contained at scan time, and is bounded by
   Roslyn `4.12.0`; Python builds with stable Rust + network (git-pinned Ruff/ty
   crates) and needs no runtime at scan time, bounded by Ruff/ty tag `0.16.6`
-  (`salsa 0.27`). The bundled structural scanner (`structfrontend`,
+  (`salsa 0.27`); COBOL (`src/cobollib`) builds with stable Rust + crates.io
+  (`serde`/`serde_json`), needs nothing at scan time (a self-contained binary
+  that never shells out), has no engine pin (hand-written parser), and is
+  bounded by its dialect table — `cobol85` (default), `cobol2002`,
+  `cobol2014`, `ibm`, with `cobol2023` refused. The bundled structural scanner (`structfrontend`,
   `src/structlib`, absorbing the retired `src/mdlib` Markdown frontend) builds
   with stable Rust + crates.io and needs nothing at scan time (it never shells
   out), bounded by `serde`/`serde_json`/`unicode-normalization` 0.1 with no
@@ -81,8 +87,8 @@ files — the system of record at rest).
   toolchains are pinned in repo-visible files consumed by every
   frontend-compiling path, exact where the mechanism can enforce it: Rust
   `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and all
-  four cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`,
-  `src/agentlib`) and Node on the `26.x` line
+  five cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`,
+  `src/agentlib`, `src/cobollib`) and Node on the `26.x` line
   (`src/tslib/package.json` `engines.node` range `>=26.8.1 <27`, enforced
   fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the exact
   `26.9.0`). Go is exact on the release Linux CI path (`GOTOOLCHAIN` +
@@ -154,11 +160,11 @@ The project builds a single `apg` binary (package `apg`):
   refuses a target inside a linked worktree, naming the main checkout to run it
   from.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
-  [--no-progress] [--force] [blacklist...]`
+  [--no-progress] [--force] [--std D] [--copy-path P]* [blacklist...]`
   — run the pipeline; produces `apg/.trans/db.lbug` (derived from the durable
   `apg/layers/**` node files and the scanned code) and
   `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
-  languages; when omitted, `apg` auto-detects **every** language present and
+  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`); when omitted, `apg` auto-detects **every** language present and
   scans them all, merging their graphs into one database (a multi-language repo
   like a Go backend + TS frontend gets a single `apg/.trans/db.lbug`). Each frontend's
   opaque ids are namespaced per language (`--id-prefix`), and the ingestor
@@ -167,7 +173,11 @@ The project builds a single `apg` binary (package `apg`):
   (skip cargo build scripts and the proc-macro server); the Rust frontend
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
-  is always skipped). `--force` is a true rebuild: it discards `db.lbug` (with
+  is always skipped; COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources
+  in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
+  `cobol2002`, `cobol2014` or `ibm` (overrides `cobol.dialect` in
+  `apg/config.json`; `cobol2023` is refused); `--copy-path <dir>` is a COBOL
+  copybook search directory (repeatable). `--force` is a true rebuild: it discards `db.lbug` (with
   its `wal`/`shm` sidecars) before scanning, and bypasses
   the two reuse paths — the unchanged-tree fast path and the shared fact
   store's warm-cache and incremental fact reuse — so every frontend re-runs
@@ -287,8 +297,9 @@ opencode **v2** only — the `~/.config/opencode/` layout and the
 
 The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): the base `scanner` formula (the binary
-plus the bundled structural scanner), and seven per-language frontend formulae —
-`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py` —
+plus the bundled structural scanner), and eight per-language frontend formulae —
+`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`,
+`apg-cobol` —
 each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
 `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
@@ -365,16 +376,18 @@ Every test in the repo belongs to exactly one of three tiers, defined by the law
 (or `src/tests.rs` for the crate root), reached by a `#[cfg(test)] mod tests;`
 declaration in the production module — the frontend crates' library roots
 included (`src/structlib/src/tests.rs`, `src/pylib/src/tests.rs`,
-`src/agentlib/src/tests.rs`). Every
+`src/agentlib/src/tests.rs`, `src/cobollib/src/tests.rs`). Every
 unit/int test still sits in an inner `unit` or `int` submodule, so libtest's
 path filter selects a tier (`…::tests::unit::`, `…::tests::int::`). The **e2e**
 tier moved OUT of the production module tree into the crate's own top-level
 `tests/<module>_e2e.rs` integration crate — the root crate's `tests/*_e2e.rs`
 (e.g. `tests/main_e2e.rs`, `tests/splice_e2e.rs`) plus the frontend crates'
-`src/structlib/tests/structlib_e2e.rs`, `src/pylib/tests/pylib_e2e.rs` and
-`src/agentlib/tests/agentlib_e2e.rs`. Each
-is wrapped in `mod e2e` and shares its crate's `tests/common/mod.rs`, so its
-libtest paths are `e2e::…` (no longer `tests::e2e::…`). Every **e2e** test also
+`src/structlib/tests/structlib_e2e.rs`, `src/pylib/tests/pylib_e2e.rs`,
+`src/agentlib/tests/agentlib_e2e.rs` and `src/cobollib/tests/*_e2e.rs`. Each
+is wrapped in `mod e2e`, so its libtest paths are `e2e::…` (no longer
+`tests::e2e::…`); the root, structlib and pylib e2e files share their crate's
+`tests/common/mod.rs`, while the agentlib and cobollib e2e files hold their
+helpers in the same file, outside `mod e2e`. Every **e2e** test also
 carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
 `cargo test` can never reach it. Each tier submodule starts with `use super::*;`.
 
@@ -382,8 +395,10 @@ carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
 non-test helper/fixture/builder/test-util is never moved into a tier and never
 duplicated per tier; a helper that sibling tiers — or the relocated e2e
 integration crate — must reach now lives on the shared public library harness
-`apg::testutil` (`src/testutil.rs`, an unconditional public module) or the
-crate's `tests/common/mod.rs`, never stranded in a production module's inline
+`apg::testutil` (`src/testutil.rs`, an unconditional public module) or — for
+the root, structlib and pylib crates — the crate's `tests/common/mod.rs`, and —
+for the agentlib and cobollib crates — the e2e file itself, outside `mod e2e`;
+never stranded in a production module's inline
 `mod tests`. Clippy `-D warnings` is what catches a stranded or unused helper.
 
 **A tier may select ZERO tests.** The repo has few genuine pure unit tests, and
@@ -433,7 +448,15 @@ gate beneath itself while it is running.
 `[workspace]`), so their tiers are run from their own directories, never by the
 root gate: `(cd src/structlib && cargo test)` /
 `(cd src/structlib && cargo test e2e:: -- --ignored --test-threads=4)`, and
-likewise `src/pylib` and `src/agentlib`. Wiring those invocations into
+likewise `src/pylib`, `src/agentlib` and `src/cobollib`
+(`cargo test --manifest-path src/cobollib/Cargo.toml` /
+`cargo test --manifest-path src/cobollib/Cargo.toml e2e:: -- --ignored --test-threads=4`).
+The opt-in COBOL cobc agreement and budget e2e
+(`src/cobollib/tests/cobollib_cobc_e2e.rs`) needs
+`cargo build --release --manifest-path src/cobollib/Cargo.toml` first (it
+fails when the release `cobolfrontend` is missing) and GnuCOBOL `cobc` on
+`PATH` or named by `APG_COBC`; it skips only when `cobc` is missing or
+unrunnable. Wiring those invocations into
 `scripts/gate.sh` has not been done (`scripts/**` is **run-only for every
 agent except `build-implementer`, which owns it** and may change a step), so the
 root `scripts/gate.sh` does NOT run them — invoke them yourself when a change
@@ -604,8 +627,8 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    blocks otherwise).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
-4. **Repoint all 8 formulae (the base `scanner` plus the seven per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
-   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`):
+4. **Repoint all 9 formulae (the base `scanner` plus the eight per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`):
    `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
    `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
@@ -669,9 +692,9 @@ Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
 `Language` node per `lang_switch` stream (its FQN is the bare language id, e.g.
 `rust`) and roots every module FQN under it. `<language-id>` is the stream's
 declared id verbatim: the code frontends' `go`/`java`/`cpp`/`rust`/`ts`/`js`/
-`csharp`/`py`, the agent frontend's `agent`, and the bundled structural
+`csharp`/`py`/`cobol`, the agent frontend's `agent`, and the bundled structural
 scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
-`misc` — the nineteen ids `layers::LANGUAGE_ROOTS` names (see
+`misc` — the twenty ids `layers::LANGUAGE_ROOTS` names (see
 `src/layers/code_refs.rs`, mirrored by `src/ingest/` and
 `src/incremental/language.rs`).
 
@@ -772,11 +795,14 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 - 5 code edge types:
   - `Contains` — Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
-  - `Uses` — Function→Struct, Struct→Struct. Rust `impl X for Y` is a `Uses`
+  - `Uses` — Function→Struct, Struct→Struct, Struct→File. Rust `impl X for Y` is a `Uses`
     edge `Y → X` (the type implements the trait); a foreign trait lands as an
     `UnresolvedUse` instead. Rust impl methods (inherent and trait) hang under
     the **self type** (`Type.method`); trait declarations/defaults under the
-    trait.
+    trait. Struct→File is present only for a COBOL `COPY` (one per program and
+    copybook, from the program Struct to the copybook File, rel property
+    `properties` = `{"kind":"copy"}`): the file dependency through which a
+    copybook change reaches each program that COPYs it.
   - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
   - `UnresolvedUse` — Function→UnresolvedTarget, Struct→UnresolvedTarget
 - Authored node labels (the `apg/layers/` node files): `Requirement` (fqn,
@@ -963,6 +989,7 @@ Built-in defaults (per language):
 - **Java**: `test` = `*Test.java`/`*Tests.java` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`.
 - **C++**: `test` = `*_test.cpp`/`test_*.cpp` or `test`/`tests` segment; `generated` = `*.pb.cc`/`*.pb.h` or `gen`/`generated` segment; `external` = `vendor`/`third_party`/`external`.
 - **Rust**: `test` = `*_test.rs` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`; else `src`.
+- **COBOL**: `test` = a `test`/`tests` path segment or a `test_*`, `*_test.*` or `*-test.*` filename (case-insensitive); `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src` — copybooks (`.cpy`) included.
 
 An `apg/config.json` at the project root **replaces** the defaults. Shape:
 

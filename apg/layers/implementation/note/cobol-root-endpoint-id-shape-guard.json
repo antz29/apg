@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-root-endpoint-id-shape-guard",
+  "body": "root_edge_endpoint roots a cobol endpoint with no non-empty module prefix to the root module cobol., but skips endpoints shaped cb followed by digits so opaque ids are never rerooted. Limit: the guard hard-codes the cobol id prefix cb, and a COBOL name spelled cb plus digits would not be rooted. Upgrade by passing the stream's emitted id set into the rooter.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.identity.root_edge_endpoint",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

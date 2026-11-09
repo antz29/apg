@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cobol-record-structs",
+  "body": "A 01-level record under the FILE, WORKING-STORAGE, LOCAL-STORAGE or LINKAGE SECTION is a Struct contained by its program's Struct, and a repeated record name keeps its first declaration.",
+  "properties": {
+    "feature": "cobol-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.cobol-program-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.cobol-program-scanning",
+      "properties": {}
+    }
+  ]
+}
