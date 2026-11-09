@@ -761,8 +761,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             manifest: incremental.manifest.clone(),
             sha: git_state.sha.clone().unwrap_or_default(),
             reuse: reuse_plan.clone(),
-            warm: false,
-            previous: None,
+            warm: warm_complete,
+            previous: incremental.previous,
             // The win-C splice's delete scope and subtraction set are the SAME
             // phase-2 state that drove the frontend target hand-off: the FINAL
             // target set (stage-1 ∪ the signature cascade) and the delta's
