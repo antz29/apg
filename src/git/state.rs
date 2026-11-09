@@ -551,7 +551,11 @@ pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
         ),
         Some(rec) => {
             let rec = state_str(Some(&rec.sha), rec.clean);
-            let verdict = if is_fresh(apg_root) { "FRESH" } else { "STALE" };
+            let verdict = if is_fresh_with_state(apg_root, current) {
+                "FRESH"
+            } else {
+                "STALE"
+            };
             format!("Git state: recorded {rec} vs current {cur} → {verdict}")
         }
     }
