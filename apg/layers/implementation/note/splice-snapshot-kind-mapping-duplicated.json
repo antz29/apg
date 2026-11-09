@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "splice-snapshot-kind-mapping-duplicated",
+  "body": "snapshot_code_kind duplicates the four-arm label-to-kind mapping of ingest::code_kind_from_label because that helper is private and the ingest module is outside this task's scope; upgrade when code_kind_from_label becomes pub(crate) or the mapping moves to a shared module.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.seed.snapshot_code_kind",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
