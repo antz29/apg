@@ -387,8 +387,12 @@ pub fn try_splice_build(
     // The content key guards cross-worktree drift; the assembled authored
     // identity additionally requires the seed DB to represent the assembled
     // graph's authored/transient rows (the win-C splice writes none), so a
-    // spec-only change-set is refused here and the full load runs.
-    let assembled_authored = splice::assembled_authored_identity(graph);
+    // spec-only change-set is refused here and the full load runs. The captured
+    // snapshot resolves an authored→code edge whose target lives only in the
+    // seed, so a delta graph's digest equals `seed_authored_identity(previous)`
+    // when the spec is unchanged.
+    let assembled_authored =
+        splice::assembled_authored_identity_with_previous(graph, input.previous.as_ref());
     let seeded = match splice::seed_checked(
         &db,
         input.recorded_content_key.as_deref(),
