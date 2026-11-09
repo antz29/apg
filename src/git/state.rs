@@ -259,53 +259,6 @@ pub fn fold_status_entries(head: &str, entries: &[StatusEntry]) -> (bool, String
     (entries.is_empty(), format!("{h:016x}"))
 }
 
-/// The content-identity key of a repo's tree (win A): a digest over the HEAD
-/// sha, the staged (index) content, and the working-tree/untracked file
-/// **content**. mtime is never consulted — touching a file without changing a
-/// byte yields the same key; any byte edit changes it. Ignored content
-/// (`apg/.trans/`, `apg/.worktrees/`) never counts, so a scan's own writes do
-/// not invalidate the key.
-fn content_key(repo: &git2::Repository) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
-    fnv1a(&mut h, head_sha(repo).unwrap_or_default().as_bytes());
-
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false);
-    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
-        return format!("{h:016x}");
-    };
-    // Deterministic order: the status collection's iteration order is not
-    // specified, so sort before folding (the key must be stable).
-    let mut changed: Vec<(String, u32)> = statuses
-        .iter()
-        .map(|e| (e.path().unwrap_or_default().to_string(), e.status().bits()))
-        .collect();
-    changed.sort();
-
-    let workdir = repo.workdir().map(Path::to_path_buf);
-    let index = repo.index().ok();
-    for (path, bits) in changed {
-        fnv1a(&mut h, path.as_bytes());
-        fnv1a(&mut h, &bits.to_le_bytes());
-        // Staged content identity: the index blob oid (content-addressed).
-        if let Some(ie) = index.as_ref().and_then(|i| i.get_path(Path::new(&path), 0)) {
-            fnv1a(&mut h, ie.id.to_string().as_bytes());
-        }
-        // Working-tree content identity: hash the file bytes when it exists.
-        if let Some(wd) = &workdir {
-            let full = wd.join(&path);
-            if full.is_file()
-                && let Ok(bytes) = std::fs::read(&full)
-            {
-                fnv1a(&mut h, &bytes);
-            }
-        }
-    }
-    format!("{h:016x}")
-}
-
 /// The recorded state of the scan that built the live DB (its own `Scan` row,
 /// [`db_recorded_scan`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -442,7 +395,11 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
 ///
 /// This is deliberately not `!is_stale`: `is_stale` is N/A (false) when there
 /// is no DB or the dir is not a git repo, so `is_stale != !is_fresh` there.
-pub fn is_fresh(apg_root: &Path) -> bool {
+///
+/// The final recorded/git comparison consumes the caller's `state` (its `sha`,
+/// `clean` and `content_key`) instead of re-reading the tree, so a caller that
+/// already captured a [`GitState`] pays for one status walk, not two.
+pub fn is_fresh_with_state(apg_root: &Path, state: &GitState) -> bool {
     if !db_path(apg_root).exists() {
         return false;
     }
@@ -454,10 +411,9 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     if socket.exists() && !live_session {
         return false;
     }
-    let Ok(repo) = git2::Repository::discover(apg_root) else {
-        return false;
-    };
-    let Some(cur_sha) = head_sha(&repo) else {
+    // Not a git repo and an unborn HEAD both arrive as `sha: None` (see
+    // [`git_state`]) — no recorded state to compare → NOT fresh.
+    let Some(cur_sha) = state.sha.as_deref() else {
         return false;
     };
     // The DB's own `Scan` row is the one recorded-state source. While a live
@@ -504,7 +460,18 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     let Some(rec_key) = rec.content_key.as_deref() else {
         return false; // pre-hardening: freshness cannot be verified
     };
-    rec.sha == cur_sha && rec.clean == repo_is_clean(&repo) && rec_key == content_key(&repo)
+    rec.sha == cur_sha && rec.clean == state.clean && state.content_key.as_deref() == Some(rec_key)
+}
+
+/// The `&Path` entry point to [`is_fresh_with_state`]: the DB-existence
+/// precondition runs first (no DB → NOT fresh without any git walk); otherwise
+/// it captures the current [`GitState`] once and delegates to the state-based
+/// predicate, so the freshness verdict is one shared rule.
+pub fn is_fresh(apg_root: &Path) -> bool {
+    if !db_path(apg_root).exists() {
+        return false;
+    }
+    is_fresh_with_state(apg_root, &git_state(apg_root))
 }
 
 /// The refuse-on-stale predicate:
