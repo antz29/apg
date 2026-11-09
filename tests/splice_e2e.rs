@@ -5069,4 +5069,401 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// Phase-01 task-13 (e2e): the CROSS-CUT reference lifecycle. A delta scan
+    /// re-emits only the changed crate, so a re-emitted unit's call to a symbol
+    /// that lives only in the seeded (unchanged) crate is emitted by the
+    /// frontend as a `Calls`/`UnresolvedCall` naming the target's canonical FQN.
+    /// `finalize_delta_graph` leaves the resulting edge DANGLING in the
+    /// target-only delta graph (no node for the seed-only target), and the
+    /// splice's `endpoint_label` (delta graph first, else the seeded DB) plus
+    /// `pair_allowed` (Calls is Function→Function only) lands it against the
+    /// seed — so the published `db.lbug` carries the same resolved `Calls` edge
+    /// a full rebuild produces. A genuinely unknown target (`ghost_target`,
+    /// absent from both code universes) stays unresolved. A still-planned
+    /// target, handed to the splice exactly as `finalize_delta_graph` leaves it
+    /// (an `UnresolvedTarget` placeholder row, never a real declaration), also
+    /// stays unresolved and keeps the seed's `status: planned` row.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
+    /// scan and a real `db.lbug` are real I/O, so this is `#[ignore]`d e2e
+    /// (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
+    fn delta_cross_cut_reference_publishes_a_resolved_calls_edge() {
+        use apg::testutil::{ApgCommand, Repo, wt_commit};
+
+        const CALLER: &str = "rust.app.edit.caller";
+        const HELPER: &str = "rust.helperlib.helper";
+        const GHOST: &str = "ghost_target";
+
+        /// One `apg` invocation in `dir` with an isolated `HOME`; fails loudly on
+        /// a non-zero exit.
+        fn apg_cli(dir: &Path, home: &str, args: &[&str]) -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", home).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        /// `apg scan . --language rust` (plus `extra`) in `dir`; returns its
+        /// stderr log (the `[load]` decision lines).
+        fn scan_log(dir: &Path, home: &str, extra: &[&str]) -> String {
+            let mut args = vec!["scan", ".", "--language", "rust"];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_cli(dir, home, &args).stderr).into_owned()
+        }
+
+        /// True only when the splice published: the success line ends in
+        /// `full load skipped` (the fallbacks also print `[load] splice:`).
+        fn spliced(log: &str) -> bool {
+            log.contains("full load skipped")
+        }
+
+        /// The DB's `(caller, callee)` Function→Function `Calls` rows.
+        fn calls_rows(dir: &Path, home: &str) -> BTreeSet<(String, String)> {
+            let cypher = "MATCH (a:Function)-[:Calls]->(b:Function) RETURN a.fqn AS a, b.fqn AS b";
+            let out = apg_cli(dir, home, &["query", "--json", cypher]);
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_slice(&out.stdout).expect("json rows");
+            rows.iter()
+                .map(|r| {
+                    (
+                        r["a"].as_str().unwrap().to_string(),
+                        r["b"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        }
+
+        /// The DB's `(source, target, category)` Function→UnresolvedTarget
+        /// `UnresolvedCall` rows.
+        fn unresolved_call_rows(dir: &Path, home: &str) -> BTreeSet<(String, String, String)> {
+            let cypher = "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) \
+                          RETURN a.fqn AS a, u.fqn AS u, u.category AS c";
+            let out = apg_cli(dir, home, &["query", "--json", cypher]);
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_slice(&out.stdout).expect("json rows");
+            rows.iter()
+                .map(|r| {
+                    (
+                        r["a"].as_str().unwrap().to_string(),
+                        r["u"].as_str().unwrap().to_string(),
+                        r["c"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        }
+
+        // ---- (1) Real scratch repo: the incremental splice ------------------
+        let repo = Repo::new("p1-cross-cut-reference");
+        // The isolated HOME lives outside the scanned repo (suite install).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-p1-cross-cut-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A two-crate workspace: the edit touches `app` only, so the emission
+        // filter re-emits the WHOLE `app` crate and leaves `helperlib` — and the
+        // `helper` its `caller` calls — in the seeded copy alone (the delta graph
+        // carries no node for it). `Cargo.lock`/`target` stay ignored so the tree
+        // remains clean for `project start`.
+        repo.write(
+            ".gitignore",
+            "Cargo.lock\n/target\n**/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"app\", \"helperlib\"]\nresolver = \"2\"\n",
+        );
+        repo.write(
+            "app/Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nhelperlib = { path = \"../helperlib\" }\n",
+        );
+        repo.write("app/src/lib.rs", "pub mod edit;\n");
+        repo.write("app/src/edit.rs", "pub fn caller() -> i32 {\n    0\n}\n");
+        repo.write(
+            "helperlib/Cargo.toml",
+            "[package]\nname = \"helperlib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.write(
+            "helperlib/src/lib.rs",
+            "pub fn helper() -> i32 {\n    0\n}\n",
+        );
+        repo.commit_all("init source");
+
+        apg_cli(&repo.root, &home_s, &["init", "."]);
+        repo.commit_all("apg init");
+        let main_log = scan_log(&repo.root, &home_s, &[]);
+        assert!(
+            main_log.contains("[load] writing parquet load files"),
+            "main's cold scan must full-load: {main_log}"
+        );
+        apg_cli(&repo.root, &home_s, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+
+        // The ONE-FILE edit: `app`'s re-emitted `caller` now calls `helperlib`'s
+        // unchanged `helper` across the crate cut, plus a genuinely unknown
+        // function (absent from both code universes).
+        std::fs::write(
+            wt.join("app/src/edit.rs"),
+            "pub fn caller() -> i32 {\n    helperlib::helper() + ghost_target()\n}\n",
+        )
+        .unwrap();
+        wt_commit(&wt, &["app/src/edit.rs"], "call the unchanged crate helper");
+
+        // The localized re-scan takes the SPLICE path, not a full load.
+        let spliced_log = scan_log(&wt, &home_s, &[]);
+        assert!(
+            spliced(&spliced_log),
+            "the one-file edit must take the splice path: {spliced_log}"
+        );
+        assert!(
+            !spliced_log.contains("[load] writing parquet load files"),
+            "the splice must skip the full load: {spliced_log}"
+        );
+
+        // The splice landed the cross-cut resolved edge against the seed.
+        let spliced_calls = calls_rows(&wt, &home_s);
+        assert!(
+            spliced_calls.contains(&(CALLER.to_string(), HELPER.to_string())),
+            "the splice must publish the cross-cut `Calls` edge to the seed-only \
+             helper: {spliced_calls:?}"
+        );
+
+        // The genuinely unknown target stayed unresolved (never a resolved call).
+        let spliced_unres = unresolved_call_rows(&wt, &home_s);
+        assert!(
+            spliced_unres.contains(&(CALLER.to_string(), GHOST.to_string(), "unknown".to_string())),
+            "a genuinely unknown target must stay unresolved: {spliced_unres:?}"
+        );
+        assert!(
+            !spliced_unres
+                .iter()
+                .any(|(from, to, _)| from == CALLER && to == HELPER),
+            "the cross-cut target must be RESOLVED, not left unresolved: {spliced_unres:?}"
+        );
+
+        // The spliced DB equals a `--force` full rebuild of the same tree.
+        let force_log = scan_log(&wt, &home_s, &["--force"]);
+        assert!(
+            !spliced(&force_log),
+            "--force must full-rebuild, not splice: {force_log}"
+        );
+        assert!(
+            force_log.contains("[load] writing parquet load files"),
+            "--force must run the full load: {force_log}"
+        );
+        assert_eq!(
+            calls_rows(&wt, &home_s),
+            spliced_calls,
+            "the spliced `Calls` rows must equal a full rebuild"
+        );
+        assert_eq!(
+            unresolved_call_rows(&wt, &home_s),
+            spliced_unres,
+            "the spliced unresolved rows must equal a full rebuild"
+        );
+
+        // ---- (2) Fixture: the still-planned target stays unresolved ---------
+        // The splice is handed the target-only delta graph EXACTLY as
+        // `finalize_delta_graph` leaves it: the cross-cut `Calls` edge is
+        // dangling (no node for the seed-only helper), while a still-planned and
+        // a genuinely unknown target keep their `UnresolvedTarget` placeholder
+        // row and their `UnresolvedCall` edge.
+        let dir = scratch("cross-cut-reference");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/a.go".to_string();
+        let b = "/x/b.go".to_string();
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+
+        // The seeded full tree: `a.go` owns the caller, `b.go` the unchanged
+        // helper the caller now calls across the cut; the planned Function and
+        // the external target are the not-yet-real references.
+        let mut prev = Graph::default();
+        prev.nodes.insert("m".into(), module());
+        prev.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 40));
+        prev.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        prev.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 10));
+        prev.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 10));
+        prev.nodes.insert(
+            "m.Planned.p".into(),
+            Node {
+                kind: NodeKind::Function,
+                name: Some("p".into()),
+                status: Some("planned".into()),
+                ..Node::default()
+            },
+        );
+        prev.nodes.insert(
+            "ext.Unknown".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("external".into()),
+                ..Node::default()
+            },
+        );
+        prev.contains.insert(("m".into(), a.clone()));
+        prev.contains.insert(("m".into(), b.clone()));
+        prev.contains.insert((a.clone(), "m.A.f".into()));
+        prev.contains.insert((b.clone(), "m.B.g".into()));
+        prev.unresolved_calls
+            .insert(("m.A.f".into(), "ext.Unknown".into(), String::new()));
+        prev.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        build_db(&prev_path, &prev);
+
+        // The target-only delta graph (only `a.go` re-emitted) as the finalizer
+        // leaves it: the `Calls` edge has no target node, and both unresolved
+        // targets keep their placeholder row.
+        let mut delta = Graph::default();
+        delta.nodes.insert("m".into(), module());
+        delta
+            .nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 45));
+        delta
+            .nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 12));
+        delta.nodes.insert(
+            "m.Planned.p".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                ..Node::default()
+            },
+        );
+        delta.nodes.insert(
+            "ext.Unknown".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("external".into()),
+                ..Node::default()
+            },
+        );
+        delta.contains.insert(("m".into(), a.clone()));
+        delta.contains.insert((a.clone(), "m.A.f".into()));
+        delta.calls.insert(("m.A.f".into(), "m.B.g".into()));
+        delta
+            .unresolved_calls
+            .insert(("m.A.f".into(), "m.Planned.p".into(), String::new()));
+        delta
+            .unresolved_calls
+            .insert(("m.A.f".into(), "ext.Unknown".into(), String::new()));
+        delta.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+        let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &delta,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+        publish(seeded).unwrap();
+
+        let db = Database::new(&prev_path, SystemConfig::default().read_only(true)).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (a:Function)-[:Calls]->(b:Function) RETURN a.fqn AS a, b.fqn AS b",
+        )
+        .unwrap();
+        let ai = column_index(&names, "a").unwrap();
+        let bi = column_index(&names, "b").unwrap();
+        let calls: BTreeSet<(String, String)> =
+            rows.iter().map(|r| (cell(r, ai), cell(r, bi))).collect();
+        assert!(
+            calls.contains(&("m.A.f".to_string(), "m.B.g".to_string())),
+            "the dangling cross-cut edge must land against the seed: {calls:?}"
+        );
+
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) \
+             RETURN a.fqn AS a, u.fqn AS u",
+        )
+        .unwrap();
+        let ai = column_index(&names, "a").unwrap();
+        let ui = column_index(&names, "u").unwrap();
+        let unresolved: BTreeSet<(String, String)> =
+            rows.iter().map(|r| (cell(r, ai), cell(r, ui))).collect();
+        assert!(
+            unresolved.contains(&("m.A.f".to_string(), "m.Planned.p".to_string())),
+            "a still-planned target must stay unresolved: {unresolved:?}"
+        );
+        assert!(
+            unresolved.contains(&("m.A.f".to_string(), "ext.Unknown".to_string())),
+            "a genuinely unknown target must stay unresolved: {unresolved:?}"
+        );
+
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (n:Function) RETURN n.fqn AS fqn, n.status AS status",
+        )
+        .unwrap();
+        let fi = column_index(&names, "fqn").unwrap();
+        let si = column_index(&names, "status").unwrap();
+        let status: BTreeMap<String, String> =
+            rows.iter().map(|r| (cell(r, fi), cell(r, si))).collect();
+        assert_eq!(
+            status.get("m.B.g").map(String::as_str),
+            Some(""),
+            "the seed-only helper row must survive the splice: {status:?}"
+        );
+        assert_eq!(
+            status.get("m.Planned.p").map(String::as_str),
+            Some("planned"),
+            "the still-planned seed row must never be realized: {status:?}"
+        );
+        drop(conn);
+        drop(db);
+
+        let unresolved_targets = unresolved_rows(&prev_path);
+        assert!(
+            unresolved_targets.contains(&("m.Planned.p".to_string(), String::new())),
+            "the still-planned target keeps its UnresolvedTarget row: {unresolved_targets:?}"
+        );
+        assert!(
+            unresolved_targets.contains(&("ext.Unknown".to_string(), "external".to_string())),
+            "the unknown target keeps its categorized UnresolvedTarget row: {unresolved_targets:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
