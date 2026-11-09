@@ -44,43 +44,46 @@ pub(crate) fn run_pipeline(
     // entry to the DB dispatch below; db-load covers that dispatch (splice OR
     // parquet/Database::new/create_schema/copy_from).
     let assembly_start = std::time::Instant::now();
+    // The assembly dispatch (phase-01 task-9): `warm` is the cached-fact splice,
+    // `delta` the target-only delta graph, and everything else the full scan.
+    let warm = input.is_some_and(|i| i.warm);
+    let delta = !warm && input.is_some_and(|i| i.reuse.is_some());
+    // The incremental path's target-only spool, materialised here ONCE. It
+    // survives the whole function because the phase-3 full re-assembly fallback
+    // replays it; the delta ingest only borrows it.
+    let delta_spool: Vec<schema::Record>;
     let (mut graph, report) = {
-        // Stream the scanner JSONL straight into the ingestor. On the win-B
-        // path the target-only spool is ingested here and the unaffected files'
+        // Stream the scanner JSONL straight into the ingestor. On the WARM path
+        // the target-only spool is ingested here and the unaffected files'
         // cached fact units are spliced into the SAME in-memory graph
-        // (phase-02 task-7 owns this assembly on every path). The resulting
-        // full fact-spliced graph is the single graph consumed downstream.
+        // (phase-02 task-7). The incremental path must NOT splice: the
+        // unaffected facts stay in the seed `db.lbug` and land as splice DML.
         let reuse_holder;
-        let reuse = match input.and_then(|i| i.reuse.as_ref()) {
+        let reuse = match input.and_then(|i| i.reuse.as_ref()).filter(|_| warm) {
             Some(plan) => {
                 reuse_holder = cache::FactStore::at(plan.store_root.clone()).load();
                 Some(plan.reuse(&reuse_holder))
             }
             None => None,
         };
-        if let Some(r) = reuse.as_ref() {
-            ingest::ingest_with_reuse(
-                records,
-                &ingest::IngestOptions {
-                    blacklist,
-                    language,
-                    config,
-                    base,
-                },
-                Some(r),
+        let opts = ingest::IngestOptions {
+            blacklist,
+            language,
+            config,
+            base,
+        };
+        if warm {
+            ingest::ingest_with_reuse(records, &opts, reuse.as_ref(), progress)
+        } else if delta {
+            delta_spool = records.into_iter().collect();
+            ingest::ingest_delta(
+                delta_spool.iter().cloned(),
+                &opts,
+                input.and_then(|i| i.previous.as_ref()),
                 progress,
             )
         } else {
-            ingest::ingest(
-                records,
-                &ingest::IngestOptions {
-                    blacklist,
-                    language,
-                    config,
-                    base,
-                },
-                progress,
-            )
+            ingest::ingest(records, &opts, progress)
         }
     };
     log.ln(&format!("Skipped {} blacklisted messages", report.skipped));
@@ -97,14 +100,24 @@ pub(crate) fn run_pipeline(
         ));
     }
 
+    // The delta graph carries only the target files' nodes, so its cleanup must
+    // recognise the far endpoints that still live in the seed `db.lbug` —
+    // `previous.scanned` ∪ `previous.planned` (phase-01 task-7). The warm and
+    // full paths' graphs are not delta-shaped, so they keep the empty universe.
+    let universe: BTreeSet<String> = if delta {
+        input
+            .and_then(|i| i.previous.as_ref())
+            .map(|previous| previous.scanned.union(&previous.planned).cloned().collect())
+            .unwrap_or_default()
+    } else {
+        BTreeSet::new()
+    };
     let cleanup_report = cleanup(
         &mut graph,
         &CleanupOptions {
             user_excludes: path_excludes.to_vec(),
             language: language.to_string(),
-            // Filled by phase-01 task-9 with `previous.scanned` ∪
-            // `previous.planned`; empty here is the full-scan-neutral placeholder.
-            universe: BTreeSet::new(),
+            universe,
         },
     );
     log.ln(&format!(
