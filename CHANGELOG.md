@@ -9,6 +9,36 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.28.4
+
+Patch release: query-engine pinning and dialect correctness, a faster scan path,
+more stable unresolved-target identities, and two guardrail fixes. No new
+features.
+
+**LadybugDB pinned to an exact engine.** `lbug` is pinned to `=0.22.3` (prebuilt
+liblbug resources v0.22.3). The query dialect is documented and corrected across
+AGENTS.md, README, the navigator agent and the `apg_query` tool, including the
+PARQUET-reader rule, the v0.21.0 STRING-primary-key aggregate-crash floor (with a
+regression test), and the Cypher grammar fixes.
+
+**Scan performance.** The gitignore probe (`IgnoreProbe`) is built once per scan
+and held for its duration (`ScanProbeGuard`); `Manifest::build` derives from the
+git index plus status-reported paths (including symlink and gitlink modes); and
+freshness is content-only (`is_fresh_with_state`) — a touched but byte-identical
+file is fresh, and durable save shares the change identity.
+
+**Unresolved-target identity for Rust and TypeScript.** Callee names are stable
+and uncapped, a nameless callee gets a site-keyed sentinel, and the category
+follows the identity.
+
+**Guardrails.** `apg project delete` refuses while a live session owns the branch
+DB, and the spec-lint wording advisories classify on whole whitespace-delimited
+tokens.
+
+**Release follow-up.** Agent regeneration is the post-0.28.3 release follow-up.
+
+No durable-spec model change.
+
 ## v0.28.3
 
 Patch release: the release workflow's CI substrate is pinned to an explicit
