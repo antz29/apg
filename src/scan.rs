@@ -212,7 +212,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // printed verdict and the fast-path decision can never disagree. A stale
     // tree falls through to the full pipeline below, and a `--force` scan has
     // already discarded the DB, so the force override always rebuilds.
-    if git::is_fresh(&apg_root) {
+    if git::is_fresh_with_state(&apg_root, &git_state) {
         log.ln(
             "[scan] fast-path: tree unchanged since the recorded scan — reusing db.lbug (frontends skipped)",
         );
