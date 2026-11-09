@@ -213,9 +213,12 @@ const SKIP_DIRS: &[&str] = &[".git", ".worktrees", "target", "node_modules"];
 impl Manifest {
     /// Builds the manifest for the scan root `root` (the scanned directory, an
     /// absolute path). In a git checkout the identity is read, not walked: each
-    /// tracked stage-0 index entry contributes its index blob OID, and only the
-    /// paths `statuses()` reports (modified, staged, untracked) are re-hashed
-    /// from their working-tree bytes — a deleted path simply does not appear.
+    /// tracked stage-0 index entry contributes its index blob OID — except a
+    /// symlink, whose old whole-tree value was its target's content hash, and a
+    /// gitlink (submodule), whose old whole-tree value was the walk of the
+    /// submodule directory's files, both reproduced here — and only the paths
+    /// `statuses()` reports (modified, staged, untracked) are re-hashed from
+    /// their working-tree bytes — a deleted path simply does not appear.
     /// Every workdir-relative path is re-based onto the canonical scan root
     /// (dropping paths outside it) with the same `/`-separated, scan-root-
     /// relative keys the walk produced, so [`Manifest::diff`] and a reading
@@ -253,13 +256,31 @@ impl Manifest {
                 Some(text)
             };
             for entry in index.iter() {
-                // Only stage-0 entries are tracked; a gitlink is a submodule
-                // commit pointer, not blob content.
-                if entry.flags & 0x3000 != 0 || entry.mode == git2::FileMode::Commit as u32 {
+                // Only stage-0 entries are tracked.
+                if entry.flags & 0x3000 != 0 {
                     continue;
                 }
                 let path = String::from_utf8_lossy(&entry.path);
-                if let Some(rel) = scan_rel(&path) {
+                if entry.mode == git2::FileMode::Commit as u32 {
+                    // A gitlink is a submodule commit pointer, not blob content:
+                    // the old whole-tree walk descended into the submodule
+                    // directory and entered its files, so do the same (with the
+                    // same exclusions) rather than entering the pointer path.
+                    if scan_rel(&path).is_some() {
+                        walk_files(&base, &workdir.join(&*path), Some(repo), &mut entries);
+                    }
+                    continue;
+                }
+                let Some(rel) = scan_rel(&path) else {
+                    continue;
+                };
+                if entry.mode == git2::FileMode::Link as u32 {
+                    // A symlink's index blob is its target path; the old walk
+                    // hashed the target's content through the link.
+                    if let Some(oid) = blob_oid_of_file(&workdir.join(&*path)) {
+                        entries.insert(rel, oid);
+                    }
+                } else {
                     entries.insert(rel, entry.id.to_string());
                 }
             }
