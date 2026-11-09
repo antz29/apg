@@ -9,6 +9,41 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.29.0
+
+Minor release: a new COBOL frontend, `src/cobollib`, joins the languages `apg
+scan` auto-detects and merges into the same graph as every other language, and
+ships through the Homebrew tap and the Linux installer.
+
+**COBOL frontend.** A standalone `cobolfrontend` built on a hand-written COBOL
+parser graphs programs, copybooks, sections, paragraphs and data declarations;
+`--language cobol` selects it explicitly. The dialect is chosen with `--std` or
+`cobol.dialect` in `apg/config.json`: `cobol85` (the default), `cobol2002`,
+`cobol2014` or `ibm` — `cobol2023` is refused. `--copy-path <dir>` (repeatable)
+supplies copybook search directories, and a `COPY` dependency is recorded as a
+Struct→File `Uses` edge (rel kind `copy`), so a copybook change reaches every
+program that copies it. `.cob`, `.cbl`, `.cobol` and `.cpy` sources are claimed
+in any case, and the frontend is self-contained at scan time — it needs nothing
+on `PATH` and never shells out.
+
+**Language integration.** COBOL joins the language roots, the identity/FQN
+rendering, code-type classification and impact analysis, the ingest load
+tables, and the splice path, so a COBOL graph merges into the same
+`apg/.trans/db.lbug` as the other languages.
+
+**Packaging and docs.** A new `apg-cobol` formula ships the frontend into
+`$(brew --prefix)/share/apg/frontends`, the Linux release builds an
+`apg-cobol-linux-*` tarball, and `install.sh`, `.github/workflows/release.yml`,
+`scripts/release.sh`, AGENTS.md and README document the new frontend, its
+dialect table and its scan-time flags.
+
+The merge adds durable spec nodes recording the new frontend and its dialect
+constraints; the durable-spec model itself is unchanged.
+
+**Release follow-up.** Agent regeneration is the post-0.29.0 release follow-up.
+
+No durable-spec model change.
+
 ## v0.28.4
 
 Patch release: query-engine pinning and dialect correctness, a faster scan path,
