@@ -5474,7 +5474,15 @@ mod e2e {
     /// A scratch /tmp Go repo carries a `Note` whose `details` edge and a
     /// `Component` whose `implemented-by` edge both name `go.scratch/b.Foo` —
     /// a real Function the delta scan does NOT target (the edit touches
-    /// `a/a.go` only). The fixture first full-scans the tree so the seed
+    /// `a/a.go` only). It also ships one `.opencode/agents/` definition and a
+    /// branch-local plan whose `Task` is assigned to that agent, so the
+    /// captured `Agent` roster is the far endpoint of a `Task`→`Agent`
+    /// `AssignedTo` row: the agent frontend is skipped for the unchanged
+    /// `.opencode/agents/`, so the roster must be re-emitted into the delta
+    /// graph — then the universe-aware cleanup keeps the row, and the digest
+    /// match covers the plan's assignment as well as the seed-only code
+    /// targets.
+    /// The fixture first full-scans the tree so the seed
     /// `db.lbug` records both authored/transient nodes AND their code-targeted
     /// edges. The one-file body edit then re-ingests the unchanged spec into a
     /// delta graph that carries no node for `b.Foo`; the captured
@@ -5482,8 +5490,8 @@ mod e2e {
     /// authored digest equals the seed's own digest and `seed_checked` accepts
     /// it — the winner's `[load] splice: … full load skipped` line replaces the
     /// parquet load. The published `db.lbug` must still carry every
-    /// authored→seed-only-code edge, exactly as a `--force` full rebuild of the
-    /// same tree does.
+    /// authored→seed-only-code edge and the `Task`→`Agent` assignment, exactly
+    /// as a `--force` full rebuild of the same tree does.
     ///
     /// Scratch /tmp repo + candidate binary only
     /// (`global.constraint.no-real-project-test`); a real Go frontend scan, real
@@ -5492,6 +5500,7 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/go frontend/db.lbug/git); run via cargo test-e2e"]
     fn delta_retains_authored_code_target_edges_without_a_full_load() {
+        use apg::schema::Record;
         use apg::testutil::{ApgCommand, Repo};
 
         /// The seed-only Function the authored edges name: the Go module is
@@ -5500,6 +5509,10 @@ mod e2e {
         const TARGET: &str = "go.scratch/b.Foo";
         const NOTE: &str = "implementation.note.foo-note";
         const COMPONENT: &str = "solution.component.foo-cmp";
+        /// The fixture agent's FQN (its `implementer.md` file stem) and the plan
+        /// task assigned to it.
+        const AGENT: &str = "agent.implementer";
+        const TASK: &str = "delta-authored/plan.phase-01.task-1";
 
         /// One `apg` invocation in `dir` with an isolated `HOME`; fails loudly on
         /// a non-zero exit.
@@ -5558,6 +5571,24 @@ mod e2e {
                 .collect()
         }
 
+        /// The DB's `Task`→`Agent` `AssignedTo` rows, as sorted `(task, agent)`
+        /// pairs.
+        fn assigned_rows(dir: &Path, home: &str) -> BTreeSet<(String, String)> {
+            query_json(
+                dir,
+                home,
+                "MATCH (t:Task)-[:AssignedTo]->(a:Agent) RETURN t.fqn AS t, a.fqn AS a",
+            )
+            .iter()
+            .map(|r| {
+                (
+                    r["t"].as_str().unwrap().to_string(),
+                    r["a"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+        }
+
         let repo = Repo::new("delta-authored-code-target");
         // The isolated HOME lives outside the scanned repo (suite install).
         let home = repo
@@ -5581,6 +5612,13 @@ mod e2e {
             "package b\n\n// Foo is the untouched seed-only target.\nfunc Foo() int { return 2 }\n",
         );
 
+        // The agent roster: one `.opencode/agents/` definition, emitted by the
+        // agent frontend on the cold scan as `agent.implementer`.
+        repo.write(
+            ".opencode/agents/implementer.md",
+            "# Implementer\n\nCore implementation.\n",
+        );
+
         // The unchanged spec: an implementation-layer Note `details` and a
         // solution Component `implemented-by` both naming the seed-only
         // `b.Foo`. Code endpoints have no node file, so each edge carries only
@@ -5595,10 +5633,54 @@ mod e2e {
         comp.body = "the component that implements the seed-only target".to_string();
         comp.out = vec![apg::testutil::out_edge("implemented-by", TARGET)];
         apg::layers::write_node(&apg_root, &comp).unwrap();
+
+        // The branch-local plan store (gitignored, so not part of the git delta
+        // between the two scans): one task assigned to the fixture's agent.
+        let plan_records = [
+            Record::Plan {
+                fqn: "delta-authored/plan".into(),
+                title: "Delta plan".into(),
+                strategy: "s".into(),
+            },
+            Record::PlanPhase {
+                fqn: "delta-authored/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "d".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "delta-authored/plan".into(),
+                to: "delta-authored/plan.phase-01".into(),
+                properties: NodeProperties::default(),
+            },
+            Record::Task {
+                fqn: TASK.into(),
+                title: "T".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "delta-authored/plan.phase-01".into(),
+                to: TASK.into(),
+                properties: NodeProperties::default(),
+            },
+            Record::AssignedTo {
+                from: TASK.into(),
+                to: AGENT.into(),
+            },
+        ];
+        let plan_jsonl: String = plan_records
+            .iter()
+            .map(|r| serde_json::to_string(r).unwrap() + "\n")
+            .collect();
+        let plans = apg_root.join(".trans").join("plans");
+        std::fs::create_dir_all(&plans).unwrap();
+        std::fs::write(plans.join("delta-authored.jsonl"), plan_jsonl).unwrap();
+
         repo.commit_all("source plus the unchanged authored spec");
 
         // (1) Cold full scan: the seed DB carries the authored rows AND their
-        // edges onto the real `b.Foo` code row.
+        // edges onto the real `b.Foo` code row, plus the roster-assigned task.
         let cold_log = scan_log(&repo.root, &home_s, &[]);
         assert!(
             cold_log.contains("[load] writing parquet load files"),
@@ -5625,6 +5707,14 @@ mod e2e {
             expected_implemented,
             "the seed must project the `SpecImplementedBy` edge onto the seed-only `b.Foo`"
         );
+        let expected_assigned: BTreeSet<(String, String)> = [(TASK.to_string(), AGENT.to_string())]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            assigned_rows(&repo.root, &home_s),
+            expected_assigned,
+            "the seed must project the plan's `Task`→`Agent` `AssignedTo` row"
+        );
 
         // (2) A ONE-FILE body edit to `a/a.go`: `b/b.go` and the authored spec
         // are unchanged, so the target-only delta graph has no node for `b.Foo`.
@@ -5643,8 +5733,9 @@ mod e2e {
             "the splice log line must replace the parquet load: {inc_log}"
         );
 
-        // (3) The published DB still carries every authored→seed-only-code edge
-        // and the seed-only code row itself.
+        // (3) The published DB still carries every authored→seed-only-code edge,
+        // the plan's `Task`→`Agent` assignment, and the seed-only code row
+        // itself.
         assert_eq!(
             edge_rows(&repo.root, &home_s, "Note", "Details"),
             expected_details,
@@ -5654,6 +5745,12 @@ mod e2e {
             edge_rows(&repo.root, &home_s, "Component", "SpecImplementedBy"),
             expected_implemented,
             "the splice must retain the `SpecImplementedBy` edge onto seed-only code"
+        );
+        assert_eq!(
+            assigned_rows(&repo.root, &home_s),
+            expected_assigned,
+            "the splice must retain the `Task`→`Agent` `AssignedTo` row through \
+             the re-emitted roster"
         );
         let surviving = query_json(
             &repo.root,
@@ -5686,6 +5783,11 @@ mod e2e {
             edge_rows(&repo.root, &home_s, "Component", "SpecImplementedBy"),
             expected_implemented,
             "the spliced `SpecImplementedBy` rows must equal a full rebuild's"
+        );
+        assert_eq!(
+            assigned_rows(&repo.root, &home_s),
+            expected_assigned,
+            "the spliced `AssignedTo` row must equal a full rebuild's"
         );
 
         let _ = std::fs::remove_dir_all(&repo.root);

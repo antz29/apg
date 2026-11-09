@@ -51,7 +51,7 @@ pub(crate) fn run_pipeline(
     // The incremental path's target-only spool, materialised here ONCE. It
     // survives the whole function because the phase-3 full re-assembly fallback
     // replays it; the delta ingest only borrows it.
-    let delta_spool: Vec<schema::Record>;
+    let mut delta_spool: Vec<schema::Record>;
     let (mut graph, report) = {
         // Stream the scanner JSONL straight into the ingestor. On the WARM path
         // the target-only spool is ingested here and the unaffected files'
@@ -76,6 +76,16 @@ pub(crate) fn run_pipeline(
             ingest::ingest_with_reuse(records, &opts, reuse.as_ref(), progress)
         } else if delta {
             delta_spool = records.into_iter().collect();
+            // Re-emit the captured Agent roster: the agent frontend is skipped
+            // for an unchanged `.opencode/agents/`, so without these records the
+            // universe-aware cleanup below prunes every Task→Agent `AssignedTo`
+            // row (the far endpoint is absent), the assembled authored digest
+            // stops matching the seed's own, and `seed_checked` refuses with
+            // `UnrepresentedAuthored` on every incremental scan. The tree-side
+            // digest re-emits the same roster (`splice::seed`'s record stream).
+            if let Some(previous) = input.and_then(|i| i.previous.as_ref()) {
+                delta_spool.extend(previous.agents.iter().cloned());
+            }
             ingest::ingest_delta(
                 delta_spool.iter().cloned(),
                 &opts,

@@ -289,7 +289,10 @@ pub fn ingest_with_reuse(
 /// counterpart of [`ingest_with_reuse`].
 ///
 /// `records` is exactly what the caller buffered: the changed files'
-/// re-emitted spool plus the authored/transient layer+plan records. The
+/// re-emitted spool plus the authored/transient layer+plan records and the
+/// captured previous scan's `Agent` roster (re-emitted because the agent
+/// frontend is skipped for an unchanged `.opencode/agents/` — without it the
+/// `Task`→`Agent` `AssignedTo` rows lose their far endpoint). The
 /// unaffected files' facts are deliberately NOT spliced in — the splice lands
 /// them against the seed database instead — so the result is the **delta
 /// graph** the splicer derives its DML from, never the full fact-spliced
