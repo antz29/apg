@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "warm-path-agent-roster-unverified",
+  "body": "The warm path (ingest_with_reuse) was deliberately left unchanged when the Agent roster re-emission was added to the delta path; whether a warm rescan of a plan-assigned worktree can drop Agent rows is unverified. Upgrade if a warm-path rescan is observed to drop Agent rows.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.ingest_with_reuse",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
