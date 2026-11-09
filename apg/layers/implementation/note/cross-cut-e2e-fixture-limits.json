@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cross-cut-e2e-fixture-limits",
+  "body": "Two limits. (1) The real-repo cross-cut act needs the unchanged target symbol in a different crate because the Rust frontend's --targets filter re-emits a whole targeted crate; upgrade if per-file emission lands. (2) The still-planned half is a hand-built fixture modelling finalize_delta_graph's output because the function is pub(crate); upgrade when a real-repo planned variant can be exercised.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.delta_cross_cut_reference_publishes_a_resolved_calls_edge",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

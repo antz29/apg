@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "authored-edge-unit-test-indirect-kind-assertion",
+  "body": "The unit test asserts the absent target's snapshot-resolved kind indirectly, through the spec_implemented_by kind-pair filter and the surviving previous.kinds entry, because finalize_delta_graph does not surface the resolved kind. Upgrade to a direct kind assertion if the finalizer exposes it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.tests.unit.finalize_delta_graph_retains_seed_only_authored_code_edges",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

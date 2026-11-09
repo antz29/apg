@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "splice-digest-requires-captured-snapshot",
+  "body": "The splice digest now depends on the captured snapshot being populated on the incremental path; a caller that hands try_splice_build a target-only delta graph with previous: None is refused and full-loads (safe, slower), never mis-accepted. Upgrade only if such a caller becomes legitimate and the digest must be computed another way.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.pipeline.try_splice_build",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

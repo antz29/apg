@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "authored-retention-e2e-hardcoded-go-fqn",
+  "body": "The e2e fixture hardcodes the Go FQN go.scratch/b.Foo per this repo's Go module-identity rendering; upgrade to a discovered FQN if the rendering changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.delta_retains_authored_code_target_edges_without_a_full_load",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

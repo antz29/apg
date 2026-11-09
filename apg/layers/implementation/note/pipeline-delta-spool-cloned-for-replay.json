@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "pipeline-delta-spool-cloned-for-replay",
+  "body": "The incremental delta spool is materialised into a Vec and then cloned again into ingest_delta's IntoIterator interface, so an incremental scan pays one extra delta-scale clone; it is kept owned for phase-3 task-5's full re-assembly replay. Upgrade when the replay API accepts a borrowed buffer.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.pipeline.run_pipeline",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

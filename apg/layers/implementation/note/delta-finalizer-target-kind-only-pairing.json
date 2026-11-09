@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delta-finalizer-target-kind-only-pairing",
+  "body": "finalize_delta_graph pairs a reference with its target kind only (UnresolvedCall to a Function, UnresolvedUse to a Struct); the exact endpoint-kind pair check stays deferred to the splice's DB-backed pair_allowed. Upgrade if the finalizer takes on pair rejection.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.finalize_delta_graph",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "universe-endpoint-int-test-planned-half",
+  "body": "The int test pins the previous.planned half through a contains parent and the cleanup universe predicate rather than a resolved Calls/Uses edge, because finalize_delta_graph deliberately leaves still-planned reference targets unresolved. Upgrade if a resolved edge to a planned target becomes reachable.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.tests.int.finalize_delta_graph_keeps_universe_endpoints",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
