@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-checks-the-computed-git-state",
+  "body": "The freshness predicate evaluates the git state its caller has computed, so the recorded scan is compared against that state alone.",
+  "properties": {
+    "feature": "scan-change-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

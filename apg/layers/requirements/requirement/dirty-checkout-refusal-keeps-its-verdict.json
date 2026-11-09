@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "dirty-checkout-refusal-keeps-its-verdict",
+  "body": "The dirty-checkout refusal keeps its verdict, refusing project start and merge when the checkout's status collection is non-empty and admitting a checkout whose collection is empty.",
+  "properties": {
+    "feature": "scan-change-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

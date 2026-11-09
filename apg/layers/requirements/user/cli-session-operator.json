@@ -7,22 +7,17 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.admission-checks-the-model-not-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.cli-session-substrate",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.session-start-requires-project-context",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.session-dirty-mark-covers-every-changed-file",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.session-save-serialises-pending-rows",
+      "target": "requirements.requirement.durable-save-shares-the-change-identity",
       "properties": {}
     },
     {
@@ -32,7 +27,7 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.session-write-through-to-the-database",
+      "target": "requirements.requirement.session-dirty-mark-covers-every-changed-file",
       "properties": {}
     },
     {
@@ -47,6 +42,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.session-save-serialises-pending-rows",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.session-save-validates-what-it-writes",
       "properties": {}
     },
@@ -57,7 +57,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.admission-checks-the-model-not-persistence",
+      "target": "requirements.requirement.session-start-requires-project-context",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.session-write-through-to-the-database",
       "properties": {}
     }
   ],

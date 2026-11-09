@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-reads-content-only",
+  "body": "Freshness reads content alone: an unchanged tree and a touched byte-identical file stay fresh, one changed byte is stale, and ignored content never counts.",
+  "properties": {
+    "feature": "scan-change-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

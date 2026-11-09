@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "durable-save-shares-the-change-identity",
+  "body": "A durable save derives its cleanliness and content key from the same single-status-collection state computation the scan uses, so the session save, write-through, and project write share that computation.",
+  "properties": {
+    "feature": "scan-change-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
+      "properties": {}
+    }
+  ]
+}

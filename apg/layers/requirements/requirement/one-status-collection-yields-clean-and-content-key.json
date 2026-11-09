@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "one-status-collection-yields-clean-and-content-key",
+  "body": "A checkout's cleanliness and content key both derive from one git status collection taken with the recursion-enabled untracked options, and cleanliness is that collection's emptiness.",
+  "properties": {
+    "feature": "scan-change-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

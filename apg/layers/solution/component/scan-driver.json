@@ -22,6 +22,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.cache.manifest.Manifest.build",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.cache.manifest.ScanConfigKey",
       "properties": {}
     },
@@ -83,6 +88,11 @@
     {
       "kind": "realises",
       "target": "domain.service.scan-rebuild-control",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.splice-eligibility",
       "properties": {}
     }
   ],

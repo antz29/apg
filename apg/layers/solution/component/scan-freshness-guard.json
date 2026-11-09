@@ -17,6 +17,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.git.state.git_state",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.git.state.is_fresh",
       "properties": {}
     },
@@ -32,12 +37,12 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.splice-eligibility",
+      "target": "domain.service.graph-materialization",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.graph-materialization",
+      "target": "domain.service.splice-eligibility",
       "properties": {}
     }
   ],

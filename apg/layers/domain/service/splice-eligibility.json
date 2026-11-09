@@ -7,12 +7,52 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.content-key-value-is-stable-for-a-tree-state",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.dirty-checkout-refusal-keeps-its-verdict",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.fast-project-start",
       "properties": {}
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.freshness-checks-the-computed-git-state",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.freshness-reads-content-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.manifest-entries-come-from-index-oids-and-status-paths",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.manifest-matches-a-whole-tree-content-hash",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.one-status-collection-yields-clean-and-content-key",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-leaves-graph-fresh",
       "properties": {}
     },
     {
@@ -29,11 +69,6 @@
       "kind": "driven-by",
       "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
       "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.scan-leaves-graph-fresh",
-      "properties": {}
     }
   ],
   "in": [
@@ -45,6 +80,11 @@
     {
       "kind": "realises",
       "source": "solution.component.project-start-seeder",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-driver",
       "properties": {}
     },
     {

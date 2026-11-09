@@ -27,6 +27,21 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.dirty-checkout-refusal-keeps-its-verdict",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.freshness-checks-the-computed-git-state",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.freshness-reads-content-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.ignore-lookup-accepts-absolute-and-relative-paths",
       "properties": {}
     },
