@@ -614,6 +614,162 @@ mod unit {
         assert_eq!((location.start_line, location.end_line), (1, 274));
         assert_eq!((location.start, location.end), (0, 0));
     }
+
+    /// phase-01 task-10: [`finalize_delta_graph`] re-resolves a delta-emitted
+    /// `unresolved_call`/`unresolved_use` against the full universe. A target
+    /// that is a real `Function`/`Struct` in the delta graph or recorded in
+    /// `previous.scanned` becomes the `calls`/`uses` edge a full scan produces
+    /// (a seed-only target has no delta node, so its edge is deliberately left
+    /// dangling for the splice to land); a still-planned target
+    /// (`previous.planned` or a delta `status: planned` placeholder) and a
+    /// target absent from both universes stay unresolved, and only the
+    /// `UnresolvedTarget` rows no surviving unresolved edge names are GC'd.
+    /// Pure in-memory: the graph and the previous-scan snapshot are built by
+    /// hand, and the finalizer is the one unit under test.
+    #[test]
+    fn finalize_delta_graph_converts_universe_references() {
+        let caller = "rust.apg.caller";
+        let caller_struct = "rust.apg.caller_struct";
+        let delta_fn = "rust.apg.delta_fn";
+        let delta_struct = "rust.apg.delta_struct";
+        let seed_fn = "rust.apg.seed_fn";
+        let seed_struct = "rust.apg.seed_struct";
+        let planned_fn = "rust.apg.planned_fn";
+        let planned_struct = "rust.apg.planned_struct";
+        let unknown = "external.Unknown";
+        let real = |kind| Node {
+            kind,
+            ..Node::default()
+        };
+
+        let mut graph = Graph::default();
+        // The delta graph's own real declarations: the call source, the real
+        // call/us targets, and the Struct source of the use edge.
+        for (fqn, kind) in [
+            (caller, NodeKind::Function),
+            (delta_fn, NodeKind::Function),
+            (caller_struct, NodeKind::Struct),
+            (delta_struct, NodeKind::Struct),
+        ] {
+            graph.nodes.insert(fqn.to_string(), real(kind));
+        }
+        // A planned delta placeholder the finalizer must not treat as real.
+        graph.nodes.insert(
+            planned_struct.to_string(),
+            Node {
+                kind: NodeKind::Struct,
+                status: Some("planned".to_string()),
+                ..Node::default()
+            },
+        );
+
+        // The unresolved-reference rows the delta spool emitted.
+        for to in [delta_fn, seed_fn, planned_fn, unknown] {
+            graph
+                .unresolved_calls
+                .insert((caller.to_string(), to.to_string(), String::new()));
+        }
+        graph
+            .unresolved_uses
+            .insert((caller.to_string(), delta_struct.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller.to_string(), seed_struct.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller_struct.to_string(), planned_struct.to_string()));
+
+        // The shared `UnresolvedTarget` rows a scan materialises for each
+        // still-unresolved reference, plus an orphan no edge names.
+        for fqn in [seed_fn, planned_fn, unknown, "external.Orphan"] {
+            graph
+                .nodes
+                .insert(fqn.to_string(), real(NodeKind::UnresolvedTarget));
+        }
+
+        let previous = PreviousScan {
+            scanned: [seed_fn.to_string(), seed_struct.to_string()]
+                .into_iter()
+                .collect(),
+            planned: [planned_fn.to_string()].into_iter().collect(),
+            kinds: [
+                (seed_fn.to_string(), "function".to_string()),
+                (seed_struct.to_string(), "struct".to_string()),
+                (planned_fn.to_string(), "function".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            agents: Vec::new(),
+        };
+
+        finalize_delta_graph(&mut graph, Some(&previous));
+
+        // Real-in-delta targets flip to the resolved edges a full scan produces.
+        assert!(
+            graph
+                .calls
+                .contains(&(caller.to_string(), delta_fn.to_string()))
+        );
+        assert!(!graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            delta_fn.to_string(),
+            String::new(),
+        )));
+        assert!(
+            graph
+                .uses
+                .contains(&(caller.to_string(), delta_struct.to_string()))
+        );
+        assert!(
+            !graph
+                .unresolved_uses
+                .contains(&(caller.to_string(), delta_struct.to_string()))
+        );
+
+        // Seed-only targets flip too, even though the delta graph has no node
+        // for them: the edge is left dangling for the splice to land, and the
+        // now-unreferenced UnresolvedTarget row is GC'd.
+        assert!(
+            graph
+                .calls
+                .contains(&(caller.to_string(), seed_fn.to_string()))
+        );
+        assert!(
+            graph
+                .uses
+                .contains(&(caller.to_string(), seed_struct.to_string()))
+        );
+        assert!(!graph.nodes.contains_key(seed_fn));
+
+        // Still-planned (previous.planned and the delta placeholder) and
+        // genuinely unknown targets stay unresolved.
+        assert!(graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            planned_fn.to_string(),
+            String::new(),
+        )));
+        assert!(
+            graph
+                .unresolved_uses
+                .contains(&(caller_struct.to_string(), planned_struct.to_string()))
+        );
+        assert!(graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            unknown.to_string(),
+            String::new(),
+        )));
+
+        // Only the UnresolvedTarget rows a surviving unresolved edge names
+        // remain; the orphan is gone and the planned placeholder keeps its kind.
+        assert_eq!(graph.nodes[planned_fn].kind, NodeKind::UnresolvedTarget);
+        assert_eq!(graph.nodes[unknown].kind, NodeKind::UnresolvedTarget);
+        assert!(!graph.nodes.contains_key("external.Orphan"));
+        assert_eq!(graph.nodes[planned_struct].kind, NodeKind::Struct);
+        assert_eq!(
+            graph.nodes[planned_struct].status.as_deref(),
+            Some("planned")
+        );
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no
