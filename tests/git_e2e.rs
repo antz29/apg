@@ -1308,6 +1308,90 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Scan-level verdicts for the ignore predicate: the real candidate binary
+    /// (`init` then `scan` on a scratch `/tmp` repo with an isolated HOME),
+    /// asserting on its own `apg/.trans/db.lbug` File rows. A tracked file
+    /// matching an ignore glob stays graphed (Git's ignore rules cover untracked
+    /// content only); an untracked, unignored file stays graphed; an untracked
+    /// ignored file at a non-pruned path is dropped (the verdict-bearing arm —
+    /// a bare `ingest` fixture would pass even if the predicate were inverted);
+    /// and an ignored `target/` tree is dropped through the structural walk's
+    /// own prune (end-to-end composition only).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/isolated HOME/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn scan_keeps_tracked_and_unignored_drops_ignored_files() {
+        let repo = fixture_repo("scan-ignore-verdict");
+        // Isolated HOME with the suite dependency dir pre-created so `apg init`
+        // never shells out to `bun install` and never touches the developer's
+        // real `~/.config/opencode`.
+        let home = std::env::temp_dir().join(format!(
+            "apg-home-{}-scan-ignore-verdict",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+
+        // Commit the file FIRST, then ignore its name: tracked content is
+        // outside Git's ignore rules, so the scan must keep it.
+        repo.write("tracked.md", "# tracked\n");
+        repo.commit_all("track tracked.md");
+        repo.write(
+            ".gitignore",
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\ntracked.md\nbuild-out/\ntarget/\n",
+        );
+        repo.commit_all("ignore tracked.md and build trees");
+
+        // Untracked: unignored (kept), ignored at a non-pruned path (dropped by
+        // the ignore predicate), ignored `target/` tree (dropped by the
+        // structural walk's prune).
+        repo.write("kept.md", "# kept\n");
+        repo.write("build-out/dropped.md", "# dropped\n");
+        repo.write("target/dropped.md", "# dropped\n");
+
+        let home_s = home.to_str().unwrap();
+        let run = |args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&repo.root)
+                .env("HOME", home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                repo.root.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init", "."]);
+        run(&["scan", "."]);
+
+        let db = apg::artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
+        let conn = db.conn().unwrap();
+        let (_, rows) =
+            apg::splice::seed::query_rows(&conn, "MATCH (f:File) RETURN f.fqn").unwrap();
+        let files: Vec<String> = rows.iter().map(|r| apg::splice::seed::cell(r, 0)).collect();
+        assert!(
+            files.iter().any(|f| f == "tracked.md"),
+            "a tracked file matching an ignore glob must stay graphed: {files:?}"
+        );
+        assert!(
+            files.iter().any(|f| f == "kept.md"),
+            "an untracked, unignored file must stay graphed: {files:?}"
+        );
+        assert!(
+            !files.iter().any(|f| f == "build-out/dropped.md"),
+            "an untracked ignored file at a non-pruned path must be dropped: {files:?}"
+        );
+        assert!(
+            !files.iter().any(|f| f == "target/dropped.md"),
+            "an ignored `target/` tree must be dropped: {files:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+        testutil::remove(&repo);
+    }
+
     // ------------------------------------------------------------------
     // Phase-09 task-4: both fail-closed freshness arms are present and cited
     // here — `dead_session_socket_makes_the_graph_unfresh` (a
