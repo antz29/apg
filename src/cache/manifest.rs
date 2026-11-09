@@ -261,7 +261,7 @@ impl Manifest {
                     continue;
                 }
                 let path = String::from_utf8_lossy(&entry.path);
-                if entry.mode == git2::FileMode::Commit as u32 {
+                if entry.mode == u32::from(git2::FileMode::Commit) {
                     // A gitlink is a submodule commit pointer, not blob content:
                     // the old whole-tree walk descended into the submodule
                     // directory and entered its files, so do the same (with the
@@ -274,7 +274,7 @@ impl Manifest {
                 let Some(rel) = scan_rel(&path) else {
                     continue;
                 };
-                if entry.mode == git2::FileMode::Link as u32 {
+                if entry.mode == u32::from(git2::FileMode::Link) {
                     // A symlink's index blob is its target path; the old walk
                     // hashed the target's content through the link.
                     if let Some(oid) = blob_oid_of_file(&workdir.join(&*path)) {
