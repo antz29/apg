@@ -770,6 +770,133 @@ mod unit {
             Some("planned")
         );
     }
+
+    /// phase-01 task-12: [`finalize_delta_graph`] keeps the code-targeted
+    /// authored edges — a Note's `details`, a Feedback's `reviews` and a
+    /// Component's `spec_implemented_by` — when their far endpoint has no node
+    /// in the delta graph but lives in the pre-scan universe (`previous.scanned`
+    /// ∪ `previous.planned`), resolving that absent target's kind from
+    /// [`PreviousScan::kinds`]; an edge whose target is in neither universe is
+    /// still dropped.
+    ///
+    /// Pure in-memory: the graph and the previous-scan snapshot are built by
+    /// hand, and the finalizer is the one unit under test.
+    #[test]
+    fn finalize_delta_graph_retains_seed_only_authored_code_edges() {
+        let note = "implementation.note.seed-details";
+        let feedback = "scan-perf-w3-delta-graph/plan.phase-01.task-12";
+        let component = "solution.component.seed-implemented-by";
+        let delta_file = "rust.apg.delta_file";
+        let seed_struct = "rust.apg.seed_only_struct";
+        let seed_fn = "rust.apg.seed_only_fn";
+        let planned_file = "rust.apg.planned_file";
+        let gone = "rust.apg.gone";
+        let real = |kind| Node {
+            kind,
+            ..Node::default()
+        };
+
+        // The delta graph carries the authored/transient edge sources plus the
+        // changed file's own File node — but no node for any seed-only or
+        // plan-declared code target.
+        let mut graph = Graph::default();
+        for (fqn, kind) in [
+            (note, NodeKind::Note),
+            (feedback, NodeKind::Feedback),
+            (component, NodeKind::Component),
+            (delta_file, NodeKind::File),
+        ] {
+            graph.nodes.insert(fqn.to_string(), real(kind));
+        }
+
+        for to in [seed_struct, delta_file, gone] {
+            graph.details.insert((note.to_string(), to.to_string()));
+        }
+        for to in [seed_fn, planned_file, gone] {
+            graph.reviews.insert((feedback.to_string(), to.to_string()));
+        }
+        for to in [seed_struct, planned_file, gone] {
+            graph
+                .spec_implemented_by
+                .insert((component.to_string(), to.to_string()));
+        }
+
+        let previous = PreviousScan {
+            scanned: [seed_struct, seed_fn]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            planned: [planned_file].into_iter().map(str::to_string).collect(),
+            kinds: [
+                (seed_struct, "struct"),
+                (seed_fn, "function"),
+                (planned_file, "file"),
+            ]
+            .into_iter()
+            .map(|(fqn, kind)| (fqn.to_string(), kind.to_string()))
+            .collect(),
+            agents: Vec::new(),
+        };
+
+        finalize_delta_graph(&mut graph, Some(&previous));
+
+        // No real node exists for the seed-only targets, so a kept edge proves
+        // the target kind came from the captured snapshot.
+        assert!(!graph.nodes.contains_key(seed_struct));
+        assert!(!graph.nodes.contains_key(seed_fn));
+
+        // A `details` edge keeps its seed-only and in-delta targets.
+        assert!(
+            graph
+                .details
+                .contains(&(note.to_string(), seed_struct.to_string()))
+        );
+        assert!(
+            graph
+                .details
+                .contains(&(note.to_string(), delta_file.to_string()))
+        );
+        // A `reviews` edge keeps a seed-only and a plan-declared target.
+        assert!(
+            graph
+                .reviews
+                .contains(&(feedback.to_string(), seed_fn.to_string()))
+        );
+        assert!(
+            graph
+                .reviews
+                .contains(&(feedback.to_string(), planned_file.to_string()))
+        );
+        // `spec_implemented_by` keeps the snapshot `struct`/`file` kinds that
+        // pair with the Component→code relation.
+        assert!(
+            graph
+                .spec_implemented_by
+                .contains(&(component.to_string(), seed_struct.to_string()))
+        );
+        assert!(
+            graph
+                .spec_implemented_by
+                .contains(&(component.to_string(), planned_file.to_string()))
+        );
+
+        // A target in neither universe drops the edge from every table.
+        assert!(
+            !graph
+                .details
+                .contains(&(note.to_string(), gone.to_string()))
+        );
+        assert!(
+            !graph
+                .reviews
+                .contains(&(feedback.to_string(), gone.to_string()))
+        );
+        assert!(
+            !graph
+                .spec_implemented_by
+                .contains(&(component.to_string(), gone.to_string()))
+        );
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no
