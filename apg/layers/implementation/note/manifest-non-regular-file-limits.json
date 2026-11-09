@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "manifest-non-regular-file-limits",
+  "body": "Index keying preserves symlinks (content hashed through the link) and gitlinks (submodule directory walked), but two whole-tree cases do not reproduce: a tracked symlink to a directory is dropped because blob_oid_of_file yields None where the whole-tree walk followed it, and a content filter such as core.autocrlf makes a tracked file's index OID differ from its raw worktree bytes. Upgrade when a repo with symlinked directories or content filters must match the whole-tree manifest exactly.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.manifest.Manifest.build",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

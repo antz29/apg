@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cache-e2e-symlink-unix-only",
+  "body": "The manifest-equality fixture creates its symlink with std::os::unix::fs::symlink, so the test is Unix-only; upgrade with std::os::windows::fs::symlink_file when Windows becomes a build target.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cache_e2e.e2e.manifest_build_matches_walk_files_over_full_fixture_shape",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
