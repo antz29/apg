@@ -5466,4 +5466,229 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Phase-01 task-14 (e2e): an UNCHANGED authored spec that targets
+    /// SEED-ONLY code must survive the target-only delta splice, with no full
+    /// load.
+    ///
+    /// A scratch /tmp Go repo carries a `Note` whose `details` edge and a
+    /// `Component` whose `implemented-by` edge both name `go.scratch/b.Foo` —
+    /// a real Function the delta scan does NOT target (the edit touches
+    /// `a/a.go` only). The fixture first full-scans the tree so the seed
+    /// `db.lbug` records both authored/transient nodes AND their code-targeted
+    /// edges. The one-file body edit then re-ingests the unchanged spec into a
+    /// delta graph that carries no node for `b.Foo`; the captured
+    /// `PreviousScan.kinds` resolves that absent target's kind, so the assembled
+    /// authored digest equals the seed's own digest and `seed_checked` accepts
+    /// it — the winner's `[load] splice: … full load skipped` line replaces the
+    /// parquet load. The published `db.lbug` must still carry every
+    /// authored→seed-only-code edge, exactly as a `--force` full rebuild of the
+    /// same tree does.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real Go frontend scan, real
+    /// `db.lbug` files and a real git checkout are real I/O, so this is
+    /// `#[ignore]`d e2e (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/go frontend/db.lbug/git); run via cargo test-e2e"]
+    fn delta_retains_authored_code_target_edges_without_a_full_load() {
+        use apg::testutil::{ApgCommand, Repo};
+
+        /// The seed-only Function the authored edges name: the Go module is
+        /// `scratch` and `Foo` lives in package `b`, so the module FQN is
+        /// `go.scratch/b`.
+        const TARGET: &str = "go.scratch/b.Foo";
+        const NOTE: &str = "implementation.note.foo-note";
+        const COMPONENT: &str = "solution.component.foo-cmp";
+
+        /// One `apg` invocation in `dir` with an isolated `HOME`; fails loudly on
+        /// a non-zero exit.
+        fn apg_cli(dir: &Path, home: &str, args: &[&str]) -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", home).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        /// `apg scan .` (plus `extra`) in `dir`; returns its stderr log (the
+        /// `[load]` decision lines).
+        fn scan_log(dir: &Path, home: &str, extra: &[&str]) -> String {
+            let mut args = vec!["scan", "."];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_cli(dir, home, &args).stderr).into_owned()
+        }
+
+        /// True only when the splice published: the success line ends in
+        /// `full load skipped` (the fallbacks also print `[load] splice:`).
+        fn spliced(log: &str) -> bool {
+            log.contains("full load skipped")
+        }
+
+        /// The JSON rows of one `apg query`.
+        fn query_json(dir: &Path, home: &str, cypher: &str) -> Vec<serde_json::Value> {
+            let out = apg_cli(dir, home, &["query", "--json", cypher]);
+            serde_json::from_slice(&out.stdout).expect("json rows")
+        }
+
+        /// The DB's authored→seed-only-code edge rows for one rel table, as
+        /// sorted `(from, to)` pairs.
+        fn edge_rows(
+            dir: &Path,
+            home: &str,
+            source_label: &str,
+            table: &str,
+        ) -> BTreeSet<(String, String)> {
+            let cypher = format!(
+                "MATCH (a:{source_label})-[:{table}]->(b:Function) \
+                 RETURN a.fqn AS a, b.fqn AS b"
+            );
+            query_json(dir, home, &cypher)
+                .iter()
+                .map(|r| {
+                    (
+                        r["a"].as_str().unwrap().to_string(),
+                        r["b"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        }
+
+        let repo = Repo::new("delta-authored-code-target");
+        // The isolated HOME lives outside the scanned repo (suite install).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-delta-authored-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A Go module: `a.Leaf` is the file the edit touches; `b.Foo` is the
+        // unchanged seed-only code the authored edges target.
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf is the edited leaf.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.write(
+            "b/b.go",
+            "package b\n\n// Foo is the untouched seed-only target.\nfunc Foo() int { return 2 }\n",
+        );
+
+        // The unchanged spec: an implementation-layer Note `details` and a
+        // solution Component `implemented-by` both naming the seed-only
+        // `b.Foo`. Code endpoints have no node file, so each edge carries only
+        // its spec-side half.
+        let apg_root = repo.apg_root();
+        let mut note = apg::testutil::node("implementation", "note", "foo-note");
+        note.body = "the note that details the seed-only target".to_string();
+        note.out = vec![apg::testutil::out_edge("details", TARGET)];
+        apg::layers::write_node(&apg_root, &note).unwrap();
+
+        let mut comp = apg::testutil::node("solution", "component", "foo-cmp");
+        comp.body = "the component that implements the seed-only target".to_string();
+        comp.out = vec![apg::testutil::out_edge("implemented-by", TARGET)];
+        apg::layers::write_node(&apg_root, &comp).unwrap();
+        repo.commit_all("source plus the unchanged authored spec");
+
+        // (1) Cold full scan: the seed DB carries the authored rows AND their
+        // edges onto the real `b.Foo` code row.
+        let cold_log = scan_log(&repo.root, &home_s, &[]);
+        assert!(
+            cold_log.contains("[load] writing parquet load files"),
+            "the cold scan must full-load: {cold_log}"
+        );
+        assert!(
+            !spliced(&cold_log),
+            "the cold scan has no seed to splice: {cold_log}"
+        );
+        let expected_details: BTreeSet<(String, String)> = [(NOTE.to_string(), TARGET.to_string())]
+            .into_iter()
+            .collect();
+        let expected_implemented: BTreeSet<(String, String)> =
+            [(COMPONENT.to_string(), TARGET.to_string())]
+                .into_iter()
+                .collect();
+        assert_eq!(
+            edge_rows(&repo.root, &home_s, "Note", "Details"),
+            expected_details,
+            "the seed must project the `Details` edge onto the seed-only `b.Foo`"
+        );
+        assert_eq!(
+            edge_rows(&repo.root, &home_s, "Component", "SpecImplementedBy"),
+            expected_implemented,
+            "the seed must project the `SpecImplementedBy` edge onto the seed-only `b.Foo`"
+        );
+
+        // (2) A ONE-FILE body edit to `a/a.go`: `b/b.go` and the authored spec
+        // are unchanged, so the target-only delta graph has no node for `b.Foo`.
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf is the edited leaf.\nfunc Leaf() int { return 42 }\n",
+        );
+        let inc_log = scan_log(&repo.root, &home_s, &[]);
+        assert!(
+            spliced(&inc_log),
+            "the assembled authored digest must equal the seed's own (resolved \
+             through the captured previous kinds) so `seed_checked` accepts it: {inc_log}"
+        );
+        assert!(
+            !inc_log.contains("[load] writing parquet load files"),
+            "the splice log line must replace the parquet load: {inc_log}"
+        );
+
+        // (3) The published DB still carries every authored→seed-only-code edge
+        // and the seed-only code row itself.
+        assert_eq!(
+            edge_rows(&repo.root, &home_s, "Note", "Details"),
+            expected_details,
+            "the splice must retain the `Details` edge onto seed-only code"
+        );
+        assert_eq!(
+            edge_rows(&repo.root, &home_s, "Component", "SpecImplementedBy"),
+            expected_implemented,
+            "the splice must retain the `SpecImplementedBy` edge onto seed-only code"
+        );
+        let surviving = query_json(
+            &repo.root,
+            &home_s,
+            &format!("MATCH (n:Function {{fqn: '{TARGET}'}}) RETURN n.fqn AS fqn"),
+        );
+        assert_eq!(
+            surviving.len(),
+            1,
+            "the seed-only target row must survive the splice"
+        );
+
+        // (4) The full-rebuild reference: `--force` on the SAME tree carries
+        // exactly the same authored→seed-only-code rows.
+        let force_log = scan_log(&repo.root, &home_s, &["--force"]);
+        assert!(
+            !spliced(&force_log),
+            "--force must full-rebuild, not splice: {force_log}"
+        );
+        assert!(
+            force_log.contains("[load] writing parquet load files"),
+            "--force must run the full load: {force_log}"
+        );
+        assert_eq!(
+            edge_rows(&repo.root, &home_s, "Note", "Details"),
+            expected_details,
+            "the spliced `Details` rows must equal a full rebuild's"
+        );
+        assert_eq!(
+            edge_rows(&repo.root, &home_s, "Component", "SpecImplementedBy"),
+            expected_implemented,
+            "the spliced `SpecImplementedBy` rows must equal a full rebuild's"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
