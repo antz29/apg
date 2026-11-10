@@ -31,7 +31,8 @@ pub enum CodeRefStatus {
 /// ids (`ts` and `js` are the unified JS/TS frontend's two ids; a JS-only repo
 /// scans under `js`), `agent` (the agent-definition frontend's id, whose code
 /// FQNs are `agent.<file-stem>`), and the bundled structural scanner's stream
-/// ids (`md` plus the per-format structural streams and the residual `misc`).
+/// ids (`md` plus the per-format structural streams — `sln` among them, the
+/// .NET solution-file stream — and the residual `misc`).
 /// Used both to resolve an authored code reference against the scanned universe
 /// tolerantly (see [`resolves_in_scanned`]) and as the complete vocabulary an
 /// `applies-to` target may name.
@@ -39,7 +40,7 @@ pub enum CodeRefStatus {
 /// This literal mirrors [`crate::frontends::STRUCTURAL_LANGUAGES`] plus the
 /// code/agent ids; a `const` array cannot concatenate that slice, so the ids
 /// are repeated here and the two lists must move together.
-pub const LANGUAGE_ROOTS: [&str; 20] = [
+pub const LANGUAGE_ROOTS: [&str; 21] = [
     "rust",
     "java",
     "go",
@@ -59,6 +60,7 @@ pub const LANGUAGE_ROOTS: [&str; 20] = [
     "dockerfile",
     "makefile",
     "ini",
+    "sln",
     "misc",
 ];
 
