@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delta-every-table-oracle-canonicalises-properties",
+  "body": "The every-table oracle canonicalises the rel properties column (decode then re-encode) because the splice's batched code-rel MERGE leaves the empty column where a full load writes {}, and both decode to the empty map per layers::properties_from_json; every other column of every row is compared raw. Upgrade by setting r.properties to the empty map in apply's step-6 rel re-merge and dropping the normalisation if raw-column identity is required.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.delta_graph_application_equals_a_full_rebuild_on_every_table",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

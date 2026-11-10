@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "fallback-e2e-oracle-normalises-scanned-at",
+  "body": "The every-table oracle normalises the Scan row's wall-clock scanned_at before comparing two independent full assemblies; upgrade if the Scan row gains another per-run value or a deterministic-timestamp contract lands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.mid_sequence_dml_failure_falls_back_to_the_full_load",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
