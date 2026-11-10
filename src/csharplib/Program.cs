@@ -291,7 +291,7 @@ public class Scanner
         var files = new SourceDiscovery(_moduleDirs, _excludePatterns).DiscoverFiles(_rootDir).ToList();
         if (files.Count == 0)
         {
-            Console.Error.WriteLine("No .cs files found to scan.");
+            Console.Error.WriteLine("No .cs, .csx, .cshtml or .razor files found to scan.");
             return;
         }
 
@@ -301,7 +301,7 @@ public class Scanner
         // metadata references. The compilation always covers the FULL file
         // set: the target set filters emission, not resolution, so a target
         // file's references resolve exactly.
-        var syntaxTrees = CompilationLoader.ParseTrees(files, out _);
+        var syntaxTrees = CompilationLoader.ParseTrees(files, out List<string> heldBack);
         var compilation = CompilationLoader.CreateCompilation(syntaxTrees);
 
         // An all-targets request (every discovered file selected) is the full
@@ -329,6 +329,15 @@ public class Scanner
         foreach (var (tree, model, root) in unitModels)
         {
             declarations.EmitFileAndDeclarations(tree, model, root, emit: !filtered || IsTargetFile(tree.FilePath));
+        }
+
+        // Held-back .cshtml/.razor files stay graphed as file-only nodes (no
+        // namespace, so the root parent a namespace-less .cs file gets).
+        foreach (var path in heldBack)
+        {
+            if (filtered && !IsTargetFile(path)) continue;
+            var text = Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(path, Encoding.UTF8));
+            JsonlWriter.Write(new FileMsg { Path = path, Parent = "", StartLine = 1, EndLine = Math.Max(1, text.Lines.Count) });
         }
 
         // Pass 2: Semantic walk for edges (calls & uses) — target files only
