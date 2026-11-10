@@ -15,10 +15,21 @@ internal static class RazorCompiler
     /// references, so nothing reads a loaded assembly's file path — it runs
     /// inside the single-file publish.
     /// </summary>
-    public static RazorProjectEngine CreateProjectEngine(string root)
+    public static RazorProjectEngine CreateProjectEngine()
     {
         var configuration = RazorConfiguration.Create(RazorLanguageVersion.Version_6_0, "MVC-3.0", Array.Empty<RazorExtension>());
-        return RazorProjectEngine.Create(configuration, RazorProjectFileSystem.Create(root), RazorExtensions.Register);
+        return RazorProjectEngine.Create(configuration, new InMemoryFileSystem(), RazorExtensions.Register);
+    }
+
+    /// <summary>
+    /// An empty project file system, so the engine never reads the disk;
+    /// sources are handed to it directly.
+    /// </summary>
+    private sealed class InMemoryFileSystem : RazorProjectFileSystem
+    {
+        public override IEnumerable<RazorProjectItem> EnumerateItems(string basePath) => Array.Empty<RazorProjectItem>();
+        public override RazorProjectItem GetItem(string path) => new NotFoundItem(path, null);
+        public override RazorProjectItem GetItem(string path, string? fileKind) => new NotFoundItem(path, fileKind);
     }
 
     /// <summary>
