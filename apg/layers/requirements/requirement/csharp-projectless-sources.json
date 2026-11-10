@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-projectless-sources",
-  "body": "A C# file outside every project is scanned in one projectless compilation whose declarations root at the csharp language root, so every claimed C# file is graphed in a tree with or without project files.",
+  "body": "A C# file outside every project is scanned in one projectless compilation whose declarations root at the csharp language root, so every claimed C# file is graphed, including in a tree holding zero project files.",
   "properties": {
     "feature": "csharp-projects"
   },
