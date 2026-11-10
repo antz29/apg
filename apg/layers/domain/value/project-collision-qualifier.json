@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "project-collision-qualifier",
-  "body": "The project module identity, one whole segment never split at its dots, that places a project's member of a type group sharing one namespace-based FQN under module csharp.<project-id>.<Namespace> inside the project module.",
+  "body": "The project module identity, kept whole as one dotted segment, that places a project's member of a type group sharing one namespace-based FQN under module csharp.<project-id>.<Namespace> inside the project module.",
   "properties": {},
   "out": [],
   "in": [
