@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc.Razor.Extensions;
 using Microsoft.AspNetCore.Razor.Language;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Apg.CsharpFrontend;
 
@@ -19,6 +21,24 @@ internal static class RazorCompiler
     {
         var configuration = RazorConfiguration.Create(RazorLanguageVersion.Version_6_0, "MVC-3.0", Array.Empty<RazorExtension>());
         return RazorProjectEngine.Create(configuration, new InMemoryFileSystem(), RazorExtensions.Register);
+    }
+
+    /// <summary>
+    /// Compiles one <c>.cshtml</c> (MVC view) or <c>.razor</c> (component)
+    /// file's in-memory <paramref name="text"/> to a generated-C# syntax tree
+    /// whose <c>#line</c> directives name <paramref name="filePath"/>, so
+    /// <see cref="RazorSourceMap.MapSpan"/> maps its declarations back to it.
+    /// Throws <see cref="InvalidOperationException"/> on any Razor error.
+    /// </summary>
+    public static SyntaxTree Compile(RazorProjectEngine engine, string filePath, string text)
+    {
+        var source = RazorSourceDocument.Create(text, new RazorSourceDocumentProperties(filePath, Path.GetFileName(filePath)));
+        var csharp = engine.Process(source, FileKinds.GetFileKindFromFilePath(filePath), Array.Empty<RazorSourceDocument>(), Array.Empty<TagHelperDescriptor>())
+            .GetCSharpDocument();
+        var errors = csharp.Diagnostics.Where(d => d.Severity == RazorDiagnosticSeverity.Error).ToList();
+        if (errors.Count > 0)
+            throw new InvalidOperationException($"Razor compile failed for {filePath}: {string.Join("; ", errors)}");
+        return CSharpSyntaxTree.ParseText(csharp.GeneratedCode, new CSharpParseOptions(LanguageVersion.Latest), filePath + ".g.cs");
     }
 
     /// <summary>
