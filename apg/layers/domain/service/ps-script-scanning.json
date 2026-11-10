@@ -32,6 +32,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-overload-signature",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-script-body",
       "properties": {}
     },

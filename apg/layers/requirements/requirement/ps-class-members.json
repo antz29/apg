@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-class-members",
-  "body": "A class method is a Function contained by its class Struct, a constructor is its Function named new, and overloaded methods or constructors take the overloaded FQN form of their parameter types.",
+  "body": "A class method is a Function contained by its class Struct, a constructor is its Function named new, and every member of a class's same-name group of two or more renders the overloaded FQN form with its comma-separated parameter types.",
   "properties": {
     "feature": "ps-frontend"
   },
