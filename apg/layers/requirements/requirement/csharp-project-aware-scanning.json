@@ -64,6 +64,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-projectless-files",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.csharp-razor-root-namespace",
       "properties": {}
     },

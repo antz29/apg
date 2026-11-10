@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "csharp-razor-compilation",
-  "body": "The capability that compiles each Razor view, page and component to C# within its owning project and locates every fact it yields in the Razor file's own lines.",
+  "body": "The capability that compiles each Razor view, page and component to C# within its owning project's compilation, or the projectless compilation, and locates every fact it yields in the Razor file's own lines.",
   "properties": {},
   "out": [
     {
@@ -18,6 +18,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.csharp-razor-mvc5-views",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-projectless-files",
       "properties": {}
     },
     {

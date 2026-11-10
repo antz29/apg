@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-razor-root-namespace",
-  "body": "Razor-generated types take the owning project's RootNamespace, else its project name, as their root namespace, and a `@namespace` directive overrides it.",
+  "body": "Razor-generated types take the owning project's RootNamespace, else its project name, else for a projectless Razor file the global namespace, as their root namespace, and a `@namespace` directive overrides it.",
   "properties": {
     "feature": "csharp-projects"
   },

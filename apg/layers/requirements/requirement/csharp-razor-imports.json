@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-razor-imports",
-  "body": "Razor compilation applies every `_ViewImports.cshtml` and `_Imports.razor` in a Razor file's directory and its ancestor directories within the owning project.",
+  "body": "Razor compilation applies every `_ViewImports.cshtml` and `_Imports.razor` in a Razor file's directory and its ancestor directories within the owning project, or up to the scan root for a projectless Razor file.",
   "properties": {
     "feature": "csharp-projects"
   },
