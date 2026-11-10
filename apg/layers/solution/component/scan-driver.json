@@ -47,6 +47,16 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.ingest.resolve_unresolved_edges",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.tests.unit.resolve_unresolved_edges_partition_is_linear",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.main",
       "properties": {}
     },

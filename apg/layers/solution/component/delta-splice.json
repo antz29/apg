@@ -16,6 +16,16 @@
       "properties": {}
     },
     {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.unresolved",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.unresolved.resolve_delta_unresolved",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}
