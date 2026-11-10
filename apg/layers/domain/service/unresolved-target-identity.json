@@ -12,11 +12,6 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.sql-external-target-identity",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.unresolved-target-category-follows-its-identity",
       "properties": {}
     },
