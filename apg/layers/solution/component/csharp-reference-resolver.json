@@ -1,0 +1,46 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "csharp-reference-resolver",
+  "body": "The C# reference resolver: metadata references read from assets files, hint paths, `packages/` folders, the global packages folder and framework reference assemblies, and the unresolved-target naming and categories.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.GetDefaultMetadataReferences",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitUnresolvedCall",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitUnresolvedNode",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.UnresolvedClassifier.ClassifyCategory",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.csharp-reference-resolution",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.csharp-frontend",
+      "properties": {}
+    }
+  ]
+}

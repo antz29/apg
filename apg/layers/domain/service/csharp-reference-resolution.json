@@ -1,0 +1,46 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "csharp-reference-resolution",
+  "body": "The capability that resolves each project's package, assembly and framework references from locally restored artefacts and names every reference lacking local metadata as an unresolved target.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-framework-reference-assemblies",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-restored-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-unresolvable-reference-target",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.dotnet-project",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.restored-reference-artefact",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.csharp-reference-resolver",
+      "properties": {}
+    }
+  ]
+}

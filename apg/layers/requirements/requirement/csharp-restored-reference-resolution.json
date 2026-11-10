@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-restored-reference-resolution",
+  "body": "A package or assembly reference resolves from locally restored artefacts: the project's `obj/project.assets.json`, a reference hint path or solution `packages/` folder, and the local NuGet global packages folder, in that order.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

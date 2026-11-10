@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-solution-project-discovery",
+  "body": "The C# frontend reads every `.sln` and every SDK-style and .NET Framework-style `.csproj` in the scanned tree, taking each project's sources, project references, package references and assembly references from its project file.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-loading",
+      "properties": {}
+    }
+  ]
+}

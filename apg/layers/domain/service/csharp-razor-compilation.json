@@ -1,0 +1,36 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "csharp-razor-compilation",
+  "body": "The capability that compiles each Razor view, page and component to C# within its owning project and locates every fact it yields in the Razor file's own lines.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-source-mapping",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-views",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.razor-source",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.csharp-razor-compiler",
+      "properties": {}
+    }
+  ]
+}

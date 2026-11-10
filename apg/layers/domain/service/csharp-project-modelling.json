@@ -1,0 +1,46 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "csharp-project-modelling",
+  "body": "The capability that models each solution and project as a module level of the graph, roots every declaration under its owning project, and gives each source file one owner.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-project-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-shared-source-single-owner",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-solution-module",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.dotnet-project",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.dotnet-solution",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.csharp-module-emitter",
+      "properties": {}
+    }
+  ]
+}

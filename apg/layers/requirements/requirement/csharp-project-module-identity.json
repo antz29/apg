@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-project-module-identity",
+  "body": "Each C# project is a module whose identity derives from its project file's repository-relative path, and every declaration the project compiles is rooted under that project module.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-modelling",
+      "properties": {}
+    }
+  ]
+}

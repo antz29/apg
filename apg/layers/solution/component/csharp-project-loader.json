@@ -1,0 +1,51 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "csharp-project-loader",
+  "body": "The C# project loader: source discovery, static solution and project-file reading, and one Roslyn compilation per project plus the projectless compilation, each with its parse options and project references.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.BuildModels",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.CreateCompilation",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.ParseTrees",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.SourceDiscovery.DiscoverFiles",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.SourceDiscovery.IsExcluded",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.csharp-project-loading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.csharp-frontend",
+      "properties": {}
+    }
+  ]
+}

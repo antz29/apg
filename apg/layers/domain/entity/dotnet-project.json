@@ -1,0 +1,32 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "dotnet-project",
+  "body": "An SDK-style or .NET Framework-style `.csproj` declaring its sources, target frameworks, preprocessor symbols, language version and project, package and assembly references, compiled as one unit.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-project-loading",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-project-modelling",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

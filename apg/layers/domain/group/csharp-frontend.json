@@ -1,0 +1,57 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "csharp-frontend",
+  "body": "The C# source-scanning subdomain: the solutions and projects of a .NET tree, their locally restored references, their Razor files, and the C# claim shared across the scan.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.dotnet-project",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.dotnet-solution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.razor-source",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.restored-reference-artefact",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.csharp-project-loading",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.csharp-project-modelling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.csharp-razor-compilation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.csharp-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.csharp-source-classification",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

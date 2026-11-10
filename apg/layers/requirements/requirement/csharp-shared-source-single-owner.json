@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-shared-source-single-owner",
+  "body": "A source file several projects compile is emitted once, under the project whose directory contains it or else the first such project in path order, and every project's references to its declarations resolve to that identity.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-modelling",
+      "properties": {}
+    }
+  ]
+}

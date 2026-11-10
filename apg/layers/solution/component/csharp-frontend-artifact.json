@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "csharp-frontend-artifact",
-  "body": "The C# frontend artifact's implementation: the Roslyn-based scanner binary that parses C# sources with Microsoft.CodeAnalysis.CSharp and streams their declarations.",
+  "body": "The C# frontend artifact's implementation: the Roslyn-based csharpfrontend binary that loads a .NET tree's solutions, projects and Razor files and streams their declarations and edges.",
   "properties": {},
   "out": [
     {

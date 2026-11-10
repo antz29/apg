@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-extension-claim-agreement",
+  "body": "Language detection, the incremental language map, the C# frontend and the structural scanner share one csharp claim of `.cs`, `.csx`, `.cshtml` and `.razor`, the C# frontend parsing `.csx` as a C# script.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-source-classification",
+      "properties": {}
+    }
+  ]
+}

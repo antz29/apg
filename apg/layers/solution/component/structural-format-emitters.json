@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "rust.structfrontend.formats.xml.emit_xml",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.structfrontend.lines.line_count",
       "properties": {}
     },

@@ -21,18 +21,28 @@
       "properties": {}
     },
     {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.discovery.stream_for_path",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.discovery.walk",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.structural-module",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.structural-file-graphing",
+      "target": "domain.service.csharp-source-classification",
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "rust.structfrontend.discovery.walk",
+      "kind": "realises",
+      "target": "domain.service.structural-file-graphing",
       "properties": {}
     }
   ],

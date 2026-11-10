@@ -1,0 +1,103 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-project-aware-scanning",
+  "body": "A .NET repository reaches the program graph as one compilation per C# project, with its solutions and projects as modules, its Razor files compiled and scanned, and its MSBuild and solution files graphed structurally.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-extension-claim-agreement",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-framework-reference-assemblies",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-multi-target-first-framework",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-per-project-compilation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-project-fixture-tests",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-project-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-projectless-sources",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-source-mapping",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-views",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-restored-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-shared-source-single-owner",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-solution-module",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-solution-project-discovery",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-unresolvable-reference-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.dotnet-msbuild-xml-stream",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.dotnet-solution-file-stream",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-loading",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.dotnet-codebase-owner",
+      "properties": {}
+    }
+  ]
+}

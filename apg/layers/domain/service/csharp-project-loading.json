@@ -1,0 +1,61 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "csharp-project-loading",
+  "body": "The capability that reads a .NET tree's solutions and projects into one compilation per project, with its sources, symbols, language version, target framework and project references.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-multi-target-first-framework",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-per-project-compilation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-project-fixture-tests",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-projectless-sources",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-solution-project-discovery",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.dotnet-project",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.dotnet-solution",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.csharp-project-loader",
+      "properties": {}
+    }
+  ]
+}

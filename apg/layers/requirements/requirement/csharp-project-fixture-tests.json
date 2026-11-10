@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-project-fixture-tests",
+  "body": "The C# frontend's tests scan fixture solutions holding SDK-style and packages.config projects, a project reference, a shared file, a Razor view, a Blazor component and an unrestored package, asserting each graph shape.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-loading",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "dotnet-codebase-owner",
+  "body": "A person who scans a Microsoft .NET estate of solutions, SDK-style and .NET Framework C# projects, ASP.NET views and Blazor components, and reads its projects, calls and dependencies from the program graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

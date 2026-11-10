@@ -1,0 +1,27 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "razor-source",
+  "body": "A `.cshtml` MVC view or Razor Page, or a `.razor` Blazor component, owned by one C# project and compiled to C# whose spans map back to the Razor file.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-razor-compilation",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-source-classification",
+      "properties": {}
+    }
+  ]
+}

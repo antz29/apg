@@ -7,17 +7,17 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.dotnet-msbuild-xml-stream",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.dotnet-solution-file-stream",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.every-tracked-file-graphed",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.structural-file-graphing",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.structural-format-scope-config",
       "properties": {}
     },
     {
@@ -27,17 +27,27 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.no-new-scan-time-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-file-graphing",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.structural-format-claiming",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.structural-format-structure",
+      "target": "requirements.requirement.structural-format-scope-config",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.no-new-scan-time-deps",
+      "target": "requirements.requirement.structural-format-structure",
       "properties": {}
     },
     {
@@ -54,7 +64,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.structural-scanner-crate",
+      "source": "solution.component.structural-build-staging",
       "properties": {}
     },
     {
@@ -64,17 +74,17 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.structural-stream-dispatch",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.structural-build-staging",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
       "source": "solution.component.structural-format-emitters",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-scanner-crate",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-stream-dispatch",
       "properties": {}
     }
   ]

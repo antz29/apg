@@ -1,0 +1,27 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "dotnet-solution",
+  "body": "A `.sln` file naming a set of C# projects, modelled as a module containing each listed project's module.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-project-loading",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-project-modelling",
+      "properties": {}
+    }
+  ]
+}

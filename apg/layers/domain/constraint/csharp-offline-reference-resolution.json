@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "csharp-offline-reference-resolution",
+  "body": "The C# frontend resolves references only from artefacts already on disk: a scan runs MSBuild, dotnet and NuGet zero times, opens zero network connections, and records each reference it cannot resolve locally as an unresolved target rather than a guessed one.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

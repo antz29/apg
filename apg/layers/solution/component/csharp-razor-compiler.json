@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "csharp-razor-compiler",
+  "body": "The C# frontend's Razor stage: `.cshtml` and `.razor` files compiled to C# in their owning project, and file and declaration emission that locates each generated fact at its Razor file line span.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitFileAndDeclarations",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.csharp-razor-compilation",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.csharp-frontend",
+      "properties": {}
+    }
+  ]
+}

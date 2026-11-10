@@ -1,0 +1,36 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "csharp-source-classification",
+  "body": "The capability that claims C# sources, scripts and Razor files for the csharp language identically across detection, the incremental language map, the C# frontend and the structural scanner.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-extension-claim-agreement",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.razor-source",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-claim-map",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-claiming",
+      "properties": {}
+    }
+  ]
+}

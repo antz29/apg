@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "dotnet-solution-file-stream",
+  "body": "The structural scanner claims `.sln` files in its sln stream under the sln language id, emitting one struct per Project entry and per GlobalSection, each at its line span.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.structural-file-graphing",
+      "properties": {}
+    }
+  ]
+}

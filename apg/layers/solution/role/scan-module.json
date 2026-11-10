@@ -100,6 +100,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.language-claim-map",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.library-surface",
       "properties": {}
     },

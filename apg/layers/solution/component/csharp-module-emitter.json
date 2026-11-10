@@ -1,0 +1,46 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "csharp-module-emitter",
+  "body": "The C# module emitter: the solution, project and namespace module records with their containment, and the canonical project-rooted naming of every declaration and endpoint.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitModuleHierarchy",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.Scanner.CanonicalFqn",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.SymbolNaming.GetFullFqn",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.SymbolNaming.GetParentScopeFqn",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.csharp-project-modelling",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.csharp-frontend",
+      "properties": {}
+    }
+  ]
+}

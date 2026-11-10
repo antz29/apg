@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-framework-reference-assemblies",
+  "body": "A project's framework references resolve from reference assemblies for its target framework present on the scanning machine, and otherwise from the runtime library the C# frontend carries.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

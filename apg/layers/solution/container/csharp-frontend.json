@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "csharp-frontend",
-  "body": "The C# frontend artifact: build-time a .NET SDK plus NuGet, zero scan-time tools, and an engine pin of Roslyn Microsoft.CodeAnalysis.CSharp 4.12.0 at its latest language version.",
+  "body": "The C# frontend artifact: build-time a .NET SDK plus NuGet, zero scan-time tools with references read from locally restored artefacts, and an engine pin of Roslyn Microsoft.CodeAnalysis.CSharp 4.12.0 at its latest language version.",
   "properties": {
     "kind": "app"
   },
@@ -10,6 +10,26 @@
     {
       "kind": "contains",
       "target": "solution.component.csharp-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.csharp-module-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.csharp-project-loader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.csharp-razor-compiler",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.csharp-reference-resolver",
       "properties": {}
     },
     {

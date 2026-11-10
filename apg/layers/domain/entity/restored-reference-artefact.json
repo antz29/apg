@@ -1,0 +1,22 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "restored-reference-artefact",
+  "body": "A locally present source of reference metadata: a project assets file, a hint path or `packages/` folder assembly, a global packages folder entry, or framework reference assemblies.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.csharp-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

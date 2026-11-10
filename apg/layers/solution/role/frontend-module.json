@@ -15,12 +15,57 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.cobol-call-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-dialect-table",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.cobol-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.cpp-frontend-artifact",
       "properties": {}
     },
     {
       "kind": "is-role",
       "source": "solution.component.csharp-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.csharp-module-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.csharp-project-loader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.csharp-razor-compiler",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.csharp-reference-resolver",
       "properties": {}
     },
     {
@@ -56,31 +101,6 @@
     {
       "kind": "is-role",
       "source": "solution.component.ts-unresolved-target-identity",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-source-reader",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-call-resolver",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-dialect-table",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-fact-emitter",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.cobol-test-suite",
       "properties": {}
     }
   ]
