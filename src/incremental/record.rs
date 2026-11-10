@@ -88,7 +88,17 @@ pub fn record(
     }
     .save(store_root)?;
 
-    // The portable indexes.
-    State::from_graph(graph, scan_root).save(store_root)?;
+    // The portable indexes. On the delta path the graph carries only the target
+    // files' re-emitted facts, so the persisted state is merged with the delta
+    // instead of re-derived from it — an unchanged file's entries survive. A
+    // full scan (or the full-load fallback's re-assembled graph) derives the
+    // whole state from the graph.
+    if full_scan {
+        State::from_graph(graph, scan_root).save(store_root)?;
+    } else {
+        let mut state = State::load(store_root);
+        state.merge_delta(graph, scan_root, targets_rel);
+        state.save(store_root)?;
+    }
     Ok(())
 }
