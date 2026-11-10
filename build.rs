@@ -391,7 +391,7 @@ fn stage_struct(stage_dir: &Path) -> Vec<String> {
         let _ = std::fs::copy(&structfrontend, &staged);
         println!("cargo:rustc-env=APG_FRONTEND_STRUCT={}", staged.display());
         // The structural scanner's stream ids (canonical order, mirroring
-        // `STRUCTURAL_LANGUAGES` in src/main.rs): the baked `APG_LANGUAGES`
+        // `STRUCTURAL_LANGUAGES` in src/frontends.rs): the baked `APG_LANGUAGES`
         // fallback enumerates them when no runtime frontends dir is found.
         let mut ids: Vec<String> = Vec::new();
         for id in [
@@ -404,6 +404,7 @@ fn stage_struct(stage_dir: &Path) -> Vec<String> {
             "dockerfile",
             "makefile",
             "ini",
+            "sln",
             "misc",
         ] {
             ids.push(id.into());
