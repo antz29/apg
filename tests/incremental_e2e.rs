@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 /// e2e tier -- real I/O: these tests stage temp dirs, write state files and
 /// run real libgit2 operations. Each is `#[ignore]`d, so a plain `cargo
 /// test` never runs one; the only entry point is the named guard
-/// `cargo test-e2e` (= `cargo test tests::e2e:: -- --ignored`).
+/// `cargo test-e2e` (= `cargo test e2e:: -- --ignored`).
 mod e2e {
     use super::*;
 
