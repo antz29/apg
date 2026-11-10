@@ -25,7 +25,7 @@ pub struct ReuseFile {
 /// The durable orchestration state persisted under the store root.
 #[derive(Debug, Clone, Default)]
 pub struct State {
-    /// Checkout-relative forward dependency edges `(dependency, dependent)`.
+    /// Checkout-relative forward dependency edges `(dependent, dependency)`.
     pub dep_edges_rel: Vec<(String, String)>,
     /// Checkout-relative file → exported signature set.
     pub signatures: SignatureMap,
