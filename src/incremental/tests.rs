@@ -1,6 +1,19 @@
 use super::*;
 use crate::graph::NodeKind;
+use crate::impact::{OverloadIndex, Signature, dep_index_rel};
 use crate::testutil::located;
+use std::collections::BTreeSet;
+
+/// One persisted exported function signature — the shape
+/// `impact::signatures_of_graph` writes into a `SignatureMap`.
+fn persisted_sig(fqn: &str, parent: &str) -> Signature {
+    Signature {
+        kind: "function".to_string(),
+        fqn: fqn.to_string(),
+        params: Vec::new(),
+        parent: parent.to_string(),
+    }
+}
 
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
@@ -94,5 +107,144 @@ mod unit {
         let root = Path::new("/r");
         assert_eq!(absolute(root, "src/a.go"), "/r/src/a.go");
         assert_eq!(absolute(root, "/abs/a.go"), "/abs/a.go");
+    }
+
+    /// The incremental path merges a target-only delta graph into the persisted
+    /// `State` instead of rebuilding it: the targets' entries are replaced from
+    /// the delta while the unchanged files' entries — including a
+    /// `(dependent, target)` edge that still points at a surviving target —
+    /// survive.
+    #[test]
+    fn merge_delta_replaces_target_entries() {
+        let root = Path::new("/r");
+        // The persisted pre-merge state. `a.go` and `gone.go` are the target
+        // files: `a.go` is re-emitted (and keeps `b.go` as a dependency through
+        // the unchanged file's signature), `gone.go` was deleted and the delta
+        // graph no longer carries it.
+        let mut signatures = std::collections::BTreeMap::new();
+        signatures.insert(
+            "a.go".to_string(),
+            BTreeSet::from([persisted_sig("m.S.old", "m.S")]),
+        );
+        signatures.insert(
+            "b.go".to_string(),
+            BTreeSet::from([persisted_sig("m.S.peer", "m.S")]),
+        );
+        signatures.insert(
+            "c.go".to_string(),
+            BTreeSet::from([persisted_sig("m.c", "m")]),
+        );
+        signatures.insert(
+            "gone.go".to_string(),
+            BTreeSet::from([persisted_sig("m.gone", "m")]),
+        );
+        signatures.insert(
+            "y.go".to_string(),
+            BTreeSet::from([persisted_sig("m.y", "m")]),
+        );
+
+        let mut overloads = OverloadIndex::default();
+        overloads.scopes.insert(
+            "m.S".to_string(),
+            vec!["m.S.old".to_string(), "m.S.peer".to_string()],
+        );
+        overloads.scopes.insert(
+            "m".to_string(),
+            vec!["m.c".to_string(), "m.gone".to_string(), "m.y".to_string()],
+        );
+        for (file, scope) in [
+            ("a.go", "m.S"),
+            ("b.go", "m.S"),
+            ("c.go", "m"),
+            ("gone.go", "m"),
+            ("y.go", "m"),
+        ] {
+            overloads
+                .file_scopes
+                .insert(file.to_string(), BTreeSet::from([scope.to_string()]));
+        }
+
+        let mut state = State {
+            // `a.go` referenced `c.go` before the edit; `y.go` referenced the
+            // target `a.go` and the deleted `gone.go`.
+            dep_edges_rel: vec![
+                ("a.go".to_string(), "c.go".to_string()),
+                ("y.go".to_string(), "a.go".to_string()),
+                ("y.go".to_string(), "b.go".to_string()),
+                ("y.go".to_string(), "gone.go".to_string()),
+            ],
+            signatures,
+            overloads,
+        };
+
+        // The target-only delta graph: `a.go` re-emitted, now declaring
+        // `m.S.new` under `m.S` and calling `m.S.peer` in the unchanged `b.go`
+        // (which the delta graph does not carry); `gone.go` is absent.
+        let mut delta = Graph::default();
+        delta
+            .nodes
+            .insert("/r/a.go".to_string(), located(NodeKind::File, "/r/a.go"));
+        delta.nodes.insert(
+            "m.S.new".to_string(),
+            located(NodeKind::Function, "/r/a.go"),
+        );
+        delta
+            .calls
+            .insert(("m.S.new".to_string(), "m.S.peer".to_string()));
+
+        let targets: BTreeSet<String> = ["a.go".to_string(), "gone.go".to_string()].into();
+        state.merge_delta(&delta, root, &targets);
+
+        // `a.go`'s stale `(a.go, c.go)` edge is dropped and replaced by the
+        // delta's `(a.go, b.go)` — resolved through the unchanged file's
+        // signature. `(y.go, a.go)` survives because `a.go` is a target the
+        // delta still carries; `(y.go, gone.go)` is dropped.
+        assert_eq!(
+            state.dep_edges_rel,
+            vec![
+                ("a.go".to_string(), "b.go".to_string()),
+                ("y.go".to_string(), "a.go".to_string()),
+                ("y.go".to_string(), "b.go".to_string()),
+            ]
+        );
+        let merged = dep_index_rel(&state.dep_edges_rel);
+        assert_eq!(merged.forward["a.go"], BTreeSet::from(["b.go".to_string()]));
+        assert_eq!(merged.reverse["a.go"], BTreeSet::from(["y.go".to_string()]));
+
+        // The target's signature entry is replaced from the delta; `b.go`'s
+        // survives and the deleted target contributes none.
+        assert_eq!(
+            state.signatures["a.go"]
+                .iter()
+                .map(|s| s.fqn.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["m.S.new"])
+        );
+        assert!(state.signatures["b.go"].iter().any(|s| s.fqn == "m.S.peer"));
+        assert!(!state.signatures.contains_key("gone.go"));
+
+        // The touched `m.S` scope keeps its non-target member, drops the
+        // retired FQN and gains the delta's — sorted. `m` (touched only through
+        // the deleted target) loses just the retired FQN.
+        assert_eq!(
+            state.overloads.scopes["m.S"],
+            vec!["m.S.new".to_string(), "m.S.peer".to_string()]
+        );
+        assert_eq!(
+            state.overloads.scopes["m"],
+            vec!["m.c".to_string(), "m.y".to_string()]
+        );
+
+        // `file_scopes`: the target's entry is replaced, the non-targets
+        // survive, the deleted target contributes none.
+        assert_eq!(
+            state.overloads.file_scopes["a.go"],
+            BTreeSet::from(["m.S".to_string()])
+        );
+        assert_eq!(
+            state.overloads.file_scopes["b.go"],
+            BTreeSet::from(["m.S".to_string()])
+        );
+        assert!(!state.overloads.file_scopes.contains_key("gone.go"));
     }
 }
