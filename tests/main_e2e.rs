@@ -9888,6 +9888,29 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// csharp-projects phase-02 task-7 (e2e): `auto_detect_languages` detects
+    /// `csharp` in a tree whose only C# file is a `.csx`, a `.cshtml` or a
+    /// `.razor` (detection walks the filesystem; `available` is passed in, so
+    /// no staged csharpfrontend is needed).
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir fs); run via cargo test-e2e"]
+    fn auto_detect_languages_detects_csharp_extended_extensions() {
+        let base = std::env::temp_dir().join(format!("apg-csharp-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let available = ["csharp".to_string()];
+        for file in ["Script.csx", "Index.cshtml", "App.razor"] {
+            let tree = base.join(file.replace('.', "-"));
+            std::fs::create_dir_all(&tree).unwrap();
+            std::fs::write(tree.join(file), "// c#\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&tree, &available),
+                vec!["csharp".to_string()],
+                "a tree holding only {file} must detect csharp"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// schema-alignment phase-03 task-12 (e2e, scratch /tmp repo, CANDIDATE
     /// binary only — `global.constraint.no-real-project-test`): a REAL scan of
     /// a checkout carrying agent definitions yields one tier-4 Agent node per
