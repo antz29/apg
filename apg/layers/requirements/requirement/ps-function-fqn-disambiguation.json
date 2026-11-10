@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-function-fqn-disambiguation",
-  "body": "A PowerShell Function whose FQN under its Struct's final FQN equals another Function's or any PowerShell Struct's or Module's, or ends in //, a scanned file's repository-relative path, : and digits, appends //, its file's path, : and its unit ordinal.",
+  "body": "A Function whose FQN under its Struct's final FQN equals another Function's or any PowerShell Struct's or Module's, or ends in //, a scanned file's repository-relative path, : and digits, appends //, its file's path, : and its unit ordinal.",
   "properties": {
     "feature": "ps-frontend"
   },
