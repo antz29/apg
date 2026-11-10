@@ -357,9 +357,12 @@ pub(crate) fn run_pipeline(
 /// (the correctness reference) and the previous `db.lbug` is left in place.
 /// This function never panics: a failure is a logged fallback.
 ///
-/// `graph` is the win-B assembled graph (re-emitted target units PLUS cached
-/// unaffected units) and `input` carries the same phase-2 target/removed sets
-/// that drove the frontend hand-off — the delete scope is never re-derived.
+/// `graph` is the **target-only delta graph** (`ingest::ingest_delta`): the
+/// re-emitted target files' units, the ingested `scan_meta`/authored/transient
+/// rows, and the cross-cut rels whose far endpoint lives only in the seed. The
+/// unaffected code stays in the seed `db.lbug` and lands only as splice DML.
+/// `input` carries the same phase-2 target/removed sets that drove the frontend
+/// hand-off — the delete scope is never re-derived.
 ///
 /// The seed is EQUIVALENCE-GUARDED (feedback-101): the delta/manifest are
 /// shared across worktrees while `db.lbug` is local, so the splice is refused
@@ -398,11 +401,11 @@ pub fn try_splice_build(
     // The delta refreshes the single Scan row; without the ingested scan_meta
     // there is nothing to write, so fall back rather than publish a bogus head.
     let Some(scan) = scan_row_from_graph(graph) else {
-        log.ln("[load] splice: assembled graph carries no Scan row — full load");
+        log.ln("[load] splice: delta graph carries no Scan row — full load");
         return None;
     };
     // The delete scope is the FINAL phase-2 target set (stage-1 ∪ the signature
-    // cascade). The assembled graph carries repo-relative identities now, so the
+    // cascade). The delta graph carries repo-relative identities now, so the
     // delete scope includes each target's repo-relative identity verbatim;
     // the absolute spelling is also included so a graph built from absolute
     // fixture paths still matches.
@@ -413,7 +416,7 @@ pub fn try_splice_build(
         .collect();
 
     // The content key guards cross-worktree drift; the assembled authored
-    // identity additionally requires the seed DB to represent the assembled
+    // identity additionally requires the seed DB to represent the delta
     // graph's authored/transient rows (the win-C splice writes none), so a
     // spec-only change-set is refused here and the full load runs. The captured
     // snapshot resolves an authored→code edge whose target lives only in the
@@ -466,7 +469,7 @@ pub fn try_splice_build(
     }
 }
 
-/// The `ScanRow` the splice refreshes, read from the assembled graph's single
+/// The `ScanRow` the splice refreshes, read from the delta graph's single
 /// `Scan` node (the ingested `scan_meta`). `None` when the graph carries no
 /// scan_meta, which makes the splice ineligible.
 pub(crate) fn scan_row_from_graph(graph: &graph::Graph) -> Option<splice::ScanRow> {
