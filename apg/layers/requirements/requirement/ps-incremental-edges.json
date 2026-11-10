@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-incremental-edges",
-  "body": "A rescan after a change to one PowerShell file yields the same calls and uses edges into that file from unchanged files as a full scan of the same tree.",
+  "body": "An incremental rescan after a change to any PowerShell files yields the same PowerShell nodes and edges, across the whole graph, as a full scan of the same tree.",
   "properties": {
     "feature": "ps-frontend"
   },
