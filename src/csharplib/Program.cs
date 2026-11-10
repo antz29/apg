@@ -15,7 +15,7 @@ public static class Program
     {
         if (args.Length == 0 || args[0] == "-h" || args[0] == "--help")
         {
-            Console.Error.WriteLine("Usage: csharpfrontend <project_dir> [--module <dir>]... [--id-prefix <p>] [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude_globs...]");
+            Console.Error.WriteLine("Usage: csharpfrontend <project_dir> [--module <dir>]... [--id-prefix <p>] [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [--razor <abs-path>]... [exclude_globs...]");
             return 1;
         }
 
@@ -32,6 +32,9 @@ public static class Program
         string? targetsPath = null;
         string? cacheDir = null;
         string? cacheKey = null;
+        // Spike-only explicit Razor inputs (`--razor <abs-path>`, repeatable);
+        // transitional until Razor runs through Scanner.Run.
+        var razorPaths = new List<string>();
 
         int i = 1;
         while (i < args.Length)
@@ -76,11 +79,85 @@ public static class Program
                     cacheKey = args[i];
                 }
             }
+            else if (args[i] == "--razor")
+            {
+                i++;
+                // A dangling `--razor` still selects Razor mode and fails as a missing path.
+                razorPaths.Add(i < args.Length ? args[i] : "");
+            }
             else
             {
                 excludePatterns.Add(args[i]);
             }
             i++;
+        }
+
+        if (razorPaths.Count > 0)
+        {
+            try
+            {
+                var engine = RazorCompiler.CreateProjectEngine();
+                var modules = new HashSet<string>(StringComparer.Ordinal);
+                int nextId = 0;
+                foreach (var razorPath in razorPaths)
+                {
+                    if (!File.Exists(razorPath)) throw new FileNotFoundException($"Razor input not found: {razorPath}");
+                    var razorText = File.ReadAllText(razorPath);
+                    var razorLines = Microsoft.CodeAnalysis.Text.SourceText.From(razorText).Lines;
+                    var generated = RazorCompiler.Compile(engine, razorPath, razorText);
+                    var typeDecl = generated.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First();
+                    string ns = typeDecl.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault()?.Name.ToString() ?? "";
+
+                    string prevModule = "";
+                    foreach (var part in ns.Split('.', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string module = prevModule.Length == 0 ? part : $"{prevModule}.{part}";
+                        if (modules.Add(module))
+                        {
+                            JsonlWriter.Write(new ModuleMsg { Fqn = module });
+                            if (prevModule.Length > 0) JsonlWriter.Write(new EdgeMsg { Type = "contains", From = prevModule, To = module });
+                        }
+                        prevModule = module;
+                    }
+
+                    JsonlWriter.Write(new FileMsg { Path = razorPath, Parent = ns, StartLine = 1, EndLine = Math.Max(1, razorLines.Count) });
+
+                    // The generated type stands for the whole Razor file.
+                    string typeId = $"{idPrefix}{++nextId}";
+                    string typeName = typeDecl.Identifier.Text;
+                    JsonlWriter.Write(new StructMsg
+                    {
+                        Id = typeId, Parent = ns, Name = typeName, Path = razorPath,
+                        Start = 0, End = razorText.Length, StartLine = 1, EndLine = Math.Max(1, razorLines.Count)
+                    });
+
+                    foreach (var method in typeDecl.Members.OfType<MethodDeclarationSyntax>())
+                    {
+                        // Only @code/@functions methods #line-map into the Razor file; generated plumbing does not.
+                        var head = RazorSourceMap.MapSpan(generated, method.Identifier.Span);
+                        if (head is not { } h || h.Path != razorPath) continue;
+                        var whole = RazorSourceMap.MapSpan(generated, method.Span);
+                        int endLine = whole is { } w && w.Path == razorPath && w.EndLine >= h.StartLine ? w.EndLine : h.StartLine;
+                        string funcId = $"{idPrefix}{++nextId}";
+                        JsonlWriter.Write(new FuncMsg
+                        {
+                            Id = funcId, Parent = string.IsNullOrEmpty(ns) ? typeName : $"{ns}.{typeName}",
+                            Name = method.Identifier.Text,
+                            Params = method.ParameterList.Parameters.Select(p => p.Type?.ToString() ?? "").ToList(),
+                            File = razorPath, Path = razorPath,
+                            Start = razorLines[h.StartLine - 1].Start, End = razorLines[endLine - 1].End,
+                            StartLine = h.StartLine, EndLine = endLine
+                        });
+                        JsonlWriter.Write(new EdgeMsg { Type = "contains", From = typeId, To = funcId });
+                    }
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"csharpfrontend error: {ex.Message}");
+                return 1;
+            }
         }
 
         // The pinned per-language artifact location is
