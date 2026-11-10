@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::cache::{CacheKey, FactStore, FileFragment, FileIndex, Manifest};
+use crate::cache::{CacheKey, FactStore, FileFragment, FileIndex, Manifest, ModuleScaffolding};
 use crate::delta::ScanRecord;
 use crate::graph::Graph;
 
@@ -65,11 +65,26 @@ pub fn record(
     // language replays it, keeping the win-B-assembled graph a full rebuild's
     // equal. This runs BEFORE the manifest/scan-record save, so a scaffolding
     // write failure aborts the recording and the next scan takes the full-scan
-    // fallback rather than reusing an incomplete store. The assembled graph is
-    // complete here (spawned languages emit their full scaffolding; skipped
-    // ones were just replayed), so the extraction is authoritative.
-    let scaffolding = crate::cache::ModuleScaffolding::extract(graph, scan_root);
-    store.put_scaffolding_all(&scaffolding, cache_key)?;
+    // fallback rather than reusing an incomplete store. A full scan's graph is
+    // complete (spawned languages emit their full scaffolding; skipped ones were
+    // just replayed), so its extraction is authoritative and written wholesale.
+    // The delta path's graph is target-only, so each spawned language's
+    // extraction is merged into the stored record instead — a partially-emitting
+    // frontend (COBOL) must not lose its untouched modules, while a module whose
+    // every file was re-emitted and that the delta no longer carries is retired.
+    let scaffolding = ModuleScaffolding::extract(graph, scan_root);
+    if full_scan {
+        store.put_scaffolding_all(&scaffolding, cache_key)?;
+    } else {
+        for (lang, delta) in &scaffolding {
+            let merged = merge_scaffolding(
+                store.scaffolding(lang, cache_key).unwrap_or_default(),
+                delta,
+                targets_rel,
+            );
+            store.put_scaffolding(lang, &merged, cache_key)?;
+        }
+    }
     store.save_index()?;
 
     // The manifest + scan record (the next scan's baseline).
@@ -101,4 +116,75 @@ pub fn record(
         state.save(store_root)?;
     }
     Ok(())
+}
+
+/// Merges one language's delta extraction into its stored scaffolding.
+///
+/// A stored module is **retired** only when its recorded `files` list is
+/// non-empty, every one of those files is a re-emitted target, and the delta no
+/// longer carries the module — the target file(s) were deleted or renamed away.
+/// A module with a surviving non-target file, and one whose `files` entry is
+/// unknown or empty (a legacy record), is kept: an undecidable module is never
+/// dropped. The delta's `modules`/`edges`/`languages`/`language_edges` are
+/// unioned in and the `files` maps are unioned per module, then the record is
+/// normalized exactly as [`ModuleScaffolding::extract`] — sorted, deduped, and
+/// with every edge/file entry scoped to the modules it carries.
+fn merge_scaffolding(
+    mut stored: ModuleScaffolding,
+    delta: &ModuleScaffolding,
+    targets_rel: &BTreeSet<String>,
+) -> ModuleScaffolding {
+    let delta_modules: BTreeSet<&str> = delta.modules.iter().map(String::as_str).collect();
+    let retired: BTreeSet<String> = stored
+        .modules
+        .iter()
+        .filter(|m| {
+            !delta_modules.contains(m.as_str())
+                && stored.files.get(*m).is_some_and(|files| {
+                    !files.is_empty() && files.iter().all(|f| targets_rel.contains(f))
+                })
+        })
+        .cloned()
+        .collect();
+
+    stored.modules.retain(|m| !retired.contains(m));
+    stored.modules.extend(delta.modules.iter().cloned());
+    stored.files.retain(|m, _| !retired.contains(m));
+    for (m, files) in &delta.files {
+        stored
+            .files
+            .entry(m.clone())
+            .or_default()
+            .extend(files.iter().cloned());
+    }
+    stored
+        .edges
+        .retain(|(a, b)| !retired.contains(a) && !retired.contains(b));
+    stored.edges.extend(delta.edges.iter().cloned());
+    stored.languages.extend(delta.languages.iter().cloned());
+    stored
+        .language_edges
+        .extend(delta.language_edges.iter().cloned());
+
+    stored.modules.sort();
+    stored.modules.dedup();
+    let modules: BTreeSet<String> = stored.modules.iter().cloned().collect();
+    stored.edges.sort();
+    stored.edges.dedup();
+    stored
+        .edges
+        .retain(|(a, b)| modules.contains(a) && modules.contains(b));
+    stored.languages.sort();
+    stored.languages.dedup();
+    stored.language_edges.sort();
+    stored.language_edges.dedup();
+    stored
+        .language_edges
+        .retain(|(_, module)| modules.contains(module));
+    stored.files.retain(|m, _| modules.contains(m));
+    for files in stored.files.values_mut() {
+        files.sort();
+        files.dedup();
+    }
+    stored
 }
