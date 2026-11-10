@@ -124,7 +124,7 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
                 return Some(dir.join("rustfrontend").display().to_string());
             }
             "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
-            | "misc"
+            | "sln" | "misc"
                 if dir.join("structfrontend").exists() =>
             {
                 // ONE binary serves every structural stream id. `frontend_cmd`
@@ -176,7 +176,7 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         // The bundled structural scanner serves every structural stream id from
         // one baked artifact (`build.rs` stages `structfrontend`).
         "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
-        | "misc" => option_env!("APG_FRONTEND_STRUCT"),
+        | "sln" | "misc" => option_env!("APG_FRONTEND_STRUCT"),
         "py" => option_env!("APG_FRONTEND_PY"),
         "cobol" => option_env!("APG_FRONTEND_COBOL"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
