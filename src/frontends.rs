@@ -593,7 +593,7 @@ pub fn should_spawn_language(
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
 /// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`,
 /// `agent`) and the bundled structural scanner's every stream id (`md`, `sh`,
-/// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`)
+/// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `sln`, `misc`)
 /// require nothing — the structural and agent arms are explicit so the
 /// exemption is intentional, not the unknown-id catch-all — and neither does an
 /// unknown language id (never a false refusal). `ts`/`js` share the one unified
@@ -608,7 +608,7 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
         // and needs nothing on `PATH`, so every structural stream id is
         // tool-less.
         "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
-        | "misc" => &[],
+        | "sln" | "misc" => &[],
         // The agent-definition frontend is self-contained too: it reads
         // `.opencode/agents/` itself and never shells out.
         "agent" => &[],
