@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-script-member-scope",
-  "body": "A `.csx` script's top-level members are scoped under its extension-stripped repository-relative path, dot-joined, so `Log` in `tools/build.csx` is csharp.tools.build.Log, an identity unique to that script.",
+  "body": "A `.csx` script is module csharp.<script-path>, its repository-relative path kept whole as one segment with its extension, containing its file and scoping its top-level members, so `Log` in `tools/build.csx` is csharp.tools/build.csx.Log.",
   "properties": {
     "feature": "csharp-projects"
   },
