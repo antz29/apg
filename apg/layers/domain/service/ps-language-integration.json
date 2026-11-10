@@ -22,6 +22,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-file-dependency-ingest",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-id-prefix",
       "properties": {}
     },
