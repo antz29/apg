@@ -300,7 +300,7 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
     // Every candidate shares the ONE generalised `has_extension` walker; each
     // names only the non-hidden directories it must not descend into
     // (`skip_set`), and the depth bound is explicit per candidate rather than a
-    // shared magic literal. Matching is exact-case except COBOL.
+    // shared magic literal. Matching is exact-case except C# and COBOL.
     let candidates = vec![
         (
             "java",
@@ -326,12 +326,14 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             false,
         ),
+        // C# matches in any letter case, like the `csharpfrontend`'s
+        // `SourceDiscovery.DiscoverFiles` and `language_of`.
         (
             "csharp",
             &[".cs", ".csx", ".cshtml", ".razor"],
             5,
             DEFAULT_DETECTOR_SKIP,
-            false,
+            true,
         ),
         // Markdown's skip set is `domain.entity.scan-exclusion`
         // (task-8): a markdown-only file under `vendor/` (or another excluded
@@ -346,7 +348,7 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
         // `.py`; `.pyx` is not a candidate.
         ("py", &[".py", ".pyi"], 8, PY_DETECTOR_SKIP, false),
         // COBOL claims `.cob`/`.cbl`/`.cobol` sources and `.cpy` copybooks in
-        // any letter case (the only case-insensitive candidate).
+        // any letter case.
         (
             "cobol",
             &[".cob", ".cbl", ".cobol", ".cpy"],

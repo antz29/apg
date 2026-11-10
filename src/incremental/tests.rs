@@ -30,6 +30,11 @@ mod unit {
         assert_eq!(language_of("x.csx"), "csharp");
         assert_eq!(language_of("Views/Index.cshtml"), "csharp");
         assert_eq!(language_of("Pages/App.razor"), "csharp");
+        // ...in any letter case, like the frontend's `DiscoverFiles`.
+        assert_eq!(language_of("Views/Home.CSHTML"), "csharp");
+        assert_eq!(language_of("x.CS"), "csharp");
+        assert_eq!(language_of("x.Csx"), "csharp");
+        assert_eq!(language_of("Pages/App.Razor"), "csharp");
         // `.py`/`.pyi` classify under the scan-side id `py` (phase-08
         // task-23), so the win-B target filter matches them.
         assert_eq!(language_of("x.py"), "py");

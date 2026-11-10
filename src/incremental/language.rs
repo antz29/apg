@@ -82,7 +82,14 @@ pub fn language_of(rel: &str) -> &'static str {
         "java" => "java",
         "rs" => "rust",
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => "ts",
-        "cs" | "csx" | "cshtml" | "razor" => "csharp",
+        // C# extensions match in any letter case (`.CSHTML`, `.Razor`), like the
+        // `csharpfrontend`'s `SourceDiscovery.DiscoverFiles`.
+        _ if ["cs", "csx", "cshtml", "razor"]
+            .iter()
+            .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "csharp"
+        }
         "py" | "pyi" => "py",
         _ if CPP_EXTENSIONS.contains(&ext) => "cpp",
         // COBOL extensions match in any letter case (`.CBL`, `.Cpy`), like the
