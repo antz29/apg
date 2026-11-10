@@ -29,6 +29,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-command-scope-prefix",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-dynamic-invocation",
       "properties": {}
     },

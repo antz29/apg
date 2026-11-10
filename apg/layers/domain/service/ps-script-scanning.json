@@ -32,6 +32,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-function-scope-prefix",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-function-units",
       "properties": {}
     },

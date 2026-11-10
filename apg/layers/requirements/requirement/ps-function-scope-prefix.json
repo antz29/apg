@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-function-scope-prefix",
+  "body": "A function declaration's global:, script:, local: or private: scope prefix, matched case-insensitively, is dropped from its Function's name, and FunctionsToExport entries match that bare name.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-script-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-script-scanning",
+      "properties": {}
+    }
+  ]
+}

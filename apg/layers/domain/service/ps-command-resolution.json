@@ -37,6 +37,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-command-scope-prefix",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-dot-source-dependency",
       "properties": {}
     },

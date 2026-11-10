@@ -29,6 +29,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-function-scope-prefix",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-function-units",
       "properties": {}
     },
