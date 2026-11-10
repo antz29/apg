@@ -417,7 +417,8 @@ public static class TestMain
     }
 
     /// <summary>
-    /// A mixed .cs/.csx tree compiles in the one compilation: the .csx File
+    /// A mixed .cs/.csx tree: the .cs files share one compilation and the .csx
+    /// compiles in its own; the .csx File
     /// record carries its top-level method's declaration, and the .cs
     /// declarations are exactly those of a .cs-only scan.
     /// </summary>
@@ -463,8 +464,10 @@ public static class TestMain
         const string body = "void Log(string msg) { }\nvoid Run() { Log(\"x\"); }\n";
         var p1 = WriteSource(Path.Combine(dir, "tools"), "build.csx",
             body + "class Opts { public int N { get; set; } class Inner { } }\n");
-        var p2 = WriteSource(Path.Combine(dir, "scripts", "other"), "build.csx", body);
-        var cs = WriteSource(dir, "Lib.cs", "namespace tools.build;\n\npublic class Log { }\n");
+        var p2 = WriteSource(Path.Combine(dir, "scripts", "other"), "build.csx",
+            body + "class Opts { public int N { get; set; } }\nvoid Make() { var l = new tools.build.Log(); }\n");
+        var cs = WriteSource(dir, "Lib.cs",
+            "namespace tools.build;\n\npublic class Log { }\n\npublic class Caller { void Go() { var o = new Opts(); Log(\"x\"); } }\n");
 
         var r = RunScanner(dir);
         Check("script-scope scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
@@ -498,6 +501,28 @@ public static class TestMain
         Check("script nested type is emitted as <script>.Opts.Inner", structFqns.Contains($"{p1}.Opts.Inner"), all);
         Check("script type accessors are under <script>.Opts",
             funcFqns.Contains($"{p1}.Opts.get_N") && funcFqns.Contains($"{p1}.Opts.set_N"), all);
+
+        // One compilation per script: the same-named Opts in each script is its own type.
+        Check("each script emits its own Opts struct record",
+            structFqns.Count(f => f == $"{p1}.Opts") == 1 && structFqns.Count(f => f == $"{p2}.Opts") == 1, all);
+        var accessors = new[] { $"{p1}.Opts.get_N", $"{p1}.Opts.set_N", $"{p2}.Opts.get_N", $"{p2}.Opts.set_N" };
+        Check("four distinct Opts accessor FQNs, one per script and accessor",
+            accessors.All(a => funcFqns.Count(f => f == a) == 1), all);
+        Check("Opts.Inner exists only under tools/build.csx",
+            structFqns.Where(f => f.EndsWith(".Opts.Inner", StringComparison.Ordinal)).SequenceEqual(new[] { $"{p1}.Opts.Inner" }), all);
+        Check("no duplicate module/file FQN",
+            g.Modules.Distinct().Count() == g.Modules.Count && g.Files.Select(f => f.Split('|')[0]).Distinct().Count() == g.Files.Count, all);
+
+        bool ResolvedEdge(string from, Func<string, bool> to) => c.Records.Any(s =>
+        {
+            var x = s.Split('|');
+            return (x[0] == "calls" || x[0] == "uses") && x[1] == from && to(x[2]);
+        });
+        Check("a script binds only to itself: no resolved edge from <other script>.Make to tools.build.Log or its ctor",
+            c.NodeFqns.Contains($"{p2}.Make") && !ResolvedEdge($"{p2}.Make", t => t.StartsWith("tools.build.Log", StringComparison.Ordinal)), all);
+        Check(".cs code binds to no script member: no resolved edge from tools.build.Caller.Go to a script record",
+            c.NodeFqns.Contains("tools.build.Caller.Go")
+            && !ResolvedEdge("tools.build.Caller.Go", t => t.StartsWith(p1, StringComparison.Ordinal) || t.StartsWith(p2, StringComparison.Ordinal)), all);
 
         Check(".cs namespace chain tools -> tools.build is kept", c.Records.Contains("contains|tools|tools.build"), all);
         Check(".cs struct tools.build.Log is unaffected",
