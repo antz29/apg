@@ -105,7 +105,10 @@ pub(crate) fn stream_for_path(path: &Path) -> Option<&'static str> {
         Some("yaml") | Some("yml") => "yaml",
         Some("json") => "json",
         Some("toml") => "toml",
-        Some("xml") => "xml",
+        // MSBuild project/property/target files, .NET config and resources are XML.
+        Some("xml") | Some("csproj") | Some("vbproj") | Some("vcxproj") | Some("sqlproj")
+        | Some("props") | Some("targets") | Some("config") | Some("resx") => "xml",
+        Some("sln") => "sln",
         Some("ini") | Some("cfg") | Some("conf") | Some("properties") | Some("env") => "ini",
         // Everything the taxonomy does not name — an unknown extension, a
         // dotfile (`.gitignore`, `.dockerignore`), a fixture or a binary — is
