@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-reference-facts",
-  "body": "View, procedure, function and trigger bodies and declared tables, table types and synonyms yield call and use edges to the scope declarations or unresolved targets they name, except local names, dynamic SQL text and a view's function calls.",
+  "body": "View, procedure, function and trigger bodies and declared tables, table types and synonyms yield exactly the call and use edges, to scope declarations or unresolved targets, that its child requirements state.",
   "properties": {
     "feature": "sql-frontend"
   },
