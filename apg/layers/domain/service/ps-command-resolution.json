@@ -17,6 +17,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-call-operator-literal",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-class-inheritance",
       "properties": {}
     },

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-dynamic-invocation",
-  "body": "A command invoked with & or . through a variable, a script block or another expression is an unresolved call of category func-value keyed by the <nameless@repo-relative:offset> sentinel of its call site.",
+  "body": "A & whose operand is a script block, variable or other computed expression, or a . whose operand is a script block, is an unresolved call of category func-value keyed by the <nameless@repo-relative:offset> sentinel of its site.",
   "properties": {
     "feature": "ps-frontend"
   },

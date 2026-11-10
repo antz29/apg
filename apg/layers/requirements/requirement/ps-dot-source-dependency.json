@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-dot-source-dependency",
-  "body": "A dot-source whose path resolves statically to a scanned file is one uses edge from the dot-sourcing script Struct to that File with properties {\"kind\":\"dot-source\"}.",
+  "body": "A . whose operand is a static path to a scanned file is one uses edge from its script Struct to that File with properties {\"kind\":\"dot-source\"}, and any other . operand except a script block is a dynamic dot-source.",
   "properties": {
     "feature": "ps-frontend"
   },
