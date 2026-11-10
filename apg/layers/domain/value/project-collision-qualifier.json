@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "project-collision-qualifier",
+  "body": "The project module identity inserted between the csharp root and the namespace of each project's member of a type group sharing one namespace-based FQN across compilations.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.dotnet-project",
+      "properties": {}
+    }
+  ]
+}

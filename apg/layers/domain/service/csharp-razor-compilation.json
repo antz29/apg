@@ -7,7 +7,32 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-component-binding",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-imports",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-mvc5-views",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-root-namespace",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.csharp-razor-source-mapping",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-unmapped-anchor",
       "properties": {}
     },
     {

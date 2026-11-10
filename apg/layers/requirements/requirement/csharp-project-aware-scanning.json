@@ -29,6 +29,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.csharp-project-collision-qualifier",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.csharp-project-fixture-tests",
       "properties": {}
     },
@@ -44,7 +49,32 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-component-binding",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-imports",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-mvc5-views",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-root-namespace",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.csharp-razor-source-mapping",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.csharp-razor-unmapped-anchor",
       "properties": {}
     },
     {

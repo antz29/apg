@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "razor-line-mapping",
-  "body": "The correspondence from each span of Razor-generated C# to the line span of the Razor file that produces it.",
+  "body": "The correspondence the generated `#line` mappings give from each span of Razor-generated C# to its Razor file line span, an unmapped generated member taking the whole-file span.",
   "properties": {},
   "out": [],
   "in": [

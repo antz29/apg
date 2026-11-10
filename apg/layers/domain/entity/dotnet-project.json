@@ -9,6 +9,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "domain.value.project-collision-qualifier",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.value.project-compile-settings",
       "properties": {}
     }

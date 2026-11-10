@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-razor-unmapped-anchor",
+  "body": "A compiler-generated Razor member without a mapped span, such as the generated class or its render method, is located at its Razor file's whole-file span, line 1 through the file's last line.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-razor-compilation",
+      "properties": {}
+    }
+  ]
+}

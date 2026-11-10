@@ -2,9 +2,14 @@
   "layer": "domain",
   "type": "service",
   "name": "csharp-project-modelling",
-  "body": "The capability that models each solution and project as a module level of the graph, roots every declaration under its owning project, and gives each source file one owner.",
+  "body": "The capability that models each solution and project as a module level containing its files, names declarations by namespace with a project qualifier only on cross-project collision, and gives each source file one owner.",
   "properties": {},
   "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-project-collision-qualifier",
+      "properties": {}
+    },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.csharp-project-module-identity",

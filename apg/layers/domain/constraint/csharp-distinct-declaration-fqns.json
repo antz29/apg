@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "csharp-distinct-declaration-fqns",
+  "body": "The C# frontend emits each declaration FQN at most once per kind: a type declared at one namespace-based FQN in several projects is qualified in every project member, so a C# stream never reaches the ingestor's same-kind collision failure.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "csharp-razor-compiler",
-  "body": "The C# frontend's Razor stage: `.cshtml` and `.razor` files compiled to C# in their owning project, and file and declaration emission that locates each generated fact at its Razor file line span.",
+  "body": "The C# frontend's Razor stage at Razor language 6.0: imports, root namespace, a declaration-only pass then full compilation of `.cshtml` and `.razor` files in their project, and `#line`-mapped location of each generated fact.",
   "properties": {},
   "out": [
     {

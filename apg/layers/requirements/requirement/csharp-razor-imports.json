@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-razor-imports",
+  "body": "Razor compilation applies every `_ViewImports.cshtml` and `_Imports.razor` in a Razor file's directory and its ancestor directories within the owning project.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-razor-compilation",
+      "properties": {}
+    }
+  ]
+}

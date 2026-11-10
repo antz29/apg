@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-razor-views",
-  "body": "Every `.cshtml` MVC view or Razor Page and every `.razor` Blazor component is compiled to C# by the Razor compiler inside its owning project's compilation and scanned as that project's source.",
+  "body": "Every `.cshtml` MVC view or Razor Page and every `.razor` Blazor component, at Razor language version 6.0 or earlier, is compiled to C# by the Razor compiler inside its owning project's compilation and scanned as that project's source.",
   "properties": {
     "feature": "csharp-projects"
   },

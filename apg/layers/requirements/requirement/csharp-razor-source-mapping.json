@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-razor-source-mapping",
-  "body": "Each declaration, call and type use a Razor file contributes is located in that `.cshtml` or `.razor` file, at the line span of the Razor source that generates it.",
+  "body": "Each declaration, call and type use from Razor-generated C# is located in its `.cshtml` or `.razor` file at the Razor line span the generated `#line` mappings assign to it.",
   "properties": {
     "feature": "csharp-projects"
   },

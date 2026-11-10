@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-project-module-identity",
-  "body": "Each C# project is a module whose identity derives from its project file's repository-relative path, and every declaration the project compiles is rooted under that project module.",
+  "body": "Each C# project is a module, identified by its project file's repository-relative path, that contains the files the project compiles, while every declaration keeps its namespace-based csharp FQN.",
   "properties": {
     "feature": "csharp-projects"
   },

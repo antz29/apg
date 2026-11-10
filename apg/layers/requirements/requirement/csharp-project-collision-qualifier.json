@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-project-collision-qualifier",
+  "body": "When two or more compilations declare a type at one namespace-based FQN, each project's member of that group renders with its project module identity between the csharp root and the namespace, a projectless member staying unqualified.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-modelling",
+      "properties": {}
+    }
+  ]
+}
