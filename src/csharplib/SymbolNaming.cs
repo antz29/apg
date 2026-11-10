@@ -37,6 +37,12 @@ internal static class SymbolNaming
 
     public static string GetParentScopeFqn(ISymbol symbol)
     {
+        if (symbol.ContainingType is { IsScriptClass: true }
+            && symbol.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree.FilePath is { Length: > 0 } scriptPath)
+        {
+            // A top-level script member scopes under its own script's path, never the shared Script class.
+            return scriptPath;
+        }
         if (symbol.ContainingType != null)
         {
             return GetFullFqn(symbol.ContainingType);
