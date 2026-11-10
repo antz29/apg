@@ -297,19 +297,26 @@ public class Scanner
 
         Console.Error.WriteLine($"Scanning {files.Count} C# source files...");
 
-        // Parse all syntax trees, then build a compilation with core BCL
-        // metadata references. The compilation always covers the FULL file
+        // Parse all syntax trees, then compile with core BCL metadata
+        // references: one compilation over every .cs tree, plus one per .csx
+        // script over exactly that script's tree, so a script binds only its
+        // own declarations (scripts sharing one compilation would merge into
+        // one Script class). The .cs compilation always covers the FULL .cs
         // set: the target set filters emission, not resolution, so a target
         // file's references resolve exactly.
         var syntaxTrees = CompilationLoader.ParseTrees(files, out List<string> heldBack);
-        var compilation = CompilationLoader.CreateCompilation(syntaxTrees);
+        var csTrees = syntaxTrees.Where(t => t.Options.Kind != SourceCodeKind.Script).ToList();
+        var byTree = CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(csTrees), csTrees)
+            .Concat(syntaxTrees.Where(t => t.Options.Kind == SourceCodeKind.Script)
+                .SelectMany(t => CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(new List<SyntaxTree> { t }), new List<SyntaxTree> { t })))
+            .ToDictionary(u => u.Tree);
 
         // An all-targets request (every discovered file selected) is the full
         // path, so it stays byte-identical to a plain full scan.
         bool filtered = _filtered && !files.All(f => _targetFiles.Contains(f));
 
-        // One semantic model per tree, for the whole project.
-        var unitModels = CompilationLoader.BuildModels(compilation, syntaxTrees);
+        // One semantic model per tree, joined back in discovery order.
+        var unitModels = syntaxTrees.Select(t => byTree[t]).ToList();
 
         if (filtered)
         {
