@@ -5,12 +5,15 @@ using System.IO;
 namespace Apg.CsharpFrontend;
 
 /// <summary>
-/// `*.cs` source enumeration: walks the project root (skipping dot-dirs,
+/// C# source enumeration (`.cs`, `.csx`, `.cshtml`, `.razor`): walks the project root (skipping dot-dirs,
 /// <c>bin</c>/<c>obj</c>/<c>node_modules</c>), applies the <c>--module</c>
 /// restriction, and filters out exclude-glob matches.
 /// </summary>
 internal sealed class SourceDiscovery
 {
+    // Sole owner of the C# discovery extension claim.
+    private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase) { ".cs", ".csx", ".cshtml", ".razor" };
+
     private readonly List<string> _moduleDirs;
     private readonly List<string> _excludePatterns;
 
@@ -34,7 +37,7 @@ internal sealed class SourceDiscovery
             try
             {
                 subDirs = Directory.GetDirectories(current);
-                files = Directory.GetFiles(current, "*.cs");
+                files = Directory.GetFiles(current).Where(f => SourceExtensions.Contains(Path.GetExtension(f))).ToArray();
             }
             catch
             {
