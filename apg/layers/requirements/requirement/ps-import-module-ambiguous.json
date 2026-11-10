@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-import-module-ambiguous",
-  "body": "An Import-Module whose name matches the case-insensitive file stem of more than one scanned manifest is an unresolved use of category unknown from the script Struct, named by that module name.",
+  "body": "An Import-Module module name equal to the case-insensitive .psd1 stem of more than one scanned manifest is an unresolved use of category unknown from the script Struct, named by that module name.",
   "properties": {
     "feature": "ps-frontend"
   },

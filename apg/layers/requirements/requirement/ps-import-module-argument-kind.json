@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-import-module-argument-kind",
+  "body": "An Import-Module literal argument is a path when it contains \\ or /, starts with ., ends in .psm1, .psd1, .ps1 or .dll, or is $PSScriptRoot-anchored, and a module name otherwise, while a non-literal argument is computed.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-file-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ]
+}

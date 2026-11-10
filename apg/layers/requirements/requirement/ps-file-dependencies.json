@@ -29,6 +29,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-import-module-argument-kind",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-import-module-dependency",
       "properties": {}
     },
