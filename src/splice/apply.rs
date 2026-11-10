@@ -178,20 +178,18 @@ fn fire_apply_hook() -> anyhow::Result<()> {
 pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
     let mut report = SpliceReport::default();
 
-    // The module delete scope is bounded by the delta's target set: a seeded
-    // Module is only re-decided when the delta reaches a File somewhere in its
-    // subtree. The assembled graph cannot vouch for a module the delta never
+    // The module scope is bounded by the delta's target set: a seeded Module is
+    // only re-decided (upserted or deleted) when the delta's target set covers
+    // its WHOLE subtree. A partially-targeted module keeps its seed row and its
+    // outgoing Contains rels to unchanged child Files/Modules — the delta's new
+    // child edge still merges additively (step 6) and a removed child detaches
+    // (step 7). The assembled graph cannot vouch for a module the delta never
     // touched — a skipped/emission-filtered language emits no global module
     // scaffolding, so its `Module -> Module` hierarchy and pure-intermediate
     // modules never reach the assembled graph. Deleting such a module (or
     // wiping its outgoing Contains rels) would drop rows a full rebuild keeps
     // (`domain.constraint.db-splice-equivalence`).
     let subtrees = module_file_subtrees(conn)?;
-    let reached = |m: &str| {
-        subtrees
-            .get(m)
-            .is_some_and(|files| files.iter().any(|f| delta.targets.contains(f)))
-    };
     // A module can only be *disappearing* when EVERY file under it is in the
     // delta scope: any unchanged file keeps it alive in a full rebuild.
     let fully_reached = |m: &str| {
@@ -251,8 +249,8 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 delta_labels.insert(fqn.clone(), "Language");
             }
             NodeKind::Module => {
-                // A module is re-decided when the delta's target set reaches a
-                // File in its SEED subtree — and only then for a REAL seed row,
+                // A module is re-decided when the delta's target set covers its
+                // WHOLE SEED subtree — and only then for a REAL seed row,
                 // OR when the seed has no Module row for it at all (a NEW
                 // package/dir: the assembled graph is the only source of truth
                 // for its node and its Contains rels). An otherwise-untouched
@@ -272,7 +270,10 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 // the Phase-4 exclusion is unchanged.
                 let healed =
                     seeded_modules.get(fqn).is_some_and(|planned| *planned) && assembled_real(node);
-                if (reached(fqn) && seed_owns_real) || !seeded_modules.contains_key(fqn) || healed {
+                if (fully_reached(fqn) && seed_owns_real)
+                    || !seeded_modules.contains_key(fqn)
+                    || healed
+                {
                     delta_modules.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Module");
                 }
