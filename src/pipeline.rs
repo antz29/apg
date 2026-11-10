@@ -480,6 +480,23 @@ pub fn try_splice_build(
         removed_fqns: &input.removed_fqns,
         scan,
     };
+    // The delta's own new declarations can make an unresolved target named by
+    // an UNCHANGED (seed-resident) file real: those seed edges are never
+    // re-emitted, so the seeded copy would keep an unresolved edge into a
+    // symbol that now exists unless it is flipped after the delta lands.
+    let previous_scanned = input.previous.as_ref().map(|p| &p.scanned);
+    let newly_real: BTreeSet<String> = graph
+        .nodes
+        .iter()
+        .filter(|(fqn, node)| {
+            matches!(
+                node.kind,
+                graph::NodeKind::Function | graph::NodeKind::Struct
+            ) && node.status.as_deref().is_none_or(str::is_empty)
+                && previous_scanned.is_none_or(|scanned| !scanned.contains(*fqn))
+        })
+        .map(|(fqn, _)| fqn.clone())
+        .collect();
     let report = match seeded.apply(&delta) {
         Ok(report) => report,
         Err(e) => {
@@ -493,6 +510,16 @@ pub fn try_splice_build(
             return None;
         }
     };
+    if let Err(e) = seeded
+        .conn()
+        .and_then(|conn| splice::unresolved::resolve_delta_unresolved(&conn, &newly_real))
+    {
+        log.ln(&format!(
+            "[load] splice: unresolved re-resolution failed ({e:#}) — discarding seed, full load"
+        ));
+        let _ = seeded.discard();
+        return None;
+    }
 
     match splice::publish(seeded) {
         Ok(()) => Some(report),
