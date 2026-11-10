@@ -59,6 +59,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.sql-source-claim",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-whole-language-rescan",
+      "properties": {}
     }
   ],
   "in": [

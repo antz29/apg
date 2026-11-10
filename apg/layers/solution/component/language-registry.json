@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "language-registry",
-  "body": "The scan driver's per-language registration tables: the source-extension matching, the opaque-id prefixes, the scan-time tool map and the impact granularity.",
+  "body": "The scan driver's per-language registration tables: the source-extension matching, the opaque-id prefixes, the scan-time tool map, and the impact granularity with its per-language target selection, sql re-targeting its whole stream.",
   "properties": {},
   "out": [
     {
@@ -23,6 +23,11 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.frontends.scan_time_tools",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.targets_for_language",
       "properties": {}
     },
     {
