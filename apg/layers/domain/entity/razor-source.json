@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "razor-source",
-  "body": "A `.cshtml` MVC view or Razor Page, or a `.razor` Blazor component, compiled to C# within its owning project's compilation, or the projectless compilation when no project owns it, with spans mapping back to the Razor file.",
+  "body": "A `.cshtml` MVC view or Razor Page, or a `.razor` Blazor component, compiled to C# within its owning project's compilation, or the projectless compilation for a file outside every project, with spans mapping back to the Razor file.",
   "properties": {
     "kind": "entity"
   },
