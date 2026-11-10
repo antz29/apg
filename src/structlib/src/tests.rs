@@ -409,11 +409,12 @@ mod unit {
         // (`.cxx/.c++/.hpp/.hh/.hxx/.tpp/.ipp`) and the unified JS/TS module
         // variants (`.mts/.cts/.mjs/.cjs`) are code-claimed too, while `.c`
         // stays residual `misc` (the C++ frontend does not claim it). The COBOL
-        // extensions are skipped in any letter case.
+        // extensions are skipped in any letter case. The C# frontend claims
+        // `.cs/.csx/.cshtml/.razor`, so none of them reach a structural stream.
         let code = [
             "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
-            "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi", "cob", "cbl",
-            "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy",
+            "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor",
+            "py", "pyi", "cob", "cbl", "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy",
         ];
         for ext in code {
             assert_eq!(
