@@ -94,6 +94,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.csharp-script-isolation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.csharp-script-member-scope",
       "properties": {}
     },

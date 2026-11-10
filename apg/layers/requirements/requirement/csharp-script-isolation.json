@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-script-isolation",
+  "body": "Each `.csx` script compiles alone with the default metadata references, binding only its own declarations, so its reference to a repository `.cs` declaration is an unresolved target and `.cs` code binds to no script member.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-loading",
+      "properties": {}
+    }
+  ]
+}

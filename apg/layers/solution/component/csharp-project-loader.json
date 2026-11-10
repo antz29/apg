@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "csharp-project-loader",
-  "body": "The C# project loader: source discovery, static solution and project-file reading, and one Roslyn compilation per project plus the projectless compilation, each with its parse options and project references.",
+  "body": "The C# project loader: source discovery, static solution and project-file reading, and one Roslyn compilation per project, one projectless compilation and one per `.csx` script, each with its parse options and references.",
   "properties": {},
   "out": [
     {

@@ -32,6 +32,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.csharp-script-isolation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.csharp-solution-project-discovery",
       "properties": {}
     },
