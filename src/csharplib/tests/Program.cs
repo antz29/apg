@@ -432,13 +432,16 @@ public static class TestMain
 
         var r = RunScanner(mixedDir);
         Check("mixed .cs/.csx scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
-        var c = Canonicalize(ParseGraph(r.Out));
+        var g = ParseGraph(r.Out);
+        var c = Canonicalize(g);
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
 
-        Check("mixed scan emits the .csx File record",
-            c.Records.Any(s => s.StartsWith($"file|{csx}|", StringComparison.Ordinal)), Join(c.Records) + "\nSTDERR:\n" + r.Err);
-        Check("mixed scan emits the .csx top-level method's declaration",
-            c.Records.Any(s => s.StartsWith("function|", StringComparison.Ordinal) && RecordPath(s) == csx && s.Split('|')[1].EndsWith("Twice", StringComparison.Ordinal)),
-            Join(c.Records) + "\nSTDERR:\n" + r.Err);
+        Check("mixed scan emits a script module record whose identity is the S.csx path",
+            g.Modules.Contains(csx), Join(g.Modules));
+        Check("mixed scan's .csx File record parent is the S.csx script module",
+            g.Files.Any(f => f.StartsWith($"{csx}|{csx}|", StringComparison.Ordinal)), Join(g.Files));
+        Check("mixed scan's .csx top-level method FQN is exactly <S.csx path>.Twice",
+            c.Records.Any(s => s.StartsWith($"function|{csx}.Twice|{csx}|", StringComparison.Ordinal)), all);
 
         var baseline = Canonicalize(ParseGraph(RunScanner(csOnlyDir).Out)).Records
             .Where(IsDecl).Select(s => s.Replace(csOnly, cs)).ToList();
