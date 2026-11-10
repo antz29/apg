@@ -1587,6 +1587,7 @@ mod unit {
                 && LANGUAGE_ROOTS.contains(&"cobol")
                 && LANGUAGE_ROOTS.contains(&"sh")
                 && LANGUAGE_ROOTS.contains(&"misc")
+                && LANGUAGE_ROOTS.contains(&"sln")
                 && LANGUAGE_ROOTS.len() == 21,
             "LANGUAGE_ROOTS must carry the twenty-one available_languages ids: {LANGUAGE_ROOTS:?}"
         );
@@ -1605,6 +1606,9 @@ mod unit {
         // A structural-scanner root strips exactly once, like a code root.
         assert_eq!(code_identity("sh.something"), "something");
         assert_eq!(code_identity("sh.sh.install"), "sh.install");
+        // The `sln` solution root strips exactly once, like any other root.
+        assert_eq!(code_identity("sln.something"), "something");
+        assert_eq!(code_identity("sln.sln.x"), "sln.x");
         assert_eq!(code_identity("apg.cmd_scan"), "apg.cmd_scan");
         assert_eq!(code_identity("/abs/store.go"), "/abs/store.go");
         // ONE root only, and only a real `<root>.` boundary.
