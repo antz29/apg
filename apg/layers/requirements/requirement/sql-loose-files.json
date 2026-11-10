@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-loose-files",
-  "body": "A .sql file that no project includes is a loose file in the loose database scope, its File node in the module of its repository-relative directory and its one-part names taking the schema dbo.",
+  "body": "A .sql file outside every project's membership is a loose file in the loose database scope, its File node in the module of its repository-relative directory and its one-part names taking the schema dbo.",
   "properties": {
     "feature": "sql-frontend"
   },

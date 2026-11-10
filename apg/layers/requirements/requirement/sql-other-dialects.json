@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-other-dialects",
-  "body": "A .sql file written in another SQL dialect parses as T-SQL, each batch the T-SQL parser rejects yielding a diagnostic and no facts.",
+  "body": "A .sql file written in another SQL dialect parses as T-SQL, each batch the T-SQL parser rejects contributing its diagnostic alone.",
   "properties": {
     "feature": "sql-frontend"
   },

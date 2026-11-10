@@ -6,6 +6,11 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.sql-project-reading",
       "properties": {}

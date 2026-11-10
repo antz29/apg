@@ -105,6 +105,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.language-registry",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.library-surface",
       "properties": {}
     },

@@ -6,6 +6,11 @@
   "properties": {},
   "out": [
     {
+      "kind": "is-role",
+      "target": "solution.role.pipeline-module",
+      "properties": {}
+    },
+    {
       "kind": "realises",
       "target": "domain.service.frontend-dependencies",
       "properties": {}

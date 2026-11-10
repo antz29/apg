@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "database-project",
-  "body": "A SQL Server database scope: a .sqlproj project with its member .sql files and default schema, or the loose scope holding every .sql file no project includes.",
+  "body": "A SQL Server database scope: a .sqlproj project with its member .sql files and default schema, or the loose scope holding every .sql file outside all project memberships.",
   "properties": {
     "kind": "entity"
   },

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-batch-recovery",
-  "body": "A batch with a syntax error yields no facts while every other batch of its file yields its facts, and the file keeps its File node.",
+  "body": "A batch with a syntax error contributes its diagnostic alone while every other batch of its file contributes its facts, and the file keeps its File node.",
   "properties": {
     "feature": "sql-frontend"
   },

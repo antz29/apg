@@ -15,6 +15,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.container.cobol-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.container.cpp-frontend",
       "properties": {}
     },
@@ -45,12 +50,12 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.container.ts-frontend",
+      "source": "solution.container.sql-frontend",
       "properties": {}
     },
     {
       "kind": "is-role",
-      "source": "solution.container.cobol-frontend",
+      "source": "solution.container.ts-frontend",
       "properties": {}
     }
   ]

@@ -10,12 +10,17 @@
   "in": [
     {
       "kind": "is-role",
-      "source": "solution.component.structural-build-staging",
+      "source": "solution.component.cobol-build-artifact",
       "properties": {}
     },
     {
       "kind": "is-role",
-      "source": "solution.component.cobol-build-artifact",
+      "source": "solution.component.sql-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.structural-build-staging",
       "properties": {}
     }
   ]
