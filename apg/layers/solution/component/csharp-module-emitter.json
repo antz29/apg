@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CollisionQualifier.Compute",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitFileAndDeclarations",
       "properties": {}
     },
@@ -17,7 +22,17 @@
     },
     {
       "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitProjectModules",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.Scanner.CanonicalFqn",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.SourceOwnership.AssignOwners",
       "properties": {}
     },
     {

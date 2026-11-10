@@ -6,6 +6,36 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.CollectImports",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.Compile",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.CompileDeclarations",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.CreateProjectEngine",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.ResolveRootNamespace",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.RazorSourceMap.MapSpan",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

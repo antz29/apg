@@ -22,6 +22,16 @@
     },
     {
       "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.ReferenceResolver.Resolve",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.ReferenceResolver.ResolveFrameworkReferences",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.UnresolvedClassifier.ClassifyCategory",
       "properties": {}
     },

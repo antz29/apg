@@ -17,7 +17,27 @@
     },
     {
       "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.CreateProjectCompilation",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.CompilationLoader.ParseTrees",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.CsharpProject",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.ProjectFileReader.Read",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.SolutionReader.Read",
       "properties": {}
     },
     {
