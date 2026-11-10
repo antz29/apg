@@ -51,7 +51,7 @@ pub(crate) fn run_pipeline(
     // The incremental path's target-only spool, materialised here ONCE. It
     // survives the whole function because the phase-3 full re-assembly fallback
     // replays it; the delta ingest only borrows it.
-    let mut delta_spool: Vec<schema::Record>;
+    let mut delta_spool: Vec<schema::Record> = Vec::new();
     let (mut graph, report) = {
         // Stream the scanner JSONL straight into the ingestor. On the WARM path
         // the target-only spool is ingested here and the unaffected files'
@@ -309,10 +309,48 @@ pub(crate) fn run_pipeline(
         // the P2-assembled full in-memory graph lands as `db.lbug` alone, with
         // no export argument left to carry.
     } else {
+        // Phase-03 task-5: EVERY full-load branch of the incremental path must
+        // load the FULL graph. `graph` is the target-only delta graph above, so
+        // re-assemble the full graph from the buffered spool plus the
+        // unchanged-file reuse plan — covering both causes: `try_splice_build`
+        // declining (a guard refusal or a mid-sequence DML failure) and
+        // `force_full_load` short-circuiting the splice entirely.
+        let full_graph = if delta {
+            log.ln(
+                "[load] full-load fallback: re-assembling the full graph (buffered spool + unchanged-file reuse) — the delta graph is never loaded",
+            );
+            let plan = input
+                .and_then(|i| i.reuse.as_ref())
+                .expect("an incremental delta scan always carries a reuse plan");
+            let holder = cache::FactStore::at(plan.store_root.clone()).load();
+            let reuse = plan.reuse(&holder);
+            let opts = ingest::IngestOptions {
+                blacklist,
+                language,
+                config,
+                base,
+            };
+            let (mut assembled, _) =
+                ingest::ingest_with_reuse(delta_spool.iter().cloned(), &opts, Some(&reuse), None);
+            // The ORDINARY cleanup: this is the full graph, not a delta-shaped
+            // one, so none of the seed-universe pruning applies.
+            cleanup(
+                &mut assembled,
+                &CleanupOptions {
+                    user_excludes: path_excludes.to_vec(),
+                    language: language.to_string(),
+                    universe: BTreeSet::new(),
+                },
+            );
+            Some(assembled)
+        } else {
+            None
+        };
+        let graph = full_graph.as_ref().unwrap_or(&graph);
         let dir = temp_dir();
         std::fs::create_dir_all(&dir).unwrap();
         log.ln("[load] writing parquet load files...");
-        load::build_load_files(&graph, &dir).unwrap();
+        load::build_load_files(graph, &dir).unwrap();
         log.ln("[load] parquet files written");
 
         // cwd is `.trans`, so the derived index lives at "."; discard the index
