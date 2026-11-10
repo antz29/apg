@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-reference-facts",
-  "body": "Each procedure execution, function call and object reference inside a view, procedure, function or trigger is an edge to its declaration in the database scope or to an unresolved target.",
+  "body": "View, procedure, function and trigger bodies and declared tables, table types and synonyms yield call and use edges to the scope declarations or unresolved targets they name, except local names, dynamic SQL text and a view's function calls.",
   "properties": {
     "feature": "sql-frontend"
   },
