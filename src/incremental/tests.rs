@@ -26,6 +26,10 @@ mod unit {
         assert_eq!(language_of("x.rs"), "rust");
         assert_eq!(language_of("x.tsx"), "ts");
         assert_eq!(language_of("x.cs"), "csharp");
+        // Every C#-frontend-claimed extension lands in the csharp target set.
+        assert_eq!(language_of("x.csx"), "csharp");
+        assert_eq!(language_of("Views/Index.cshtml"), "csharp");
+        assert_eq!(language_of("Pages/App.razor"), "csharp");
         // `.py`/`.pyi` classify under the scan-side id `py` (phase-08
         // task-23), so the win-B target filter matches them.
         assert_eq!(language_of("x.py"), "py");
@@ -68,6 +72,7 @@ mod unit {
         assert_eq!(language_of("config.toml"), "toml");
         assert_eq!(language_of("Cargo.lock"), "toml");
         assert_eq!(language_of("pom.xml"), "xml");
+        assert_eq!(language_of("App.sln"), "sln");
         assert_eq!(language_of("Dockerfile"), "dockerfile");
         assert_eq!(language_of("app.dockerfile"), "dockerfile");
         assert_eq!(language_of("Makefile"), "makefile");
