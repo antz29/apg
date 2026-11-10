@@ -17,10 +17,6 @@ pub(crate) mod ini;
 pub(crate) mod json;
 pub(crate) mod makefile;
 pub(crate) mod sh;
-#[expect(
-    dead_code,
-    reason = "run's dispatch table wires emit_sln in phase-03 task 3"
-)]
 pub(crate) mod sln;
 pub(crate) mod toml;
 pub(crate) mod xml;

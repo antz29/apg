@@ -51,6 +51,7 @@ use crate::formats::ini::emit_ini;
 use crate::formats::json::emit_json;
 use crate::formats::makefile::emit_makefile;
 use crate::formats::sh::emit_sh;
+use crate::formats::sln::emit_sln;
 use crate::formats::toml::emit_toml;
 use crate::formats::xml::emit_xml;
 use crate::formats::yaml::emit_yaml;
@@ -180,6 +181,10 @@ fn run(args: Args) -> io::Result<()> {
             "ini" => (
                 repo_relative_dir(&base, path),
                 emit_ini(path, &bytes, &args.id_prefix, &mut next_id),
+            ),
+            "sln" => (
+                repo_relative_dir(&base, path),
+                emit_sln(path, &bytes, &args.id_prefix, &mut next_id),
             ),
             // The residual `misc` stream emits a `File` record only.
             _ => (
