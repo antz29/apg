@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "merge-delta-limits",
+  "body": "Three limits. (1) A surviving target with no Struct/Function declarations installs no signatures or file_scopes entry (matching from_graph), never an empty-key entry. (2) merge_delta sorts overloads.scopes members while OverloadIndex::from_graph may not, so membership must be compared as sets. (3) The signature-inversion fallback covers Struct/Function FQNs; a delta edge whose far endpoint is a bare File FQN (a COBOL program-to-unchanged-copybook uses) has neither a delta node nor a signature entry and is skipped. Upgrade (3) only if the persisted index must carry copybook file-dependency edges across a delta scan, which needs a persisted File-identity set.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.incremental.prepare.State.merge_delta",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

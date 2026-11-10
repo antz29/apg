@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scaffolding-files-map-coverage",
+  "body": "The module-to-direct-files map is not asserted directly here; the incremental_e2e delta-record test pins the merge against it. An absent files key and an empty Vec are equivalent by design (both take the safe additive fallback). Upgrade with explicit extract assertions if the component grouping that yields an empty entry ever changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.fragment.ModuleScaffolding.extract",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
