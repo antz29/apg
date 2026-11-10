@@ -33,10 +33,7 @@ internal sealed class EdgeEmitter
                 if (callerSymbol != null && _scanner.SymbolToId.TryGetValue(callerSymbol, out var callerId))
                 {
                     var symbolInfo = model.GetSymbolInfo(invocation);
-                    // Scripts merge into one Script class, so same-signature members are ambiguous: prefer this tree's own.
-                    var targetSymbol = symbolInfo.Symbol
-                        ?? symbolInfo.CandidateSymbols.FirstOrDefault(c => c.ContainingType?.IsScriptClass == true && c.DeclaringSyntaxReferences.Any(r => r.SyntaxTree == tree))
-                        ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+                    var targetSymbol = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
 
                     if (targetSymbol is IMethodSymbol targetMethod)
                     {
@@ -74,9 +71,7 @@ internal sealed class EdgeEmitter
                 if (callerSymbol != null && _scanner.SymbolToId.TryGetValue(callerSymbol, out var callerId))
                 {
                     var symbolInfo = model.GetSymbolInfo(creation);
-                    var targetSymbol = symbolInfo.Symbol
-                        ?? symbolInfo.CandidateSymbols.FirstOrDefault(c => c.ContainingType?.IsScriptClass == true && c.DeclaringSyntaxReferences.Any(r => r.SyntaxTree == tree))
-                        ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+                    var targetSymbol = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
 
                     if (targetSymbol is IMethodSymbol targetCtor)
                     {
