@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-top-level-statements",
-  "body": "A statement outside every view, procedure, function and trigger contributes its declarations alone, so a script's top-level references are ungraphed sites.",
+  "body": "A statement outside every view, procedure, function and trigger yields no call or use edge except the column-type uses of a declared table or table type and the target use of a declared synonym.",
   "properties": {
     "feature": "sql-frontend"
   },
