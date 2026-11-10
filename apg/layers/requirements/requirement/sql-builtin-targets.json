@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-builtin-targets",
-  "body": "A schema-less scalar function call, and an EXEC of an sp_ or xp_ procedure or one in the sys schema absent from the scope, is an unresolved call of category builtin named by its upper-cased name.",
+  "body": "A schema-less scalar function call is an unresolved call of category builtin named by its upper-cased name, and an EXEC of an sp_, xp_ or sys-schema procedure absent from the scope is one named SYS. plus its upper-cased name.",
   "properties": {
     "feature": "sql-frontend"
   },

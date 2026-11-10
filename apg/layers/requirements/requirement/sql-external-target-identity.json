@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-external-target-identity",
-  "body": "An external target's identity is its written name parts joined by dots with brackets stripped, a one-part name prefixed with its file's default schema.",
+  "body": "An external target is its written name parts, brackets stripped, joined by dots, a one-part name prefixed with its file's default schema, spelled as its first case-insensitive match in repository-relative path and source order.",
   "properties": {
     "feature": "sql-frontend"
   },

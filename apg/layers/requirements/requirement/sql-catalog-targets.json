@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-catalog-targets",
-  "body": "A reference to an object in the sys or INFORMATION_SCHEMA schema is an unresolved use of category builtin.",
+  "body": "A reference to an object in the sys or INFORMATION_SCHEMA schema is an unresolved use of category builtin named by its upper-cased schema and object joined by a dot, such as SYS.OBJECTS or INFORMATION_SCHEMA.TABLES.",
   "properties": {
     "feature": "sql-frontend"
   },
