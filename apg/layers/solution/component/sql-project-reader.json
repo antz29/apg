@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "sql-project-reader",
-  "body": "The .sqlproj reader: static XML reading of legacy SSDT and Microsoft.Build.Sql SDK projects into each database scope's member files and default schema.",
+  "body": "The .sqlproj reader: static XML reading of each legacy project and each SDK-style project, whatever SDK it names, into its database scope's member files and default schema.",
   "properties": {},
   "out": [
     {
