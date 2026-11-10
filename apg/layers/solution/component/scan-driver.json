@@ -57,11 +57,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.incremental.record.merge_scaffolding",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.incremental.record.record",
       "properties": {}
     },
