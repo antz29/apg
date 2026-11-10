@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-object-identity",
+  "body": "An object's identity is sql.P.schema.name for a member of project P and sql.schema.name for a loose file, each schema being a module under its database scope.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-schema-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-trigger-schema",
+  "body": "A DML trigger declared with a one-part name takes the schema of the table or view it fires on, and a database-scoped DDL trigger takes its file's default schema.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-schema-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    }
+  ]
+}

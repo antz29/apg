@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-shared-member",
+  "body": "A .sql file that several projects include belongs to the first of those projects in repository-relative path order, so it carries one module identity.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-project-model",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-project-reading",
+      "properties": {}
+    }
+  ]
+}

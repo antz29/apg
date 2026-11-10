@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "sql-never-guesses",
+  "body": "A SQL reference that names no declaration of its own database scope is an unresolved target, and an edge to a guessed, cross-scope or cross-database declaration is a violation.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

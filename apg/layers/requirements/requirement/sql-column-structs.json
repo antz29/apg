@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-column-structs",
+  "body": "Each column of a table, view or table type is a Struct named by its column name and contained by that object's Struct, a view's columns being its column list or else its select list's named outputs.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-schema-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    }
+  ]
+}

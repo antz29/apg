@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-engine-pin",
+  "body": "The SQL frontend parses with the TSql170Parser of Microsoft.SqlServer.TransactSql.ScriptDom 180.140.0, quoted identifiers on and every engine type accepted, so its ceiling is SQL Server 2025 T-SQL including Azure SQL.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.frontend-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-synonym-uses",
+  "body": "A synonym whose target is a table, view or sequence in the scope has a uses edge of kind read to that target's Struct, and any other synonym target is an unresolved use of category external.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

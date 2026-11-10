@@ -1,0 +1,61 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "language-registry",
+  "body": "The scan driver's per-language registration tables: the detection candidates and their extension walk, the opaque-id prefixes, the scan-time tool map, the incremental language map and the impact granularity.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.auto_detect_languages",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.ext_matches",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.has_extension",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.id_prefix_for",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.scan_time_tools",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.impact.signature.granularity",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.incremental.language.language_of",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

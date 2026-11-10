@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-project-module",
+  "body": "A database project is the module sql.P, P being its .sqlproj file's repository-relative path, and is the database scope whose module contains its member .sql files.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-project-model",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-project-reading",
+      "properties": {}
+    }
+  ]
+}

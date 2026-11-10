@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-object-uses",
+  "body": "A unit's references to one table, view, sequence or synonym in the scope form one uses edge from the unit's Struct or Function to that object's Struct.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

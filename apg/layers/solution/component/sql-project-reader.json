@@ -1,0 +1,21 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-project-reader",
+  "body": "The .sqlproj reader: static XML reading of legacy SSDT and Microsoft.Build.Sql SDK projects into each database scope's member files and default schema.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-project-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

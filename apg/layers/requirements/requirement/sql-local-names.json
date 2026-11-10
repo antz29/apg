@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-local-names",
+  "body": "Temporary tables, table variables, common table expressions, table aliases and a trigger's inserted and deleted tables stay local to their unit, so a reference to one yields no edge.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

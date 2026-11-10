@@ -1,0 +1,116 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "sql-reference-resolution",
+  "body": "The capability that resolves each procedure execution, function call and object reference to a declaration in its database scope, or to a builtin or external unresolved target.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-alias-write-target",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-builtin-targets",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-catalog-targets",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-dynamic-sql",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-exec-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-external-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-external-targets",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-function-calls",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-local-names",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-name-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-object-uses",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-synonym-uses",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-top-level-statements",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-trigger-uses",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-type-uses",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-uses-kind",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-view-function-calls",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.database-project",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-reference-resolver",
+      "properties": {}
+    }
+  ]
+}

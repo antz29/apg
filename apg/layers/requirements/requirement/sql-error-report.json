@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-error-report",
+  "body": "Each SQL syntax error and each repeated declaration is one stderr line in the form sql: file:line:col: message, and the scan continues past it.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ]
+}

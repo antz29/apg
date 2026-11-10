@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cobol-packaging",
-  "body": "The apg-cobol formula is the eighth per-language formula in the release set, beside the base scanner formula.",
+  "body": "The apg-cobol formula is a per-language formula of the release set, beside the base scanner formula.",
   "properties": {
     "feature": "cobol-frontend"
   },

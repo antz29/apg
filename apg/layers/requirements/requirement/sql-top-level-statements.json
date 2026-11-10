@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-top-level-statements",
+  "body": "A statement outside every view, procedure, function and trigger contributes its declarations alone, so a script's top-level references are ungraphed sites.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

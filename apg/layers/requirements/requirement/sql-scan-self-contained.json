@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-scan-self-contained",
+  "body": "sqlfrontend runs self-contained, needing zero scan-time tools on the path and zero network access during a scan.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.frontend-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ]
+}

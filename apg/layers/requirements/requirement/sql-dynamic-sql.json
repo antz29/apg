@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-dynamic-sql",
+  "body": "An EXEC of a string or a procedure variable is an ungraphed site, and an sp_executesql call is one builtin unresolved call whose SQL text stays unparsed.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "sql-project-reading",
+  "body": "The capability that reads each database project statically into its member files and default schema, and assigns every .sql file to exactly one database scope.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-default-schema",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-deploy-scripts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-legacy-membership",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-loose-files",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-project-file-ownership",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-project-model",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-project-module",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-sdk-membership",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-shared-member",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-static-project-read",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.database-project",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "calls",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-project-reader",
+      "properties": {}
+    }
+  ]
+}

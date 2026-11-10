@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-language-root",
+  "body": "The sql id is a member of the canonical language-root set, so a code reference rooted at sql resolves and an applies-to edge names the sql Language.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ]
+}

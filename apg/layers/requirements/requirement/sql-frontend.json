@@ -1,0 +1,53 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-frontend",
+  "body": "A T-SQL source file's facts reach the program graph through the standalone sqlfrontend binary under the sql language id.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-project-model",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-schema-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.sql-database-owner",
+      "properties": {}
+    }
+  ]
+}

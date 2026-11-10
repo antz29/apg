@@ -1,0 +1,81 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "sql-language-integration",
+  "body": "The capability that makes T-SQL one scanned language of apg, with its claim, language root, code types, build artefact, cache identity, dependency contract and release packaging.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-code-type",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-engine-pin",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-incremental-equivalence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-language-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-language-root",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-packaging",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-scan-language-flag",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-scan-self-contained",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-source-claim",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-registry",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-build-artifact",
+      "properties": {}
+    }
+  ]
+}

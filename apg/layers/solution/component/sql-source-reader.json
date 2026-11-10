@@ -1,0 +1,21 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-source-reader",
+  "body": "The T-SQL source reader: SQLCMD neutralisation, the ScriptDom TSql170Parser pass over each file's GO batches, and the per-batch syntax diagnostics.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

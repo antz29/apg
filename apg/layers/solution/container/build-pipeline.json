@@ -9,17 +9,22 @@
   "out": [
     {
       "kind": "contains",
+      "target": "solution.component.cobol-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.sql-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.structural-build-staging",
       "properties": {}
     },
     {
       "kind": "is-role",
       "target": "solution.role.pipeline-container",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.cobol-build-artifact",
       "properties": {}
     }
   ],

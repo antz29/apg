@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-project-file-ownership",
+  "body": "A .sqlproj file's own File node belongs to the structural scanner, and the SQL frontend reads that file as project input alone.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-project-model",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-project-reading",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.structural-file-graphing",
+      "properties": {}
+    }
+  ]
+}

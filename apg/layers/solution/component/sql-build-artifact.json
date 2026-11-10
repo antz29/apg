@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-build-artifact",
+  "body": "The build-pipeline SQL arm: the build.rs publish and staging of sqlfrontend, the apg-sql formula and Linux package, and their entries in the release set.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.frontend-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.build-pipeline",
+      "properties": {}
+    }
+  ]
+}

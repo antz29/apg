@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.frontend-dependency-contract",
+      "target": "requirements.requirement.build-toolchain-pins",
       "properties": {}
     },
     {
@@ -17,17 +17,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.structural-scanner-in-base-package",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.frontend-engine-pin",
+      "target": "requirements.requirement.frontend-dependency-contract",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.frontend-dependency-docs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-engine-pin",
       "properties": {}
     },
     {
@@ -42,7 +42,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.build-toolchain-pins",
+      "target": "requirements.requirement.sql-engine-pin",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-scan-self-contained",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.structural-scanner-in-base-package",
       "properties": {}
     }
   ],
@@ -54,17 +64,22 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.scan-time-preflight",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
       "source": "solution.component.cpp-frontend-artifact",
       "properties": {}
     },
     {
       "kind": "realises",
       "source": "solution.component.csharp-frontend-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-time-preflight",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-build-artifact",
       "properties": {}
     }
   ]

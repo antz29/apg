@@ -1,0 +1,56 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "sql-source-reading",
+  "body": "The capability that reads a .sql file through SQLCMD neutralisation, GO batches and batch-level recovery into T-SQL parse trees located in the original text.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-batch-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-error-report",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-go-batches",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-other-dialects",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-sqlcmd-neutralisation",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "calls",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-source-reader",
+      "properties": {}
+    }
+  ]
+}

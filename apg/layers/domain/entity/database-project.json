@@ -1,0 +1,38 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "database-project",
+  "body": "A SQL Server database scope: a .sqlproj project with its member .sql files and default schema, or the loose scope holding every .sql file no project includes.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.default-schema",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.sql-project-reading",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "source": "domain.service.sql-schema-scanning",
+      "properties": {}
+    }
+  ]
+}

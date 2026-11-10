@@ -1,0 +1,21 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-schema-emitter",
+  "body": "The schema emitter and sqlfrontend entry point: module, file, object and column declarations streamed as the unified JSONL schema on stdout, with diagnostics on stderr.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-schema-scanning",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

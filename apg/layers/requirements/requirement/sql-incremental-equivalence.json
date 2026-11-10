@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-incremental-equivalence",
+  "body": "An incremental scan yields the same SQL facts as a full scan of the same tree, after a changed .sqlproj file or a changed declaration in another .sql file as much as after a body edit.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ]
+}
