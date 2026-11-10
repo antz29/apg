@@ -64,6 +64,26 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-external-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-external-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-routine-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.sql-synonym-uses",
       "properties": {}
     },
