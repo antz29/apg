@@ -99,6 +99,103 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: spawns the built structfrontend against a scratch /tmp tree; run via cargo test-e2e"]
+    fn structfrontend_streams_msbuild_as_xml_and_sln_as_sln() {
+        let dir = std::fs::canonicalize(scratch_dir("msbuild")).expect("canonicalize scratch dir");
+        let msbuild = [
+            "App.csproj",
+            "Directory.Build.props",
+            "Custom.targets",
+            "app.config",
+            "Strings.resx",
+        ];
+        for name in msbuild {
+            std::fs::write(dir.join(name), "<Project>\n  <A>x</A>\n</Project>\n")
+                .expect("write msbuild fixture");
+        }
+        std::fs::write(
+            dir.join("App.sln"),
+            "Microsoft Visual Studio Solution File, Format Version 12.00\n\
+             Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"App\", \"App.csproj\", \"{11111111-1111-1111-1111-111111111111}\"\n\
+             EndProject\n\
+             Global\n\
+             \tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n\
+             \t\tDebug|Any CPU = Debug|Any CPU\n\
+             \tEndGlobalSection\n\
+             EndGlobal\n",
+        )
+        .expect("write sln fixture");
+
+        // One spawn per stream, selected the way the scan driver does.
+        let stream = |id: &str| -> Vec<serde_json::Value> {
+            let out = std::process::Command::new(structfrontend_bin())
+                .arg(&dir)
+                .args(["--stream", id])
+                .output()
+                .expect("spawn structfrontend");
+            assert!(
+                out.status.success(),
+                "structfrontend --stream {id} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout)
+                .expect("utf8 stdout")
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("jsonl record"))
+                .collect()
+        };
+        let file_names = |recs: &[serde_json::Value]| -> Vec<String> {
+            let mut names: Vec<String> = recs
+                .iter()
+                .filter(|r| r["type"] == "file")
+                .filter_map(|r| r["path"].as_str())
+                .map(|p| {
+                    Path::new(p)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            names.sort();
+            names
+        };
+
+        // The xml stream claims exactly the MSBuild/config/resource files.
+        let xml = stream("xml");
+        let mut want: Vec<String> = msbuild.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(file_names(&xml), want, "xml stream files: {xml:?}");
+
+        // The sln stream claims the .sln alone, with its Project and
+        // GlobalSection structs.
+        let sln = stream("sln");
+        assert_eq!(
+            file_names(&sln),
+            vec!["App.sln"],
+            "sln stream files: {sln:?}"
+        );
+        let structs: Vec<&str> = sln
+            .iter()
+            .filter(|r| r["type"] == "struct")
+            .filter_map(|r| r["name"].as_str())
+            .collect();
+        assert_eq!(
+            structs,
+            vec!["App", "SolutionConfigurationPlatforms"],
+            "sln Project + GlobalSection structs"
+        );
+
+        // Neither lands in the residual misc stream.
+        assert!(
+            file_names(&stream("misc")).is_empty(),
+            "nothing left to misc"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    #[ignore = "e2e tier: spawns the built structfrontend against a scratch /tmp tree; run via cargo test-e2e"]
     fn structfrontend_prunes_top_level_apg_layout() {
         let dir =
             std::fs::canonicalize(scratch_dir("apg-layout")).expect("canonicalize scratch dir");
