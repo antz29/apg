@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "seed-unresolved-e2e-fixture-form",
+  "body": "The e2e is DB-fixture-based rather than a scratch-repo CLI scan because unresolved target FQNs are emitted unrooted (foreign names) and inserted verbatim by the ingestor, so they can never equal a rooted real Function or Struct FQN (zero matches in the current graph); upgrade to a real-CLI assertion only if the ingestor starts canonicalising Unresolved targets.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.seed_unresolved_edges_resolve_to_newly_real_delta_fqns",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

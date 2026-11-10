@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delta-unresolved-resolver-limits",
+  "body": "Two limits. (1) newly_real is O(delta nodes) and the resolver issues its label-split MERGEs plus one GC even when no seed unresolved row targets a new FQN; the GC scans the whole UnresolvedTarget table. Upgrade to a seeded-target index probe and a bounded GC only if this stage dominates a large-delta splice. (2) newly_real treats only status None or empty as real while the resolver's Cypher admits any status other than planned; a third code status would be skipped by the caller, so upgrade if a new code status is introduced.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.unresolved.resolve_delta_unresolved",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
