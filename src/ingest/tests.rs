@@ -1201,6 +1201,7 @@ mod int {
             "makefile",
             "ini",
             "misc",
+            "sln",
         ] {
             assert_eq!(
                 crate::classify::classify_code_type("run.sh", "sh.run.sh", lang, None),
