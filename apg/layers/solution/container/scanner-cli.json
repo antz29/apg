@@ -228,6 +228,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.sql-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.test-layout",
       "properties": {}
     },

@@ -76,6 +76,11 @@
       "kind": "realises",
       "source": "solution.component.sql-build-artifact",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-source-claim",
+      "properties": {}
     }
   ]
 }

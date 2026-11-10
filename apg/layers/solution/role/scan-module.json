@@ -240,6 +240,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.sql-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.test-layout",
       "properties": {}
     },
