@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-import-module-dependency",
-  "body": "An Import-Module naming exactly one scanned manifest by its repository-relative path minus .psd1, or a scanned .psm1 or .psd1 by static path, is one uses edge from the importing script Struct to that File with properties {\"kind\":\"import-module\"}.",
+  "body": "An Import-Module naming exactly one scanned manifest by its repository-relative path minus .psd1, or a scanned .psm1 or .psd1 by static path, is one uses edge from the script Struct to that File with properties {\"kind\":\"import-module\"}.",
   "properties": {
     "feature": "ps-frontend"
   },
