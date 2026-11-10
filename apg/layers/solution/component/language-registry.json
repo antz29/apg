@@ -2,14 +2,9 @@
   "layer": "solution",
   "type": "component",
   "name": "language-registry",
-  "body": "The scan driver's per-language registration tables: the detection candidates and their extension walk, the opaque-id prefixes, the scan-time tool map, the incremental language map and the impact granularity.",
+  "body": "The scan driver's per-language registration tables: the source-extension matching, the opaque-id prefixes, the scan-time tool map and the impact granularity.",
   "properties": {},
   "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.frontends.auto_detect_languages",
-      "properties": {}
-    },
     {
       "kind": "implemented-by",
       "target": "rust.apg.frontends.ext_matches",
@@ -33,11 +28,6 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.impact.signature.granularity",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.incremental.language.language_of",
       "properties": {}
     },
     {
