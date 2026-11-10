@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-overload-signature",
-  "body": "An overloaded member's FQN suffix renders each parameter as its declared type without the enclosing brackets and an untyped one as object, and a signature repeated within one class keeps its first declaration.",
+  "body": "An overloaded member's FQN suffix renders a typed parameter as the type written inside its brackets and a parameter lacking a type as object, and a signature repeated within one class keeps its first declaration.",
   "properties": {
     "feature": "ps-frontend"
   },
