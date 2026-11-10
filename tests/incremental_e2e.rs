@@ -449,4 +449,327 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// phase-05 task-4: an incremental `record` merges the target-only delta
+    /// graph into the full baseline's persisted index — the merged
+    /// `deps.json`/`signatures.json`/`overloads.json` reproduce a full-graph
+    /// `State::from_graph` rebuild — and merges each TOUCHED language's stored
+    /// module scaffolding (retiring a module whose every file was a target and
+    /// that the delta no longer carries) while a SKIPPED language's record stays
+    /// byte-identical. Real temp-dir FactStore — e2e by the boundaries law.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp-dir FactStore on disk); run via cargo test-e2e"]
+    fn delta_record_merges_the_index_and_keeps_skipped_scaffolding() {
+        use apg::cache::{CacheKey, Manifest, ScanConfigKey};
+
+        let dir = std::env::temp_dir().join(format!("apg-delta-record-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let scan_root = dir.join("wt");
+        std::fs::create_dir_all(scan_root.join("src")).unwrap();
+        let store_root = dir.join("store");
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let abs = |rel: &str| scan_root.join(rel).to_string_lossy().into_owned();
+
+        let rels = ["src/a.go", "src/b.go", "src/c.go", "src/d.go", "src/old.go"];
+        let mut manifest = Manifest::default();
+        for (i, rel) in rels.iter().chain(["src/J.java"].iter()).enumerate() {
+            std::fs::write(scan_root.join(rel), format!("package m // {i}\n")).unwrap();
+            manifest
+                .entries
+                .insert((*rel).to_string(), format!("oid-{i}"));
+        }
+
+        // The full baseline (pre-edit tree). `go` owns two components:
+        // `go.root -> {go.svc, go.retired}` (a pure-intermediate module with no
+        // direct file, so no `files` entry — the legacy record that must survive
+        // the merge) and the separate `go.mixed`; `java` is the skipped language.
+        let mut base = Graph::default();
+        for lang in ["go", "java"] {
+            base.nodes.insert(
+                lang.into(),
+                Node {
+                    kind: NodeKind::Language,
+                    ..Node::default()
+                },
+            );
+        }
+        for m in ["go.root", "go.svc", "go.retired", "go.mixed", "java.core"] {
+            base.nodes.insert(
+                m.into(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+        }
+        for (rel, module) in [
+            ("src/a.go", "go.svc"),
+            ("src/b.go", "go.svc"),
+            ("src/old.go", "go.retired"),
+            ("src/c.go", "go.mixed"),
+            ("src/d.go", "go.mixed"),
+            ("src/J.java", "java.core"),
+        ] {
+            let p = abs(rel);
+            base.nodes.insert(p.clone(), located(NodeKind::File, &p));
+            base.contains.insert((module.to_string(), p));
+        }
+        base.contains.insert(("go.root".into(), "go.svc".into()));
+        base.contains
+            .insert(("go.root".into(), "go.retired".into()));
+        for (lang, module) in [
+            ("go", "go.root"),
+            ("go", "go.svc"),
+            ("go", "go.retired"),
+            ("go", "go.mixed"),
+            ("java", "java.core"),
+        ] {
+            base.contains.insert((lang.to_string(), module.to_string()));
+        }
+        for (fqn, file) in [
+            ("go.svc.A", "src/a.go"),
+            ("go.svc.B", "src/b.go"),
+            ("go.retired.Old", "src/old.go"),
+            ("go.mixed.C", "src/c.go"),
+            ("go.mixed.D", "src/d.go"),
+            ("java.core.J", "src/J.java"),
+        ] {
+            let p = abs(file);
+            base.nodes
+                .insert(fqn.into(), located(NodeKind::Function, &p));
+            base.contains.insert((p, fqn.into()));
+        }
+        // Baseline references: `a.go` used to reach the soon-retired `old.go`;
+        // `b.go` reaches both `a.go` (the surviving target) and `old.go`
+        // (deleted/renamed away); `d.go` reaches the other surviving target.
+        base.calls
+            .insert(("go.svc.A".into(), "go.retired.Old".into()));
+        base.calls.insert(("go.svc.B".into(), "go.svc.A".into()));
+        base.calls
+            .insert(("go.svc.B".into(), "go.retired.Old".into()));
+        base.calls
+            .insert(("go.mixed.D".into(), "go.mixed.C".into()));
+
+        record(
+            &store_root,
+            &cache_key,
+            &scan_root,
+            &base,
+            &manifest,
+            "sha-base",
+            &BTreeSet::new(),
+        )
+        .unwrap();
+
+        // A skipped language's scaffolding is only ever written by a full scan;
+        // capture its bytes to prove the delta path never touches it.
+        let java_scaffold = store_root
+            .join("java")
+            .join(cache_key.token())
+            .join(apg::cache::SCAFFOLDING_FILE);
+        let java_before =
+            std::fs::read(&java_scaffold).expect("the full scan wrote the skipped language");
+
+        // The target-only delta graph: `src/a.go`/`src/c.go` re-emitted with a
+        // changed signature and a cross-cut call into an unchanged file's
+        // declaration; `src/old.go` was deleted, so the delta does not carry it.
+        let mut delta = Graph::default();
+        delta.nodes.insert(
+            "go".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        for m in ["go.svc", "go.mixed"] {
+            delta.nodes.insert(
+                m.into(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+        }
+        for (rel, module) in [("src/a.go", "go.svc"), ("src/c.go", "go.mixed")] {
+            let p = abs(rel);
+            delta.nodes.insert(p.clone(), located(NodeKind::File, &p));
+            delta.contains.insert((module.to_string(), p));
+        }
+        for module in ["go.svc", "go.mixed"] {
+            delta
+                .contains
+                .insert(("go".to_string(), module.to_string()));
+        }
+        let mut a = located(NodeKind::Function, &abs("src/a.go"));
+        a.params = vec!["int".into()];
+        delta.nodes.insert("go.svc.A".into(), a);
+        let mut c = located(NodeKind::Function, &abs("src/c.go"));
+        c.params = vec!["string".into()];
+        delta.nodes.insert("go.mixed.C".into(), c);
+        delta.calls.insert(("go.svc.A".into(), "go.svc.B".into()));
+        delta
+            .calls
+            .insert(("go.mixed.C".into(), "go.mixed.D".into()));
+
+        let targets: BTreeSet<String> = ["src/a.go", "src/c.go", "src/old.go"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        record(
+            &store_root,
+            &cache_key,
+            &scan_root,
+            &delta,
+            &manifest,
+            "sha-delta",
+            &targets,
+        )
+        .unwrap();
+
+        for name in ["deps.json", "signatures.json", "overloads.json"] {
+            assert!(
+                store_root.join("index").join(name).exists(),
+                "index/{name} on disk"
+            );
+        }
+
+        // The full NEW graph the delta is a target-only slice of: the same tree
+        // with `src/old.go` gone and the two targets re-declared.
+        let mut full = Graph::default();
+        let mut a = located(NodeKind::Function, &abs("src/a.go"));
+        a.params = vec!["int".into()];
+        full.nodes.insert("go.svc.A".into(), a);
+        full.nodes.insert(
+            "go.svc.B".into(),
+            located(NodeKind::Function, &abs("src/b.go")),
+        );
+        let mut c = located(NodeKind::Function, &abs("src/c.go"));
+        c.params = vec!["string".into()];
+        full.nodes.insert("go.mixed.C".into(), c);
+        full.nodes.insert(
+            "go.mixed.D".into(),
+            located(NodeKind::Function, &abs("src/d.go")),
+        );
+        full.nodes.insert(
+            "java.core.J".into(),
+            located(NodeKind::Function, &abs("src/J.java")),
+        );
+        full.calls.insert(("go.svc.A".into(), "go.svc.B".into()));
+        full.calls.insert(("go.svc.B".into(), "go.svc.A".into()));
+        full.calls
+            .insert(("go.mixed.C".into(), "go.mixed.D".into()));
+        full.calls
+            .insert(("go.mixed.D".into(), "go.mixed.C".into()));
+        let truth = State::from_graph(&full, &scan_root);
+
+        // The merged index reproduces the full-graph rebuild. Dep edges and
+        // signatures compare directly; overload scopes are sorted on the merge
+        // path, so compare their members as SETS.
+        let merged = State::load(&store_root);
+        assert_eq!(merged.dep_edges_rel, truth.dep_edges_rel);
+        assert_eq!(merged.signatures, truth.signatures);
+        assert_eq!(merged.overloads.file_scopes, truth.overloads.file_scopes);
+        let scopes_as_sets = |index: &apg::impact::OverloadIndex| {
+            index
+                .scopes
+                .iter()
+                .map(|(scope, members)| {
+                    (
+                        scope.clone(),
+                        members.iter().cloned().collect::<BTreeSet<String>>(),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<String, BTreeSet<String>>>()
+        };
+        assert_eq!(
+            scopes_as_sets(&merged.overloads),
+            scopes_as_sets(&truth.overloads)
+        );
+
+        // The target's own dependency entries are dropped and replaced from the
+        // delta (`src/a.go` no longer reaches the retired `old.go`, it now
+        // reaches `b.go` through the unchanged file's signature).
+        assert!(
+            merged
+                .dep_edges_rel
+                .contains(&("src/a.go".to_string(), "src/b.go".to_string()))
+        );
+        assert!(
+            !merged
+                .dep_edges_rel
+                .contains(&("src/a.go".to_string(), "src/old.go".to_string()))
+        );
+        // A surviving target's second-half entry (non-target `d.go` depend on
+        // target `c.go`) is kept.
+        assert!(
+            merged
+                .dep_edges_rel
+                .contains(&("src/d.go".to_string(), "src/c.go".to_string()))
+        );
+        // A dependency on the deleted/renamed-away file is gone.
+        assert!(
+            !merged
+                .dep_edges_rel
+                .contains(&("src/b.go".to_string(), "src/old.go".to_string()))
+        );
+
+        // The touched `go` scaffolding merged: the retired module is gone, the
+        // module with a surviving non-target file and the legacy module (no
+        // `files` entry) survive, and each edge/language edge to the retired
+        // module is dropped.
+        let store = FactStore::at(store_root.clone()).load();
+        let go = store
+            .scaffolding("go", &cache_key)
+            .expect("the touched language has a record");
+        assert!(go.modules.contains(&"go.svc".to_string()), "{go:?}");
+        assert!(go.modules.contains(&"go.mixed".to_string()), "{go:?}");
+        assert!(
+            go.modules.contains(&"go.root".to_string()),
+            "a legacy module with no `files` entry survives: {go:?}"
+        );
+        assert!(
+            !go.modules.contains(&"go.retired".to_string()),
+            "a module whose only file was a target and that the delta lacks is retired: {go:?}"
+        );
+        assert!(
+            !go.files.contains_key("go.root"),
+            "the legacy module keeps its absent `files` entry: {go:?}"
+        );
+        assert_eq!(
+            go.files["go.svc"],
+            vec!["src/a.go".to_string(), "src/b.go".to_string()],
+            "a target module keeps its surviving non-target file"
+        );
+        assert_eq!(
+            go.files["go.mixed"],
+            vec!["src/c.go".to_string(), "src/d.go".to_string()]
+        );
+        assert!(
+            go.edges
+                .contains(&("go.root".to_string(), "go.svc".to_string()))
+        );
+        assert!(
+            !go.edges
+                .contains(&("go.root".to_string(), "go.retired".to_string())),
+            "an edge to a retired module is dropped: {go:?}"
+        );
+        assert!(
+            go.language_edges
+                .contains(&("go".to_string(), "go.mixed".to_string()))
+        );
+        assert!(
+            !go.language_edges
+                .contains(&("go".to_string(), "go.retired".to_string())),
+            "a language edge to a retired module is dropped: {go:?}"
+        );
+
+        // The skipped language's stored record is byte-identical.
+        let java_after = std::fs::read(&java_scaffold).unwrap();
+        assert_eq!(
+            java_after, java_before,
+            "a skipped language's scaffolding stays byte-identical"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
