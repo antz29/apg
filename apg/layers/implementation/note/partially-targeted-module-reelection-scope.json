@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "partially-targeted-module-reelection-scope",
+  "body": "The module re-decide predicate requires a non-empty recorded file subtree, so a seeded Module whose module_file_subtrees entry is empty or absent is never re-decided through the module arm; a new or unknown module still enters via the missing-row arm, so this is not currently reachable as a defect. Upgrade only if an empty-subtree module must be re-decided.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.partially_targeted_module_keeps_unchanged_child_contains",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

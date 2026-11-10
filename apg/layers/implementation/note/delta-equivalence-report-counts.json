@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delta-equivalence-report-counts",
+  "body": "The splice report counts are exact expectations of the current fixture: nodes_upserted 5, edges_deleted 7, edges_merged 7, because the partially-targeted module's seed Contains are neither replaced nor re-merged. Upgrade when the fixture's rel set changes by recomputing from apply.rs's AUTH_RELS sets rather than bumping a literal.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.delta_application_matches_a_full_rebuild",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

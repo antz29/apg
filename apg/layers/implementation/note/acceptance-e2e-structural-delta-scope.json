@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "acceptance-e2e-structural-delta-scope",
+  "body": "The acceptance e2e pins the file-granular structural (misc) delta shape on a 50,100-file tree; upgrade if a code frontend's target granularity changes, since the delta shape and equivalence could differ.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.acceptance_one_file_rescan_stays_under_the_value_threshold",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
