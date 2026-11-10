@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-command-facts",
-  "body": "Each command, static method call, dot-source and Import-Module in a PowerShell file is an edge to its resolved target or to an unresolved target, and the scanner never guesses a target.",
+  "body": "Each command, method call, dot-source and Import-Module in a PowerShell file is an edge to the target the scan proves it reaches, or else to a categorised unresolved target.",
   "properties": {
     "feature": "ps-frontend"
   },

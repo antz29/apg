@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-scan-time-deps",
-  "body": "psfrontend is a self-contained binary with its parser statically linked, so a PowerShell scan needs zero scan-time tools and network, and the scan preflight lists no tool for ps.",
+  "body": "psfrontend is a self-contained binary with its parser statically linked, so a PowerShell scan needs zero scan-time tools and zero network, and the scan preflight's tool set for ps is empty.",
   "properties": {
     "feature": "ps-frontend"
   },

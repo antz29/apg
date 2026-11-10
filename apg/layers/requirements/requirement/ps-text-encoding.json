@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-text-encoding",
-  "body": "A PowerShell file in UTF-8 with or without a byte-order mark, or in UTF-16 with a byte-order mark, is read as its decoded text, and its line spans count the lines of that text.",
+  "body": "A PowerShell file in UTF-8, with an optional byte-order mark, or in UTF-16 with a byte-order mark, is read as its decoded text, and its line spans count the lines of that text.",
   "properties": {
     "feature": "ps-frontend"
   },

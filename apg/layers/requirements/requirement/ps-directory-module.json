@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-directory-module",
-  "body": "A PowerShell file no module manifest claims belongs to the module named by its repository-relative directory, the repository root included, and that directory is the module's base directory.",
+  "body": "A PowerShell file outside every module manifest's claim belongs to the module named by its repository-relative directory, the repository root included, and that directory is the module's base directory.",
   "properties": {
     "feature": "ps-frontend"
   },
