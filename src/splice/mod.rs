@@ -50,13 +50,15 @@
 // `incremental` (phase-02) used before task-4.
 #![allow(dead_code)]
 
-// The seam is split into its three cohesive halves — the seed ([`seed`]), the
-// delta application ([`apply`]), and the atomic publish ([`publish`]) — all
-// re-exported here so `crate::splice::<name>` keeps resolving at the original
-// paths.
+// The seam is split into its cohesive halves — the seed ([`seed`]), the delta
+// application ([`apply`]), the post-apply re-resolution of the seed's unresolved
+// edges ([`unresolved`]), and the atomic publish ([`publish`]). The seed, apply
+// and publish modules are re-exported here so `crate::splice::<name>` keeps
+// resolving at the original paths; [`unresolved`] is reached by its module path.
 pub mod apply;
 pub mod publish;
 pub mod seed;
+pub mod unresolved;
 
 pub use apply::*;
 pub use publish::*;
