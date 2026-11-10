@@ -6302,4 +6302,292 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Phase-03 task-6 (e2e): a DELETED agent definition on a one-file delta
+    /// rescan must publish the same graph a full rebuild does, once the
+    /// full-load fallback re-assembles the full graph.
+    ///
+    /// The scratch /tmp Go repo carries two `.opencode/agents/` definitions and
+    /// a branch-local plan whose `Task` is assigned to one of them. The cold
+    /// full scan seeds a `db.lbug` with both `Agent` rows and the `Task`→`Agent`
+    /// `AssignedTo` row. The delta then DELETES that assignment's definition
+    /// and edits one file OUTSIDE `.opencode/agents/`: the agent frontend emits
+    /// nothing for the deleted definition and the delta spool re-emits only the
+    /// UNCHANGED roster record, so the target-only delta graph has no node for
+    /// the deleted `Agent`. Its assembled authored digest therefore loses the
+    /// `AssignedTo` row the seed carries, `seed_checked` refuses with
+    /// `UnrepresentedAuthored`, and `run_pipeline` re-assembles the FULL graph
+    /// (buffered spool + unchanged-file reuse) before the ordinary full load —
+    /// the target-only delta graph never reaches `build_load_files`. The scan
+    /// must complete with no duplicate-FQN panic and no ghost `Agent` row for
+    /// the deleted definition, no stale `AssignedTo` row may survive, and the
+    /// published `Agent` / `Task`→`Agent` rows must equal a `--force` full
+    /// rebuild of the same tree.
+    ///
+    /// Scratch /tmp repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); real frontend scans, real
+    /// `db.lbug` files and a real git checkout are real I/O, so this is
+    /// `#[ignore]`d e2e (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/go/agent frontends/db.lbug/git); run via cargo test-e2e"]
+    fn deleted_agent_definition_rescan_matches_a_full_rebuild() {
+        use apg::schema::Record;
+        use apg::testutil::{ApgCommand, Repo};
+
+        /// The surviving definition's FQN and the deleted one's FQN + path.
+        const KEPT: &str = "agent.reviewer";
+        const DELETED: &str = "agent.implementer";
+        const DELETED_PATH: &str = ".opencode/agents/implementer.md";
+        /// The plan task whose `assigned-to` names the deleted definition.
+        const TASK: &str = "deleted-agent/plan.phase-01.task-1";
+
+        /// One `apg` invocation in `dir` with an isolated `HOME`; fails loudly on
+        /// a non-zero exit (a duplicate-FQN panic is such an exit).
+        fn apg_cli(dir: &Path, home: &str, args: &[&str]) -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", home).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        /// `apg scan .` (plus `extra`) in `dir`; returns its stderr log (the
+        /// `[scan]`/`[load]` decision lines).
+        fn scan_log(dir: &Path, home: &str, extra: &[&str]) -> String {
+            let mut args = vec!["scan", "."];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_cli(dir, home, &args).stderr).into_owned()
+        }
+
+        /// The JSON rows of one `apg query`.
+        fn query_json(dir: &Path, home: &str, cypher: &str) -> Vec<serde_json::Value> {
+            let out = apg_cli(dir, home, &["query", "--json", cypher]);
+            serde_json::from_slice(&out.stdout).expect("json rows")
+        }
+
+        /// The DB's `Task`→`Agent` `AssignedTo` rows, as sorted `(task, agent)`
+        /// pairs.
+        fn assigned_rows(dir: &Path, home: &str) -> BTreeSet<(String, String)> {
+            query_json(
+                dir,
+                home,
+                "MATCH (t:Task)-[:AssignedTo]->(a:Agent) RETURN t.fqn AS t, a.fqn AS a",
+            )
+            .iter()
+            .map(|r| {
+                (
+                    r["t"].as_str().unwrap().to_string(),
+                    r["a"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+        }
+
+        /// The DB's `Agent` rows, as sorted `(fqn, path, start_line,
+        /// end_line)` tuples — the whole row a full rebuild would write.
+        fn agent_rows(dir: &Path, home: &str) -> BTreeSet<(String, String, String, String)> {
+            query_json(
+                dir,
+                home,
+                "MATCH (a:Agent) RETURN a.fqn AS fqn, a.path AS path, \
+                 a.start_line AS start_line, a.end_line AS end_line",
+            )
+            .iter()
+            .map(|r| {
+                (
+                    r["fqn"].as_str().unwrap().to_string(),
+                    r["path"].as_str().unwrap().to_string(),
+                    r["start_line"].as_str().unwrap().to_string(),
+                    r["end_line"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+        }
+
+        let repo = Repo::new("deleted-agent-definition");
+        // The isolated HOME lives outside the scanned repo (suite install).
+        let home = repo
+            .root
+            .parent()
+            .unwrap()
+            .join(format!("apg-deleted-agent-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A Go module: `a/a.go` is the edited file; `b/b.go` is untouched, so
+        // the delta carries a genuine reuse plan (and a delta graph that lacks
+        // its units).
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf is the edited leaf.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.write(
+            "b/b.go",
+            "package b\n\n// Foo is the untouched file.\nfunc Foo() int { return 2 }\n",
+        );
+
+        // Two `.opencode/agents/` definitions: the assignment's one is deleted
+        // by the delta; the other is unchanged and must survive.
+        repo.write(DELETED_PATH, "# Implementer\n\nCore implementation.\n");
+        repo.write(
+            ".opencode/agents/reviewer.md",
+            "# Reviewer\n\nReview guidance.\n",
+        );
+
+        // The branch-local plan store (gitignored, so not part of the git delta
+        // between the two scans): one task assigned to the definition the delta
+        // deletes.
+        let plan_records = [
+            Record::Plan {
+                fqn: "deleted-agent/plan".into(),
+                title: "Deleted agent plan".into(),
+                strategy: "s".into(),
+            },
+            Record::PlanPhase {
+                fqn: "deleted-agent/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "d".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "deleted-agent/plan".into(),
+                to: "deleted-agent/plan.phase-01".into(),
+                properties: NodeProperties::default(),
+            },
+            Record::Task {
+                fqn: TASK.into(),
+                title: "T".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "deleted-agent/plan.phase-01".into(),
+                to: TASK.into(),
+                properties: NodeProperties::default(),
+            },
+            Record::AssignedTo {
+                from: TASK.into(),
+                to: DELETED.into(),
+            },
+        ];
+        let plan_jsonl: String = plan_records
+            .iter()
+            .map(|r| serde_json::to_string(r).unwrap() + "\n")
+            .collect();
+        let plans = repo.apg_root().join(".trans").join("plans");
+        std::fs::create_dir_all(&plans).unwrap();
+        std::fs::write(plans.join("deleted-agent.jsonl"), plan_jsonl).unwrap();
+
+        repo.commit_all("source, agent definitions and the plan assignment");
+
+        // (1) Cold full scan: the seed DB carries BOTH `Agent` rows and the
+        // `Task`→`Agent` `AssignedTo` row.
+        let cold_log = scan_log(&repo.root, &home_s, &[]);
+        assert!(
+            cold_log.contains("[load] writing parquet load files"),
+            "the cold scan must full-load: {cold_log}"
+        );
+        assert!(
+            !cold_log.contains("full load skipped"),
+            "the cold scan has no seed to splice: {cold_log}"
+        );
+        let seeded_agents = agent_rows(&repo.root, &home_s);
+        for fqn in [DELETED, KEPT] {
+            assert!(
+                seeded_agents.iter().any(|(agent, ..)| agent == fqn),
+                "the seed must carry `{fqn}`: {seeded_agents:?}"
+            );
+        }
+        assert_eq!(
+            assigned_rows(&repo.root, &home_s),
+            BTreeSet::from([(TASK.to_string(), DELETED.to_string())]),
+            "the seed must project the plan's `Task`→`Agent` `AssignedTo` row"
+        );
+
+        // (2) Delete the assignment's definition and edit ONE file outside
+        // `.opencode/agents/`, so the delta has a target and a reuse plan.
+        std::fs::remove_file(repo.root.join(DELETED_PATH)).unwrap();
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf is the edited leaf.\nfunc Leaf() int { return 42 }\n",
+        );
+        let inc_log = scan_log(&repo.root, &home_s, &[]);
+        assert!(
+            inc_log.contains("[scan] incremental:"),
+            "the deletion + edit must take the delta path: {inc_log}"
+        );
+        assert!(
+            !inc_log.contains("0 reusable file(s)"),
+            "unchanged files' facts must be in the reuse plan: {inc_log}"
+        );
+        assert!(
+            !inc_log.contains("duplicate project node FQN"),
+            "the target-only delta graph must never reach build_load_files: {inc_log}"
+        );
+        assert!(
+            inc_log.contains("[load] full-load fallback: re-assembling the full graph"),
+            "the deleted definition's delta digest loses the `AssignedTo` row, so \
+             `seed_checked` refuses and the fallback re-assembles the full graph: {inc_log}"
+        );
+        assert!(
+            !inc_log.contains("full load skipped"),
+            "the target-only delta graph must never be published: {inc_log}"
+        );
+
+        // (3) The published DB carries no ghost `Agent` row for the deleted
+        // definition and no stale `AssignedTo` row.
+        let inc_agents = agent_rows(&repo.root, &home_s);
+        assert!(
+            inc_agents
+                .iter()
+                .all(|(fqn, path, ..)| fqn != DELETED && path != DELETED_PATH),
+            "the deleted definition must leave no ghost `Agent` row: {inc_agents:?}"
+        );
+        assert_eq!(
+            inc_agents.iter().filter(|(fqn, ..)| fqn == KEPT).count(),
+            1,
+            "the unchanged definition must survive: {inc_agents:?}"
+        );
+        let inc_assigned = assigned_rows(&repo.root, &home_s);
+        assert!(
+            inc_assigned.iter().all(|(_, agent)| agent != DELETED),
+            "no stale `AssignedTo` row may survive for the deleted agent: {inc_assigned:?}"
+        );
+        assert!(
+            inc_assigned.is_empty(),
+            "the assignment's agent is gone, so a full rebuild carries no \
+             `AssignedTo` row: {inc_assigned:?}"
+        );
+
+        // (4) The full-rebuild reference: `--force` on the SAME tree writes the
+        // same `Agent` and `AssignedTo` rows.
+        let force_log = scan_log(&repo.root, &home_s, &["--force"]);
+        assert!(
+            !force_log.contains("full load skipped"),
+            "--force must full-rebuild, not splice: {force_log}"
+        );
+        assert!(
+            force_log.contains("[load] writing parquet load files"),
+            "--force must run the full load: {force_log}"
+        );
+        assert_eq!(
+            agent_rows(&repo.root, &home_s),
+            inc_agents,
+            "the fallback rescan's `Agent` rows must equal a --force full rebuild's"
+        );
+        assert_eq!(
+            assigned_rows(&repo.root, &home_s),
+            inc_assigned,
+            "the fallback rescan's `AssignedTo` rows must equal a --force full rebuild's"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
