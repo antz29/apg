@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-whole-language-rescan",
-  "body": "An incremental scan whose changed files include any .sql or .sqlproj file, in any letter case, re-runs the SQL frontend over every .sql file of the tree with no emission filter.",
+  "body": "An incremental scan whose changed files include any .sql or .sqlproj file, in any letter case, re-runs the SQL frontend to emit the facts of every .sql file in the tree.",
   "properties": {
     "feature": "sql-frontend"
   },
