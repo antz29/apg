@@ -2,3 +2,5 @@
 //! tier, driving the staged `csharpfrontend` / the CANDIDATE binary
 //! (`testutil::apg_bin`) against scratch `/tmp` trees only — never the apg
 //! repo. Every test is `#[ignore]`d and runs through `cargo test-e2e`.
+
+mod common;
