@@ -17,3 +17,7 @@ apg/.trans/
 apg/.worktrees/
 apg/.scratch/
 /opencode.json
+
+
+# MacOS related stub file
+.DS_Store
