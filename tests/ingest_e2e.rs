@@ -2097,6 +2097,15 @@ mod e2e {
     /// four `planned_node` records (and their parent `contains` edges). The file
     /// whose facts are warm is NOT a re-emission target, so only the cache
     /// carries its declaration — exactly the masking the seam must undo.
+    ///
+    /// The still-planned half is pinned beside that matrix: a `planned` Module
+    /// with its planned child File, and a `planned` Function under the REALIZED
+    /// File, are in the spool but in NO warm fact unit. A cached declaration
+    /// supersedes only a placeholder it can fill, so all three keep
+    /// `status: planned`, their location-less placeholder rows, and their
+    /// incident `Contains` edges (Module -> child File, realized File -> planned
+    /// Function) in both the assembled graph and its `db.lbug` — exactly as the
+    /// no-reuse reference, which is given the same placeholders, keeps them.
     #[test]
     #[ignore = "e2e tier: real I/O (temp FactStore dir/db.lbug); run via cargo test-e2e"]
     fn cached_declaration_supersedes_a_planned_placeholder() {
@@ -2128,27 +2137,86 @@ mod e2e {
         const FILE: &str = "crate/src/lib.rs";
         const STRUCT: &str = "rust.diagcrate.Widget";
         const FUNCTION: &str = "rust.diagcrate.compute";
+        // The still-planned half: a location-less Module, its planned child
+        // File, and a planned Function under the REALIZED File. No warm fact
+        // unit holds any of them, so no cached declaration can supersede them.
+        const FUTURE_MODULE: &str = "rust.futurecrate";
+        const FUTURE_FILE: &str = "crate/src/future.rs";
+        const FUTURE_FN: &str = "rust.diagcrate.future";
 
-        // The no-reuse reference: the declarations a full scan spools for the
-        // same tree (the warm file included).
+        // The plan store's `planned_node` records exactly as it emits them: the
+        // four a cached declaration supersedes and the three that stay planned.
+        // `insert_node` re-derives each non-empty `parent` `contains` edge.
+        let planned_records = || {
+            vec![
+                Record::PlannedNode {
+                    fqn: MODULE.to_string(),
+                    kind: "module".to_string(),
+                    name: "diagcrate".to_string(),
+                    parent: String::new(),
+                },
+                Record::PlannedNode {
+                    fqn: FILE.to_string(),
+                    kind: "file".to_string(),
+                    name: "lib.rs".to_string(),
+                    parent: MODULE.to_string(),
+                },
+                Record::PlannedNode {
+                    fqn: STRUCT.to_string(),
+                    kind: "struct".to_string(),
+                    name: "Widget".to_string(),
+                    parent: FILE.to_string(),
+                },
+                Record::PlannedNode {
+                    fqn: FUNCTION.to_string(),
+                    kind: "function".to_string(),
+                    name: "compute".to_string(),
+                    parent: FILE.to_string(),
+                },
+                Record::PlannedNode {
+                    fqn: FUTURE_MODULE.to_string(),
+                    kind: "module".to_string(),
+                    name: "futurecrate".to_string(),
+                    parent: String::new(),
+                },
+                Record::PlannedNode {
+                    fqn: FUTURE_FILE.to_string(),
+                    kind: "file".to_string(),
+                    name: "future.rs".to_string(),
+                    parent: FUTURE_MODULE.to_string(),
+                },
+                Record::PlannedNode {
+                    fqn: FUTURE_FN.to_string(),
+                    kind: "function".to_string(),
+                    name: "future".to_string(),
+                    parent: FILE.to_string(),
+                },
+            ]
+        };
+
+        // The real declarations a full scan spools for the same tree (the warm
+        // file included) — the real-declarations-only base the warm fact unit
+        // and the equality reference are both built from.
+        let reference_records = || {
+            vec![
+                scan.clone(),
+                Record::LangSwitch {
+                    language: "rust".to_string(),
+                },
+                Record::Module {
+                    fqn: "diagcrate".to_string(),
+                },
+                file_rec(FILE, "diagcrate", 40),
+                srec("n1", "diagcrate", "Widget", FILE),
+                frec("n2", "diagcrate", "compute", FILE),
+                file_rec("other.rs", "diagcrate", 12),
+            ]
+        };
+
+        // The no-reuse reference: the real declarations a full scan spools for
+        // the same tree (the warm file included).
         let reference = {
-            let (graph, _) = ingest(
-                vec![
-                    scan.clone(),
-                    Record::LangSwitch {
-                        language: "rust".to_string(),
-                    },
-                    Record::Module {
-                        fqn: "diagcrate".to_string(),
-                    },
-                    file_rec(FILE, "diagcrate", 40),
-                    srec("n1", "diagcrate", "Widget", FILE),
-                    frec("n2", "diagcrate", "compute", FILE),
-                    file_rec("other.rs", "diagcrate", 12),
-                ],
-                &opts,
-                None,
-            );
+            let (graph, _) = ingest(reference_records(), &opts, None);
             for fqn in [MODULE, FILE, STRUCT, FUNCTION] {
                 assert!(
                     graph.nodes.contains_key(fqn),
@@ -2159,10 +2227,10 @@ mod e2e {
             graph
         };
         let reference_db = dir.join("reference").join("db.lbug");
-        build_db(&reference_db, &reference);
 
         // Warm the store with that file's real fact unit, extracted FROM the
-        // reference graph so the cached nodes are exactly what a scan stores.
+        // real-declarations-only reference graph so the cached nodes are exactly
+        // what a scan stores — no planned placeholder can leak into the cache.
         let mut store = FactStore::at(dir.join("facts"));
         let frag = FileFragment::from_graph(&reference, FILE, FILE, "oid-diag", "rust");
         // The routing this matrix pins: the File and its two located units are
@@ -2189,57 +2257,56 @@ mod e2e {
         );
         store.put(&frag, "/fresh", &cache_key).unwrap();
 
-        // The spool: the four `planned_node` placeholders (as the plan store
-        // emits them, plus their parent `contains` edges) and ONE unrelated
-        // re-emitted target file. No Module record — the module scaffolding is
-        // not part of this spool, so its declaration can only arrive from the
-        // warm unit.
-        let planned = vec![
-            scan.clone(),
-            Record::LangSwitch {
-                language: "rust".to_string(),
-            },
-            file_rec("other.rs", "diagcrate", 12),
-            Record::PlannedNode {
-                fqn: MODULE.to_string(),
-                kind: "module".to_string(),
-                name: "diagcrate".to_string(),
-                parent: String::new(),
-            },
-            Record::PlannedNode {
-                fqn: FILE.to_string(),
-                kind: "file".to_string(),
-                name: "lib.rs".to_string(),
-                parent: MODULE.to_string(),
-            },
-            Record::PlannedNode {
-                fqn: STRUCT.to_string(),
-                kind: "struct".to_string(),
-                name: "Widget".to_string(),
-                parent: FILE.to_string(),
-            },
-            Record::PlannedNode {
-                fqn: FUNCTION.to_string(),
-                kind: "function".to_string(),
-                name: "compute".to_string(),
-                parent: FILE.to_string(),
-            },
-            Record::Contains {
-                from: MODULE.to_string(),
-                to: FILE.to_string(),
-                properties: NodeProperties::default(),
-            },
-            Record::Contains {
-                from: FILE.to_string(),
-                to: STRUCT.to_string(),
-                properties: NodeProperties::default(),
-            },
-            Record::Contains {
-                from: FILE.to_string(),
-                to: FUNCTION.to_string(),
-                properties: NodeProperties::default(),
-            },
-        ];
+        // The equality reference: the same real declarations WITH the plan
+        // store's seven placeholders — the fact set the assembled graph must
+        // reproduce row for row. The warm unit above is derived from the
+        // real-declarations-only graph, so the cache cannot supply a planned
+        // placeholder's declaration.
+        let reference = {
+            let (graph, _) = ingest(
+                reference_records().into_iter().chain(planned_records()),
+                &opts,
+                None,
+            );
+            graph
+        };
+        build_db(&reference_db, &reference);
+
+        // The spool: the plan store's `planned_node` records (as it emits them,
+        // plus their parent `contains` edges) and ONE unrelated re-emitted target
+        // file. No Module record — the module scaffolding is not part of this
+        // spool, so its declaration can only arrive from the warm unit.
+        let planned = {
+            let mut records = vec![
+                scan.clone(),
+                Record::LangSwitch {
+                    language: "rust".to_string(),
+                },
+                file_rec("other.rs", "diagcrate", 12),
+            ];
+            records.extend(planned_records());
+            // The four realized pairs travel explicitly in the spool; the
+            // still-planned pairs are re-derived from each placeholder's
+            // `parent` by `insert_node`.
+            records.extend([
+                Record::Contains {
+                    from: MODULE.to_string(),
+                    to: FILE.to_string(),
+                    properties: NodeProperties::default(),
+                },
+                Record::Contains {
+                    from: FILE.to_string(),
+                    to: STRUCT.to_string(),
+                    properties: NodeProperties::default(),
+                },
+                Record::Contains {
+                    from: FILE.to_string(),
+                    to: FUNCTION.to_string(),
+                    properties: NodeProperties::default(),
+                },
+            ]);
+            records
+        };
         let reuse = Reuse {
             store: &store,
             cache_key: &cache_key,
@@ -2315,6 +2382,40 @@ mod e2e {
             matrix.join("\n")
         );
 
+        // The still-planned half: a placeholder no cached declaration fills keeps
+        // `status: planned`, its location-less row, and its `Contains` edges in
+        // the assembled graph.
+        for (label, fqn, kind) in [
+            ("Module", FUTURE_MODULE, NodeKind::Module),
+            ("File", FUTURE_FILE, NodeKind::File),
+            ("Function", FUTURE_FN, NodeKind::Function),
+        ] {
+            let got = assembled.nodes.get(fqn).unwrap_or_else(|| {
+                panic!("{label} `{fqn}` must survive the cache merge as a placeholder")
+            });
+            assert_eq!(
+                got.kind, kind,
+                "{label} `{fqn}` must keep its {kind:?} kind"
+            );
+            assert_eq!(
+                got.status.as_deref(),
+                Some("planned"),
+                "{label} `{fqn}` must stay `planned`: no cached declaration supersedes it"
+            );
+            assert!(
+                got.location.is_none(),
+                "{label} `{fqn}` must stay location-less like the plan store's placeholder"
+            );
+        }
+        for (from, to) in [(FUTURE_MODULE, FUTURE_FILE), (FILE, FUTURE_FN)] {
+            assert!(
+                assembled
+                    .contains
+                    .contains(&(from.to_string(), to.to_string())),
+                "the still-planned `{from}` -> `{to}` Contains edge must survive the cache merge"
+            );
+        }
+
         // The database is the artifact both consumers read (the query index and
         // the splice delta source): the assembled `db.lbug` must be table- and
         // row-equal to a no-reuse full rebuild's. The LANGUAGE ROOT is
@@ -2367,9 +2468,32 @@ mod e2e {
             );
         }
 
+        // Each still-planned node's own row: identity kept, `status: planned`
+        // intact, identical to the no-reuse reference row (which was given the
+        // same placeholders).
+        for (label, fqn) in [
+            ("Module", FUTURE_MODULE),
+            ("File", FUTURE_FILE),
+            ("Function", FUTURE_FN),
+        ] {
+            let got = db_node_row(&assembled_db, label, fqn);
+            assert_eq!(
+                got,
+                db_node_row(&reference_db, label, fqn),
+                "still-planned {label} `{fqn}` row must equal a no-reuse full rebuild's"
+            );
+            assert_eq!(
+                got.last().map(String::as_str),
+                Some("planned"),
+                "still-planned {label} `{fqn}` must keep `status: planned` in db.lbug"
+            );
+        }
+
         // Its incident edges, both halves: every code-side `Contains` pair must
         // equal a no-reuse full rebuild's, and the three edges the placeholder
-        // spool declared survive the cached declaration superseding it.
+        // spool declared survive the cached declaration superseding it — as do
+        // the still-planned pairs (Module -> planned File, realized File ->
+        // planned Function).
         for (from, to) in [
             ("Module", "File"),
             ("File", "Struct"),
@@ -2386,11 +2510,13 @@ mod e2e {
             ("Module", "File", MODULE, FILE),
             ("File", "Struct", FILE, STRUCT),
             ("File", "Function", FILE, FUNCTION),
+            ("Module", "File", FUTURE_MODULE, FUTURE_FILE),
+            ("File", "Function", FILE, FUTURE_FN),
         ] {
             assert!(
                 db_contains_pairs(&assembled_db, from, to)
                     .contains(&vec![a.to_string(), b.to_string()]),
-                "the assembled database must carry the realized {from} -> {to} edge \
+                "the assembled database must carry the {from} -> {to} edge \
                  `{a}` -> `{b}`"
             );
         }
