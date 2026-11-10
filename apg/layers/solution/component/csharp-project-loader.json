@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.BuildModels",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.CompilationLoader.CreateCompilation",
       "properties": {}
     },

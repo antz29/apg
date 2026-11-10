@@ -12,12 +12,17 @@
     },
     {
       "kind": "implemented-by",
-      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitUnresolvedCall",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitEdges",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitUnresolvedNode",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitTypeUse",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitUnresolvedCall",
       "properties": {}
     },
     {
