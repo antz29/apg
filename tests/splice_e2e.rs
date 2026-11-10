@@ -6303,6 +6303,249 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase-03 task-8 (e2e): the module re-decide gate (`fully_reached`). A
+    /// seeded Module whose file subtree is only PARTIALLY re-emitted keeps its
+    /// seed row and every outgoing `Module -> File` / `Module -> Module`
+    /// `Contains` rel: re-emitting one child file must merge additively, never
+    /// wipe the untouched sibling (`b.go`) or the nested child module
+    /// (`m.sub`). The fully-targeted control module (`gone`, every file in the
+    /// target set) IS re-decided, so its old `Contains` to the removed child is
+    /// gone — and the spliced `Contains` set equals a full rebuild's.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
+    fn partially_targeted_module_keeps_unchanged_child_contains() {
+        /// The `Contains` rows of a DB file opened read-only, as
+        /// `(parent_fqn, child_fqn)`.
+        fn contains_rows(path: &Path) -> BTreeSet<(String, String)> {
+            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (_, rows) = query_rows(
+                &conn,
+                "MATCH (a)-[:Contains]->(b) RETURN a.fqn AS a, b.fqn AS b",
+            )
+            .unwrap();
+            let out = rows.iter().map(|r| (cell(r, 0), cell(r, 1))).collect();
+            drop(conn);
+            drop(db);
+            out
+        }
+
+        let dir = scratch("partial-module");
+        let prev_path = dir.join("db.lbug");
+
+        let a = "/x/m/a.go".to_string();
+        let b = "/x/m/b.go".to_string();
+        let c = "/x/m/sub/c.go".to_string();
+        let g1 = "/x/gone/g1.go".to_string();
+        let orphan = "/x/gone/orphan.go".to_string();
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let language = || Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        };
+
+        // Seed: `m` owns `a.go` (target) and `b.go` (untouched sibling) plus the
+        // nested child module `m.sub` (owning `c.go`); control module `gone`
+        // owns `g1.go` (target, kept) and `orphan.go` (target, removed) — every
+        // file in scope, so `gone` is fully reached.
+        let mut prev = Graph::default();
+        prev.nodes.insert("go".into(), language());
+        prev.nodes.insert("m".into(), module());
+        prev.nodes.insert("m.sub".into(), module());
+        prev.nodes.insert("gone".into(), module());
+        prev.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 40));
+        prev.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        prev.nodes
+            .insert(c.clone(), located(NodeKind::File, &c, 1, 20));
+        prev.nodes
+            .insert(g1.clone(), located(NodeKind::File, &g1, 1, 30));
+        prev.nodes
+            .insert(orphan.clone(), located(NodeKind::File, &orphan, 1, 20));
+        prev.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 30));
+        prev.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 12));
+        prev.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 12));
+        prev.nodes
+            .insert("m.C.q".into(), located(NodeKind::Function, &c, 2, 12));
+        prev.nodes
+            .insert("gone.G1.h".into(), located(NodeKind::Function, &g1, 2, 12));
+        prev.nodes.insert(
+            "gone.G2.o".into(),
+            located(NodeKind::Function, &orphan, 2, 12),
+        );
+        prev.contains.insert(("go".into(), "m".into()));
+        prev.contains.insert(("go".into(), "gone".into()));
+        prev.contains.insert(("m".into(), a.clone()));
+        prev.contains.insert(("m".into(), b.clone()));
+        prev.contains.insert(("m".into(), "m.sub".into()));
+        prev.contains.insert(("m.sub".into(), c.clone()));
+        prev.contains.insert(("gone".into(), g1.clone()));
+        prev.contains.insert(("gone".into(), orphan.clone()));
+        prev.contains.insert((a.clone(), "m.A".into()));
+        prev.contains.insert((a.clone(), "m.A.f".into()));
+        prev.contains.insert(("m.A".into(), "m.A.f".into()));
+        prev.contains.insert((b.clone(), "m.B.g".into()));
+        prev.contains.insert((c.clone(), "m.C.q".into()));
+        prev.contains.insert((g1.clone(), "gone.G1.h".into()));
+        prev.contains.insert((orphan.clone(), "gone.G2.o".into()));
+        prev.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        build_db(&prev_path, &prev);
+
+        // The target-only delta re-emits exactly `a.go` (under the partially
+        // targeted `m`) and `g1.go` (under the fully targeted `gone`); `b.go`,
+        // `m.sub`/`c.go` and `gone`'s removed child stay out of the delta.
+        let mut delta = Graph::default();
+        delta.nodes.insert("go".into(), language());
+        delta.nodes.insert("m".into(), module());
+        delta.nodes.insert("gone".into(), module());
+        delta
+            .nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 45));
+        delta
+            .nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 35));
+        delta
+            .nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 14));
+        delta
+            .nodes
+            .insert("m.A.h".into(), located(NodeKind::Function, &a, 16, 28));
+        delta
+            .nodes
+            .insert(g1.clone(), located(NodeKind::File, &g1, 1, 34));
+        delta
+            .nodes
+            .insert("gone.G1.h".into(), located(NodeKind::Function, &g1, 2, 14));
+        delta.contains.insert(("go".into(), "m".into()));
+        delta.contains.insert(("go".into(), "gone".into()));
+        delta.contains.insert(("m".into(), a.clone()));
+        delta.contains.insert((a.clone(), "m.A".into()));
+        delta.contains.insert((a.clone(), "m.A.f".into()));
+        delta.contains.insert((a.clone(), "m.A.h".into()));
+        delta.contains.insert(("m.A".into(), "m.A.f".into()));
+        delta.contains.insert(("m.A".into(), "m.A.h".into()));
+        delta.contains.insert(("gone".into(), g1.clone()));
+        delta.contains.insert((g1.clone(), "gone.G1.h".into()));
+        delta.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+
+        // The full-rebuild reference: the whole new tree — `m` still owns
+        // `b.go` and the nested `m.sub`, and `gone` no longer owns `orphan.go`.
+        let mut full = Graph::default();
+        full.nodes.insert("go".into(), language());
+        full.nodes.insert("m".into(), module());
+        full.nodes.insert("m.sub".into(), module());
+        full.nodes.insert("gone".into(), module());
+        full.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 45));
+        full.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        full.nodes
+            .insert(c.clone(), located(NodeKind::File, &c, 1, 20));
+        full.nodes
+            .insert(g1.clone(), located(NodeKind::File, &g1, 1, 34));
+        full.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 35));
+        full.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 14));
+        full.nodes
+            .insert("m.A.h".into(), located(NodeKind::Function, &a, 16, 28));
+        full.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 12));
+        full.nodes
+            .insert("m.C.q".into(), located(NodeKind::Function, &c, 2, 12));
+        full.nodes
+            .insert("gone.G1.h".into(), located(NodeKind::Function, &g1, 2, 14));
+        full.contains.insert(("go".into(), "m".into()));
+        full.contains.insert(("go".into(), "gone".into()));
+        full.contains.insert(("m".into(), a.clone()));
+        full.contains.insert(("m".into(), b.clone()));
+        full.contains.insert(("m".into(), "m.sub".into()));
+        full.contains.insert(("m.sub".into(), c.clone()));
+        full.contains.insert(("gone".into(), g1.clone()));
+        full.contains.insert((a.clone(), "m.A".into()));
+        full.contains.insert((a.clone(), "m.A.f".into()));
+        full.contains.insert((a.clone(), "m.A.h".into()));
+        full.contains.insert(("m.A".into(), "m.A.f".into()));
+        full.contains.insert(("m.A".into(), "m.A.h".into()));
+        full.contains.insert((b.clone(), "m.B.g".into()));
+        full.contains.insert((c.clone(), "m.C.q".into()));
+        full.contains.insert((g1.clone(), "gone.G1.h".into()));
+        full.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+
+        // Splice the target-only delta into a seeded copy and publish.
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+        let targets: BTreeSet<String> = [a.clone(), g1.clone(), orphan.clone()]
+            .into_iter()
+            .collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &delta,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+        publish(seeded).unwrap();
+
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &full);
+
+        let spliced = contains_rows(&prev_path);
+
+        // The partially-targeted `m` keeps the untouched sibling and the nested
+        // child module's Contains rels.
+        for edge in [("m", b.as_str()), ("m", "m.sub"), ("m.sub", c.as_str())] {
+            assert!(
+                spliced.contains(&(edge.0.to_string(), edge.1.to_string())),
+                "an unchanged child of a partially-targeted module must survive: \
+                 {edge:?} missing from {spliced:?}"
+            );
+        }
+        // The fully-targeted control module is re-decided: its old Contains to
+        // the removed child is gone (the removed File/unit themselves too).
+        assert!(
+            !spliced
+                .iter()
+                .any(|(_, child)| child == &orphan || child == "gone.G2.o"),
+            "a fully-targeted module's removed-child Contains must be gone: {spliced:?}"
+        );
+
+        // The spliced Contains set equals a full rebuild of the same tree.
+        let expected = contains_rows(&expected_path);
+        assert_eq!(
+            spliced, expected,
+            "a partially-targeted module's Contains set must equal a full rebuild"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase-03 task-6 (e2e): a DELETED agent definition on a one-file delta
     /// rescan must publish the same graph a full rebuild does, once the
     /// full-load fallback re-assembles the full graph.
