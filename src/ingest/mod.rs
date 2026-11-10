@@ -503,42 +503,60 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
 ///
 /// A spool-authored `unresolved_call`/`unresolved_use` to an FQN a cached unit
 /// declares as a real `Function`/`Struct` must become the `calls`/`uses` edge a
-/// full-scan assembly has. The move keeps `target_type` on the edges that stay
-/// unresolved; a resolved `calls`/`uses` edge carries none (a full scan's
-/// resolved edges do not). The reference GC mirrors the DB splicer's rule — a
-/// shared row lives only while some unresolved edge names it.
+/// full-scan assembly has. "Real" excludes a still-`planned` placeholder: its
+/// edge stays unresolved with its `target_type`, because a full scan never
+/// produces a resolved edge to code that does not yet exist. The move keeps
+/// `target_type` on the edges that stay unresolved; a resolved `calls`/`uses`
+/// edge carries none (a full scan's resolved edges do not). One hash pass over
+/// the nodes plus one `partition` per edge set replaces the old
+/// per-resolved-edge `retain` walk (O(nodes + edges)). The reference GC mirrors
+/// the DB splicer's rule — a shared row lives only while some unresolved edge
+/// names it.
 fn resolve_unresolved_edges(graph: &mut Graph) {
-    let is_fn = |g: &Graph, fqn: &str| {
-        g.nodes
-            .get(fqn)
-            .is_some_and(|n| n.kind == NodeKind::Function)
-    };
-    let is_struct =
-        |g: &Graph, fqn: &str| g.nodes.get(fqn).is_some_and(|n| n.kind == NodeKind::Struct);
+    // The real (not still-planned) Function/Struct FQNs every edge is checked
+    // against. `status` is `None` on every scanned declaration and `planned` on
+    // a plan-writer placeholder.
+    let mut real_fns: HashSet<&str> = HashSet::new();
+    let mut real_structs: HashSet<&str> = HashSet::new();
+    for (fqn, node) in &graph.nodes {
+        if node.status.as_deref().is_none_or(str::is_empty) {
+            match node.kind {
+                NodeKind::Function => {
+                    real_fns.insert(fqn.as_str());
+                }
+                NodeKind::Struct => {
+                    real_structs.insert(fqn.as_str());
+                }
+                _ => {}
+            }
+        }
+    }
 
-    let resolved_calls: Vec<(String, String)> = graph
-        .unresolved_calls
-        .iter()
-        .filter(|(from, to, _)| is_fn(graph, from) && is_fn(graph, to))
-        .map(|(from, to, _)| (from.clone(), to.clone()))
-        .collect();
-    for (from, to) in resolved_calls {
+    // calls: Function → real Function.
+    let calls = std::mem::take(&mut graph.unresolved_calls);
+    let (resolved, unresolved): (Vec<_>, Vec<_>) = calls.into_iter().partition(|(from, to, _)| {
         graph
-            .unresolved_calls
-            .retain(|(f, t, _)| !(f == &from && t == &to));
-        graph.calls.insert((from, to));
-    }
+            .nodes
+            .get(from)
+            .is_some_and(|n| n.kind == NodeKind::Function)
+            && real_fns.contains(to.as_str())
+    });
+    graph
+        .calls
+        .extend(resolved.into_iter().map(|(from, to, _)| (from, to)));
+    graph.unresolved_calls = unresolved.into_iter().collect();
 
-    let resolved_uses: Vec<(String, String)> = graph
-        .unresolved_uses
-        .iter()
-        .filter(|(from, to)| (is_fn(graph, from) || is_struct(graph, from)) && is_struct(graph, to))
-        .map(|(from, to)| (from.clone(), to.clone()))
-        .collect();
-    for (from, to) in resolved_uses {
-        graph.unresolved_uses.remove(&(from.clone(), to.clone()));
-        graph.uses.insert((from, to));
-    }
+    // uses: (Function|Struct) → real Struct.
+    let uses = std::mem::take(&mut graph.unresolved_uses);
+    let (resolved, unresolved): (Vec<_>, Vec<_>) = uses.into_iter().partition(|(from, to)| {
+        graph
+            .nodes
+            .get(from)
+            .is_some_and(|n| matches!(n.kind, NodeKind::Function | NodeKind::Struct))
+            && real_structs.contains(to.as_str())
+    });
+    graph.uses.extend(resolved);
+    graph.unresolved_uses = unresolved.into_iter().collect();
 
     let referenced: HashSet<String> = graph
         .unresolved_calls
