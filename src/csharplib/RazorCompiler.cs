@@ -20,4 +20,19 @@ internal static class RazorCompiler
         var configuration = RazorConfiguration.Create(RazorLanguageVersion.Version_6_0, "MVC-3.0", Array.Empty<RazorExtension>());
         return RazorProjectEngine.Create(configuration, RazorProjectFileSystem.Create(root), RazorExtensions.Register);
     }
+
+    /// <summary>
+    /// A missing project item — stands in for Razor 6.0's internal
+    /// NotFoundProjectItem, which is not reachable from outside the assembly.
+    /// </summary>
+    private sealed class NotFoundItem(string path, string? fileKind) : RazorProjectItem
+    {
+        public override string BasePath => string.Empty;
+        public override string FilePath => path;
+        public override string? PhysicalPath => null;
+        public override string? RelativePhysicalPath => null;
+        public override string FileKind => fileKind ?? FileKinds.GetFileKindFromFilePath(path);
+        public override bool Exists => false;
+        public override Stream Read() => throw new InvalidOperationException($"Razor project item not found: {path}");
+    }
 }
