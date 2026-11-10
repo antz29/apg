@@ -1,5 +1,5 @@
-//! The delta-application half of the splice (phase-03 task-2): apply the win-B
-//! assembled graph's delta to the seeded copy as DML only — upsert the
+//! The delta-application half of the splice (phase-03 task-2): apply the
+//! **target-only delta graph** to the seeded copy as DML only — upsert the
 //! re-emitted units, detach the disappeared ones, lifecycle the shared
 //! `UnresolvedTarget` rows, and refresh the single `Scan` row.
 
@@ -26,24 +26,29 @@ use super::seed::{SeededDb, cell, cypher_escape, query_rows};
 // seed, which is what makes a spliced DB equal a full rebuild
 // (`domain.constraint.db-splice-equivalence`).
 //
-// ## The input is the win-B assembled graph, not the target-only spool
+// ## The input is the target-only delta graph
 //
-// `graph` is the full assembled graph (`ingest::ingest_with_reuse`'s output:
-// the re-emitted target units PLUS the cached unaffected units). The splicer
-// selects the **delta rows** from it:
+// `graph` is the **target-only delta graph** (`ingest::ingest_delta`'s output:
+// the re-emitted target files' units, the ingested `scan_meta`/authored/
+// transient rows, and the cross-cut rels whose far endpoint lives only in the
+// seed). It carries no unaffected code unit — those rows exist ONLY in the
+// seeded copy, which is what makes the splice a delta application rather than a
+// second assembly. The splicer selects the **delta rows** from it:
 //
 // * a Struct/Function/Agent is a delta unit when its location path is in
 //   `targets`;
-// * a File is a delta unit when its FQN (the absolute path) is in `targets`;
-// * a Module is always re-upserted (there are few, and the module set is part
-//   of the equivalence — a removed file can orphan its module);
+// * a File is a delta unit when its FQN is in `targets`;
+// * a Module is re-upserted when the target set reaches a File in its SEED
+//   subtree (or the seed has no row for it, or a planned placeholder heals),
+//   never blindly — see step 1;
 // * an UnresolvedTarget is inserted only when a delta edge first references it.
 //
-// Reading the FULL assembled graph (rather than a target-only spool) is what
-// keeps a target unit's edge to an **unaffected** unit: the frontend emits such
-// a cross-cut edge with its canonical FQN, and the cached endpoint only exists
-// in the assembled graph — a target-only graph would have pruned it in
-// `finalize_graph` before the splicer ever saw it.
+// The delta graph has no unaffected endpoint to offer, so a target unit's edge
+// to an **unaffected** unit is kept dangling by `ingest::finalize_delta_graph`
+// and landed here against the seed: `endpoint_label` reads the far endpoint's
+// row (and label) from the seeded DB, and `pair_allowed` applies the same
+// declared-pair rule a full load does. The seeded copy supplies every unchanged
+// row — node and rel — the delta graph never mentions.
 //
 // ## Scheme (feedback-90, option (i): upsert in place + replace outgoing rels)
 //
@@ -70,11 +75,11 @@ use super::seed::{SeededDb, cell, cypher_escape, query_rows};
 // The seed already holds the CURRENT authored/transient tables (Requirement/
 // Entity/Note/Constraint/Plan/PlanPhase/Task/Feedback and their rels) by
 // write-through: every durable/transient mutation synchronously projects into
-// `db.lbug`. The splice writes no authored row — `graph` is the **code**
-// assembly (scanner records spliced with cached fact units), never the layer/
-// transient records, so a planned node can never be re-marked over a realized
-// one. A missing/incompatible previous DB falls back to the full load
-// (task-1/task-4).
+// `db.lbug`. The splice writes no authored row — `graph` carries the ingested
+// authored/transient records only so the seed-equivalence digest can judge them
+// (see `splice::seed_checked`), never as insert candidates — so a planned node
+// can never be re-marked over a realized one. A missing/incompatible previous
+// DB falls back to the full load (task-1/task-4).
 
 /// The single `Scan` row (SCAN_HEAD) a spliced DB must carry. Mirrors the
 /// `scan_meta` control record (`schema::Record::ScanMeta`) and the columns
@@ -91,12 +96,12 @@ pub struct ScanRow {
 
 /// The delta a spliced DB must apply, expressed against the seeded copy.
 ///
-/// `graph` is the win-B assembled graph (target units + cached unaffected
-/// units, see the module comment); `targets` is the FULL phase-2 re-emission
-/// target set — changed files ∪ reverse-dependency closure ∪ overload-group
-/// peers — and is the **delete scope**; `removed_fqns` is the subtraction half
-/// of the full-universe seam (`incremental::Prepared::removed_fqns`); `scan` is
-/// the new SCAN_HEAD row.
+/// `graph` is the target-only delta graph (`ingest::ingest_delta`'s output — see
+/// the module comment); `targets` is the FULL phase-2 re-emission target set —
+/// changed files ∪ reverse-dependency closure ∪ overload-group peers — and is
+/// the **delete scope**; `removed_fqns` is the subtraction half of the
+/// full-universe seam (`incremental::Prepared::removed_fqns`); `scan` is the new
+/// SCAN_HEAD row.
 pub struct SpliceDelta<'a> {
     pub graph: &'a Graph,
     pub targets: &'a BTreeSet<String>,
@@ -136,6 +141,32 @@ impl SeededDb {
     pub fn apply(&self, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
         let conn = self.conn()?;
         apply(&conn, delta)
+    }
+}
+
+// A test-only one-shot injection fired inside a delta application, after the
+// node delete/upsert stage and before the edge re-merge. Tests use it to force
+// a genuine mid-sequence DML failure (the seeded copy is then partially
+// mutated) and assert the caller discards it and falls back to the full load
+// (phase-03 task-3). Compiled unconditionally — never installed outside tests,
+// so it is a no-op — so the relocated `tests/main_e2e.rs` integration crate can
+// reach `install_apply_hook`.
+type ApplyHook = Box<dyn FnOnce() -> anyhow::Result<()>>;
+
+thread_local! {
+    static APPLY_HOOK: std::cell::RefCell<Option<ApplyHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub fn install_apply_hook(hook: impl FnOnce() -> anyhow::Result<()> + 'static) {
+    APPLY_HOOK.with(|cell| *cell.borrow_mut() = Some(Box::new(hook)));
+}
+
+fn fire_apply_hook() -> anyhow::Result<()> {
+    let hook = APPLY_HOOK.with(|cell| cell.borrow_mut().take());
+    match hook {
+        Some(hook) => hook(),
+        None => Ok(()),
     }
 }
 
@@ -400,6 +431,13 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     report.dml_statements += stmts;
 
     // --- 6. MERGE the delta's new outgoing rels (batched per rel-table pair) --
+    //
+    // The stage boundary above is where a test injects a failure: every node
+    // delete (step 3) and upsert (steps 4-5) has landed on the seeded copy and
+    // no replacement rel has been merged yet, so a failure here leaves the seed
+    // genuinely half-applied — the caller's `discard` + full-load path
+    // (phase-03 tasks 3-5) is what recovers it.
+    fire_apply_hook()?;
     //
     // Resolve every delta edge exactly as the pre-fix per-row `merge` closure
     // did (the Contains additive exception, the disappearing-target skip, the
