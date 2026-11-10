@@ -77,6 +77,19 @@ mod unit {
         assert_eq!(language_of("config.toml"), "toml");
         assert_eq!(language_of("Cargo.lock"), "toml");
         assert_eq!(language_of("pom.xml"), "xml");
+        // MSBuild project/property/target files, .NET config and resources are
+        // XML, in any letter case.
+        assert_eq!(language_of("App.csproj"), "xml");
+        assert_eq!(language_of("Lib.vbproj"), "xml");
+        assert_eq!(language_of("Native.vcxproj"), "xml");
+        assert_eq!(language_of("Db.sqlproj"), "xml");
+        assert_eq!(language_of("Directory.Build.props"), "xml");
+        assert_eq!(language_of("Directory.Build.targets"), "xml");
+        assert_eq!(language_of("app.config"), "xml");
+        assert_eq!(language_of("Strings.resx"), "xml");
+        assert_eq!(language_of("App.CSPROJ"), "xml");
+        assert_eq!(language_of("Web.Config"), "xml");
+        assert_eq!(language_of("Strings.ResX"), "xml");
         assert_eq!(language_of("App.sln"), "sln");
         assert_eq!(language_of("Dockerfile"), "dockerfile");
         assert_eq!(language_of("app.dockerfile"), "dockerfile");
