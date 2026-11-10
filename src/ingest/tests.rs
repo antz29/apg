@@ -897,6 +897,195 @@ mod unit {
                 .contains(&(component.to_string(), gone.to_string()))
         );
     }
+
+    /// phase-04 task-2: [`resolve_unresolved_edges`] partitions the unresolved
+    /// edge sets in one pass against the assembled graph's real `Function`/
+    /// `Struct` FQNs. Only the endpoint-kind pairs a full scan can produce flip
+    /// — a `Function`-sourced call onto a real `Function` becomes `calls`, a
+    /// `Function`- or `Struct`-sourced use onto a real `Struct` becomes `uses`
+    /// — while a still-planned placeholder, a genuinely unknown and an external
+    /// target stay unresolved (the planned call keeps its `target_type`), a
+    /// call onto a real `Struct` and a use onto a real `Function` never flip
+    /// (wrong endpoint kind), and only the `UnresolvedTarget` rows no surviving
+    /// unresolved edge names are GC'd. Pure in-memory: the assembled graph is
+    /// built by hand and the partition is the one unit under test.
+    #[test]
+    fn resolve_unresolved_edges_partition_is_linear() {
+        let caller = "rust.apg.caller";
+        let caller_struct = "rust.apg.caller_struct";
+        let real_fn = "rust.apg.real_fn";
+        let real_struct = "rust.apg.real_struct";
+        let planned_fn = "rust.apg.planned_fn";
+        let planned_struct = "rust.apg.planned_struct";
+        let unknown = "external.Unknown";
+        let external = "protoimpl.Pointer";
+        let orphan = "external.Orphan";
+        let real = |kind| Node {
+            kind,
+            ..Node::default()
+        };
+        let planned = |kind| Node {
+            kind,
+            status: Some("planned".to_string()),
+            ..Node::default()
+        };
+
+        let mut graph = Graph::default();
+        // The assembled graph's own real declarations: both edge sources and
+        // the real call/use targets.
+        for (fqn, kind) in [
+            (caller, NodeKind::Function),
+            (caller_struct, NodeKind::Struct),
+            (real_fn, NodeKind::Function),
+            (real_struct, NodeKind::Struct),
+        ] {
+            graph.nodes.insert(fqn.to_string(), real(kind));
+        }
+        // The still-planned placeholders the partition must not treat as real.
+        graph
+            .nodes
+            .insert(planned_fn.to_string(), planned(NodeKind::Function));
+        graph
+            .nodes
+            .insert(planned_struct.to_string(), planned(NodeKind::Struct));
+        // The shared `UnresolvedTarget` rows for targets with no declaration;
+        // `orphan` is named by no edge.
+        for fqn in [unknown, external, orphan] {
+            graph
+                .nodes
+                .insert(fqn.to_string(), real(NodeKind::UnresolvedTarget));
+        }
+
+        // calls: a real Function target (flips), a planned and a genuinely
+        // unknown target (stay, holding their `target_type`), and one onto a
+        // real Struct (wrong endpoint kind — stays).
+        graph
+            .unresolved_calls
+            .insert((caller.to_string(), real_fn.to_string(), String::new()));
+        graph.unresolved_calls.insert((
+            caller.to_string(),
+            planned_fn.to_string(),
+            "func-value".to_string(),
+        ));
+        graph.unresolved_calls.insert((
+            caller.to_string(),
+            unknown.to_string(),
+            "unknown-type".to_string(),
+        ));
+        graph
+            .unresolved_calls
+            .insert((caller.to_string(), real_struct.to_string(), String::new()));
+
+        // uses: a Function and a Struct source onto the real Struct (both
+        // flip), a planned Struct and an external target (stay), and one onto
+        // a real Function (wrong endpoint kind — stays).
+        graph
+            .unresolved_uses
+            .insert((caller.to_string(), real_struct.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller_struct.to_string(), real_struct.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller_struct.to_string(), planned_struct.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller.to_string(), external.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller.to_string(), real_fn.to_string()));
+
+        resolve_unresolved_edges(&mut graph);
+
+        // A real Function target becomes the `calls` edge a full scan has; its
+        // unresolved row is gone.
+        assert!(
+            graph
+                .calls
+                .contains(&(caller.to_string(), real_fn.to_string()))
+        );
+        assert!(!graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            real_fn.to_string(),
+            String::new(),
+        )));
+        // A real Struct target becomes `uses` from both a Function and a
+        // Struct source; both unresolved rows are gone.
+        assert!(
+            graph
+                .uses
+                .contains(&(caller.to_string(), real_struct.to_string()))
+        );
+        assert!(
+            graph
+                .uses
+                .contains(&(caller_struct.to_string(), real_struct.to_string()))
+        );
+        assert!(
+            !graph
+                .unresolved_uses
+                .contains(&(caller.to_string(), real_struct.to_string()))
+        );
+        // Exactly the resolved endpoint-kind pairs flipped.
+        assert_eq!(graph.calls.len(), 1);
+        assert_eq!(graph.uses.len(), 2);
+
+        // The still-planned call target keeps its unresolved row and its
+        // `target_type`, and its planned placeholder keeps its kind.
+        assert!(graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            planned_fn.to_string(),
+            "func-value".to_string(),
+        )));
+        assert_eq!(graph.nodes[planned_fn].kind, NodeKind::Function);
+        assert_eq!(graph.nodes[planned_fn].status.as_deref(), Some("planned"));
+
+        // The unknown and external targets keep their unresolved rows and
+        // their `UnresolvedTarget` rows.
+        assert!(graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            unknown.to_string(),
+            "unknown-type".to_string(),
+        )));
+        assert!(
+            graph
+                .unresolved_uses
+                .contains(&(caller.to_string(), external.to_string()))
+        );
+        assert_eq!(graph.nodes[unknown].kind, NodeKind::UnresolvedTarget);
+        assert_eq!(graph.nodes[external].kind, NodeKind::UnresolvedTarget);
+
+        // A planned Struct target stays unresolved with its placeholder kind.
+        assert!(
+            graph
+                .unresolved_uses
+                .contains(&(caller_struct.to_string(), planned_struct.to_string()))
+        );
+        assert_eq!(graph.nodes[planned_struct].kind, NodeKind::Struct);
+        assert_eq!(
+            graph.nodes[planned_struct].status.as_deref(),
+            Some("planned")
+        );
+
+        // Wrong endpoint-kind pairs never flip: a call onto a real Struct and
+        // a use onto a real Function stay unresolved.
+        assert!(graph.unresolved_calls.contains(&(
+            caller.to_string(),
+            real_struct.to_string(),
+            String::new(),
+        )));
+        assert!(
+            graph
+                .unresolved_uses
+                .contains(&(caller.to_string(), real_fn.to_string()))
+        );
+
+        // The orphan `UnresolvedTarget` row is GC'd; every row a surviving
+        // unresolved edge still names survives.
+        assert!(!graph.nodes.contains_key(orphan));
+        assert_eq!(graph.nodes[real_fn].kind, NodeKind::Function);
+        assert_eq!(graph.nodes[real_struct].kind, NodeKind::Struct);
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no
