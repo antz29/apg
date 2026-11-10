@@ -10,6 +10,7 @@ use crate::formats::ini::emit_ini;
 use crate::formats::json::emit_json;
 use crate::formats::makefile::emit_makefile;
 use crate::formats::sh::emit_sh;
+use crate::formats::sln::emit_sln;
 use crate::formats::toml::emit_toml;
 use crate::formats::xml::emit_xml;
 use crate::formats::yaml::emit_yaml;
@@ -136,6 +137,7 @@ fn assemble(
             "dockerfile" => emit_dockerfile(path, bytes, "n", &mut next_id),
             "makefile" => emit_makefile(path, bytes, "n", &mut next_id),
             "ini" => emit_ini(path, bytes, "n", &mut next_id),
+            "sln" => emit_sln(path, bytes, "n", &mut next_id),
             _ => emit_misc(path, bytes, "n", &mut next_id),
         };
         modules.insert(module.clone());
@@ -311,6 +313,49 @@ mod unit {
     }
 
     #[test]
+    fn sln_projects_and_global_sections_are_extracted_flat() {
+        let src = "Microsoft Visual Studio Solution File, Format Version 12.00\n\
+                       Project(\"{FAE04EC0}\") = \"App\", \"App\\App.csproj\", \"{1111}\"\n\
+                       EndProject\n\
+                       Project(\"{2150E333}\") = \"Solution Items\", \"Solution Items\", \"{2222}\"\n\
+                       \tProjectSection(SolutionItems) = preProject\n\
+                       \t\tREADME.md = README.md\n\
+                       \tEndProjectSection\n\
+                       EndProject\n\
+                       Global\n\
+                       \tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n\
+                       \t\tDebug|Any CPU = Debug|Any CPU\n\
+                       \tEndGlobalSection\n\
+                       \tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n\
+                       \t\t{1111}.Debug|Any CPU.ActiveCfg = Debug|Any CPU\n\
+                       \tEndGlobalSection\n\
+                       EndGlobal\n";
+        let s = emit(emit_sln, "App.sln", src);
+        // Exactly one file-rooted struct per Project entry and per
+        // GlobalSection — no ProjectSection, no Global block, no nesting.
+        assert_eq!(
+            struct_rows(&s),
+            vec![
+                ("App".into(), "App.sln".into(), 2, 3),
+                ("Solution Items".into(), "App.sln".into(), 4, 8),
+                (
+                    "SolutionConfigurationPlatforms".into(),
+                    "App.sln".into(),
+                    10,
+                    12
+                ),
+                (
+                    "ProjectConfigurationPlatforms".into(),
+                    "App.sln".into(),
+                    13,
+                    15
+                ),
+            ]
+        );
+        assert!(s.contains.is_empty());
+    }
+
+    #[test]
     fn dockerfile_stages_and_instructions_are_extracted() {
         let src = "FROM rust:1.98 AS builder\n\
                        RUN cargo build --release\n\
@@ -435,6 +480,19 @@ mod unit {
             ("a.toml", Some("toml")),
             ("Cargo.lock", Some("toml")),
             ("a.xml", Some("xml")),
+            // MSBuild projects/props/targets, .NET config and resources are XML;
+            // routing lowercases the extension.
+            ("a.csproj", Some("xml")),
+            ("a.vbproj", Some("xml")),
+            ("a.vcxproj", Some("xml")),
+            ("a.sqlproj", Some("xml")),
+            ("Directory.Build.props", Some("xml")),
+            ("a.targets", Some("xml")),
+            ("App.config", Some("xml")),
+            ("a.resx", Some("xml")),
+            ("X.CSPROJ", Some("xml")),
+            ("a.sln", Some("sln")),
+            ("X.SLN", Some("sln")),
             ("Dockerfile", Some("dockerfile")),
             ("Dockerfile.dev", Some("dockerfile")),
             ("Makefile", Some("makefile")),
