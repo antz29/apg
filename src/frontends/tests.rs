@@ -81,6 +81,28 @@ mod unit {
         assert!(scan_time_tools("cobol").is_empty());
     }
 
+    /// csharp-projects phase-03 task-13: every structural stream id (`sln`
+    /// included) is a language root and classified structural; the `sln`
+    /// stream's opaque-id prefix collides with no other root's nor the `x`
+    /// fallback, and it needs no scan-time tool on PATH.
+    #[test]
+    fn structural_languages_are_roots_and_sln_is_distinct_and_tool_less() {
+        let roots = crate::layers::LANGUAGE_ROOTS;
+        for language in STRUCTURAL_LANGUAGES {
+            assert!(roots.contains(language), "{language} is not a root");
+            assert!(
+                classify::is_structural_language(language),
+                "{language} is not classified structural"
+            );
+        }
+        let prefix = id_prefix_for("sln");
+        assert_ne!(prefix, id_prefix_for("not-a-language"), "sln vs fallback");
+        for language in roots.iter().filter(|l| **l != "sln") {
+            assert_ne!(prefix, id_prefix_for(language), "sln vs {language}");
+        }
+        assert!(scan_time_tools("sln").is_empty());
+    }
+
     /// cobol-frontend phase-02 task-22: only the COBOL candidate matches its
     /// extensions in any letter case; every other language stays exact-case,
     /// so `Main.JAVA` is not a java source.
