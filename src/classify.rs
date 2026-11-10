@@ -365,9 +365,8 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
         // arm above (`docs`). With a config present the same decision is made
         // by `structural_code_type` (the config's structural `code_type`,
         // default `config`).
-        "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini" | "misc" => {
-            "config"
-        }
+        "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini" | "sln"
+        | "misc" => "config",
         _ => "src",
     }
 }
