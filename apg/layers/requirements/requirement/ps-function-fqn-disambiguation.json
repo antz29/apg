@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-function-fqn-disambiguation",
+  "body": "A PowerShell Function whose FQN under its Struct's final FQN equals another's or ends in //, a scanned file's repository-relative path, : and digits appends //, its file's path, : and its source-order ordinal in its file, <script> first.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-unit-fqn-uniqueness",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-script-scanning",
+      "properties": {}
+    }
+  ]
+}

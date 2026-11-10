@@ -1,0 +1,33 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-unit-fqn-uniqueness",
+  "body": "Every PowerShell Struct FQN is distinct from every other PowerShell Struct FQN, and every PowerShell Function FQN from every other PowerShell Function FQN, across the whole scan.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-function-fqn-disambiguation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-type-fqn-disambiguation",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-script-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-script-scanning",
+      "properties": {}
+    }
+  ]
+}
