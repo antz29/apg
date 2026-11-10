@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "razor-line-mapping",
+  "body": "The correspondence from each span of Razor-generated C# to the line span of the Razor file that produces it.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.razor-source",
+      "properties": {}
+    }
+  ]
+}

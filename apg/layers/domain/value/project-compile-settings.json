@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "project-compile-settings",
+  "body": "A project's target frameworks, preprocessor symbols, language version and source item set, read statically from its project file and its imported property files.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.dotnet-project",
+      "properties": {}
+    }
+  ]
+}

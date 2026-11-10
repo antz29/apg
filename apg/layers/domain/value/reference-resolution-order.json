@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "reference-resolution-order",
+  "body": "The fixed lookup order for reference metadata: the assets file, then a hint path or `packages/` folder, then the global packages folder, with framework reference assemblies for framework references.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.restored-reference-artefact",
+      "properties": {}
+    }
+  ]
+}

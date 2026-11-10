@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "solution-project-list",
+  "body": "The set of C# project file paths a solution names, each resolving to one project module.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.dotnet-solution",
+      "properties": {}
+    }
+  ]
+}
