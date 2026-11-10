@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "csharp-project-modelling",
-  "body": "The capability that models each solution and project as a module level containing its files, names declarations by namespace with a project qualifier only on cross-project collision, and gives each source file one owner.",
+  "body": "Models each solution and project as a module of its files, names declarations by namespace, project-qualified on cross-project collision, scopes `.csx` top-level members to csharp.<script-path> with extension, and gives each file one owner.",
   "properties": {},
   "out": [
     {

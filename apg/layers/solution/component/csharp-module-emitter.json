@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "csharp-module-emitter",
-  "body": "The C# module emitter: solution, project and namespace module records with their containment, namespace-based declaration and endpoint naming, and the project qualifier for a type declared at one FQN in several projects.",
+  "body": "The C# module emitter: solution, project, namespace and `.csx` script module records with containment, namespace-based declaration and endpoint naming, csharp.<script-path> script scoping, and project qualifiers on cross-project collision.",
   "properties": {},
   "out": [
     {
