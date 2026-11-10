@@ -51,6 +51,7 @@ pub const STRUCTURAL_LANGUAGES: &[&str] = &[
     "dockerfile",
     "makefile",
     "ini",
+    "sln",
     "misc",
 ];
 
