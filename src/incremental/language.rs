@@ -106,6 +106,17 @@ pub fn language_of(rel: &str) -> &'static str {
         "json" => "json",
         "toml" => "toml",
         "xml" => "xml",
+        // MSBuild project/property/target files, .NET config and resources are
+        // XML, in any letter case (`App.CSPROJ`), like `structfrontend`'s
+        // lowercasing `stream_for_path`.
+        _ if [
+            "csproj", "vbproj", "vcxproj", "sqlproj", "props", "targets", "config", "resx",
+        ]
+        .iter()
+        .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "xml"
+        }
         "sln" => "sln",
         "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
         _ => "misc",
