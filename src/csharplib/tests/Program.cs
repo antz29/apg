@@ -54,6 +54,7 @@ public static class TestMain
             TestParseTreesKindsAndHoldBack(baseDir);
             TestHeldBackFilesAreFileOnly(baseDir);
             TestMixedCsCsxScan(baseDir);
+            TestScriptMemberScope(baseDir);
         }
         catch (Exception ex)
         {
@@ -445,6 +446,67 @@ public static class TestMain
         Check("mixed scan emits the .cs declarations unchanged",
             baseline.Count > 0 && new SortedSet<string>(baseline, StringComparer.Ordinal).SetEquals(mixedCs),
             SetDiff(baseline, mixedCs));
+    }
+
+    /// <summary>
+    /// Script member scope: each .csx is one whole-path module, its members hang
+    /// under that path (distinct per script), calls stay within their own script,
+    /// a targeted scan renders the same FQNs, and a .cs namespace sharing the
+    /// dotted spelling (tools.build) is unaffected.
+    /// </summary>
+    private static void TestScriptMemberScope(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "script-scope"));
+        const string body = "void Log(string msg) { }\nvoid Run() { Log(\"x\"); }\n";
+        var p1 = WriteSource(Path.Combine(dir, "tools"), "build.csx",
+            body + "class Opts { public int N { get; set; } class Inner { } }\n");
+        var p2 = WriteSource(Path.Combine(dir, "scripts", "other"), "build.csx", body);
+        var cs = WriteSource(dir, "Lib.cs", "namespace tools.build;\n\npublic class Log { }\n");
+
+        var r = RunScanner(dir);
+        Check("script-scope scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var c = Canonicalize(g);
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+
+        var wantModules = new SortedSet<string>(StringComparer.Ordinal) { p1, p2, "tools", "tools.build" };
+        Check("script-scope modules are exactly the two whole-path script modules plus tools/tools.build (no fragments)",
+            wantModules.SetEquals(g.Modules), SetDiff(wantModules, g.Modules));
+        Check("no duplicate module record", g.Modules.Count == g.Modules.Distinct(StringComparer.Ordinal).Count(), Join(g.Modules));
+
+        foreach (var p in new[] { p1, p2 })
+        {
+            Check($"script File record parent is its script module: {p}",
+                g.Files.Any(f => f.StartsWith($"{p}|{p}|", StringComparison.Ordinal)), Join(g.Files));
+            Check($"script Log is a member of its own script: {p}.Log",
+                c.Records.Any(s => s.StartsWith($"function|{p}.Log|{p}|", StringComparison.Ordinal)), all);
+            Check($"script Run calls its own script's Log: {p}",
+                c.Records.Contains($"calls|{p}.Run|{p}.Log"), all);
+        }
+        Check("no cross-script Run -> Log call",
+            !c.Records.Contains($"calls|{p1}.Run|{p2}.Log") && !c.Records.Contains($"calls|{p2}.Run|{p1}.Log"), all);
+
+        var funcFqns = c.Records.Where(s => s.StartsWith("function|", StringComparison.Ordinal)).Select(s => s.Split('|')[1]).ToList();
+        var structFqns = c.Records.Where(s => s.StartsWith("struct|", StringComparison.Ordinal)).Select(s => s.Split('|')[1]).ToList();
+        Check("no duplicate function FQN", funcFqns.Count == g.Funcs.Count && funcFqns.Distinct().Count() == funcFqns.Count, Join(funcFqns));
+        Check("no duplicate struct FQN", structFqns.Count == g.Structs.Count && structFqns.Distinct().Count() == structFqns.Count, Join(structFqns));
+
+        Check("script type is emitted under its script: <script>.Opts", structFqns.Contains($"{p1}.Opts"), all);
+        Check("script nested type is emitted as <script>.Opts.Inner", structFqns.Contains($"{p1}.Opts.Inner"), all);
+        Check("script type accessors are under <script>.Opts",
+            funcFqns.Contains($"{p1}.Opts.get_N") && funcFqns.Contains($"{p1}.Opts.set_N"), all);
+
+        Check(".cs namespace chain tools -> tools.build is kept", c.Records.Contains("contains|tools|tools.build"), all);
+        Check(".cs struct tools.build.Log is unaffected",
+            c.Records.Any(s => s.StartsWith($"struct|tools.build.Log|{cs}|", StringComparison.Ordinal)), all);
+
+        var targets = WriteTargets(baseDir, "script-scope.targets", p1);
+        var t = Canonicalize(ParseGraph(RunScanner(dir, "--targets", targets).Out));
+        var fullP1 = c.Records.Where(s => IsDecl(s) && RecordPath(s) == p1).Select(s => s.Split('|')[1]).ToList();
+        var targetedFqns = t.Records.Where(IsDecl).Select(s => s.Split('|')[1]).ToList();
+        Check("targeted scan of tools/build.csx emits the same FQNs as the full scan",
+            fullP1.Count > 0 && new SortedSet<string>(fullP1, StringComparer.Ordinal).SetEquals(targetedFqns),
+            SetDiff(fullP1, targetedFqns));
     }
 
     // ------------------------------------------------------------------
