@@ -50,6 +50,10 @@ public static class TestMain
             TestCrossFileEndpointsAreCanonical(proj, baseDir);
             TestTargetedEqualsFullForTargetFile(proj, baseDir);
             TestCanonicalFormsDirectly(proj);
+            TestDiscoverFilesClaimsAllExtensions(baseDir);
+            TestParseTreesKindsAndHoldBack(baseDir);
+            TestHeldBackFilesAreFileOnly(baseDir);
+            TestMixedCsCsxScan(baseDir);
         }
         catch (Exception ex)
         {
@@ -317,6 +321,130 @@ public static class TestMain
             forms.Contains("App.B.Over(int)"), Join(forms));
         Check("canonical overloaded form for a non-emitted symbol: App.B.Over(string)",
             forms.Contains("App.B.Over(string)"), Join(forms));
+    }
+
+    // ------------------------------------------------------------------
+    // Source kinds: .cs / .csx / .cshtml / .razor
+    // ------------------------------------------------------------------
+
+    // SourceDiscovery and CompilationLoader are internal (no InternalsVisibleTo),
+    // so they are reached by reflection like the private members above.
+    private static Type FrontendType(string name)
+        => typeof(Apg.CsharpFrontend.Scanner).Assembly.GetType("Apg.CsharpFrontend." + name, throwOnError: true)!;
+
+    private static string WriteSource(string dir, string name, string text)
+    {
+        Directory.CreateDirectory(dir);
+        var path = Path.GetFullPath(Path.Combine(dir, name));
+        File.WriteAllText(path, text, new UTF8Encoding(false));
+        return path;
+    }
+
+    /// <summary>DiscoverFiles claims .cs/.csx/.cshtml/.razor case-insensitively and nothing else.</summary>
+    private static void TestDiscoverFilesClaimsAllExtensions(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "discover"));
+        var want = new SortedSet<string>(StringComparer.Ordinal)
+        {
+            WriteSource(dir, "A.cs", "class A { }"),
+            WriteSource(dir, "B.CSX", "int x = 1;"),
+            WriteSource(dir, "C.cshtml", "<p>c</p>"),
+            WriteSource(dir, "D.Razor", "<p>d</p>"),
+        };
+        WriteSource(dir, "E.txt", "not source");
+        WriteSource(dir, "F.csproj", "<Project />");
+
+        var discovery = Activator.CreateInstance(FrontendType("SourceDiscovery"), new List<string>(), new List<string>())!;
+        var found = (IEnumerable<string>)discovery.GetType().GetMethod("DiscoverFiles")!.Invoke(discovery, new object[] { dir })!;
+        var got = new SortedSet<string>(found, StringComparer.Ordinal);
+        Check("DiscoverFiles claims exactly the .cs/.csx/.cshtml/.razor files (case-insensitive)",
+            want.SetEquals(got), SetDiff(want, got));
+    }
+
+    /// <summary>ParseTrees parses .csx as Script, .cs as Regular, and holds back .cshtml/.razor unparsed.</summary>
+    private static void TestParseTreesKindsAndHoldBack(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "parse"));
+        var cs = WriteSource(dir, "A.cs", "class A { }");
+        var csx = WriteSource(dir, "S.csx", "void Hello() { }");
+        var cshtml = WriteSource(dir, "V.cshtml", "<p>v</p>");
+        var razor = WriteSource(dir, "C.razor", "<p>c</p>");
+
+        var args = new object?[] { new List<string> { cs, csx, cshtml, razor }, null };
+        var trees = (List<SyntaxTree>)FrontendType("CompilationLoader").GetMethod("ParseTrees")!.Invoke(null, args)!;
+        var heldBack = (List<string>)args[1]!;
+
+        var kinds = trees.ToDictionary(t => t.FilePath, t => t.Options.Kind);
+        Check("ParseTrees parses exactly the .cs and .csx files",
+            kinds.Count == 2 && kinds.ContainsKey(cs) && kinds.ContainsKey(csx), Join(kinds.Keys));
+        Check("ParseTrees parses .cs as SourceCodeKind.Regular",
+            kinds.TryGetValue(cs, out var k1) && k1 == SourceCodeKind.Regular, k1.ToString());
+        Check("ParseTrees parses .csx as SourceCodeKind.Script",
+            kinds.TryGetValue(csx, out var k2) && k2 == SourceCodeKind.Script, k2.ToString());
+        Check("ParseTrees holds back .cshtml/.razor in discovery order",
+            heldBack.SequenceEqual(new[] { cshtml, razor }), Join(heldBack));
+    }
+
+    /// <summary>
+    /// A held-back .cshtml/.razor file is emitted as a file record only (root
+    /// parent, 1..line-count) with no declarations, and honours the target filter.
+    /// </summary>
+    private static void TestHeldBackFilesAreFileOnly(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "heldback"));
+        var cs = WriteSource(dir, "A.cs", "namespace App;\n\npublic class A { }\n");
+        var cshtml = WriteSource(dir, "V.cshtml", "@page\n<h1>Hi</h1>\n@code { void M() { } }");
+        var razor = WriteSource(dir, "C.razor", "<p>one</p>\n<p>two</p>");
+
+        var r = RunScanner(dir);
+        Check("held-back scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var c = Canonicalize(ParseGraph(r.Out));
+        Check("held-back .cshtml emits a file-only record (root parent, 1..3)",
+            c.Records.Contains($"file|{cshtml}||1|3"), Join(c.Records));
+        Check("held-back .razor emits a file-only record (root parent, 1..2)",
+            c.Records.Contains($"file|{razor}||1|2"), Join(c.Records));
+        Check("held-back files emit no struct/function declarations",
+            !c.Records.Any(s => IsDecl(s) && (RecordPath(s) == cshtml || RecordPath(s) == razor)), Join(c.Records));
+        Check("the .cs file beside held-back files still emits its declarations",
+            c.Records.Any(s => IsDecl(s) && RecordPath(s) == cs), Join(c.Records));
+
+        var targets = WriteTargets(baseDir, "heldback.targets", cs);
+        var t = Canonicalize(ParseGraph(RunScanner(dir, "--targets", targets).Out));
+        Check("a target filter omits non-target held-back file records",
+            !t.Records.Any(s => s.StartsWith("file|", StringComparison.Ordinal) && (s.Contains(cshtml) || s.Contains(razor))),
+            Join(t.Records));
+    }
+
+    /// <summary>
+    /// A mixed .cs/.csx tree compiles in the one compilation: the .csx File
+    /// record carries its top-level method's declaration, and the .cs
+    /// declarations are exactly those of a .cs-only scan.
+    /// </summary>
+    private static void TestMixedCsCsxScan(string baseDir)
+    {
+        const string csText = "namespace App;\n\npublic class A\n{\n    public void Run() { }\n}\n";
+        var csOnlyDir = Path.GetFullPath(Path.Combine(baseDir, "mixed-cs-only"));
+        var mixedDir = Path.GetFullPath(Path.Combine(baseDir, "mixed"));
+        var csOnly = WriteSource(csOnlyDir, "A.cs", csText);
+        var cs = WriteSource(mixedDir, "A.cs", csText);
+        var csx = WriteSource(mixedDir, "S.csx", "int Twice(int x) { return x * 2; }\nvar y = Twice(2);\n");
+
+        var r = RunScanner(mixedDir);
+        Check("mixed .cs/.csx scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var c = Canonicalize(ParseGraph(r.Out));
+
+        Check("mixed scan emits the .csx File record",
+            c.Records.Any(s => s.StartsWith($"file|{csx}|", StringComparison.Ordinal)), Join(c.Records) + "\nSTDERR:\n" + r.Err);
+        Check("mixed scan emits the .csx top-level method's declaration",
+            c.Records.Any(s => s.StartsWith("function|", StringComparison.Ordinal) && RecordPath(s) == csx && s.Split('|')[1].EndsWith("Twice", StringComparison.Ordinal)),
+            Join(c.Records) + "\nSTDERR:\n" + r.Err);
+
+        var baseline = Canonicalize(ParseGraph(RunScanner(csOnlyDir).Out)).Records
+            .Where(IsDecl).Select(s => s.Replace(csOnly, cs)).ToList();
+        var mixedCs = c.Records.Where(s => IsDecl(s) && RecordPath(s) == cs).ToList();
+        Check("mixed scan emits the .cs declarations unchanged",
+            baseline.Count > 0 && new SortedSet<string>(baseline, StringComparer.Ordinal).SetEquals(mixedCs),
+            SetDiff(baseline, mixedCs));
     }
 
     // ------------------------------------------------------------------
