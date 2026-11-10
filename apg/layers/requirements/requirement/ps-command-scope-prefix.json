@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-command-scope-prefix",
-  "body": "A command name written with or without a global:, script:, local: or private: scope prefix, matched case-insensitively, resolves by its bare name under the command resolution order.",
+  "body": "A command name bearing a global:, script:, local: or private: scope prefix, matched case-insensitively, resolves exactly as its bare name does under the command resolution order.",
   "properties": {
     "feature": "ps-frontend"
   },
