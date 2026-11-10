@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-manifest-module",
-  "body": "A module manifest defines the module named by its repository-relative path minus its .psd1 extension, whose base directory is the manifest's directory and which holds the manifest file and its member files.",
+  "body": "A module manifest defines the module named by its repository-relative path kept whole, .psd1 extension included, whose base directory is the manifest's directory and which holds the manifest file and its member files.",
   "properties": {
     "feature": "ps-frontend"
   },

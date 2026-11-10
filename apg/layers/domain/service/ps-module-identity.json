@@ -39,6 +39,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.ps-module-identity",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-unique-script-struct",
+      "properties": {}
     }
   ],
   "in": [

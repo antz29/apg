@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.ps-manifest-recognition",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-unique-script-struct",
+      "properties": {}
     }
   ],
   "in": [

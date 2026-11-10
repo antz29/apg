@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-script-struct",
-  "body": "Each .ps1 or .psm1 file is one script Struct contained by its File and named by the file's path relative to its module's base directory, so two scripts of one module hold distinct scopes.",
+  "body": "Each .ps1 or .psm1 file is one script Struct contained by its File, named by the file's path relative to its module's base directory unless that FQN clashes, so every script holds a distinct scope.",
   "properties": {
     "feature": "ps-frontend"
   },

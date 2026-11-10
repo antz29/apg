@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-unique-script-struct",
+  "body": "Each PowerShell file yields a script Struct FQN of its own: where two would render alike, the later in repository-relative path order names its script Struct by its base-relative path, then #, then its repository-relative path.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-module-identity",
+      "properties": {}
+    }
+  ]
+}
