@@ -27,6 +27,16 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.layers.code_refs.code_identity",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.code_refs.resolves_in_scanned",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.load",
       "properties": {}
     },

@@ -116,6 +116,11 @@
       "kind": "contains",
       "target": "requirements.requirement.dotnet-solution-file-stream",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sln-language-root",
+      "properties": {}
     }
   ],
   "in": [

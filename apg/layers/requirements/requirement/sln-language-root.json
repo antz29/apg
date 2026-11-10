@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sln-language-root",
+  "body": "The sln language id is a member of the canonical language-root set, so ingestor rooting, code-reference classification, planned-node realization and the incremental language map each recognise sln-rooted identities.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
+    }
+  ]
+}
