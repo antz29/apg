@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-unique-script-struct",
-  "body": "Each PowerShell file yields a distinct script Struct FQN, the later in repository-relative path order of two files whose FQNs render alike being named by its base-relative path, then #, then its repository-relative path.",
+  "body": "Each PowerShell file yields a distinct script Struct FQN, every file of a group whose base-relative names render one FQN being named by its base-relative path, then //, then its repository-relative path.",
   "properties": {
     "feature": "ps-frontend"
   },
