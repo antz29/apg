@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-compile-no-imports-no-tag-helpers",
+  "body": "Compile processes one Razor file with no import sources (_ViewImports.cshtml/_Imports.razor) and no tag helpers, so namespaces and usings brought in by import files are absent from the generated tree; Razor warnings pass silently and only errors throw. Upgrade: phase 7's CollectImports and declaration-only pass supply imports and component binding.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.Compile",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-spike-mode-syntax-only-records",
+  "body": "The transitional --razor mode in Main has no semantic model: function names are raw identifiers (no generic arity), params are syntax text, start/end are line-based offsets in the Razor text, and only the first generated class becomes a struct (properties, constructors and nested types in @code are not emitted). Upgrade: phase 7 task 20 routes Razor through Scanner.Run and removes this mode.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.Program.Main",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

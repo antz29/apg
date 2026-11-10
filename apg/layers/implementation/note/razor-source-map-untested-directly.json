@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-source-map-untested-directly",
+  "body": "MapSpan has no direct C# harness test; only the razor_engine_single_file_smoke e2e exercises it end to end through the --razor mode, using each method's Identifier span. A span under `#line hidden` maps to null. Upgrade: add a harness test when a later task opens src/csharplib/tests/Program.cs for Razor (phase 7).",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.RazorSourceMap.MapSpan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

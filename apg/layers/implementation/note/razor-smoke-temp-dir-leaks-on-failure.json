@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-smoke-temp-dir-leaks-on-failure",
+  "body": "The smoke removes its scratch dir apg-csharp-e2e-razor-<pid> only on success; a failing run leaves it under the temp dir. Upgrade: a drop guard if leftover temp dirs become a problem.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.csharp_scan_e2e.e2e.razor_engine_single_file_smoke",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
