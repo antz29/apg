@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-fixture-coverage",
+  "body": "Fixtures cover functions, filters, workflows, classes, enums, a module manifest with nested modules and exports, dot-sourcing, Import-Module, cmdlet calls and a file with syntax errors.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-verification",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-conformance",
+      "properties": {}
+    }
+  ]
+}

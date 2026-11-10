@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-function-units",
+  "body": "Each function, filter or workflow declaration, a nested one included, is a Function contained by its script Struct, and a name declared twice in one script keeps its first declaration.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-script-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-script-scanning",
+      "properties": {}
+    }
+  ]
+}

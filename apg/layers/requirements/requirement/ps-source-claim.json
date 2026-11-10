@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-source-claim",
+  "body": "The PowerShell frontend claims .ps1, .psm1 and .psd1 files in any letter case, and language detection and the incremental language map name the same claim.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-source-classification",
+      "properties": {}
+    }
+  ]
+}

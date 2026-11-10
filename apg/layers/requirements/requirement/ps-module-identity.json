@@ -1,0 +1,53 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-module-identity",
+  "body": "Every PowerShell file belongs to exactly one module, named by its module manifest where one claims it and by its directory otherwise.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-directory-module",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-manifest-claim-order",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-manifest-exports",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-manifest-members",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-manifest-module",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-manifest-recognition",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-module-identity",
+      "properties": {}
+    }
+  ]
+}

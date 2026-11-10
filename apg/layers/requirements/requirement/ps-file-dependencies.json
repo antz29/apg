@@ -1,0 +1,48 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-file-dependencies",
+  "body": "A script's dot-sources and Import-Module commands are file dependencies, each a uses edge from the script Struct to a File carrying a kind property, through which a change to that File reaches the script.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-dot-source-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-dynamic-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-import-module-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-import-module-unresolved",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-static-path",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-incremental-edges",
+  "body": "A rescan after a change to one PowerShell file yields the same calls and uses edges into that file from unchanged files as a full scan of the same tree.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-language-integration",
+      "properties": {}
+    }
+  ]
+}

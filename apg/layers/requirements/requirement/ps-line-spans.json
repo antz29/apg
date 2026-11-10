@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-line-spans",
+  "body": "Every PowerShell File, Struct and Function record carries its byte offsets and its 1-based inclusive start and end lines within its own file.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-source-reading",
+      "properties": {}
+    }
+  ]
+}

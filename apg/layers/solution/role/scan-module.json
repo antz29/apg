@@ -170,6 +170,16 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.ps-driver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.push-tag-policy-surfaces",
       "properties": {}
     },

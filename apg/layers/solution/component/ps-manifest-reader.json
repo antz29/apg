@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ps-manifest-reader",
+  "body": "The PowerShell manifest reader: manifest recognition, the RootModule, NestedModules and FunctionsToExport keys, member-file claiming in path order, directory modules, and each manifest module's export set.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-module-identity",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.ps-frontend",
+      "properties": {}
+    }
+  ]
+}

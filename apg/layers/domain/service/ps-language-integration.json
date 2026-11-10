@@ -1,0 +1,71 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "ps-language-integration",
+  "body": "The capability that makes PowerShell one scanned language of apg, with its language flag, stream prefix, incremental identity, dependency contract, build artefact and release packaging.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-build-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-engine-pin",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-id-prefix",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-incremental-edges",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-packaging",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-scan-language-flag",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-scan-time-deps",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-driver",
+      "properties": {}
+    }
+  ]
+}

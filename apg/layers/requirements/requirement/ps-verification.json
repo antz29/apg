@@ -1,0 +1,33 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-verification",
+  "body": "The PowerShell frontend is verified by its own crate's unit, int and e2e tiers against fixture scripts, modules and manifests built inside the tests.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-fixture-coverage",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-grammar-regression",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-conformance",
+      "properties": {}
+    }
+  ]
+}

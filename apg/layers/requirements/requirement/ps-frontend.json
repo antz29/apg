@@ -1,0 +1,58 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-frontend",
+  "body": "A PowerShell source file's facts reach the program graph through the standalone psfrontend binary under the ps language id, streamed in the unified JSONL schema.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-command-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-file-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-script-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-script-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.ps-codebase-owner",
+      "properties": {}
+    }
+  ]
+}

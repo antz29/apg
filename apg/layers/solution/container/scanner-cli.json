@@ -164,6 +164,16 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.ps-driver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.push-tag-policy-surfaces",
       "properties": {}
     },

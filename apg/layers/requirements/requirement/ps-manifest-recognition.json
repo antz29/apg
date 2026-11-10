@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-manifest-recognition",
+  "body": "A .psd1 file whose top-level hashtable holds a RootModule, NestedModules or FunctionsToExport key is a module manifest, and any other .psd1 file is a data file of its directory module.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-module-identity",
+      "properties": {}
+    }
+  ]
+}

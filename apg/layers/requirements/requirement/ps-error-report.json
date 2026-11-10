@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-error-report",
+  "body": "Each PowerShell syntax error region is one stderr line in the form ps: file:line:col: message, and the scan continues past it.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-source-reading",
+      "properties": {}
+    }
+  ]
+}

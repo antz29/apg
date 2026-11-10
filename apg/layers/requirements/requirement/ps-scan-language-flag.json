@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-scan-language-flag",
+  "body": "apg scan accepts ps as a --language value, and the apg_scan suite tool lists ps among its scannable languages.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-language-integration",
+      "properties": {}
+    }
+  ]
+}

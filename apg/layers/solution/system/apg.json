@@ -47,6 +47,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.container.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.container.py-frontend",
       "properties": {}
     },

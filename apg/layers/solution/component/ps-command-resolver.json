@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ps-command-resolver",
+  "body": "The PowerShell command resolver: the ordered command lookup, the built-in cmdlet table, static and $this method calls, static path resolution, and the dot-source and Import-Module file edges.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.ps-frontend",
+      "properties": {}
+    }
+  ]
+}

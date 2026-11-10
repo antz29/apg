@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ps-build-artifact",
+  "body": "The build-pipeline PowerShell arm: the build.rs compile and staging of psfrontend, the apg-ps formula, its Linux package, and its entry in the release set.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.pipeline-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-language-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.build-pipeline",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "ps-source-classification",
+  "body": "The capability that claims PowerShell source files consistently across detection, incremental mapping and the structural scanner, and assigns each its code type from its path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-auto-detection",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-code-type",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-structural-handoff",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-driver",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-source-claim",
+      "properties": {}
+    }
+  ]
+}

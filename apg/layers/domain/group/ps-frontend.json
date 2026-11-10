@@ -1,0 +1,47 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "ps-frontend",
+  "body": "The PowerShell source-scanning subdomain: scripts, functions, classes and module manifests read from PowerShell files, the commands and file dependencies between them, and the scan settings that admit them.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-command-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-conformance",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-script-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.ps-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

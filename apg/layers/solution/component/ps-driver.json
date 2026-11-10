@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ps-driver",
+  "body": "The apg scan driver's PowerShell arm: the detector entry, the ps language id and stream prefix, the frontend command, the incremental language map entry, and the zero-tool preflight entry.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-source-classification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ps-unit-scanner",
+  "body": "The PowerShell unit scanner: script Structs and their script-body Functions, functions, filters and workflows, and classes and enums with their methods, constructors and property types.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-script-scanning",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.ps-frontend",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-id-prefix",
+  "body": "A merged scan gives the PowerShell stream its own opaque-id prefix, distinct from every other stream's prefix and from the unknown-language fallback.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-language-integration",
+      "properties": {}
+    }
+  ]
+}

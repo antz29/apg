@@ -1,0 +1,61 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "ps-source-reading",
+  "body": "The capability that reads a PowerShell file through its text encoding, the pinned grammar's parse and its error recovery into facts located in that file, reporting each syntax error.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-crash-reason",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-error-count",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-error-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-error-report",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-line-spans",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-text-encoding",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-source-reader",
+      "properties": {}
+    }
+  ]
+}

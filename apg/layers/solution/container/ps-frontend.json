@@ -1,0 +1,53 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "ps-frontend",
+  "body": "The PowerShell frontend artifact: build-time stable Rust 1.98.1 plus crates.io and a C compiler, zero scan-time tools, and an engine pin of tree-sitter-powershell 0.26.6 on the tree-sitter 0.26.13 runtime at parser ABI 15.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-command-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-manifest-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-unit-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-engine-pin",
+  "body": "psfrontend parses with tree-sitter-powershell =0.26.6 on the tree-sitter =0.26.13 runtime, so its ceiling is that grammar's PowerShell 7.3 syntax plus Windows PowerShell 5.1 workflow syntax.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.frontend-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-language-integration",
+      "properties": {}
+    }
+  ]
+}

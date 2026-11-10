@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-auto-detection",
+  "body": "Auto-detection selects the PowerShell frontend whenever psfrontend is installed and the scanned tree holds a .ps1, .psm1 or .psd1 file in any letter case.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-source-classification",
+      "properties": {}
+    }
+  ]
+}

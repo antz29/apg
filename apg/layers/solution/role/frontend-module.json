@@ -80,6 +80,36 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.ps-command-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-manifest-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-unit-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.python-module-identity",
       "properties": {}
     },

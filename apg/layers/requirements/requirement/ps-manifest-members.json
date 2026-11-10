@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-manifest-members",
+  "body": "A manifest's member files are the scanned .ps1 and .psm1 files its RootModule and NestedModules entries name by a path relative to the manifest's directory.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-module-identity",
+      "properties": {}
+    }
+  ]
+}

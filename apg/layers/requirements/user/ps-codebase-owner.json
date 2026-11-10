@@ -1,0 +1,15 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "ps-codebase-owner",
+  "body": "A developer or team whose repository holds PowerShell scripts, script modules and module manifests, such as the build, deployment and automation estate of a .NET codebase, and who scans them to read their program graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.ps-frontend",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

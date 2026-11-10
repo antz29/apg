@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-structural-handoff",
+  "body": "The structural scanner's code-extension set holds ps1, psm1 and psd1, so a PowerShell file appears once, under the ps stream, and stays out of the residual misc stream.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.structural-file-graphing",
+      "properties": {}
+    }
+  ]
+}

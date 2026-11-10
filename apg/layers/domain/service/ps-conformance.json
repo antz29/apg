@@ -1,0 +1,36 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "ps-conformance",
+  "body": "The capability that proves the PowerShell frontend against its fixture scripts, modules and manifests and pins the grammar node kinds it reads.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-fixture-coverage",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-grammar-regression",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ps-test-suite",
+      "properties": {}
+    }
+  ]
+}
