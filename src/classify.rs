@@ -69,14 +69,24 @@ impl ApgConfig {
 }
 
 /// The bundled structural scanner's stream ids (`structfrontend`'s injected
-/// `lang_switch` ids): Markdown plus the per-format text/config/data streams and
+/// `lang_switch` ids): Markdown plus the per-format text/config/data streams
+/// (including the `.sln` solution stream) and
 /// the residual `misc`. A record on one of these streams takes its `code_type`
 /// from the config's [`StructuralScope`] rather than the code `types`/`default`
 /// rules; `md` keeps the built-in `docs` classification.
 pub fn is_structural_language(language: &str) -> bool {
     matches!(
         language,
-        "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini" | "misc"
+        "md" | "sh"
+            | "yaml"
+            | "json"
+            | "toml"
+            | "xml"
+            | "dockerfile"
+            | "makefile"
+            | "ini"
+            | "sln"
+            | "misc"
     )
 }
 
