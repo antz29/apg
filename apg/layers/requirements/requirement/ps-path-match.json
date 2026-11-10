@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-path-match",
-  "body": "A normalised path names the scanned file whose repository-relative path equals it case-insensitively, the exact-case one when several match, and no file when several match and none matches in exact case.",
+  "body": "A normalised path names the scanned file whose repository-relative path equals it case-insensitively, the exact-case one among several, and a path whose several matches all differ from it in case lies outside the scanned files.",
   "properties": {
     "feature": "ps-frontend"
   },
