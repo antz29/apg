@@ -570,6 +570,11 @@ pub struct ModuleScaffolding {
     /// The `Language -> Module` `contains` edges `(from, to)` (sorted, deduped).
     #[serde(default)]
     pub language_edges: Vec<(String, String)>,
+    /// Each module's **direct** `File` children as repo-relative paths, keyed by
+    /// the module FQN (every list sorted, deduped). `#[serde(default)]` so a
+    /// record written before the field existed decodes as empty.
+    #[serde(default)]
+    pub files: BTreeMap<String, Vec<String>>,
 }
 
 impl ModuleScaffolding {
@@ -605,12 +610,14 @@ impl ModuleScaffolding {
         // Deterministic when a module somehow anchors files of two languages:
         // the smallest language label wins.
         let mut label: BTreeMap<String, String> = BTreeMap::new();
+        let mut direct_files: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for (a, b) in &graph.contains {
             let anchored = graph.nodes.get(b).is_some_and(|n| n.kind == NodeKind::File);
             if !real.contains(a) || !anchored {
                 continue;
             }
             let rel = rel_path_of(scan_root, b);
+            direct_files.entry(a.clone()).or_default().push(rel.clone());
             let lang = crate::incremental::language_of(&rel).to_string();
             label
                 .entry(a.clone())
@@ -655,6 +662,9 @@ impl ModuleScaffolding {
             let entry = out.entry(lang).or_default();
             for m in &component {
                 entry.modules.push(m.clone());
+                if let Some(files) = direct_files.get(m) {
+                    entry.files.insert(m.clone(), files.clone());
+                }
             }
             for (a, b) in &edges {
                 if component.contains(a) && component.contains(b) {
@@ -685,6 +695,10 @@ impl ModuleScaffolding {
             scaffolding.languages.dedup();
             scaffolding.language_edges.sort();
             scaffolding.language_edges.dedup();
+            for files in scaffolding.files.values_mut() {
+                files.sort();
+                files.dedup();
+            }
         }
         out
     }
