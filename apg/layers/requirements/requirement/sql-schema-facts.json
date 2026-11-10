@@ -24,7 +24,17 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.sql-fqn-collision",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.sql-function-objects",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-identity-case",
       "properties": {}
     },
     {

@@ -32,12 +32,22 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.sql-fqn-collision",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.sql-frontend",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.sql-function-objects",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-identity-case",
       "properties": {}
     },
     {
