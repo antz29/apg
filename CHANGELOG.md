@@ -9,6 +9,33 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.29.1
+
+Patch release: faster and more correct incremental scans. No new features and
+no user-visible interface change — no CLI flag, config key or output format
+changed.
+
+**Incremental delta splice.** A scanned target set now assembles a
+**target-only delta graph** (`ingest::ingest_delta`) and lands it as splice DML
+against the seed `db.lbug`, instead of re-assembling the full fact-spliced graph
+in memory. Unchanged code stays in the seed and is never rewritten; the assembly
+dispatch is now explicit (warm cache-fact splice, delta splice, or full scan).
+
+**Correctness across the delta.** Cleanup recognises far endpoints that live
+only in the seed (`previous.scanned` ∪ `previous.planned`); newly-real
+declarations re-resolve the seed's unresolved edges; authored and Agent-roster
+rows are carried so the seed's authored digest stays represented; and every
+full-load fallback re-assembles the full graph from the buffered spool plus the
+unchanged-file reuse plan. `State::merge_delta` merges a delta's index entries
+into the persisted record.
+
+**Tests and docs.** New unit, integration and e2e coverage pins the delta
+against a full rebuild (equivalence on every table, one-file rescan under the
+value threshold, partial-module re-election, planned-node realization), plus
+comment and documentation fixes.
+
+No durable-spec model change.
+
 ## v0.29.0
 
 Minor release: a new COBOL frontend, `src/cobollib`, joins the languages `apg
