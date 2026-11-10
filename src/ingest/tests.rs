@@ -1162,6 +1162,7 @@ mod int {
             "makefile",
             "ini",
             "misc",
+            "sln",
         ] {
             assert_eq!(root_module_fqn(lang, "", base), format!("{lang}."));
             assert_eq!(
