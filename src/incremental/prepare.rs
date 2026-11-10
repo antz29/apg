@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::cache::{CacheKey, FactStore, Manifest, ScanConfigKey};
@@ -98,33 +98,94 @@ impl State {
     /// `(dependent, target)` edge from an unchanged file survives as long as the
     /// delta graph still carries that target, and is dropped only when the
     /// dependency file was deleted or renamed away.
+    ///
+    /// A delta edge may target a symbol that lives only in an unchanged file
+    /// (the finalizer deliberately leaves such a cross-cut edge dangling), so
+    /// the edge endpoints resolve through the delta graph's located nodes first
+    /// and then through the pre-merge signatures — that is what keeps a target's
+    /// dependency on the unchanged tree in the merged index.
     pub fn merge_delta(
         &mut self,
         delta_graph: &Graph,
         root: &Path,
         targets_rel: &BTreeSet<String>,
     ) {
-        let delta_edges = DepIndex::from_graph(delta_graph).edges_rel(root);
         let delta_signatures = signatures_of_graph(delta_graph, root);
         let delta_overloads = OverloadIndex::from_graph(delta_graph, root);
 
-        // The target files the delta graph still carries — a File node, a
-        // declaration, or a dependency-edge endpoint. A target it no longer
-        // carries was deleted or renamed away.
+        // FQN → declaring file for the delta's edges: the delta graph's located
+        // nodes first, then the PRE-MERGE signatures so an edge whose far
+        // endpoint lives only in an unchanged file still yields its dependency.
+        // A target's declarations are authoritative in the delta graph, so its
+        // stale pre-merge FQNs never resolve — a symbol the delta removed must
+        // not resurrect a dependency through the persisted copy.
+        //
+        // Also the target files the delta graph still carries (a File node): a
+        // target it no longer carries was deleted or renamed away.
+        let mut file_of: BTreeMap<String, String> = BTreeMap::new();
         let mut carried: BTreeSet<String> = BTreeSet::new();
         for (fqn, node) in &delta_graph.nodes {
-            if node.kind != NodeKind::File {
+            match node.kind {
+                NodeKind::File => {
+                    let path = node
+                        .location
+                        .as_ref()
+                        .map(|l| l.path.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| fqn.clone());
+                    let path = rel(root, &path);
+                    file_of.insert(fqn.clone(), path.clone());
+                    carried.insert(path);
+                }
+                NodeKind::Struct | NodeKind::Function => {
+                    if let Some(loc) = &node.location {
+                        file_of.insert(fqn.clone(), rel(root, &loc.path.to_string_lossy()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (file, sigs) in &self.signatures {
+            if targets_rel.contains(file) {
                 continue;
             }
-            let path = node
-                .location
-                .as_ref()
-                .map(|l| l.path.to_string_lossy().into_owned())
-                .unwrap_or_else(|| fqn.clone());
-            carried.insert(rel(root, &path));
+            for sig in sigs {
+                file_of
+                    .entry(sig.fqn.clone())
+                    .or_insert_with(|| file.clone());
+            }
         }
         carried.extend(delta_signatures.keys().cloned());
         carried.extend(delta_overloads.file_scopes.keys().cloned());
+
+        // The target files' outgoing dependencies, resolved with the augmented
+        // endpoint map above (the rest of the DepIndex rule: both endpoints known,
+        // no self-edge, the dependent is a target).
+        let mut delta_edges: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut add_edge = |from: &str, to: &str| {
+            let (Some(dependent), Some(dependency)) = (file_of.get(from), file_of.get(to)) else {
+                return;
+            };
+            if dependent == dependency
+                || dependent.is_empty()
+                || dependency.is_empty()
+                || !targets_rel.contains(dependent)
+            {
+                return;
+            }
+            delta_edges.insert((dependent.clone(), dependency.clone()));
+        };
+        for (from, to) in &delta_graph.calls {
+            add_edge(from, to);
+        }
+        for (from, to) in &delta_graph.uses {
+            add_edge(from, to);
+        }
+        for (from, to, _) in &delta_graph.unresolved_calls {
+            add_edge(from, to);
+        }
+        for (from, to) in &delta_graph.unresolved_uses {
+            add_edge(from, to);
+        }
         for (from, to) in &delta_edges {
             carried.insert(from.clone());
             carried.insert(to.clone());
