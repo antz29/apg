@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-dynamic-dependency",
-  "body": "A dot-source or Import-Module whose path or name is computed at run time, or whose static path lies outside the scanned files, is an unresolved use of category unknown keyed by a site sentinel for its site.",
+  "body": "A dot-source or Import-Module whose path or name is computed at run time, or whose static path names no scanned file, is an unresolved use of category unknown keyed by a site sentinel for its site.",
   "properties": {
     "feature": "ps-frontend"
   },

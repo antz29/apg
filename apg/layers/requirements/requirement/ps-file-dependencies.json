@@ -39,6 +39,16 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-path-match",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-path-normalisation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-static-path",
       "properties": {}
     }

@@ -72,6 +72,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-path-match",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-path-normalisation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-resolved-call",
       "properties": {}
     },

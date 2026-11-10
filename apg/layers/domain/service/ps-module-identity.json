@@ -42,6 +42,21 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-path-match",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-path-normalisation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-static-path",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-unique-script-struct",
       "properties": {}
     }
