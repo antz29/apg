@@ -26,6 +26,11 @@
       "properties": {}
     },
     {
+      "kind": "implemented-by",
+      "target": "rust.ingest_e2e.e2e.cached_declaration_supersedes_a_planned_placeholder",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}
