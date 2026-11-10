@@ -1254,19 +1254,27 @@ mod e2e {
         };
 
         let report = seeded.apply(&delta).unwrap();
-        assert!(
-            report.nodes_upserted >= 6,
-            "persist+new units upserted: {report:?}"
+        // The delta's persisting and newly-emitted units are upserted: the
+        // changed a.go File, its m.A/m.A.f/m.A.h and the newly referenced
+        // ext.New. Module `m` is NOT re-decided — it also owns the unchanged
+        // b.go outside the target set, so only a WHOLLY-targeted module is
+        // re-decided and this one keeps its seed row and Contains rels.
+        assert_eq!(
+            report.nodes_upserted, 5,
+            "a.go's units + ext.New upserted, partially-targeted m kept: {report:?}"
         );
         assert_eq!(
             report.nodes_deleted, 3,
             "c.go, m.C.q, m.C disappear: {report:?}"
         );
-        assert!(
-            report.edges_deleted >= 8,
+        // Module `m` is only partially targeted (b.go is unchanged), so its
+        // seed Contains rels (m→a.go, m→b.go) are neither replaced nor
+        // re-merged — one fewer delete/merge than the wholly-targeted case.
+        assert_eq!(
+            report.edges_deleted, 7,
             "authored rels replaced: {report:?}"
         );
-        assert!(report.edges_merged >= 8, "delta rels re-merged: {report:?}");
+        assert_eq!(report.edges_merged, 7, "delta rels re-merged: {report:?}");
         assert_eq!(
             report.unresolved_gc, 1,
             "ext.Old is now unreferenced: {report:?}"
