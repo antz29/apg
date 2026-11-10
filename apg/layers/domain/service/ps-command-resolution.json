@@ -57,6 +57,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-import-module-ambiguous",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-import-module-dependency",
       "properties": {}
     },
