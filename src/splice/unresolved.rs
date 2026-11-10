@@ -25,7 +25,10 @@
 //!
 //! The work is batched as one literal list of `newly_real` FQNs per target
 //! label, split into a `MERGE` and a `DELETE` statement (one write clause per
-//! statement, as everywhere else on the seeded copy). Finally every
+//! statement, as everywhere else on the seeded copy). The Struct-target `MERGE`
+//! is issued once per declared `Uses` source label (`Function`, `Struct`): the
+//! engine refuses to create a rel whose bound source can carry more than one
+//! node label. Finally every
 //! `UnresolvedTarget` row no surviving unresolved edge names is GC'd, exactly as
 //! `apply`'s last stage does.
 //!
@@ -68,13 +71,24 @@ pub fn resolve_delta_unresolved(
     // Struct targets: only `UnresolvedUse` rows flip (Uses is Function|Struct →
     // Struct — the rel table's declared source labels, apply.rs's
     // CODE_REL_PAIRS). An `UnresolvedCall` onto a Struct and an
-    // `UnresolvedUse` onto a Function keep their rows.
+    // `UnresolvedUse` onto a Function keep their rows. lbug refuses to CREATE a
+    // rel whose bound source can carry more than one node label ("Create rel
+    // bound by multiple node labels is not supported"), so the MERGE runs once
+    // per declared source label; the shared DELETE creates nothing and needs no
+    // label.
+    for source in ["Function", "Struct"] {
+        conn.query(&format!(
+            "UNWIND [{list}] AS target MATCH (a:{source})-[r:UnresolvedUse]->\
+             (t:UnresolvedTarget {{fqn: target}}), (b:Struct {{fqn: target}}) \
+             WHERE b.status IS NULL OR b.status <> 'planned' \
+             MERGE (a)-[:Uses]->(b)"
+        ))?;
+    }
     let struct_match = format!(
         "UNWIND [{list}] AS target MATCH (a)-[r:UnresolvedUse]->\
          (t:UnresolvedTarget {{fqn: target}}), (b:Struct {{fqn: target}}) \
          WHERE b.status IS NULL OR b.status <> 'planned'"
     );
-    conn.query(&format!("{struct_match} MERGE (a)-[:Uses]->(b)"))?;
     conn.query(&format!("{struct_match} DELETE r"))?;
 
     // GC the shared rows by reference, as `apply`'s last stage does: an
