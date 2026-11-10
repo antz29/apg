@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-unlisted-project-module",
+  "body": "A C# project module that no `.sln` in the scanned tree lists is contained directly by the csharp language root.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.csharp-project-modelling",
+      "properties": {}
+    }
+  ]
+}

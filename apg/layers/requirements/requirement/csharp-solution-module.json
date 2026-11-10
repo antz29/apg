@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-solution-module",
-  "body": "Each `.sln` is a module containing the project module of every C# project it lists, so a project listed by several solutions is one module contained by each.",
+  "body": "Each `.sln` is module csharp.<sln-path>, its repository-relative path kept whole as one segment, containing the project module of every C# project it lists, so a project several solutions list is one module contained by each.",
   "properties": {
     "feature": "csharp-projects"
   },

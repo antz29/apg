@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "dotnet-solution",
-  "body": "A `.sln` file naming a set of C# projects, modelled as a module containing each listed project's module.",
+  "body": "A `.sln` file naming a set of C# projects, modelled as module csharp.<sln-path>, its repository-relative path kept whole as one segment, containing each listed project's module.",
   "properties": {
     "kind": "entity"
   },

@@ -109,6 +109,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.csharp-unlisted-project-module",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.csharp-unresolvable-reference-target",
       "properties": {}
     },

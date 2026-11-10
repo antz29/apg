@@ -26,6 +26,11 @@
       "properties": {}
     },
     {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-unlisted-project-module",
+      "properties": {}
+    },
+    {
       "kind": "reads",
       "target": "domain.entity.dotnet-project",
       "properties": {}
