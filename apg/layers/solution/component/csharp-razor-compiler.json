@@ -6,11 +6,6 @@
   "properties": {},
   "out": [
     {
-      "kind": "implemented-by",
-      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitFileAndDeclarations",
-      "properties": {}
-    },
-    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}
