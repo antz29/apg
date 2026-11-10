@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "csx-method-fqn-suffix-match",
+  "body": "The mixed .cs/.csx scan test only checks that a declaration whose name ends in `Twice` is emitted, because no expected parent scope is defined for script top-level methods; it does not assert the .csx File record's parent or any .csx edges. Upgrade: pin the exact script-method FQN once its parent form is agreed (phase 8's .csx fixture is the natural place).",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.CsharpFrontend.Tests.TestMain.TestMixedCsCsxScan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
