@@ -301,7 +301,7 @@ public class Scanner
         // metadata references. The compilation always covers the FULL file
         // set: the target set filters emission, not resolution, so a target
         // file's references resolve exactly.
-        var syntaxTrees = CompilationLoader.ParseTrees(files);
+        var syntaxTrees = CompilationLoader.ParseTrees(files, out _);
         var compilation = CompilationLoader.CreateCompilation(syntaxTrees);
 
         // An all-targets request (every discovered file selected) is the full
