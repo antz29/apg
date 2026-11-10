@@ -40,7 +40,17 @@ internal sealed class DeclarationEmitter
         // Module scaffolding is global (it is not part of a per-file fact unit),
         // so it is emitted for every file — target or not — and the cached splice
         // sees the full Module→Module hierarchy.
-        if (!string.IsNullOrEmpty(defaultNamespace))
+        bool isScript = tree.Options.Kind == SourceCodeKind.Script;
+        if (isScript)
+        {
+            // A script is its own whole-path module (no dot-split, no parent edge); the ingestor renders it repo-relative.
+            defaultNamespace = filePath;
+            if (_scanner.EmittedModules.Add(filePath))
+            {
+                JsonlWriter.Write(new ModuleMsg { Fqn = filePath });
+            }
+        }
+        else if (!string.IsNullOrEmpty(defaultNamespace))
         {
             EmitModuleHierarchy(defaultNamespace);
         }
@@ -66,7 +76,7 @@ internal sealed class DeclarationEmitter
                 if (symbol == null) continue;
 
                 string parentFqn = SymbolNaming.GetParentScopeFqn(symbol);
-                if (!string.IsNullOrEmpty(parentFqn))
+                if (!isScript && !string.IsNullOrEmpty(parentFqn))
                 {
                     EmitModuleHierarchy(parentFqn);
                 }
