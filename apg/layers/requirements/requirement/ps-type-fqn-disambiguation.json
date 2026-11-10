@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-type-fqn-disambiguation",
-  "body": "A class or enum Struct whose FQN equals another PowerShell Struct's or ends in //, a scanned file's repository-relative path, : and digits appends //, its file's path, : and its ordinal among its file's class and enum Structs in source order.",
+  "body": "A class or enum Struct whose FQN equals another PowerShell Struct's or a PowerShell Module's, or ends in //, a scanned file's repository-relative path, : and digits, appends //, its file's path, : and its unit ordinal.",
   "properties": {
     "feature": "ps-frontend"
   },

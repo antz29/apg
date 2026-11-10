@@ -64,6 +64,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.ps-unit-fqn-uniqueness",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-unit-ordinal",
+      "properties": {}
     }
   ],
   "in": [

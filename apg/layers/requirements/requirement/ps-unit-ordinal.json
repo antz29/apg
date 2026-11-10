@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-unit-ordinal",
+  "body": "A PowerShell unit's unit ordinal is its 1-based position among its file's class and enum Structs and Functions, methods included, ordered by start offset with the <script> Function first.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-unit-fqn-uniqueness",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-script-scanning",
+      "properties": {}
+    }
+  ]
+}
