@@ -1,7 +1,7 @@
 mod common;
 
 use apg::graph::{Graph, Location, Node, NodeKind};
-use apg::layers::NodeProperties;
+use apg::layers::{NodeProperties, properties_from_json, properties_json};
 use apg::load;
 use apg::schema::SCAN_HEAD;
 use apg::splice::*;
@@ -5855,5 +5855,451 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Phase-03 task-1 (e2e): applying a **target-only** delta graph to a
+    /// seeded copy must equal a full rebuild of the same tree **row by row on
+    /// every table** — every code, authored and transient node table and every
+    /// rel table, a lost or duplicated row included.
+    ///
+    /// The delta graph is the shape the incremental path really hands the
+    /// splicer: the edited package `m`'s re-emitted units (`a.go` with the new
+    /// `m.A.h`), the re-ingested authored/transient rows, the roster's `Agent`
+    /// row, the new `Scan` head, and the cross-cut `Calls`/`Uses` rels whose far
+    /// endpoint (`n.B.g` / `n.B.S`) lives only in the seed. The re-emission is
+    /// package-granular, so the untouched package `n` is absent from the delta
+    /// graph exactly as here; its seed rows and outgoing `Contains` rels must
+    /// survive untouched. The splicer lands the dangling cross-cut rels against
+    /// the seed (`endpoint_label` + `pair_allowed`), GCs the retired
+    /// `UnresolvedTarget`, and refreshes the `Scan` row.
+    ///
+    /// The oracle enumerates every table `show_tables()` reports (NODE and REL
+    /// alike) and serialises each row's full property tuple with its
+    /// multiplicity — counts alone cannot catch a changed property or a
+    /// duplicated rel (`domain.constraint.db-splice-equivalence`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
+    fn delta_graph_application_equals_a_full_rebuild_on_every_table() {
+        /// Every row of every table in a DB file, keyed by
+        /// `"<NODE|REL>:<table>:<cells>"` with its multiplicity so a lost OR
+        /// duplicated row fails; the cells are the table's full property tuple
+        /// in a stable (sorted) column order — never the internal storage id.
+        fn every_table_snapshot(path: &Path) -> BTreeMap<String, usize> {
+            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (names, tables) =
+                query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
+            let name_i = column_index(&names, "name").unwrap();
+            let type_i = column_index(&names, "type").unwrap();
+            let mut out: BTreeMap<String, usize> = BTreeMap::new();
+            for table_row in tables {
+                let table = cell(&table_row, name_i);
+                let kind = cell(&table_row, type_i);
+                let (tnames, trows) =
+                    query_rows(&conn, &format!("CALL table_info('{table}') RETURN *")).unwrap();
+                let prop_i = column_index(&tnames, "name").unwrap();
+                let mut props: Vec<String> = trows.iter().map(|r| cell(r, prop_i)).collect();
+                props.sort();
+                let (_, rows) = if kind == "REL" {
+                    // Every node table shares the `fqn` key, so an unlabelled
+                    // rel endpoint always projects it; the rel's own declared
+                    // properties follow.
+                    let mut columns: Vec<String> = vec!["a.fqn".into(), "b.fqn".into()];
+                    columns.extend(props.iter().map(|p| format!("r.`{p}`")));
+                    query_rows(
+                        &conn,
+                        &format!("MATCH (a)-[r:{table}]->(b) RETURN {}", columns.join(", ")),
+                    )
+                    .unwrap()
+                } else {
+                    let columns: Vec<String> = props.iter().map(|p| format!("n.`{p}`")).collect();
+                    query_rows(
+                        &conn,
+                        &format!("MATCH (n:{table}) RETURN {}", columns.join(", ")),
+                    )
+                    .unwrap()
+                };
+                for row in rows {
+                    let mut cells = row;
+                    // The rel's serialized-properties column decodes to the same
+                    // empty map whether it is the canonical `{}` (a full load's
+                    // scanned-code row) or the empty column the splice's `MERGE`
+                    // leaves unset — `layers::properties_from_json` documents
+                    // both as the code row's "no properties". Compare the
+                    // canonical encoding so the oracle compares the stored
+                    // semantics, not that one serialization detail.
+                    if kind == "REL"
+                        && let Some(i) = props.iter().position(|p| p == "properties")
+                    {
+                        cells[2 + i] =
+                            properties_json(&properties_from_json(&cells[2 + i]).unwrap());
+                    }
+                    *out.entry(format!("{kind}:{table}:{}", cells.join("|")))
+                        .or_default() += 1;
+                }
+            }
+            drop(conn);
+            drop(db);
+            out
+        }
+
+        let dir = scratch("delta-graph-every-table");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/m/a.go".to_string();
+        let b = "/x/n/b.go".to_string();
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let language = || Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        };
+
+        /// The seed side of the tier-4 agent scaffolding: the `agent` language
+        /// root, its module, the claimed definition `File` and the `Agent` row.
+        fn agent_scaffolding(g: &mut Graph) {
+            let def = ".opencode/agents/implementer.md";
+            g.nodes.insert(
+                "agent".into(),
+                Node {
+                    kind: NodeKind::Language,
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                AGENT_MODULE.into(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+            g.contains.insert(("agent".into(), AGENT_MODULE.into()));
+            add_agent_definition(g, def, "implementer", 1, 10);
+        }
+
+        /// The authored/transient rows both sides carry: a `Service` driven by a
+        /// `Requirement`, and a `Plan` ⊃ `PlanPhase` ⊃ `Task` chain whose `Task`
+        /// is assigned to the tier-4 `Agent`.
+        fn authored(g: &mut Graph) {
+            g.nodes.insert(
+                "requirements.requirement.req".into(),
+                Node {
+                    kind: NodeKind::Requirement,
+                    title: Some("the requirement".into()),
+                    body: Some("the requirement body".into()),
+                    feature: Some("the feature".into()),
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                "domain.service.svc".into(),
+                Node {
+                    kind: NodeKind::Service,
+                    name: Some("svc".into()),
+                    body: Some("the service".into()),
+                    ..Node::default()
+                },
+            );
+            g.driven_by.insert((
+                "domain.service.svc".into(),
+                "requirements.requirement.req".into(),
+            ));
+            g.nodes.insert(
+                "delta-graph/plan".into(),
+                Node {
+                    kind: NodeKind::Plan,
+                    title: Some("Delta plan".into()),
+                    strategy: Some("the strategy".into()),
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                "delta-graph/plan.phase-01".into(),
+                Node {
+                    kind: NodeKind::PlanPhase,
+                    number: Some(1),
+                    title: Some("Phase one".into()),
+                    deliverable: Some("the deliverable".into()),
+                    status: Some("pending".into()),
+                    ..Node::default()
+                },
+            );
+            let task = "delta-graph/plan.phase-01.task-1";
+            g.nodes.insert(
+                task.into(),
+                Node {
+                    kind: NodeKind::Task,
+                    title: Some("Task one".into()),
+                    status: Some("pending".into()),
+                    ..Node::default()
+                },
+            );
+            g.contains.insert((
+                "delta-graph/plan".into(),
+                "delta-graph/plan.phase-01".into(),
+            ));
+            g.contains
+                .insert(("delta-graph/plan.phase-01".into(), task.into()));
+            g.assigned_to
+                .insert((task.into(), "agent.implementer".into()));
+        }
+
+        // ---- The seeded previous tree -------------------------------------
+        // Target package `m` owns `a.go`; seed-only package `n` owns `b.go` and
+        // the units the edited package references across the cut.
+        let mut prev = Graph::default();
+        prev.nodes.insert("go".into(), language());
+        prev.nodes.insert("m".into(), module());
+        prev.nodes.insert("n".into(), module());
+        prev.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 40));
+        prev.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        prev.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 30));
+        prev.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 12));
+        prev.nodes
+            .insert("n.B".into(), located(NodeKind::Struct, &b, 1, 30));
+        prev.nodes
+            .insert("n.B.S".into(), located(NodeKind::Struct, &b, 1, 20));
+        prev.nodes
+            .insert("n.B.g".into(), located(NodeKind::Function, &b, 2, 12));
+        prev.nodes.insert(
+            "ext.Old".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("external".into()),
+                ..Node::default()
+            },
+        );
+        prev.contains.insert(("go".into(), "m".into()));
+        prev.contains.insert(("go".into(), "n".into()));
+        prev.contains.insert(("m".into(), a.clone()));
+        prev.contains.insert(("n".into(), b.clone()));
+        prev.contains.insert((a.clone(), "m.A".into()));
+        prev.contains.insert((a.clone(), "m.A.f".into()));
+        prev.contains.insert(("m.A".into(), "m.A.f".into()));
+        prev.contains.insert((b.clone(), "n.B".into()));
+        prev.contains.insert((b.clone(), "n.B.S".into()));
+        prev.contains.insert((b.clone(), "n.B.g".into()));
+        prev.contains.insert(("n.B".into(), "n.B.g".into()));
+        prev.unresolved_calls
+            .insert(("m.A.f".into(), "ext.Old".into(), String::new()));
+        authored(&mut prev);
+        agent_scaffolding(&mut prev);
+        prev.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        build_db(&prev_path, &prev);
+
+        // ---- The target-only delta graph -----------------------------------
+        // The edited package `m` re-emits `a.go` with the new `m.A.h` and the
+        // cross-cut references into the seed-only `n`; package `n`, its units and
+        // its `Contains` rows are deliberately absent.
+        let mut delta = Graph::default();
+        delta.nodes.insert("go".into(), language());
+        delta.nodes.insert("m".into(), module());
+        delta
+            .nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 45));
+        delta
+            .nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 35));
+        delta
+            .nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 14));
+        delta
+            .nodes
+            .insert("m.A.h".into(), located(NodeKind::Function, &a, 16, 28));
+        delta.nodes.insert(
+            "ext.New".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("stdlib".into()),
+                ..Node::default()
+            },
+        );
+        delta.contains.insert(("go".into(), "m".into()));
+        delta.contains.insert(("m".into(), a.clone()));
+        delta.contains.insert((a.clone(), "m.A".into()));
+        delta.contains.insert((a.clone(), "m.A.f".into()));
+        delta.contains.insert((a.clone(), "m.A.h".into()));
+        delta.contains.insert(("m.A".into(), "m.A.f".into()));
+        delta.contains.insert(("m.A".into(), "m.A.h".into()));
+        // The cross-cut rels: their far endpoint lives only in the seed.
+        delta.calls.insert(("m.A.f".into(), "n.B.g".into()));
+        delta.uses.insert(("m.A.f".into(), "m.A".into()));
+        delta.uses.insert(("m.A.h".into(), "n.B.S".into()));
+        delta
+            .unresolved_calls
+            .insert(("m.A.f".into(), "ext.New".into(), String::new()));
+        authored(&mut delta);
+        // The roster re-emission carries the `Agent` rows only: an unchanged
+        // definition's File/module scaffolding is not re-emitted.
+        delta.nodes.insert(
+            "agent.implementer".into(),
+            Node {
+                kind: NodeKind::Agent,
+                location: Some(Location {
+                    path: PathBuf::from(".opencode/agents/implementer.md"),
+                    start: 0,
+                    end: 0,
+                    start_line: 1,
+                    end_line: 10,
+                }),
+                code_type: "docs".to_string(),
+                ..Node::default()
+            },
+        );
+        delta.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+
+        // ---- The full-rebuild reference: the whole new tree ----------------
+        let mut full = Graph::default();
+        full.nodes.insert("go".into(), language());
+        full.nodes.insert("m".into(), module());
+        full.nodes.insert("n".into(), module());
+        full.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 45));
+        full.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        full.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 35));
+        full.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 14));
+        full.nodes
+            .insert("m.A.h".into(), located(NodeKind::Function, &a, 16, 28));
+        full.nodes
+            .insert("n.B".into(), located(NodeKind::Struct, &b, 1, 30));
+        full.nodes
+            .insert("n.B.S".into(), located(NodeKind::Struct, &b, 1, 20));
+        full.nodes
+            .insert("n.B.g".into(), located(NodeKind::Function, &b, 2, 12));
+        full.nodes.insert(
+            "ext.New".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("stdlib".into()),
+                ..Node::default()
+            },
+        );
+        full.contains.insert(("go".into(), "m".into()));
+        full.contains.insert(("go".into(), "n".into()));
+        full.contains.insert(("m".into(), a.clone()));
+        full.contains.insert(("n".into(), b.clone()));
+        full.contains.insert((a.clone(), "m.A".into()));
+        full.contains.insert((a.clone(), "m.A.f".into()));
+        full.contains.insert((a.clone(), "m.A.h".into()));
+        full.contains.insert(("m.A".into(), "m.A.f".into()));
+        full.contains.insert(("m.A".into(), "m.A.h".into()));
+        full.contains.insert((b.clone(), "n.B".into()));
+        full.contains.insert((b.clone(), "n.B.S".into()));
+        full.contains.insert((b.clone(), "n.B.g".into()));
+        full.contains.insert(("n.B".into(), "n.B.g".into()));
+        full.calls.insert(("m.A.f".into(), "n.B.g".into()));
+        full.uses.insert(("m.A.f".into(), "m.A".into()));
+        full.uses.insert(("m.A.h".into(), "n.B.S".into()));
+        full.unresolved_calls
+            .insert(("m.A.f".into(), "ext.New".into(), String::new()));
+        authored(&mut full);
+        agent_scaffolding(&mut full);
+        full.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+
+        // ---- Apply the delta to a seeded copy and publish ------------------
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+        // The delete scope is the edited package's file; `n` is untouched.
+        let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &delta,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+        publish(seeded).unwrap();
+
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &full);
+
+        let spliced = every_table_snapshot(&prev_path);
+        let expected = every_table_snapshot(&expected_path);
+        assert_eq!(
+            spliced, expected,
+            "a target-only delta application must equal a full rebuild ROW BY \
+             ROW on every table"
+        );
+
+        // Non-vacuity: the oracle really enumerated a POPULATED copy of every
+        // interesting tier, and the cross-cut rels/landed units are present.
+        for prefix in [
+            "NODE:Language:",
+            "NODE:Module:",
+            "NODE:File:",
+            "NODE:Struct:",
+            "NODE:Function:",
+            "NODE:Agent:",
+            "NODE:UnresolvedTarget:",
+            "NODE:Scan:",
+            "NODE:Requirement:",
+            "NODE:Service:",
+            "NODE:Plan:",
+            "NODE:PlanPhase:",
+            "NODE:Task:",
+            "REL:Contains:",
+            "REL:Calls:",
+            "REL:Uses:",
+            "REL:UnresolvedCall:",
+            "REL:DrivenBy:",
+            "REL:AssignedTo:",
+        ] {
+            assert!(
+                spliced.keys().any(|k| k.starts_with(prefix)),
+                "the oracle must enumerate a populated {prefix} table: {spliced:?}"
+            );
+        }
+        for needle in [
+            "|m.A.h|",
+            "|ext.New|",
+            "|agent.implementer|",
+            "|requirements.requirement.req|",
+            "|delta-graph/plan.phase-01.task-1|",
+            "REL:Calls:m.A.f|n.B.g|",
+            "REL:Uses:m.A.h|n.B.S|",
+            "REL:DrivenBy:domain.service.svc|requirements.requirement.req|",
+            "REL:AssignedTo:delta-graph/plan.phase-01.task-1|agent.implementer",
+        ] {
+            assert!(
+                spliced.keys().any(|k| k.contains(needle)),
+                "the every-table oracle must carry `{needle}`: {spliced:?}"
+            );
+        }
+        // The retired seed-only reference and its `UnresolvedTarget` row are gone
+        // exactly as in the full rebuild (the every-table equality above proves
+        // the full rebuild agrees; this names the lifecycle).
+        assert!(
+            !spliced.keys().any(|k| k.contains("ext.Old")),
+            "the retired UnresolvedTarget must be GC'd: {spliced:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
