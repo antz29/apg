@@ -17,7 +17,7 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 ///
 /// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
 /// `csharp`, `py`, `cpp`, `agent`, `md`, and the bundled structural scanner's
-/// `sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`,
+/// `sh`, `yaml`, `json`, `toml`, `xml`, `sln`, `dockerfile`, `makefile`, `ini`,
 /// `misc`) so it can be compared directly against the scan's detected/requested
 /// language ids — `apg.targets_for_language` filters the win-B target set with
 /// exactly this comparison. `.py`/`.pyi` therefore return `"py"`, NOT
@@ -82,7 +82,7 @@ pub fn language_of(rel: &str) -> &'static str {
         "java" => "java",
         "rs" => "rust",
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => "ts",
-        "cs" | "csx" => "csharp",
+        "cs" | "csx" | "cshtml" | "razor" => "csharp",
         "py" | "pyi" => "py",
         _ if CPP_EXTENSIONS.contains(&ext) => "cpp",
         // COBOL extensions match in any letter case (`.CBL`, `.Cpy`), like the
@@ -99,6 +99,7 @@ pub fn language_of(rel: &str) -> &'static str {
         "json" => "json",
         "toml" => "toml",
         "xml" => "xml",
+        "sln" => "sln",
         "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
         _ => "misc",
     }
