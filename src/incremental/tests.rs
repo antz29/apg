@@ -91,6 +91,7 @@ mod unit {
         assert_eq!(language_of("Web.Config"), "xml");
         assert_eq!(language_of("Strings.ResX"), "xml");
         assert_eq!(language_of("App.sln"), "sln");
+        assert_eq!(language_of("Legacy.SLN"), "sln");
         assert_eq!(language_of("Dockerfile"), "dockerfile");
         assert_eq!(language_of("app.dockerfile"), "dockerfile");
         assert_eq!(language_of("Makefile"), "makefile");

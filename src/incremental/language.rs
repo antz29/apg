@@ -117,7 +117,8 @@ pub fn language_of(rel: &str) -> &'static str {
         {
             "xml"
         }
-        "sln" => "sln",
+        // Any letter case (`Legacy.SLN`), like `stream_for_path`'s lowercasing.
+        _ if ext.eq_ignore_ascii_case("sln") => "sln",
         "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
         _ => "misc",
     }
