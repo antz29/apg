@@ -6590,4 +6590,282 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// Phase-04 task-5 (e2e): the SEED-SIDE unresolved lifecycle.
+    ///
+    /// The splice copies the previous scan's `db.lbug` whole and applies the
+    /// target-only delta as DML. An UNCHANGED file the delta never re-emits
+    /// keeps its seeded `UnresolvedCall`/`UnresolvedUse` rows, so when the
+    /// delta's own new declarations make one of those targets real the seed
+    /// rows would stay unresolved — a shape a full rebuild never produces
+    /// (`domain.constraint.db-splice-equivalence`). `resolve_delta_unresolved`
+    /// flips exactly those seed rows:
+    ///
+    /// * `b.go` (outside the delta's target set — its facts live only in the
+    ///   seed DB) calls `m.X` and uses `m.S`; the delta's `a.go`, the ONLY
+    ///   target, newly declares `m.X` (Function) and `m.S`/`m.T` (Structs), so
+    ///   `newly_real` = {X, S, T};
+    /// * the seed `UnresolvedCall` → `m.X` becomes `Calls` (Function→Function)
+    ///   and the seed `UnresolvedUse` → `m.S` becomes `Uses` (Function→Struct);
+    ///   both `UnresolvedTarget` rows are GC'd;
+    /// * the WRONG-KIND seed `UnresolvedCall` → `m.T` (a newly-real Struct)
+    ///   stays unresolved, as does `m.Ghost` (outside `newly_real`), each
+    ///   keeping its `UnresolvedTarget` row;
+    /// * the delta graph carries NO unresolved reference and no `b.go` row, so
+    ///   every flipped edge above is SEED-resident, never delta-emitted — the
+    ///   delta-emitted case is phase-1's
+    ///   `delta_cross_cut_reference_publishes_a_resolved_calls_edge`.
+    ///
+    /// Real `db.lbug` files (seed copy → DML → publish) are real I/O, so this is
+    /// `#[ignore]`d e2e (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
+    fn seed_unresolved_edges_resolve_to_newly_real_delta_fqns() {
+        let dir = scratch("seed-unresolved-newly-real");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/a.go".to_string();
+        let b = "/x/b.go".to_string();
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let target = |cat: &str| Node {
+            kind: NodeKind::UnresolvedTarget,
+            category: Some(cat.to_string()),
+            ..Node::default()
+        };
+
+        // The seed is a cold full scan. `b.go` is UNCHANGED and outside every
+        // later delta target, so its unresolved rows live only in this DB.
+        let mut prev = Graph::default();
+        prev.nodes.insert("m".into(), module());
+        prev.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 40));
+        prev.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        prev.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 10));
+        prev.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 10));
+        prev.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 10));
+        // The unresolved targets `b.go` names: `m.X` becomes a Function and
+        // `m.S`/`m.T` Structs once the delta declares them; `m.Ghost` stays
+        // undefined everywhere.
+        prev.nodes.insert("m.X".into(), target("unknown"));
+        prev.nodes.insert("m.S".into(), target("unknown"));
+        prev.nodes.insert("m.T".into(), target("unknown"));
+        prev.nodes.insert("m.Ghost".into(), target("external"));
+        prev.contains.insert(("m".into(), a.clone()));
+        prev.contains.insert(("m".into(), b.clone()));
+        prev.contains.insert((a.clone(), "m.A".into()));
+        prev.contains.insert((a.clone(), "m.A.f".into()));
+        prev.contains.insert((b.clone(), "m.B.g".into()));
+        prev.unresolved_calls
+            .insert(("m.B.g".into(), "m.X".into(), String::new()));
+        // The WRONG-KIND direction: an `UnresolvedCall` onto a Struct target.
+        prev.unresolved_calls
+            .insert(("m.B.g".into(), "m.T".into(), String::new()));
+        prev.unresolved_calls
+            .insert(("m.B.g".into(), "m.Ghost".into(), String::new()));
+        prev.unresolved_uses.insert(("m.B.g".into(), "m.S".into()));
+        prev.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        build_db(&prev_path, &prev);
+
+        // The seed DB really carries the four unresolved targets `b.go` names.
+        let seeded_unresolved = unresolved_rows(&prev_path);
+        for (fqn, category) in [
+            ("m.X", "unknown"),
+            ("m.S", "unknown"),
+            ("m.T", "unknown"),
+            ("m.Ghost", "external"),
+        ] {
+            assert!(
+                seeded_unresolved.contains(&(fqn.to_string(), category.to_string())),
+                "the seed must carry `{fqn}`: {seeded_unresolved:?}"
+            );
+        }
+
+        // The target-only delta: `a.go` is the ONLY target and now DECLARES
+        // `m.X` (Function), `m.S` and `m.T` (Structs) beside the re-emitted
+        // units. It carries no `b.go` row and no unresolved reference at all.
+        let mut delta = Graph::default();
+        delta.nodes.insert("m".into(), module());
+        delta
+            .nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 60));
+        delta
+            .nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 10));
+        delta
+            .nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 10));
+        delta
+            .nodes
+            .insert("m.X".into(), located(NodeKind::Function, &a, 12, 20));
+        delta
+            .nodes
+            .insert("m.S".into(), located(NodeKind::Struct, &a, 22, 30));
+        delta
+            .nodes
+            .insert("m.T".into(), located(NodeKind::Struct, &a, 32, 40));
+        delta.contains.insert(("m".into(), a.clone()));
+        delta.contains.insert((a.clone(), "m.A".into()));
+        delta.contains.insert((a.clone(), "m.A.f".into()));
+        delta.contains.insert((a.clone(), "m.X".into()));
+        delta.contains.insert((a.clone(), "m.S".into()));
+        delta.contains.insert((a.clone(), "m.T".into()));
+        delta.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+        assert!(
+            delta.unresolved_calls.is_empty() && delta.unresolved_uses.is_empty(),
+            "the delta must emit no unresolved reference — this pins the SEED side"
+        );
+        assert!(
+            !delta.nodes.contains_key(&b) && !delta.nodes.contains_key("m.B.g"),
+            "`b.go` must stay outside the delta's target set"
+        );
+
+        // `newly_real` exactly as `try_splice_build` computes it: the delta
+        // graph's real Function/Struct FQNs minus the previous scan's.
+        let previous_code: BTreeSet<String> = prev
+            .nodes
+            .iter()
+            .filter(|(_, n)| matches!(n.kind, NodeKind::Function | NodeKind::Struct))
+            .map(|(fqn, _)| fqn.clone())
+            .collect();
+        let newly_real: BTreeSet<String> = delta
+            .nodes
+            .iter()
+            .filter(|(_, n)| {
+                matches!(n.kind, NodeKind::Function | NodeKind::Struct)
+                    && n.status.as_deref().is_none_or(str::is_empty)
+            })
+            .map(|(fqn, _)| fqn.clone())
+            .filter(|fqn| !previous_code.contains(fqn))
+            .collect();
+        assert_eq!(
+            newly_real,
+            BTreeSet::from(["m.S".to_string(), "m.T".to_string(), "m.X".to_string()]),
+            "`newly_real` is the delta's new declarations, not the re-emitted units"
+        );
+
+        let seeded = seed_or_panic(&prev_path);
+        let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &delta,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+        {
+            // The pipeline's post-apply, pre-publish step. A failure here fails
+            // the test loudly rather than being swallowed into a fallback.
+            let conn = seeded.conn().unwrap();
+            apg::splice::unresolved::resolve_delta_unresolved(&conn, &newly_real).unwrap();
+        }
+        publish(seeded).unwrap();
+
+        // The published DB: the seed-resident edges flipped, the GC removed the
+        // now-real targets' rows, and the two controls survived.
+        let db = Database::new(&prev_path, SystemConfig::default().read_only(true)).unwrap();
+        let conn = Connection::new(&db).unwrap();
+
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (a:Function)-[:Calls]->(b:Function) RETURN a.fqn AS a, b.fqn AS b",
+        )
+        .unwrap();
+        let ai = column_index(&names, "a").unwrap();
+        let bi = column_index(&names, "b").unwrap();
+        let calls: BTreeSet<(String, String)> =
+            rows.iter().map(|r| (cell(r, ai), cell(r, bi))).collect();
+        assert!(
+            calls.contains(&("m.B.g".to_string(), "m.X".to_string())),
+            "the seed UnresolvedCall onto the newly-real Function must become Calls: {calls:?}"
+        );
+
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (a:Function)-[:Uses]->(b:Struct) RETURN a.fqn AS a, b.fqn AS b",
+        )
+        .unwrap();
+        let ai = column_index(&names, "a").unwrap();
+        let bi = column_index(&names, "b").unwrap();
+        let uses: BTreeSet<(String, String)> =
+            rows.iter().map(|r| (cell(r, ai), cell(r, bi))).collect();
+        assert!(
+            uses.contains(&("m.B.g".to_string(), "m.S".to_string())),
+            "the seed UnresolvedUse onto the newly-real Struct must become Uses: {uses:?}"
+        );
+
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) \
+             RETURN a.fqn AS a, u.fqn AS u",
+        )
+        .unwrap();
+        let ai = column_index(&names, "a").unwrap();
+        let ui = column_index(&names, "u").unwrap();
+        let unresolved_calls: BTreeSet<(String, String)> =
+            rows.iter().map(|r| (cell(r, ai), cell(r, ui))).collect();
+        assert!(
+            !unresolved_calls.contains(&("m.B.g".to_string(), "m.X".to_string())),
+            "the flipped call must not stay unresolved: {unresolved_calls:?}"
+        );
+        for keep in ["m.T", "m.Ghost"] {
+            assert!(
+                unresolved_calls.contains(&("m.B.g".to_string(), keep.to_string())),
+                "`{keep}` must stay unresolved: {unresolved_calls:?}"
+            );
+        }
+
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (a:Function)-[:UnresolvedUse]->(u:UnresolvedTarget) \
+             RETURN a.fqn AS a, u.fqn AS u",
+        )
+        .unwrap();
+        let ai = column_index(&names, "a").unwrap();
+        let ui = column_index(&names, "u").unwrap();
+        let unresolved_uses: BTreeSet<(String, String)> =
+            rows.iter().map(|r| (cell(r, ai), cell(r, ui))).collect();
+        assert!(
+            !unresolved_uses.contains(&("m.B.g".to_string(), "m.S".to_string())),
+            "the flipped use must not stay unresolved: {unresolved_uses:?}"
+        );
+
+        let unresolved_targets = unresolved_rows(&prev_path);
+        for gone in ["m.X", "m.S"] {
+            assert!(
+                !unresolved_targets.iter().any(|(fqn, _)| fqn == gone),
+                "`{gone}` is real now, so its UnresolvedTarget row must be GC'd: \
+                 {unresolved_targets:?}"
+            );
+        }
+        for (kept, category) in [("m.T", "unknown"), ("m.Ghost", "external")] {
+            assert!(
+                unresolved_targets.contains(&(kept.to_string(), category.to_string())),
+                "`{kept}` stays unresolved and keeps its row: {unresolved_targets:?}"
+            );
+        }
+        drop(conn);
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
