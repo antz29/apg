@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::cache::{CacheKey, FactStore, Manifest, ScanConfigKey};
 use crate::delta::{self, Delta, FullScanReason, ScanRecord};
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeKind};
+use crate::impact::depindex::rel;
 use crate::impact::{DepIndex, OverloadIndex, SignatureMap, signatures_of_graph};
 
 use super::language::language_of;
@@ -86,6 +87,127 @@ impl State {
             dep_edges_rel: index.edges_rel(root),
             signatures: signatures_of_graph(graph, root),
             overloads: OverloadIndex::from_graph(graph, root),
+        }
+    }
+
+    /// Merges a target-only `delta_graph` into this persisted state.
+    ///
+    /// The delta graph carries only the target files' re-emitted facts, so each
+    /// target's dependency, signature and overload entries are replaced from
+    /// it, while the unchanged files' entries survive untouched. A
+    /// `(dependent, target)` edge from an unchanged file survives as long as the
+    /// delta graph still carries that target, and is dropped only when the
+    /// dependency file was deleted or renamed away.
+    pub fn merge_delta(
+        &mut self,
+        delta_graph: &Graph,
+        root: &Path,
+        targets_rel: &BTreeSet<String>,
+    ) {
+        let delta_edges = DepIndex::from_graph(delta_graph).edges_rel(root);
+        let delta_signatures = signatures_of_graph(delta_graph, root);
+        let delta_overloads = OverloadIndex::from_graph(delta_graph, root);
+
+        // The target files the delta graph still carries — a File node, a
+        // declaration, or a dependency-edge endpoint. A target it no longer
+        // carries was deleted or renamed away.
+        let mut carried: BTreeSet<String> = BTreeSet::new();
+        for (fqn, node) in &delta_graph.nodes {
+            if node.kind != NodeKind::File {
+                continue;
+            }
+            let path = node
+                .location
+                .as_ref()
+                .map(|l| l.path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| fqn.clone());
+            carried.insert(rel(root, &path));
+        }
+        carried.extend(delta_signatures.keys().cloned());
+        carried.extend(delta_overloads.file_scopes.keys().cloned());
+        for (from, to) in &delta_edges {
+            carried.insert(from.clone());
+            carried.insert(to.clone());
+        }
+
+        // Dependency edges: drop each target's own entries and the entries
+        // whose dependency was deleted/renamed away, then add the delta graph's
+        // (sorted, deduped exactly like `DepIndex::edges_rel`).
+        let mut edges: BTreeSet<(String, String)> = self
+            .dep_edges_rel
+            .iter()
+            .filter(|(from, to)| {
+                !targets_rel.contains(from) && !(targets_rel.contains(to) && !carried.contains(to))
+            })
+            .cloned()
+            .collect();
+        edges.extend(delta_edges.iter().cloned());
+        self.dep_edges_rel = edges.into_iter().collect();
+
+        // The touched overload scopes and the retired target FQNs (the
+        // pre-merge declarations the delta no longer makes), read before the
+        // signature map is replaced.
+        let mut touched: BTreeSet<String> = BTreeSet::new();
+        let mut retired: BTreeSet<String> = BTreeSet::new();
+        for target in targets_rel {
+            if let Some(scopes) = self.overloads.file_scopes.get(target) {
+                touched.extend(scopes.iter().cloned());
+            }
+            if let Some(old) = self.signatures.get(target) {
+                let new = delta_signatures.get(target);
+                for sig in old {
+                    if sig.kind == "function" && new.is_none_or(|n| !n.contains(sig)) {
+                        retired.insert(sig.fqn.clone());
+                    }
+                }
+            }
+            if let Some(scopes) = delta_overloads.file_scopes.get(target) {
+                touched.extend(scopes.iter().cloned());
+            }
+        }
+
+        // Signatures: replace each target's entry. A still-existing target with
+        // no declarations contributes none, exactly like `signatures_of_graph`.
+        self.signatures
+            .retain(|path, _| !targets_rel.contains(path));
+        for (path, sigs) in &delta_signatures {
+            if targets_rel.contains(path) {
+                self.signatures.insert(path.clone(), sigs.clone());
+            }
+        }
+
+        // Overload scopes: keep every non-target member, drop the target files'
+        // retired FQNs, add the delta's — sorted, so a repeated merge is
+        // idempotent.
+        for scope in &touched {
+            let mut members: BTreeSet<String> = self
+                .overloads
+                .scopes
+                .get(scope)
+                .map(|fqns| fqns.iter().cloned().collect())
+                .unwrap_or_default();
+            members.retain(|fqn| !retired.contains(fqn));
+            if let Some(new) = delta_overloads.scopes.get(scope) {
+                members.extend(new.iter().cloned());
+            }
+            if members.is_empty() {
+                self.overloads.scopes.remove(scope);
+            } else {
+                self.overloads
+                    .scopes
+                    .insert(scope.clone(), members.into_iter().collect());
+            }
+        }
+
+        // File → scopes: replace each target's entry (again, an empty set is not
+        // a `from_graph` entry, so only a delta-carried file installs one).
+        for target in targets_rel {
+            self.overloads.file_scopes.remove(target);
+            if let Some(scopes) = delta_overloads.file_scopes.get(target) {
+                self.overloads
+                    .file_scopes
+                    .insert(target.clone(), scopes.clone());
+            }
         }
     }
 }
