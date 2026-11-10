@@ -12415,4 +12415,352 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-07 task-1 — the netbeans-scale acceptance. The whole delta-splice
+    /// win is only worth its complexity if, on a repository of the scale the
+    /// win was designed for, ONE edited file rescans in bounded time while
+    /// still publishing a database indistinguishable from a full rebuild and
+    /// still refusing to splice a spec-only delta.
+    ///
+    /// The fixture is deliberately the LIGHTEST shape that crosses the pinned
+    /// scale: >50k tracked files, all tiny residual `misc` sources (a `.txt`
+    /// file is graphed as a `File`-only record — no parser, no structure, no
+    /// per-language frontend binaries), sharded over 501 directories. The
+    /// acceptance measures the ONE-FILE RESCAN, not the cold baseline.
+    ///
+    /// Pinned in one scenario:
+    /// 1. a cold full scan establishes the baseline and records the cold
+    ///    `ingest_assembly_ns` from the machine-readable `[timing-json]` line;
+    /// 2. ONE `.txt` edit rescans via the incremental delta path and completes
+    ///    in under the pinned **60 s** wall clock;
+    /// 3. the incremental `ingest_assembly_ns` is **delta-bounded**, not a
+    ///    function of the 50k file count: it must be under a fixed ceiling
+    ///    (`INCREMENTAL_ASSEMBLY_CEILING_NS`, 10 s) and under
+    ///    `cold_assembly / ASSEMBLY_FRACTION_DIVISOR` (half). A full assembly
+    ///    re-ingests all 50k records and rewrites all 50k fact units; the delta
+    ///    assembly ingests ONE target file and its only O(files) work is the
+    ///    store index/state read, so the cold baseline is the discriminating
+    ///    reference. Both bounds are generous to a warm object-store cache
+    ///    while still failing an assembly that re-does the full ingest;
+    /// 4. the incrementally published `db.lbug` equals a `--force` full
+    ///    rebuild of the SAME tree on EVERY table (row-for-row, multiplicity
+    ///    included; only the `Scan.scanned_at` wall clock is normalised), so
+    ///    the delta path cannot silently diverge at scale;
+    /// 5. adding ONE durable `apg/layers/global/constraint` node file (a
+    ///    spec-only delta whose authored rows the seed does not represent)
+    ///    **full-loads**: the scan takes the delta dispatch, the splice guard
+    ///    refuses with the `UnrepresentedAuthored` line, `[load] writing
+    ///    parquet load files` runs and `full load skipped` NEVER appears — and
+    ///    the new authored `Constraint` row is present, which a splice (it
+    ///    writes no authored row) could not produce.
+    ///
+    /// Scratch `/tmp` git repo only, CANDIDATE binary only
+    /// (`global.constraint.no-real-project-test`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (>50k-file scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn acceptance_one_file_rescan_stays_under_the_value_threshold() {
+        /// Every row of every table in a DB file, keyed by
+        /// `"<NODE|REL>:<table>:<cells>"` with its multiplicity so a lost or
+        /// duplicated row fails. Two stored-encoding details are normalised so
+        /// the oracle compares semantics: the `Scan` row's wall-clock
+        /// `scanned_at`, and a rel's serialized-properties column — the full
+        /// load stores the canonical `{}` while a splice `MERGE` leaves the
+        /// column unset, both meaning "no properties" (the same normalisation
+        /// the `splice_e2e` every-table oracle applies).
+        fn every_table_snapshot(path: &Path) -> BTreeMap<String, usize> {
+            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (names, tables) =
+                splice::query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
+            let name_i = splice::column_index(&names, "name").unwrap();
+            let type_i = splice::column_index(&names, "type").unwrap();
+            let mut out: BTreeMap<String, usize> = BTreeMap::new();
+            for table_row in tables {
+                let table = db_text(&table_row, name_i);
+                let kind = db_text(&table_row, type_i);
+                let (tnames, trows) =
+                    splice::query_rows(&conn, &format!("CALL table_info('{table}') RETURN *"))
+                        .unwrap();
+                let prop_i = splice::column_index(&tnames, "name").unwrap();
+                let mut props: Vec<String> = trows.iter().map(|r| db_text(r, prop_i)).collect();
+                props.sort();
+                let (_, rows) = if kind == "REL" {
+                    let mut columns: Vec<String> = vec!["a.fqn".into(), "b.fqn".into()];
+                    columns.extend(props.iter().map(|p| format!("r.`{p}`")));
+                    splice::query_rows(
+                        &conn,
+                        &format!("MATCH (a)-[r:{table}]->(b) RETURN {}", columns.join(", ")),
+                    )
+                    .unwrap()
+                } else {
+                    let columns: Vec<String> = props.iter().map(|p| format!("n.`{p}`")).collect();
+                    splice::query_rows(
+                        &conn,
+                        &format!("MATCH (n:{table}) RETURN {}", columns.join(", ")),
+                    )
+                    .unwrap()
+                };
+                for mut cells in rows {
+                    if table == "Scan"
+                        && let Some(i) = props.iter().position(|p| p == "scanned_at")
+                    {
+                        cells[i] = "<scanned-at>".to_string();
+                    }
+                    // A rel's properties column decodes to the same empty map
+                    // whether it is the canonical `{}` (a full load's row) or
+                    // the unset column the splice's `MERGE` leaves.
+                    if kind == "REL"
+                        && let Some(i) = props.iter().position(|p| p == "properties")
+                    {
+                        cells[2 + i] = apg::layers::properties_json(
+                            &apg::layers::properties_from_json(&cells[2 + i]).unwrap(),
+                        );
+                    }
+                    *out.entry(format!("{kind}:{table}:{}", cells.join("|")))
+                        .or_default() += 1;
+                }
+            }
+            drop(conn);
+            drop(db);
+            out
+        }
+
+        // The pinned wall-clock acceptance threshold for the one-file rescan.
+        const WALL_CLOCK_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+        // A fixed delta-bounded assembly ceiling (10 s), far below the cold
+        // full assembly of the same fixture and well inside the 60 s gate.
+        const INCREMENTAL_ASSEMBLY_CEILING_NS: u64 = 10_000_000_000;
+        // The incremental assembly must be under half the cold full assembly.
+        const ASSEMBLY_FRACTION_DIVISOR: u64 = 2;
+        // >50k tracked files: 501 directories × 100 tiny `misc` files.
+        const PER_DIR: usize = 100;
+        const DIR_COUNT: usize = 501;
+        const TRACKED_FLOOR: usize = 50_000;
+
+        let base =
+            std::env::temp_dir().join(format!("apg-netbeans-acceptance-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+        // it never shells out to bun install.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        scratch_repo_init(&repo_dir);
+        // The fixture: >50k tiny residual-`misc` sources. A `.txt` file is
+        // claimed only by the bundled structural scanner's residual stream and
+        // emits a `File` record alone — the cheapest possible per-file graph
+        // fact, so the scale is real without any parser cost.
+        for d in 0..DIR_COUNT {
+            let dir = repo_dir.join(format!("d{d:03}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            for f in 0..PER_DIR {
+                let i = d * PER_DIR + f;
+                std::fs::write(dir.join(format!("f{i:05}.txt")), format!("note {i}\n")).unwrap();
+            }
+        }
+        scratch_commit_all(&repo_dir, "fixture: >50k tracked files");
+        let tracked = git2::Repository::open(&repo_dir)
+            .unwrap()
+            .index()
+            .unwrap()
+            .len();
+        assert!(
+            tracked > TRACKED_FLOOR,
+            "the fixture must cross the 50k tracked-file scale; got {tracked}"
+        );
+
+        let run_in = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let stderr_of =
+            |out: &std::process::Output| String::from_utf8_lossy(&out.stderr).into_owned();
+        // Read one nanosecond phase value off the machine-readable timing line.
+        // `TimingReport::duration`/`Phase` are crate-internal, so the external
+        // e2e crate parses the documented JSON payload directly.
+        let timing_ns = |stderr: &str, key: &str| -> u64 {
+            let line = stderr
+                .lines()
+                .find(|l| l.starts_with(apg::timing::MACHINE_PREFIX))
+                .unwrap_or_else(|| panic!("no machine-readable timing line in: {stderr}"));
+            let json = line
+                .strip_prefix(apg::timing::MACHINE_PREFIX)
+                .unwrap_or(line);
+            let value: serde_json::Value = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("bad timing line {line}: {e}"));
+            value
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .unwrap_or_else(|| panic!("the timing line must carry {key}: {line}"))
+        };
+
+        run_in(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+
+        // ---- (1) cold full scan: the baseline -----------------------------
+        let cold = stderr_of(&run_in(&repo_dir, &["scan", "."]));
+        assert!(
+            cold.contains("[load] writing parquet load files"),
+            "the cold scan must be a full load: {cold}"
+        );
+        assert!(
+            !cold.contains("full load skipped"),
+            "the cold scan must not splice: {cold}"
+        );
+        let cold_assembly_ns = timing_ns(&cold, "ingest_assembly_ns");
+
+        // ---- (2) ONE-file edit → incremental rescan, under 60 s -----------
+        // Body-only edit of one tiny source. It stays uncommitted so the git
+        // status / manifest diff both report exactly one target file; the warm
+        // fast path misses on the recorded content key and the delta path is
+        // chosen.
+        std::fs::write(repo_dir.join("d000/f00000.txt"), "note 0 edited\n").unwrap();
+        let inc_start = std::time::Instant::now();
+        let inc = stderr_of(&run_in(&repo_dir, &["scan", "."]));
+        let inc_wall = inc_start.elapsed();
+        assert!(
+            inc.contains("[scan] incremental: 1 target file(s),"),
+            "the one-file edit must take the delta path with exactly one target: {inc}"
+        );
+        assert!(
+            inc.contains("[load] splice:") && inc.contains("full load skipped"),
+            "the one-file rescan must splice and skip the full load: {inc}"
+        );
+        let inc_assembly_ns = timing_ns(&inc, "ingest_assembly_ns");
+
+        eprintln!(
+            "netbeans-scale acceptance: tracked={tracked} cold_assembly_ns={cold_assembly_ns} \
+             inc_wall_ms={} inc_assembly_ns={inc_assembly_ns}",
+            inc_wall.as_millis()
+        );
+
+        assert!(
+            inc_wall < WALL_CLOCK_LIMIT,
+            "the one-file rescan must finish under the pinned 60 s threshold; took {:?} (cold assembly {} ns, incremental assembly {} ns)",
+            inc_wall,
+            cold_assembly_ns,
+            inc_assembly_ns
+        );
+        // Delta-bounded assembly: a full assembly re-ingests all 50k records
+        // and rewrites all 50k fact units, while the delta assembly ingests one
+        // file — so the cold baseline is the reference that fails if the
+        // incremental assembly tracks the file count.
+        assert!(
+            inc_assembly_ns < INCREMENTAL_ASSEMBLY_CEILING_NS,
+            "the delta ingest-assembly must stay under the {INCREMENTAL_ASSEMBLY_CEILING_NS} ns fixed ceiling; got {inc_assembly_ns} ns"
+        );
+        assert!(
+            inc_assembly_ns < cold_assembly_ns / ASSEMBLY_FRACTION_DIVISOR,
+            "the delta ingest-assembly must be under 1/{ASSEMBLY_FRACTION_DIVISOR} of the cold full assembly \
+             (it must not track the 50k file count); cold {cold_assembly_ns} ns, incremental {inc_assembly_ns} ns"
+        );
+
+        // ---- (3) whole-table equivalence: incremental == --force ----------
+        let db_path = repo_dir.join("apg/.trans/db.lbug");
+        let incremental_db = every_table_snapshot(&db_path);
+        let forced = stderr_of(&run_in(&repo_dir, &["scan", ".", "--force"]));
+        assert!(
+            forced.contains("[load] writing parquet load files"),
+            "the oracle must be a from-scratch full rebuild: {forced}"
+        );
+        assert!(
+            !forced.contains("full load skipped"),
+            "a --force rebuild must never splice: {forced}"
+        );
+        let forced_db = every_table_snapshot(&db_path);
+        // Bounded discrepancy report: a full assert_eq of two 50k-row maps would
+        // dump every row, so collect only the first few differences.
+        let mut discrepancies: Vec<String> = Vec::new();
+        for (row, count) in &incremental_db {
+            match forced_db.get(row) {
+                Some(other) if other == count => {}
+                Some(other) => {
+                    discrepancies.push(format!("count {row}: incremental {count}, forced {other}"))
+                }
+                None => discrepancies.push(format!("only incremental: {row} x{count}")),
+            }
+            if discrepancies.len() >= 40 {
+                break;
+            }
+        }
+        if discrepancies.len() < 40 {
+            for (row, count) in &forced_db {
+                if !incremental_db.contains_key(row) {
+                    discrepancies.push(format!("only forced: {row} x{count}"));
+                }
+                if discrepancies.len() >= 40 {
+                    break;
+                }
+            }
+        }
+        assert!(
+            discrepancies.is_empty(),
+            "the incrementally published db.lbug must equal a --force full rebuild on every table; \
+             first {} discrepanc(ies) (cold_assembly_ns={cold_assembly_ns}, inc_wall_ms={}, \
+             inc_assembly_ns={inc_assembly_ns}):\n{}",
+            discrepancies.len(),
+            inc_wall.as_millis(),
+            discrepancies.join("\n")
+        );
+
+        // ---- (4) spec-only delta: the full-load refusal stays intact ------
+        // ONE durable node file (a global constraint — prose, no spine edges)
+        // is a spec-only delta: its authored row is in the assembled graph but
+        // not in the seed, so the splice must refuse and the full load must
+        // project it.
+        let layers_dir = repo_dir.join("apg/layers/global/constraint");
+        std::fs::create_dir_all(&layers_dir).unwrap();
+        std::fs::write(
+            layers_dir.join("acceptance-spec-only.json"),
+            "{\n  \"layer\": \"global\",\n  \"type\": \"constraint\",\n  \"name\": \"acceptance-spec-only\",\n  \"body\": \"The spec-only rescan never splices.\"\n}\n",
+        )
+        .unwrap();
+        let spec = stderr_of(&run_in(&repo_dir, &["scan", "."]));
+        assert!(
+            spec.contains("[scan] incremental:"),
+            "the spec-only change must still take the delta dispatch: {spec}"
+        );
+        assert!(
+            !spec.contains("full load skipped"),
+            "a spec-only delta must never splice: {spec}"
+        );
+        assert!(
+            spec.contains("does not represent the assembled graph's authored/transient rows"),
+            "the splice guard must refuse the unrepresented authored row: {spec}"
+        );
+        assert!(
+            spec.contains("[load] full-load fallback: re-assembling the full graph"),
+            "the refusal must re-assemble the full graph, never load the delta: {spec}"
+        );
+        assert!(
+            spec.contains("[load] writing parquet load files"),
+            "the refusal must run the ordinary full load: {spec}"
+        );
+        let constraint_rows = db_query(
+            &repo_dir,
+            "MATCH (n:Constraint) RETURN n.fqn ORDER BY n.fqn",
+        );
+        assert!(
+            constraint_rows
+                .iter()
+                .any(|r| db_text(r, 0) == "global.constraint.acceptance-spec-only"),
+            "the full load must project the new authored Constraint row (a splice writes no authored row): {constraint_rows:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
