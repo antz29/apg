@@ -418,6 +418,7 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "dockerfile" => "df",
         "makefile" => "mk",
         "ini" => "ini",
+        "sln" => "sl",
         "misc" => "mi",
         "py" => "py",
         "cobol" => "cb",
