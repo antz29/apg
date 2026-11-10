@@ -7,6 +7,16 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "rust.apg.incremental.prepare.State.merge_delta",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.incremental.tests.unit.merge_delta_replaces_target_entries",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.splice.apply.SpliceDelta",
       "properties": {}
     },

@@ -12,6 +12,16 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.cache.fragment.ModuleScaffolding",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.fragment.ModuleScaffolding.extract",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.cache.fragment.rebase",
       "properties": {}
     },
@@ -43,6 +53,16 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.frontends.should_spawn_language",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.incremental.record.merge_scaffolding",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.incremental.record.record",
       "properties": {}
     },
     {
