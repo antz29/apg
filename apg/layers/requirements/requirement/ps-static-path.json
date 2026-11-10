@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-static-path",
-  "body": "A path, for Import-Module a path-kind argument alone, resolves statically when it is a bare or quoted literal, optionally $PSScriptRoot-anchored, split by \\ or /, a relative one resolving against its file's directory; any other operand is computed.",
+  "body": "A path, for Import-Module a path-kind argument alone, resolves statically when it is a bare or quoted literal, optionally $PSScriptRoot-anchored, split by \\ or /, a relative one resolving against its file's directory, and is computed otherwise.",
   "properties": {
     "feature": "ps-frontend"
   },
