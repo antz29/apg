@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-fqn-collision",
-  "body": "When two SQL Structs or two SQL Functions of one scan render FQNs matching case-insensitively, the first in repository-relative path and source order stays and each later one, with its columns, is a dropped repeated declaration.",
+  "body": "A SQL Struct or Function whose FQN matches, case-insensitively, any SQL Module or an earlier SQL Struct or Function in repository-relative path and source order is, with its columns, a dropped repeated declaration.",
   "properties": {
     "feature": "sql-frontend"
   },

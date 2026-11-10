@@ -52,6 +52,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.sql-module-collision",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.sql-object-identity",
       "properties": {}
     },

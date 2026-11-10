@@ -39,6 +39,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.sql-module-collision",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.sql-object-identity",
       "properties": {}
     },
