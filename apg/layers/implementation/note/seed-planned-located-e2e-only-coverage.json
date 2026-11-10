@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "seed-planned-located-e2e-only-coverage",
+  "body": "seed_planned_located takes a live lbug Connection, so by the tier law it has no direct unit or int test; its coverage is the pinned e2e realization matrix planned_node_realizes_on_the_splice_for_every_kind. Upgrade only if a per-kind unit seam (an in-memory query abstraction) is introduced.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.splice.apply.seed_planned_located",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
