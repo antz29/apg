@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-legacy-membership",
-  "body": "A legacy project, a .sqlproj naming no SDK, has as members exactly the .sql files its Build Include items name, wildcards included, minus its Build Remove items.",
+  "body": "A legacy project, any .sqlproj outside the SDK-style set, has as members exactly the .sql files its Build Include items name, wildcards included, minus its Build Remove items.",
   "properties": {
     "feature": "sql-frontend"
   },
