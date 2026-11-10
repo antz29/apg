@@ -42,6 +42,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.sql-project-style",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.sql-sdk-membership",
       "properties": {}
     },
