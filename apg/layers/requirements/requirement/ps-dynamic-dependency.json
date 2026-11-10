@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-dynamic-dependency",
-  "body": "A dot-source path outside the scanned files, an Import-Module path resolving to no scanned .psm1 or .psd1, or either one's computed argument is an unresolved use of category unknown keyed by its site's <nameless@repo-relative:offset> sentinel.",
+  "body": "A dot-source path outside the scanned files, an Import-Module path outside the scanned .psm1 and .psd1 files, or either one's computed argument is an unresolved use of category unknown keyed by its site's <nameless@repo-relative:offset> sentinel.",
   "properties": {
     "feature": "ps-frontend"
   },

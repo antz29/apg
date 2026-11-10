@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-import-module-unresolved",
-  "body": "An Import-Module module name equal to no scanned manifest's case-insensitive .psd1 stem is an unresolved use from the script Struct named by that module name, stdlib for a built-in Microsoft.PowerShell.* module, else external.",
+  "body": "An Import-Module module name differing from every scanned manifest's case-insensitive .psd1 stem is an unresolved use from the script Struct named by that module name, stdlib for a built-in Microsoft.PowerShell.* module, external otherwise.",
   "properties": {
     "feature": "ps-frontend"
   },
