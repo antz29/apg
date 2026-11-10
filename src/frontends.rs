@@ -326,7 +326,13 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             false,
         ),
-        ("csharp", &[".cs", ".csx"], 5, DEFAULT_DETECTOR_SKIP, false),
+        (
+            "csharp",
+            &[".cs", ".csx", ".cshtml", ".razor"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+            false,
+        ),
         // Markdown's skip set is `domain.entity.scan-exclusion`
         // (task-8): a markdown-only file under `vendor/` (or another excluded
         // tree) must not trigger md detection.
