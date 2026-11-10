@@ -7078,6 +7078,316 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Phase-03 task-3 (amended): every FULL-LOAD branch of an incremental scan
+    /// re-assembles the FULL graph before the load — the target-only delta graph
+    /// is never handed to `build_load_files`.
+    ///
+    /// (a) A genuine mid-sequence DML failure: `install_apply_hook` fails after
+    /// the node delete/upsert stage (before any rel re-merge), so the seeded copy
+    /// is genuinely half-applied. `try_splice_build` must decline (`None`),
+    /// discard the partially mutated seeded copy, leave the previous `db.lbug`
+    /// byte-identical and leave no `.db.lbug.seed-*.tmp` sibling behind. The
+    /// guard-refusal arms are already pinned by
+    /// `splice_dispatch_falls_back_when_ineligible` and
+    /// `splice_dispatch_falls_back_when_the_local_seed_is_stale`; neither is
+    /// re-tested here.
+    ///
+    /// (b)(i) A stale session socket is the delta-vs-full re-assembly
+    /// discriminator: a one-file edit leaves unchanged files whose facts live
+    /// only in the reuse plan, so the target-only delta graph genuinely differs
+    /// from the re-assembled full graph. `force_full_load` short-circuits
+    /// `try_splice_build` (the seed is discarded before any splice is
+    /// attempted), the `[load] full-load fallback` line re-assembles the full
+    /// graph from the buffered target spool plus the unchanged-file reuse plan,
+    /// no `[load] splice:` line is printed, and the published `db.lbug` equals a
+    /// `--force` full rebuild of the same tree on every table.
+    ///
+    /// (b)(ii) Pending state is pre-empted by `incremental::prepare`, which
+    /// returns the full-scan `Prepared(NoPreviousDatabase)` BEFORE the delta path
+    /// is chosen (an unsaved DB row must never seed the full universe or a
+    /// splice). That is an ELIGIBILITY full scan, not a delta fallback: no
+    /// `[scan] incremental:`, no `[load] full-load fallback:` and no
+    /// `[load] splice:`. `run_pipeline`'s own pending probe still discards the
+    /// derived index, and the published `db.lbug` still equals a `--force` full
+    /// rebuild on every table — a genuine full assembly, never a splice.
+    ///
+    /// Scratch `/tmp` repos only; CANDIDATE binary only
+    /// (`global.constraint.no-real-project-test`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/fs); run via cargo test-e2e"]
+    fn mid_sequence_dml_failure_falls_back_to_the_full_load() {
+        /// Every row of every table in a DB file, keyed by
+        /// `"<NODE|REL>:<table>:<cells>"` with its multiplicity so a lost or
+        /// duplicated row fails. The sole legitimately run-specific property is
+        /// the `Scan` row's wall-clock `scanned_at`, normalised so two genuinely
+        /// equivalent full assemblies compare equal.
+        fn every_table_snapshot(path: &Path) -> BTreeMap<String, usize> {
+            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let (names, tables) =
+                splice::query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
+            let name_i = splice::column_index(&names, "name").unwrap();
+            let type_i = splice::column_index(&names, "type").unwrap();
+            let mut out: BTreeMap<String, usize> = BTreeMap::new();
+            for table_row in tables {
+                let table = db_text(&table_row, name_i);
+                let kind = db_text(&table_row, type_i);
+                let (tnames, trows) =
+                    splice::query_rows(&conn, &format!("CALL table_info('{table}') RETURN *"))
+                        .unwrap();
+                let prop_i = splice::column_index(&tnames, "name").unwrap();
+                let mut props: Vec<String> = trows.iter().map(|r| db_text(r, prop_i)).collect();
+                props.sort();
+                let (_, rows) = if kind == "REL" {
+                    let mut columns: Vec<String> = vec!["a.fqn".into(), "b.fqn".into()];
+                    columns.extend(props.iter().map(|p| format!("r.`{p}`")));
+                    splice::query_rows(
+                        &conn,
+                        &format!("MATCH (a)-[r:{table}]->(b) RETURN {}", columns.join(", ")),
+                    )
+                    .unwrap()
+                } else {
+                    let columns: Vec<String> = props.iter().map(|p| format!("n.`{p}`")).collect();
+                    splice::query_rows(
+                        &conn,
+                        &format!("MATCH (n:{table}) RETURN {}", columns.join(", ")),
+                    )
+                    .unwrap()
+                };
+                for mut cells in rows {
+                    if table == "Scan"
+                        && let Some(i) = props.iter().position(|p| p == "scanned_at")
+                    {
+                        cells[i] = "<scanned-at>".to_string();
+                    }
+                    *out.entry(format!("{kind}:{table}:{}", cells.join("|")))
+                        .or_default() += 1;
+                }
+            }
+            drop(conn);
+            drop(db);
+            out
+        }
+
+        // ---- (a) mid-sequence DML failure --------------------------------
+        let apply_base =
+            std::env::temp_dir().join(format!("apg-mid-dml-apply-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&apply_base);
+        let apply_root = apply_base.join(specs::LAYOUT);
+        let trans = apply_root.join(specs::TRANS);
+        std::fs::create_dir_all(&trans).unwrap();
+        let abs = apply_base.join("a.go").to_string_lossy().into_owned();
+
+        let prev = win_c_fixture(&abs, "old");
+        let prev_db = splice::db_path(&apply_root);
+        win_c_build_db(&prev_db, &prev);
+        let before = std::fs::read(&prev_db).unwrap();
+
+        let mut next = prev.clone();
+        {
+            use apg::graph::{Location, Node, NodeKind};
+            next.nodes.insert(
+                "mod.A.g".to_string(),
+                Node {
+                    kind: NodeKind::Function,
+                    location: Some(Location {
+                        path: PathBuf::from(&abs),
+                        start: 0,
+                        end: 1,
+                        start_line: 1,
+                        end_line: 1,
+                    }),
+                    ..Node::default()
+                },
+            );
+        }
+        next.nodes.get_mut(schema::SCAN_HEAD).unwrap().git_sha = Some("new".to_string());
+        next.contains
+            .insert(("mod.A".to_string(), "mod.A.g".to_string()));
+        let input = win_c_input(&apply_base, &apply_base, &["a.go"]);
+
+        // The one-shot seam fires after the node delete/upsert stage and before
+        // the rel re-merge, so the seeded copy is genuinely half-applied.
+        splice::install_apply_hook(|| {
+            Err(anyhow::Error::msg(
+                "injected mid-sequence DML failure (test seam)",
+            ))
+        });
+        let declined = with_cwd(&trans, || {
+            let mut log = Log::new();
+            try_splice_build(&next, &input, &apply_root, &mut log)
+        });
+        assert!(
+            declined.is_none(),
+            "a mid-sequence DML failure must decline the splice and fall back to the full load"
+        );
+        assert_eq!(
+            std::fs::read(&prev_db).unwrap(),
+            before,
+            "the previous db.lbug must stay byte-identical after a declined splice"
+        );
+        let seed_temps: Vec<PathBuf> = std::fs::read_dir(&trans)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(".db.lbug.seed-"))
+            })
+            .collect();
+        assert!(
+            seed_temps.is_empty(),
+            "a declined splice must discard its partially mutated seeded copy: {seed_temps:?}"
+        );
+        let apply_log = std::fs::read_to_string(trans.join("apg-frontend.log")).unwrap();
+        assert!(
+            apply_log.contains("injected mid-sequence DML failure"),
+            "the injected failure must be the logged decline cause (it fired after partial DML): {apply_log}"
+        );
+        let _ = std::fs::remove_dir_all(&apply_base);
+
+        // ---- (b)(i) stale session socket: delta vs full re-assembly ------
+        let (stale_base, stale_repo) = winb_scratch("mid-dml-stale-socket", &winb_go_fixture());
+        let stale_home = stale_base.join("home");
+        let stale_run = |args: &[&str]| -> String {
+            let out = winb_run(&stale_repo, &stale_home, args);
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                stale_repo.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+        stale_run(&["init", "."]);
+        scratch_commit_all(&stale_repo, "apg init");
+        assert!(
+            stale_run(&["scan", "."]).contains("[scan] running go frontend"),
+            "the cold scan must run the go frontend"
+        );
+
+        // A one-fact (body-only) edit of the leaf: the signature is unchanged,
+        // so the target set is exactly a/a.go while b/b.go and c/c.go stay in
+        // the reuse plan — the delta graph genuinely lacks their units.
+        std::fs::write(
+            stale_repo.join("a/a.go"),
+            "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 7 }\n",
+        )
+        .unwrap();
+        let stale_apg = stale_repo.join(specs::LAYOUT);
+        let socket = session::socket_path(&stale_apg);
+        std::fs::write(&socket, b"stale-session").unwrap();
+        assert!(
+            !session::live_session_at(&socket),
+            "the planted socket must be unreachable (a genuine unclean exit)"
+        );
+
+        let inc_err = stale_run(&["scan", "."]);
+        assert!(
+            inc_err.contains("[scan] incremental: 1 target file(s),"),
+            "the one-file edit must take the delta path: {inc_err}"
+        );
+        assert!(
+            !inc_err.contains("0 reusable file(s)"),
+            "unchanged files' facts must be in the reuse plan (so the delta graph differs from the full graph): {inc_err}"
+        );
+        assert!(
+            inc_err.contains("session socket present but unreachable"),
+            "the stale socket must force the full load: {inc_err}"
+        );
+        assert!(
+            inc_err.contains("[load] full-load fallback: re-assembling the full graph"),
+            "the full-load branch must re-assemble the full graph: {inc_err}"
+        );
+        assert!(
+            !inc_err.contains("[load] splice:"),
+            "the stale socket must short-circuit try_splice_build entirely: {inc_err}"
+        );
+        let stale_db = stale_apg.join(specs::TRANS).join("db.lbug");
+        let delta_fallback = every_table_snapshot(&stale_db);
+        stale_run(&["scan", ".", "--force"]);
+        let forced_full = every_table_snapshot(&stale_db);
+        assert_eq!(
+            delta_fallback, forced_full,
+            "the stale-socket full-load fallback must equal a --force full rebuild on every table"
+        );
+        let _ = std::fs::remove_dir_all(&stale_base);
+
+        // ---- (b)(ii) pending state: the eligibility full scan -------------
+        let (pending_base, pending_repo) = winb_scratch("mid-dml-pending", &winb_go_fixture());
+        let pending_home = pending_base.join("home");
+        let pending_run = |args: &[&str]| -> String {
+            let out = winb_run(&pending_repo, &pending_home, args);
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                pending_repo.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+        pending_run(&["init", "."]);
+        scratch_commit_all(&pending_repo, "apg init");
+        assert!(
+            pending_run(&["scan", "."]).contains("[scan] running go frontend"),
+            "the cold scan must run the go frontend"
+        );
+
+        // The same one-file edit, but the database carries an admitted-but-
+        // unsaved durable row: `prepare` must pre-empt the delta path.
+        std::fs::write(
+            pending_repo.join("a/a.go"),
+            "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 9 }\n",
+        )
+        .unwrap();
+        let pending_apg = pending_repo.join(specs::LAYOUT);
+        {
+            let db = apg::artifacts::ArtifactDb::open(&pending_apg).unwrap();
+            db.conn()
+                .unwrap()
+                .query(
+                    "CREATE (n:Requirement {fqn: 'requirements.requirement.pending', body: 'admitted-but-unsaved', updated: 1})",
+                )
+                .unwrap();
+        }
+        assert!(
+            apg::artifacts::db_has_pending_state(&pending_apg),
+            "the fixture must carry the injected pending state"
+        );
+
+        let pending_err = pending_run(&["scan", "."]);
+        assert!(
+            pending_err.contains("[scan] no usable previous worktree database"),
+            "pending state must be pre-empted by prepare's full-scan reason: {pending_err}"
+        );
+        assert!(
+            !pending_err.contains("[scan] incremental:"),
+            "the pending cause must never choose the delta path: {pending_err}"
+        );
+        assert!(
+            !pending_err.contains("[load] full-load fallback:"),
+            "the pending cause is an eligibility full scan, not a delta fallback: {pending_err}"
+        );
+        assert!(
+            !pending_err.contains("[load] splice:"),
+            "the pending cause must never splice: {pending_err}"
+        );
+        assert!(
+            pending_err.contains("[load] database carries pending state"),
+            "run_pipeline's pending probe must still discard the derived index: {pending_err}"
+        );
+        let pending_db = pending_apg.join(specs::TRANS).join("db.lbug");
+        let pending_full = every_table_snapshot(&pending_db);
+        pending_run(&["scan", ".", "--force"]);
+        let pending_reference = every_table_snapshot(&pending_db);
+        assert_eq!(
+            pending_full, pending_reference,
+            "the pending-state full scan must equal a --force full rebuild on every table"
+        );
+        let _ = std::fs::remove_dir_all(&pending_base);
+    }
+
     /// Phase-04 task-11 (e2e by body: a REAL scratch-repo `apg scan` — a
     /// process spawn plus `db.lbug` I/O): the emitted per-phase timing report
     /// is first-class and truthful on the real paths. A cold full scan emits
