@@ -71,6 +71,12 @@ internal static class SymbolNaming
         if (symbol is INamedTypeSymbol namedType)
         {
             string typeName = GetTypeNameWithArity(namedType);
+            if (symbol.ContainingType is { IsScriptClass: true }
+                && namedType.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree.FilePath is { Length: > 0 } scriptPath)
+            {
+                // A script's types scope under their own tree's path (the module identity), never the shared Script class.
+                return $"{scriptPath}.{typeName}";
+            }
             if (symbol.ContainingType != null)
             {
                 var parent = GetFullFqn(symbol.ContainingType);
