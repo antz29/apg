@@ -58,6 +58,7 @@ public static class TestMain
             TestProjectSdkStyle(baseDir);
             TestProjectSdkElementNoDefaultItems(baseDir);
             TestProjectFrameworkStyle(baseDir);
+            TestSolutionReader(baseDir);
         }
         catch (Exception ex)
         {
@@ -689,6 +690,51 @@ public static class TestMain
             packages.SequenceEqual(new (string, string?)[] { ("Newtonsoft.Json", "12.0.3") }),
             Join(packages.Select(x => x.ToString())));
         Check(".NET Framework-style csproj: RootNamespace read", Prop<string>(p, "RootNamespace") == "Legacy", Prop<string>(p, "RootNamespace"));
+    }
+
+    // ------------------------------------------------------------------
+    // SolutionReader: static .sln reading (internal, reached by reflection)
+    // ------------------------------------------------------------------
+
+    private static List<string> ReadSolution(string sln)
+        => (List<string>)FrontendType("SolutionReader").GetMethod("Read")!.Invoke(null, new object[] { sln })!;
+
+    private const string SlnBody = """
+        Microsoft Visual Studio Solution File, Format Version 12.00
+        Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "App", "src\App\App.csproj", "{11111111-1111-1111-1111-111111111111}"
+        EndProject
+        Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Folder", "Folder", "{22222222-2222-2222-2222-222222222222}"
+        EndProject
+        Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VbLib", "src\VbLib\VbLib.vbproj", "{33333333-3333-3333-3333-333333333333}"
+        EndProject
+        Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Shared", "..\shared\Shared.csproj", "{44444444-4444-4444-4444-444444444444}"
+        EndProject
+        Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AppAgain", "src\App\App.csproj", "{55555555-5555-5555-5555-555555555555}"
+        EndProject
+        """;
+
+    /// <summary>
+    /// Every C# Project entry yields its .csproj resolved against the .sln dir (nested backslash
+    /// and ..\ paths); solution folders and .vbproj are skipped; a duplicate listing is de-duped in
+    /// listed order — over an LF file and a CRLF + BOM file.
+    /// </summary>
+    private static void TestSolutionReader(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "sln", "root"));
+        var want = new[]
+        {
+            Path.GetFullPath(Path.Combine(dir, "src", "App", "App.csproj")),
+            Path.GetFullPath(Path.Combine(dir, "..", "shared", "Shared.csproj")),
+        };
+        var lf = WriteSource(dir, "Lf.sln", SlnBody.Replace("\r\n", "\n"));
+        var got = ReadSolution(lf);
+        Check("sln: csproj entries resolved vs the .sln dir, folders/.vbproj skipped, de-duped in order",
+            got.SequenceEqual(want), Join(got));
+
+        var crlf = Path.Combine(dir, "Crlf.sln");
+        File.WriteAllText(crlf, SlnBody.Replace("\r\n", "\n").Replace("\n", "\r\n"), new UTF8Encoding(true));
+        got = ReadSolution(crlf);
+        Check("sln: CRLF + BOM file reads identically", got.SequenceEqual(want), Join(got));
     }
 
     // ------------------------------------------------------------------
