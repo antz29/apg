@@ -62,6 +62,10 @@ public static class TestMain
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
             TestFilteredSharedFileRegistration(baseDir);
+            TestProjectWalkSkips(baseDir);
+            TestProjectWalkModuleScope(baseDir);
+            TestProjectLoadedOnce(baseDir);
+            TestDiscoverFilesScope(baseDir);
         }
         catch (Exception ex)
         {
@@ -876,6 +880,141 @@ public static class TestMain
             && c.Records.Any(s => s.StartsWith($"file|{b}|Z|", StringComparison.Ordinal)), all);
         Check("zero-project tree: declarations graphed", c.NodeFqns.Contains("Z.A.Run") && c.NodeFqns.Contains("Z.B.Hit"), all);
         Check("zero-project tree: cross-file call resolved", c.Records.Contains("calls|Z.A.Run|Z.B.Hit"), all);
+    }
+
+    // ------------------------------------------------------------------
+    // Project-discovery scope: a project is observed as loaded only through a
+    // project-dependent effect — its DefineConstants symbol ungating a
+    // declaration in a file it compiles.
+    // ------------------------------------------------------------------
+
+    /// SDK-style csproj with no default globbing: defines `symbol`, compiles exactly `includes`.
+    private static string ScopeProject(string symbol, params string[] includes) =>
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net9.0</TargetFramework>\n"
+        + $"    <DefineConstants>{symbol}</DefineConstants>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n  </PropertyGroup>\n  <ItemGroup>"
+        + string.Concat(includes.Select(i => $"<Compile Include=\"{i}\" />")) + "</ItemGroup>\n</Project>\n";
+
+    private static string Gated(string symbol, string method) => $"#if {symbol}\n    public void {method}() {{ }}\n#endif\n";
+
+    /// <summary>
+    /// A .csproj under bin/, obj/, node_modules/ or a dot-dir, or matching an
+    /// exclude pattern (case-insensitively), is never loaded: none of their
+    /// symbols ungates Src/X.cs, which only they compile; a sibling project is loaded.
+    /// </summary>
+    private static void TestProjectWalkSkips(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "project-skips"));
+        var skipped = new (string Dir, string Symbol, string Method)[]
+        {
+            ("bin", "FROM_BIN", "FromBin"), ("obj", "FROM_OBJ", "FromObj"),
+            ("node_modules", "FROM_NM", "FromNodeModules"), (".hidden", "FROM_DOT", "FromDotDir"),
+            ("SkipMe", "FROM_EXCL", "FromExcluded"),
+        };
+        foreach (var s in skipped) WriteSource(Path.Combine(dir, s.Dir), "P.csproj", ScopeProject(s.Symbol, "../Src/X.cs"));
+        WriteSource(Path.Combine(dir, "Src"), "X.cs",
+            "namespace Sk;\n\npublic class X\n{\n" + string.Concat(skipped.Select(s => Gated(s.Symbol, s.Method))) + "}\n");
+        WriteSource(Path.Combine(dir, "Good"), "Good.csproj", ScopeProject("GOOD", "G.cs"));
+        WriteSource(Path.Combine(dir, "Good"), "G.cs", "namespace Sk;\n\npublic class G\n{\n" + Gated("GOOD", "GoodGated") + "}\n");
+
+        var r = RunScanner(dir, "skipme");
+        Check("project-skip scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var all = Join(Canonicalize(g).Records) + "\nSTDERR:\n" + r.Err;
+        Check("project walk: a sibling project is loaded (its DefineConstants ungates Sk.G.GoodGated)",
+            g.Funcs.Any(f => f.Parent == "Sk.G" && f.Name == "GoodGated"), all);
+        Check("project walk: Src/X.cs is still graphed (projectless)", g.Structs.Any(s => s.Parent == "Sk" && s.Name == "X"), all);
+        foreach (var s in skipped)
+        {
+            Check($"project walk: a .csproj under {s.Dir}/ is not loaded ({s.Method} stays gated)",
+                !g.Funcs.Any(f => f.Name == s.Method), all);
+        }
+    }
+
+    /// <summary>
+    /// --module src/A: a project in the module dir (below the non-module dir
+    /// src) is loaded; a project outside the module dirs and the sibling
+    /// src/AB (segment boundary) are not, and src/AB's sources are not scanned.
+    /// </summary>
+    private static void TestProjectWalkModuleScope(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "project-module"));
+        var a = Path.Combine(dir, "src", "A");
+        WriteSource(a, "A.csproj", ScopeProject("AMOD", "A.cs"));
+        WriteSource(a, "A.cs", "namespace Ma;\n\npublic class A\n{\n" + Gated("AMOD", "InA") + "}\n");
+        WriteSource(a, "Extra.cs", "namespace Ma;\n\npublic class Extra\n{\n" + Gated("ABMOD", "FromAB") + Gated("OUTSIDE", "FromOutside") + "}\n");
+        WriteSource(Path.Combine(dir, "src", "AB"), "AB.csproj", ScopeProject("ABMOD", "../A/Extra.cs", "AB.cs"));
+        WriteSource(Path.Combine(dir, "src", "AB"), "AB.cs", "namespace Mab;\n\npublic class AB { }\n");
+        WriteSource(Path.Combine(dir, "outside"), "O.csproj", ScopeProject("OUTSIDE", "../src/A/Extra.cs"));
+        WriteSource(dir, "Root.cs", "namespace Mr;\n\npublic class Root { }\n");
+
+        var r = RunScanner(dir, "--module", "src/A");
+        Check("module-scoped project scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var all = Join(Canonicalize(g).Records) + "\nSTDERR:\n" + r.Err;
+        Check("--module: a project in a module dir nested below a non-module dir is loaded (Ma.A.InA)",
+            g.Funcs.Any(f => f.Parent == "Ma.A" && f.Name == "InA"), all);
+        Check("--module: a project outside the module dirs is not loaded (FromOutside stays gated)",
+            !g.Funcs.Any(f => f.Name == "FromOutside"), all);
+        Check("--module src/A never admits the sibling project src/AB (FromAB stays gated)",
+            !g.Funcs.Any(f => f.Name == "FromAB"), all);
+        Check("--module src/A: src/AB and root sources are not scanned; Extra.cs is (projectless)",
+            !g.Structs.Any(s => s.Name is "AB" or "Root") && g.Structs.Any(s => s.Parent == "Ma" && s.Name == "Extra"), all);
+    }
+
+    /// <summary>A .csproj reached by the walk and through two .sln files is loaded exactly once.</summary>
+    private static void TestProjectLoadedOnce(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "project-once"));
+        WriteSource(Path.Combine(dir, "P"), "P.csproj", ScopeProject("ONCE", "P.cs"));
+        var pcs = WriteSource(Path.Combine(dir, "P"), "P.cs", "namespace On;\n\npublic class P\n{\n" + Gated("ONCE", "Gated") + "}\n");
+        const string entry = "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+            + "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"P\", \"PATH\", \"{11111111-1111-1111-1111-111111111111}\"\nEndProject\n";
+        WriteSource(dir, "a.sln", entry.Replace("PATH", @"P\P.csproj"));
+        WriteSource(Path.Combine(dir, "sub"), "b.sln", entry.Replace("PATH", @"..\P\P.csproj"));
+
+        var r = RunScanner(dir);
+        Check("loaded-once scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var all = Join(Canonicalize(g).Records) + "\nSTDERR:\n" + r.Err;
+        Check("walk + two .sln: the project is loaded (On.P.Gated ungated) exactly once",
+            g.Funcs.Count(f => f.Parent == "On.P" && f.Name == "Gated") == 1, all);
+        Check("walk + two .sln: no duplicate struct or File records",
+            g.Structs.Count(s => s.Parent == "On" && s.Name == "P") == 1
+            && g.Files.Count(f => f.StartsWith(pcs + "|", StringComparison.Ordinal)) == 1, all);
+    }
+
+    /// <summary>
+    /// DiscoverFiles after the IsExcluded refactor: dot-dir/bin/obj/node_modules
+    /// skipped, exclude patterns case-insensitive, and --module matched on a
+    /// segment boundary (src/AB is not inside module src/A).
+    /// </summary>
+    private static void TestDiscoverFilesScope(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "discover-scope"));
+        var a = Path.Combine(dir, "src", "A");
+        var inA = WriteSource(a, "a.cs", "class A { }");
+        var inSub = WriteSource(Path.Combine(a, "sub"), "s.cs", "class S { }");
+        foreach (var skip in new[] { "bin", "obj", "node_modules", ".git" }) WriteSource(Path.Combine(a, skip), "x.cs", "class X { }");
+        var ab = WriteSource(Path.Combine(dir, "src", "AB"), "ab.cs", "class AB { }");
+        WriteSource(Path.Combine(dir, "other"), "o.cs", "class O { }");
+        var top = WriteSource(dir, "Top.cs", "class T { }");
+
+        SortedSet<string> Discover(List<string> modules, List<string> excludes)
+        {
+            var discovery = Activator.CreateInstance(FrontendType("SourceDiscovery"), modules, excludes)!;
+            var found = (IEnumerable<string>)discovery.GetType().GetMethod("DiscoverFiles")!.Invoke(discovery, new object[] { dir })!;
+            return new SortedSet<string>(found, StringComparer.Ordinal);
+        }
+
+        var want = new SortedSet<string>(StringComparer.Ordinal) { inA, inSub, ab, top };
+        var got = Discover(new List<string>(), new List<string> { "OTHER" });
+        Check("DiscoverFiles: dot-dir/bin/obj/node_modules skipped, exclude pattern matched case-insensitively",
+            want.SetEquals(got), SetDiff(want, got));
+
+        want = new SortedSet<string>(StringComparer.Ordinal) { inA, inSub };
+        got = Discover(new List<string> { a }, new List<string>());
+        Check("DiscoverFiles: --module src/A yields only files under src/A (sibling src/AB excluded)",
+            want.SetEquals(got), SetDiff(want, got));
     }
 
     // ------------------------------------------------------------------
