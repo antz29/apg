@@ -981,6 +981,8 @@ fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
     vec![
         // The Language root ⊃ its modules (PHASE_09 language rooting).
         (Language, Module),
+        // A Language root ⊃ a module-less File (csharp-projects).
+        (Language, File),
         (Module, Module),
         (Module, File),
         (File, Struct),
@@ -1423,7 +1425,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     // (`Reviews`/`Gates`/`Satisfies`) and the code-only
     // `UnresolvedCall`/`UnresolvedUse` stay uncolumned.
     conn.query(
-        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Service, FROM Entity TO Value, FROM System TO Container, FROM Container TO Component, properties STRING)",
+        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Language TO File, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Service, FROM Entity TO Value, FROM System TO Container, FROM Container TO Component, properties STRING)",
     )?;
     conn.query(
         "CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service, FROM Actor TO Service, properties STRING)",
