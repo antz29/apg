@@ -74,6 +74,7 @@ public static class TestMain
             TestProjectWalkModuleScope(baseDir);
             TestProjectLoadedOnce(baseDir);
             TestDiscoverFilesScope(baseDir);
+            TestOverloadFailureKeepsBoundMethod(baseDir);
         }
         catch (Exception ex)
         {
@@ -1075,6 +1076,45 @@ public static class TestMain
         got = Discover(new List<string> { a }, new List<string>());
         Check("DiscoverFiles: --module src/A yields only files under src/A (sibling src/AB excluded)",
             want.SetEquals(got), SetDiff(want, got));
+    }
+
+    /// <summary>
+    /// An invocation failing overload resolution against a bound stdlib method
+    /// (Console.WriteLine(1, 2): no overload takes an int format) keeps the
+    /// candidate's bound naming System.Console.WriteLine and its stdlib category,
+    /// never the unbound as-written "Console.WriteLine"/unknown path.
+    /// </summary>
+    private static void TestOverloadFailureKeepsBoundMethod(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "overload-failure"));
+        WriteSource(dir, "O.cs", "using System;\n\nnamespace Ov;\n\npublic class O { public void Run() { Console.WriteLine(1, 2); } }\n");
+
+        // Bind against the carried runtime alone: fresh empty NuGet/dotnet/Reference Assemblies roots.
+        var resolver = FrontendType("ReferenceResolver");
+        var flags = BindingFlags.NonPublic | BindingFlags.Static;
+        (int Code, string Out, string Err) r;
+        try
+        {
+            Environment.SetEnvironmentVariable("NUGET_PACKAGES", Directory.CreateDirectory(Path.Combine(dir, "iso-nuget")).FullName);
+            resolver.GetProperty("DotnetRootOverride", flags)!.SetValue(null, Directory.CreateDirectory(Path.Combine(dir, "iso-dotnet")).FullName);
+            resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.SetValue(null, Directory.CreateDirectory(Path.Combine(dir, "iso-refasm")).FullName);
+            r = RunScanner(dir);
+        }
+        finally
+        {
+            ApplyHarnessDefaults();
+        }
+
+        Check("overload-failure scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var c = Canonicalize(ParseGraph(r.Out));
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        var calls = c.Records.Where(s => s.StartsWith("unresolved_call|Ov.O.Run|", StringComparison.Ordinal)).ToList();
+        Check("overload failure: exactly one unresolved_call, named by the bound candidate System.Console.WriteLine",
+            calls.Count == 1 && calls[0] == "unresolved_call|Ov.O.Run|System.Console.WriteLine", all);
+        Check("overload failure: the target is categorized stdlib from the bound containing type",
+            c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
+        Check("overload failure: no unbound as-written target is emitted",
+            !c.UnresFqns.Contains("Console.WriteLine") && !c.Records.Any(s => s.EndsWith("|unknown", StringComparison.Ordinal)), all);
     }
 
     // ------------------------------------------------------------------
