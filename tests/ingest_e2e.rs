@@ -1533,6 +1533,108 @@ mod e2e {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// csharp-projects task-27: a skipped csharp language whose every cached
+    /// file is namespace-less has no Module to replay, so `splice_cached` must
+    /// rebuild the `Language` root itself — the assembly and its database rows
+    /// equal a full ingest of the same tree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool/FactStore dir, db.lbug); run via cargo test-e2e"]
+    fn skipped_namespace_less_csharp_reuse_rebuilds_its_language_root() {
+        use apg::cache::{
+            CacheKey, FactStore, FileFragment, FileIndex, ModuleScaffolding, ScanConfigKey,
+        };
+
+        let dir = std::env::temp_dir().join(format!("apg-nsless-cs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "csharp",
+            config: None,
+            base: None,
+        };
+        let files = [("cs/A.cs", "Alpha", "oid-a"), ("cs/B.cs", "Beta", "oid-b")];
+
+        // The full ingest of the namespace-less tree is the reference graph.
+        let mut records = vec![Record::LangSwitch {
+            language: "csharp".to_string(),
+        }];
+        for (i, (path, name, _)) in files.iter().enumerate() {
+            records.push(file_rec(path, "", 10));
+            records.push(srec(&format!("s{i}"), "", name, path));
+        }
+        let (full, _) = ingest(records, &opts, None);
+
+        // Record each unit and the scaffolding through the production paths.
+        let index = FileIndex::build(&full);
+        for (path, _, oid) in files {
+            let frag = FileFragment::from_index(&index, path, path, oid, "csharp");
+            store.put(&frag, "/x", &cache_key).unwrap();
+        }
+        let scaffolding = ModuleScaffolding::extract(&full, Path::new("/x"));
+        store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: files
+                .iter()
+                .map(|(p, _, oid)| (p.to_string(), "csharp".to_string(), oid.to_string()))
+                .collect(),
+            reader_root: "/x".into(),
+            skipped_langs: ["csharp".into()].into_iter().collect(),
+        };
+        let (assembled, _) = ingest_with_reuse(Vec::<Record>::new(), &opts, Some(&reuse), None);
+
+        assert_eq!(
+            assembled.nodes.get("csharp").map(|n| n.kind),
+            Some(NodeKind::Language),
+            "the skipped namespace-less language's root must be rebuilt: {:?}",
+            assembled.nodes.keys().collect::<Vec<_>>()
+        );
+        for (path, _, _) in files {
+            assert!(
+                assembled
+                    .contains
+                    .contains(&("csharp".to_string(), path.to_string())),
+                "csharp -> {path} must be spliced: {:?}",
+                assembled.contains
+            );
+        }
+        let structs: BTreeSet<&String> = full
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == NodeKind::Struct)
+            .map(|(fqn, _)| fqn)
+            .collect();
+        assert_eq!(structs.len(), files.len(), "each file declares a Struct");
+        let node_set =
+            |g: &apg::graph::Graph| -> BTreeSet<String> { g.nodes.keys().cloned().collect() };
+        assert_eq!(node_set(&assembled), node_set(&full));
+        assert_eq!(assembled.contains, full.contains);
+
+        // Both graphs land the same, non-empty Language rows and Language⊃File pairs.
+        let full_db = dir.join("full").join("db.lbug");
+        let spliced_db = dir.join("spliced").join("db.lbug");
+        for (db, g) in [(&full_db, &full), (&spliced_db, &assembled)] {
+            std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+            build_db(db, g);
+        }
+        let languages = |p: &Path| -> BTreeSet<Vec<String>> {
+            db_rows(p, "MATCH (n:Language) RETURN n.fqn")
+                .into_iter()
+                .collect()
+        };
+        assert!(!languages(&full_db).is_empty());
+        assert_eq!(languages(&spliced_db), languages(&full_db));
+        let pairs = db_contains_pairs(&full_db, "Language", "File");
+        assert_eq!(pairs.len(), files.len(), "{pairs:?}");
+        assert_eq!(db_contains_pairs(&spliced_db, "Language", "File"), pairs);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase-02 task-8: the win-B assembly reports the spool AND every
     /// `splice_cached` admission through the same `Progress` emitter — exactly
     /// one symbol (and one summary tally) per node that enters the graph, never
