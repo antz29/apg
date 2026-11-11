@@ -116,13 +116,14 @@ internal sealed class EdgeEmitter
                 var declaredType = model.GetDeclaredSymbol(baseTypeDecl);
                 if (declaredType != null && _scanner.SymbolToId.TryGetValue(declaredType, out var structId))
                 {
-                    if (declaredType.BaseType != null && declaredType.BaseType.SpecialType != SpecialType.System_Object)
+                    // An unbound base/interface is reported once, as written, by the type-syntax branch's visit of the base list.
+                    if (declaredType.BaseType != null && declaredType.BaseType.SpecialType != SpecialType.System_Object && !IsUnbound(declaredType.BaseType))
                     {
                         EmitTypeUse(structId, declaredType.BaseType);
                     }
                     foreach (var iface in declaredType.Interfaces)
                     {
-                        EmitTypeUse(structId, iface);
+                        if (!IsUnbound(iface)) EmitTypeUse(structId, iface);
                     }
                 }
             }
@@ -132,10 +133,22 @@ internal sealed class EdgeEmitter
                 var enclosingSymbol = GetEnclosingExecutableSymbol(node, model) ?? GetEnclosingTypeSymbol(node, model);
                 if (enclosingSymbol != null && _scanner.SymbolToId.TryGetValue(enclosingSymbol, out var fromId))
                 {
-                    var typeInfo = model.GetTypeInfo(typeSyntax);
-                    if (typeInfo.Type is INamedTypeSymbol usedType)
+                    var usedType = model.GetTypeInfo(typeSyntax).Type as INamedTypeSymbol;
+                    // Roslyn gives a creation's type syntax no type info; an unbound one takes the creation's error type.
+                    if (usedType == null && node.Parent is ObjectCreationExpressionSyntax creationOf && creationOf.Type == node
+                        && model.GetTypeInfo(creationOf).Type is INamedTypeSymbol created && IsUnbound(created))
                     {
-                        EmitTypeUse(fromId, usedType);
+                        usedType = created;
+                    }
+                    // An unbound use is named by its outermost type syntax: qualified-name fragments, `?` (its element
+                    // reports) and an implicit `var` are absorbed, and expression positions are left to unresolved_call.
+                    bool absorbed = typeSyntax is NullableTypeSyntax nullable
+                        ? model.GetTypeInfo(nullable.ElementType).Type is { } element && IsUnbound(element)
+                        : usedType != null && IsUnbound(usedType) && (IsQualifiedNameFragment(typeSyntax) || typeSyntax.IsVar
+                            || !SyntaxFacts.IsInNamespaceOrTypeContext(typeSyntax));
+                    if (usedType != null && !absorbed)
+                    {
+                        EmitTypeUse(fromId, usedType, typeSyntax);
                     }
                 }
             }
@@ -153,6 +166,15 @@ internal sealed class EdgeEmitter
             });
         }
     }
+
+    private static bool IsUnbound(ITypeSymbol type) => type is IErrorTypeSymbol || type.TypeKind == TypeKind.Error;
+
+    private static bool IsQualifiedNameFragment(TypeSyntax syntax) => syntax.Parent switch
+    {
+        QualifiedNameSyntax q => q.Left == syntax || q.Right == syntax,
+        AliasQualifiedNameSyntax a => a.Alias == syntax || a.Name == syntax,
+        _ => false
+    };
 
     private void EmitTypeUse(string fromId, INamedTypeSymbol targetType, TypeSyntax? syntax = null)
     {
