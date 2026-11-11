@@ -82,6 +82,9 @@ public static class TestMain
             TestPackageFolderSelection(baseDir);
             TestPackagesFolderAncestorScope(baseDir);
             TestPackageVersionRules(baseDir);
+            TestFrameworkPackSelection(baseDir);
+            TestFrameworkNet4x(baseDir);
+            TestFrameworkCarriedFallback(baseDir);
         }
         catch (Exception ex)
         {
@@ -1392,6 +1395,129 @@ public static class TestMain
         want = Path.GetFullPath(Path.Combine(nuget, "stub.ver", "1.10.0", "lib", "net8.0", "Stub.Ver.dll"));
         got = Isolated(flt, nuget, () => ResolvePaths(csproj, flt));
         Check("floating 1.* picks the highest present 1.x folder", got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+    }
+
+    // ------------------------------------------------------------------
+    // ReferenceResolver.ResolveFrameworkReferences: targeting packs under a temp dotnet
+    // root, net4x Reference Assemblies, and the carried-runtime fallback. Each case runs
+    // under Isolated, whose iso-dotnet/iso-refasm dirs are pre-populated where needed.
+    // ------------------------------------------------------------------
+
+    private static string FwProject(string dir, string sdk, string tfm, string items = "") => WriteSource(dir, "App.csproj",
+        $"<Project Sdk=\"{sdk}\">\n  <PropertyGroup><TargetFramework>{tfm}</TargetFramework></PropertyGroup>\n  <ItemGroup>{items}</ItemGroup>\n</Project>\n");
+
+    /// ResolveFrameworkReferences(project, null, null): roots come from the overrides Isolated sets.
+    private static List<MetadataReference> FrameworkRefs(string csproj)
+        => (List<MetadataReference>)FrontendType("ReferenceResolver").GetMethod("ResolveFrameworkReferences")!
+            .Invoke(null, new object?[] { ReadProject(csproj), null, null })!;
+
+    private static IReadOnlyList<MetadataReference> CarriedRuntime()
+        => (IReadOnlyList<MetadataReference>)FrontendType("CompilationLoader")
+            .GetMethod("GetDefaultMetadataReferences", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
+
+    private static string RefPath(MetadataReference r) => ((PortableExecutableReference)r).FilePath!;
+
+    /// <summary>
+    /// With NETCore.App.Ref and AspNetCore.App.Ref packs at several versions: Microsoft.NET.Sdk
+    /// resolves NETCore.App alone, Sdk.Web adds AspNetCore.App, Sdk.Razor resolves AspNetCore.App
+    /// only with an explicit FrameworkReference; each pack is the highest version with the TFM's
+    /// major.minor; the found set holds no carried-runtime reference and one System.Runtime.
+    /// </summary>
+    private static void TestFrameworkPackSelection(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "fw-packs"));
+        var runtime = StubAssembly("System.Runtime", "StubRuntime");
+        var asp = StubAssembly("Microsoft.AspNetCore", "StubAsp");
+        var carried = CarriedRuntime();
+        var aspRef = "<FrameworkReference Include=\"Microsoft.AspNetCore.App\" />";
+        var cases = new (string Name, string Sdk, string Tfm, string Items, string Core, string? Asp)[]
+        {
+            ("sdk", "Microsoft.NET.Sdk", "net8.0", "", "8.0.10", null),
+            ("web", "Microsoft.NET.Sdk.Web", "net8.0", "", "8.0.10", "8.0.12"),
+            ("web9", "Microsoft.NET.Sdk.Web", "net9.0", "", "9.0.0", "9.0.1"),
+            ("razor", "Microsoft.NET.Sdk.Razor", "net8.0", "", "8.0.10", null),
+            ("razor-explicit", "Microsoft.NET.Sdk.Razor", "net8.0", aspRef, "8.0.10", "8.0.12"),
+        };
+        foreach (var (name, sdk, tfm, items, core, aspVer) in cases)
+        {
+            var dir = Path.Combine(root, name);
+            var packs = Path.Combine(dir, "iso-dotnet", "packs");
+            string Pack(string fw, string ver, string t, string dll, byte[] image)
+                => PutStub(Path.Combine(packs, fw + ".Ref", ver, "ref", t, dll), image);
+            foreach (var v in new[] { "8.0.1", "8.0.9", "8.0.10", "9.0.0" })
+            {
+                Pack("Microsoft.NETCore.App", v, "net8.0", "System.Runtime.dll", runtime);
+                if (v.StartsWith("9.", StringComparison.Ordinal)) Pack("Microsoft.NETCore.App", v, "net9.0", "System.Runtime.dll", runtime);
+            }
+            foreach (var v in new[] { "8.0.2", "8.0.12", "9.0.1" })
+            {
+                Pack("Microsoft.AspNetCore.App", v, "net8.0", "Microsoft.AspNetCore.dll", asp);
+                if (v.StartsWith("9.", StringComparison.Ordinal)) Pack("Microsoft.AspNetCore.App", v, "net9.0", "Microsoft.AspNetCore.dll", asp);
+            }
+            var want = new List<string> { Path.GetFullPath(Path.Combine(packs, "Microsoft.NETCore.App.Ref", core, "ref", tfm, "System.Runtime.dll")) };
+            if (aspVer != null) want.Add(Path.GetFullPath(Path.Combine(packs, "Microsoft.AspNetCore.App.Ref", aspVer, "ref", tfm, "Microsoft.AspNetCore.dll")));
+            var csproj = FwProject(Path.Combine(dir, "App"), sdk, tfm, items);
+            var refs = Isolated(dir, Path.Combine(dir, "nuget"), () => FrameworkRefs(csproj));
+            var got = refs.Select(r => Path.GetFullPath(RefPath(r))).ToList();
+            Check($"framework packs ({name}): {sdk} {tfm} resolves exactly NETCore.App {core}" + (aspVer == null ? " and no AspNetCore.App" : $" + AspNetCore.App {aspVer}"),
+                got.SequenceEqual(want), "want:\n" + Join(want) + "\ngot:\n" + Join(got));
+            Check($"framework packs ({name}): the found set replaces the carried runtime",
+                !refs.Any(r => carried.Contains(r)), Join(got));
+            Check($"framework packs ({name}): exactly one System.Runtime",
+                refs.Count(r => Path.GetFileName(RefPath(r)) == "System.Runtime.dll") == 1, Join(got));
+        }
+    }
+
+    /// <summary>
+    /// net48: the Reference Assemblies root's .NETFramework/v4.8 dlls win over the
+    /// microsoft.netframework.referenceassemblies package; with that root empty the package's
+    /// build/.NETFramework/v4.8 in the global packages folder is used.
+    /// </summary>
+    private static void TestFrameworkNet4x(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "fw-net4x"));
+        var image = StubAssembly("mscorlib", "StubMscorlib");
+        foreach (var name in new[] { "refasm", "package" })
+        {
+            var dir = Path.Combine(root, name);
+            var nuget = Path.Combine(dir, "nuget");
+            var pkg = PutStub(Path.Combine(nuget, "microsoft.netframework.referenceassemblies.net48", "1.0.3", "build", ".NETFramework", "v4.8", "mscorlib.dll"), image);
+            var want = name == "refasm"
+                ? new[] { "System.dll", "mscorlib.dll" }.Select(d => PutStub(Path.Combine(dir, "iso-refasm", ".NETFramework", "v4.8", d), image)).ToList()
+                : new List<string> { pkg };
+            var csproj = FwProject(Path.Combine(dir, "App"), "Microsoft.NET.Sdk", "net48");
+            var got = Isolated(dir, nuget, () => FrameworkRefs(csproj)).Select(r => Path.GetFullPath(RefPath(r))).ToList();
+            Check($"net48 framework references from the {name} location alone", got.SequenceEqual(want), "want:\n" + Join(want) + "\ngot:\n" + Join(got));
+        }
+    }
+
+    /// <summary>
+    /// A net7.0 project with no local reference assemblies (empty roots, empty NuGet folder) gets a
+    /// new list of the carried runtime (non-empty, holding System.Runtime and System.Console), and a
+    /// scan of its System.Console.WriteLine call emits that bound target categorized stdlib.
+    /// </summary>
+    private static void TestFrameworkCarriedFallback(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "fw-fallback"));
+        var nuget = Path.Combine(dir, "nuget");
+        var app = Path.Combine(dir, "App");
+        var csproj = FwProject(app, "Microsoft.NET.Sdk", "net7.0");
+        WriteSource(app, "Caller.cs", "namespace App;\n\npublic class Caller\n{\n    public void Go() { System.Console.WriteLine(\"x\"); }\n}\n");
+
+        var carried = CarriedRuntime();
+        var names = carried.Select(r => Path.GetFileName(RefPath(r))).ToList();
+        Check("carried runtime is non-empty and holds System.Runtime and System.Console",
+            carried.Count > 0 && names.Contains("System.Runtime.dll") && names.Contains("System.Console.dll"), Join(names));
+        var refs = Isolated(dir, nuget, () => FrameworkRefs(csproj));
+        Check("no local reference assemblies: a new list of exactly the carried runtime",
+            !ReferenceEquals(refs, carried) && refs.SequenceEqual(carried), Join(refs.Select(RefPath)));
+
+        var r = Isolated(dir, nuget, () => RunScanner(dir));
+        var c = Canonicalize(ParseGraph(r.Out));
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        Check("carried fallback scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        Check("carried fallback scan: System.Console.WriteLine is an unresolved_call categorized stdlib",
+            c.Records.Contains("unresolved_call|App.Caller.Go|System.Console.WriteLine") && c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
     }
 
     // ------------------------------------------------------------------
