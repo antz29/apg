@@ -55,6 +55,9 @@ public static class TestMain
             TestHeldBackFilesAreFileOnly(baseDir);
             TestMixedCsCsxScan(baseDir);
             TestScriptMemberScope(baseDir);
+            TestProjectSdkStyle(baseDir);
+            TestProjectSdkElementNoDefaultItems(baseDir);
+            TestProjectFrameworkStyle(baseDir);
         }
         catch (Exception ex)
         {
@@ -535,6 +538,157 @@ public static class TestMain
         Check("targeted scan of tools/build.csx emits the same FQNs as the full scan",
             fullP1.Count > 0 && new SortedSet<string>(fullP1, StringComparer.Ordinal).SetEquals(targetedFqns),
             SetDiff(fullP1, targetedFqns));
+    }
+
+    // ------------------------------------------------------------------
+    // ProjectFileReader: static .csproj reading (internal, reached by reflection)
+    // ------------------------------------------------------------------
+
+    private static object ReadProject(string csproj)
+        => FrontendType("ProjectFileReader").GetMethod("Read")!.Invoke(null, new object[] { csproj })!;
+
+    private static T Prop<T>(object project, string name) => (T)project.GetType().GetProperty(name)!.GetValue(project)!;
+
+    /// <summary>
+    /// SDK-style: default **/*.cs minus bin/obj and Compile Remove, plus Compile Include;
+    /// PackageReference Version from attribute and child; FrameworkReference;
+    /// first TargetFrameworks entry; DefineConstants (conditioned group ignored); LangVersion; ProjectReference.
+    /// </summary>
+    private static void TestProjectSdkStyle(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "csproj-sdk"));
+        var dir = Path.Combine(root, "App");
+        var a = WriteSource(dir, "A.cs", "class A { }");
+        var b = WriteSource(Path.Combine(dir, "sub"), "B.cs", "class B { }");
+        var shared = WriteSource(Path.Combine(root, "Shared"), "S.cs", "class S { }");
+        WriteSource(dir, "Gen.cs", "class Gen { }");
+        WriteSource(Path.Combine(dir, "bin", "Debug"), "X.cs", "class X { }");
+        WriteSource(Path.Combine(dir, "obj"), "Y.cs", "class Y { }");
+        var csproj = WriteSource(dir, "App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFrameworks>net8.0;net6.0</TargetFrameworks>
+                <LangVersion>12.0</LangVersion>
+                <DefineConstants>FOO;$(DefineConstants);;BAR</DefineConstants>
+              </PropertyGroup>
+              <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+                <DefineConstants>DEBUGONLY</DefineConstants>
+              </PropertyGroup>
+              <ItemGroup>
+                <Compile Include="../Shared/S.cs" />
+                <Compile Remove="Gen.cs" />
+                <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+                <PackageReference Include="Serilog"><Version>3.1.0</Version></PackageReference>
+                <FrameworkReference Include="Microsoft.AspNetCore.App" />
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var p = ReadProject(csproj);
+        Check("SDK-style csproj: Sdk read from the root attribute",
+            Prop<string>(p, "Sdk") == "Microsoft.NET.Sdk" && Prop<bool>(p, "IsSdkStyle"), Prop<string>(p, "Sdk"));
+        var sources = Prop<List<string>>(p, "SourcePaths");
+        var want = new[] { a, b, shared };
+        Check("SDK-style csproj: default glob + Include, minus Remove and bin/obj",
+            new SortedSet<string>(want, StringComparer.Ordinal).SetEquals(sources), SetDiff(want, sources));
+        var packages = Prop<List<(string Include, string? Version)>>(p, "PackageReferences");
+        Check("SDK-style csproj: PackageReference Version from the attribute and from a Version child",
+            packages.SequenceEqual(new (string, string?)[] { ("Newtonsoft.Json", "13.0.1"), ("Serilog", "3.1.0") }),
+            Join(packages.Select(x => x.ToString())));
+        var frameworks = Prop<List<string>>(p, "FrameworkReferences");
+        Check("SDK-style csproj: FrameworkReference read",
+            frameworks.SequenceEqual(new[] { "Microsoft.AspNetCore.App" }), Join(frameworks));
+        Check("SDK-style csproj: first-listed TargetFrameworks entry selected",
+            Prop<string>(p, "TargetFramework") == "net8.0", Prop<string>(p, "TargetFramework"));
+        var symbols = Prop<List<string>>(p, "PreprocessorSymbols");
+        Check("SDK-style csproj: DefineConstants split, $(…)/empties dropped, conditioned group ignored",
+            symbols.SequenceEqual(new[] { "FOO", "BAR" }), Join(symbols));
+        Check("SDK-style csproj: LangVersion read", Prop<string>(p, "LanguageVersion") == "12.0", Prop<string>(p, "LanguageVersion"));
+        var refs = Prop<List<string>>(p, "ProjectReferences");
+        Check("SDK-style csproj: ProjectReference kept as written",
+            refs.SequenceEqual(new[] { @"..\Lib\Lib.csproj" }), Join(refs));
+    }
+
+    /// <summary>An &lt;Sdk Name&gt; element marks SDK style; EnableDefaultCompileItems=false disables globbing; TargetFramework beats TargetFrameworks.</summary>
+    private static void TestProjectSdkElementNoDefaultItems(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "csproj-sdk-element"));
+        var a = WriteSource(dir, "A.cs", "class A { }");
+        WriteSource(dir, "B.cs", "class B { }");
+        var csproj = WriteSource(dir, "Web.csproj", """
+            <Project>
+              <Sdk Name="Microsoft.NET.Sdk.Web" />
+              <PropertyGroup>
+                <TargetFrameworks>net8.0;net6.0</TargetFrameworks>
+                <TargetFramework>net9.0</TargetFramework>
+                <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+              </PropertyGroup>
+              <ItemGroup><Compile Include="A.cs" /></ItemGroup>
+            </Project>
+            """);
+
+        var p = ReadProject(csproj);
+        Check("<Sdk Name> element csproj is SDK-style",
+            Prop<string>(p, "Sdk") == "Microsoft.NET.Sdk.Web" && Prop<bool>(p, "IsSdkStyle"), Prop<string>(p, "Sdk"));
+        var sources = Prop<List<string>>(p, "SourcePaths");
+        Check("EnableDefaultCompileItems=false compiles only the explicit Includes",
+            sources.SequenceEqual(new[] { a }), Join(sources));
+        Check("TargetFramework wins over TargetFrameworks",
+            Prop<string>(p, "TargetFramework") == "net9.0", Prop<string>(p, "TargetFramework"));
+    }
+
+    /// <summary>.NET Framework style: explicit Compile items only, Reference HintPath as written, packages.config beside the csproj.</summary>
+    private static void TestProjectFrameworkStyle(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "csproj-framework"));
+        var program = WriteSource(dir, "Program.cs", "class P { }");
+        var info = WriteSource(Path.Combine(dir, "Properties"), "AssemblyInfo.cs", "");
+        WriteSource(dir, "Unlisted.cs", "class U { }");
+        WriteSource(dir, "packages.config", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <packages>
+              <package id="Newtonsoft.Json" version="12.0.3" targetFramework="net472" />
+            </packages>
+            """);
+        var csproj = WriteSource(dir, "Legacy.csproj", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup>
+                <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+                <RootNamespace>Legacy</RootNamespace>
+              </PropertyGroup>
+              <ItemGroup>
+                <Reference Include="System" />
+                <Reference Include="Newtonsoft.Json">
+                  <HintPath>..\packages\Newtonsoft.Json.12.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
+                </Reference>
+              </ItemGroup>
+              <ItemGroup>
+                <Compile Include="Program.cs" />
+                <Compile Include="Properties\AssemblyInfo.cs" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var p = ReadProject(csproj);
+        Check(".NET Framework-style csproj is not SDK-style",
+            Prop<string>(p, "Sdk") == "" && !Prop<bool>(p, "IsSdkStyle"), Prop<string>(p, "Sdk"));
+        var sources = Prop<List<string>>(p, "SourcePaths");
+        Check(".NET Framework-style csproj compiles only the explicit Compile items",
+            sources.SequenceEqual(new[] { program, info }), Join(sources));
+        var assemblies = Prop<List<(string Include, string? HintPath)>>(p, "AssemblyReferences");
+        Check(".NET Framework-style csproj: Reference HintPath kept as written",
+            assemblies.SequenceEqual(new (string, string?)[]
+            {
+                ("System", null),
+                ("Newtonsoft.Json", @"..\packages\Newtonsoft.Json.12.0.3\lib\net45\Newtonsoft.Json.dll"),
+            }), Join(assemblies.Select(x => x.ToString())));
+        var packages = Prop<List<(string Include, string? Version)>>(p, "PackageReferences");
+        Check(".NET Framework-style csproj: packages.config packages read",
+            packages.SequenceEqual(new (string, string?)[] { ("Newtonsoft.Json", "12.0.3") }),
+            Join(packages.Select(x => x.ToString())));
+        Check(".NET Framework-style csproj: RootNamespace read", Prop<string>(p, "RootNamespace") == "Legacy", Prop<string>(p, "RootNamespace"));
     }
 
     // ------------------------------------------------------------------
