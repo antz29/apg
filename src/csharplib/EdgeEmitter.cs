@@ -154,10 +154,24 @@ internal sealed class EdgeEmitter
         }
     }
 
-    private void EmitTypeUse(string fromId, INamedTypeSymbol targetType)
+    private void EmitTypeUse(string fromId, INamedTypeSymbol targetType, TypeSyntax? syntax = null)
     {
         if (targetType.SpecialType != SpecialType.None && targetType.SpecialType != SpecialType.System_Object)
             return;
+
+        // An unbound type is named by the type as written in source (A.B.C, Foo<Bar>), not its error symbol.
+        if (syntax != null && (targetType is IErrorTypeSymbol || targetType.TypeKind == TypeKind.Error))
+        {
+            string asWritten = syntax.ToString();
+            EmitUnresolvedNode(asWritten, UnresolvedClassifier.ClassifyCategory(targetType));
+            JsonlWriter.Write(new EdgeMsg
+            {
+                Type = "unresolved_use",
+                From = fromId,
+                To = asWritten
+            });
+            return;
+        }
 
         if (_scanner.TryResolveEndpoint(targetType, out var targetEndpoint))
         {
