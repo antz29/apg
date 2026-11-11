@@ -85,6 +85,7 @@ public static class TestMain
             TestFrameworkPackSelection(baseDir);
             TestFrameworkNet4x(baseDir);
             TestFrameworkCarriedFallback(baseDir);
+            TestEnvRootOverrides(baseDir);
             TestUnrestoredPackageTargets(baseDir);
             TestFrontendAssemblyIsolation(baseDir);
         }
@@ -1520,6 +1521,91 @@ public static class TestMain
         Check("carried fallback scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
         Check("carried fallback scan: System.Console.WriteLine is an unresolved_call categorized stdlib",
             c.Records.Contains("unresolved_call|App.Caller.Go|System.Console.WriteLine") && c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
+    }
+
+    /// Runs `body` with NUGET_PACKAGES = an empty dir, APG_CSHARP_DOTNET_ROOT / APG_CSHARP_REFASM_ROOT
+    /// set to `dotnetEnv` / `refasmEnv` (never empty, so the default lookup never runs) and the static
+    /// overrides set to the given values (null = consult the env); restores env and harness defaults after.
+    private static T EnvRooted<T>(string nuget, string dotnetEnv, string refasmEnv, string? dotnetStatic, string? refasmStatic, Func<T> body)
+    {
+        var resolver = FrontendType("ReferenceResolver");
+        var flags = BindingFlags.NonPublic | BindingFlags.Static;
+        var prior = new[] { "APG_CSHARP_DOTNET_ROOT", "APG_CSHARP_REFASM_ROOT" }.ToDictionary(n => n, Environment.GetEnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable("NUGET_PACKAGES", Directory.CreateDirectory(nuget).FullName);
+            Environment.SetEnvironmentVariable("APG_CSHARP_DOTNET_ROOT", Directory.CreateDirectory(dotnetEnv).FullName);
+            Environment.SetEnvironmentVariable("APG_CSHARP_REFASM_ROOT", Directory.CreateDirectory(refasmEnv).FullName);
+            resolver.GetProperty("DotnetRootOverride", flags)!.SetValue(null, dotnetStatic);
+            resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.SetValue(null, refasmStatic);
+            return body();
+        }
+        finally
+        {
+            foreach (var (name, value) in prior) Environment.SetEnvironmentVariable(name, value);
+            ApplyHarnessDefaults();
+        }
+    }
+
+    /// <summary>
+    /// With both static overrides null: APG_CSHARP_DOTNET_ROOT holding a NETCore.App.Ref pack resolves
+    /// that pack from it alone, and at an empty dir yields the carried runtime; APG_CSHARP_REFASM_ROOT
+    /// holding .NETFramework/v4.8 resolves net48 from it alone. A static override set beside a different
+    /// env root wins: only the static root is read. Env vars and harness defaults are restored after.
+    /// </summary>
+    private static void TestEnvRootOverrides(string baseDir)
+    {
+        var priorDotnet = Environment.GetEnvironmentVariable("APG_CSHARP_DOTNET_ROOT");
+        var priorRefasm = Environment.GetEnvironmentVariable("APG_CSHARP_REFASM_ROOT");
+        var root = Path.GetFullPath(Path.Combine(baseDir, "fw-env-roots"));
+        var nuget = Path.Combine(root, "nuget-empty");
+        var runtime = StubAssembly("System.Runtime", "StubEnvRuntime");
+        var mscorlib = StubAssembly("mscorlib", "StubEnvMscorlib");
+        string Pack(string dotnet, string ver) => PutStub(Path.Combine(dotnet, "packs", "Microsoft.NETCore.App.Ref", ver, "ref", "net8.0", "System.Runtime.dll"), runtime);
+        string RefAsm(string refasm, string dll) => PutStub(Path.Combine(refasm, ".NETFramework", "v4.8", dll), mscorlib);
+        List<string> Paths(List<MetadataReference> refs) => refs.Select(r => Path.GetFullPath(RefPath(r))).ToList();
+        var core = FwProject(Path.Combine(root, "core", "App"), "Microsoft.NET.Sdk", "net8.0");
+        var net48 = FwProject(Path.Combine(root, "net48", "App"), "Microsoft.NET.Sdk", "net48");
+        var emptyDotnet = Path.Combine(root, "env-dotnet-empty");
+        var emptyRefasm = Path.Combine(root, "env-refasm-empty");
+
+        var envDotnet = Path.Combine(root, "env-dotnet");
+        var want = Pack(envDotnet, "8.0.5");
+        var got = Paths(EnvRooted(nuget, envDotnet, emptyRefasm, null, null, () => FrameworkRefs(core)));
+        Check("env roots: APG_CSHARP_DOTNET_ROOT's NETCore.App.Ref pack resolves from that root alone",
+            got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+
+        var carried = CarriedRuntime();
+        var refs = EnvRooted(nuget, emptyDotnet, emptyRefasm, null, null, () => FrameworkRefs(core));
+        Check("env roots: APG_CSHARP_DOTNET_ROOT at an empty dir yields the carried runtime",
+            refs.SequenceEqual(carried), Join(Paths(refs)));
+
+        var envRefasm = Path.Combine(root, "env-refasm");
+        var wantFw = new[] { "System.dll", "mscorlib.dll" }.Select(d => RefAsm(envRefasm, d)).ToList();
+        got = Paths(EnvRooted(nuget, emptyDotnet, envRefasm, null, null, () => FrameworkRefs(net48)));
+        Check("env roots: APG_CSHARP_REFASM_ROOT's .NETFramework/v4.8 resolves net48 from that root alone",
+            got.SequenceEqual(wantFw), "want:\n" + Join(wantFw) + "\ngot:\n" + Join(got));
+
+        var staticDotnet = Path.Combine(root, "static-dotnet");
+        want = Pack(staticDotnet, "8.0.1");
+        got = Paths(EnvRooted(nuget, envDotnet, emptyRefasm, Path.GetFullPath(staticDotnet), null, () => FrameworkRefs(core)));
+        Check("env roots: a static dotnet-root override beats APG_CSHARP_DOTNET_ROOT",
+            got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+
+        var staticRefasm = Path.Combine(root, "static-refasm");
+        var wantStatic = RefAsm(staticRefasm, "mscorlib.dll");
+        got = Paths(EnvRooted(nuget, emptyDotnet, envRefasm, null, Path.GetFullPath(staticRefasm), () => FrameworkRefs(net48)));
+        Check("env roots: a static Reference Assemblies-root override beats APG_CSHARP_REFASM_ROOT",
+            got.SequenceEqual(new[] { wantStatic }), "want " + wantStatic + "\ngot:\n" + Join(got));
+
+        var resolver = FrontendType("ReferenceResolver");
+        var flags = BindingFlags.NonPublic | BindingFlags.Static;
+        Check("env roots: harness defaults and env vars restored afterwards",
+            (string?)resolver.GetProperty("DotnetRootOverride", flags)!.GetValue(null) == HarnessDotnetRoot
+            && (string?)resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.GetValue(null) == HarnessRefAsmRoot
+            && Environment.GetEnvironmentVariable("NUGET_PACKAGES") == HarnessNugetPackages
+            && Environment.GetEnvironmentVariable("APG_CSHARP_DOTNET_ROOT") == priorDotnet
+            && Environment.GetEnvironmentVariable("APG_CSHARP_REFASM_ROOT") == priorRefasm, "");
     }
 
     /// <summary>
