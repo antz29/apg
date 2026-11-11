@@ -1086,6 +1086,17 @@ mod unit {
         assert_eq!(graph.nodes[real_fn].kind, NodeKind::Function);
         assert_eq!(graph.nodes[real_struct].kind, NodeKind::Struct);
     }
+
+    /// csharp-projects phase-04 task-23: a namespace-less projectless C# file
+    /// hangs straight off its Language root, so Language ⊃ File is admitted
+    /// beside Language ⊃ Module, while the reverse and a skipped tier are not.
+    #[test]
+    fn valid_contains_pair_admits_language_file() {
+        assert!(valid_contains_pair(&NodeKind::Language, &NodeKind::File));
+        assert!(valid_contains_pair(&NodeKind::Language, &NodeKind::Module));
+        assert!(!valid_contains_pair(&NodeKind::File, &NodeKind::Language));
+        assert!(!valid_contains_pair(&NodeKind::Language, &NodeKind::Struct));
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no
