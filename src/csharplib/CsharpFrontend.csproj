@@ -26,4 +26,20 @@
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
   </ItemGroup>
+
+  <!-- Carried runtime: embed the Microsoft.NETCore.App targeting-pack reference
+       assemblies this build compiles against (as resolved by the SDK for
+       net9.0) under the `apg.refs/` prefix, so the scanner binds System types
+       identically under `dotnet run` and the single-file publish. -->
+  <Target Name="EmbedCarriedRuntimeReferences"
+          DependsOnTargets="ResolveTargetingPackAssets"
+          BeforeTargets="PrepareResourceNames">
+    <ItemGroup>
+      <EmbeddedResource Include="@(Reference)"
+                        Condition="'%(Reference.FrameworkReferenceName)' == 'Microsoft.NETCore.App' And '%(Reference.Extension)' == '.dll'"
+                        LogicalName="apg.refs/%(Reference.Filename)%(Reference.Extension)"
+                        WithCulture="false"
+                        Type="Non-Resx" />
+    </ItemGroup>
+  </Target>
 </Project>
