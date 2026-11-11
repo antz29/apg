@@ -337,6 +337,14 @@ impl FileFragment {
                 frag.edges.push(e.clone());
             }
         }
+        // A `Language -> File` edge rides the same way, but the Language root
+        // never enters `modules`.
+        if let Some(langs) = index.language_edges_by_file.get(abs_path) {
+            for e in langs {
+                frag.inputs.insert(e.from.clone());
+                frag.edges.push(e.clone());
+            }
+        }
         // Unresolved-target rows referenced by this file's edges travel with the
         // unit so a projection can rebuild them without a re-scan.
         for e in &frag.edges {
@@ -408,6 +416,9 @@ pub struct FileIndex {
     edges_by_file: BTreeMap<String, Vec<FragEdge>>,
     /// File key -> the `Module -> File` contains edges targeting it.
     module_edges_by_file: BTreeMap<String, Vec<FragEdge>>,
+    /// File key -> the `Language -> File` contains edges targeting it (a
+    /// namespace-less file); never a module, so never in `frag.modules`.
+    language_edges_by_file: BTreeMap<String, Vec<FragEdge>>,
     /// Every node's fragment row, keyed by FQN — resolves the row an unresolved
     /// edge carries with the unit.
     node_rows: BTreeMap<String, FragNode>,
@@ -465,6 +476,24 @@ impl FileIndex {
                 // file, so it lands on the target File's bucket.
                 index
                     .module_edges_by_file
+                    .entry(b.clone())
+                    .or_default()
+                    .push(FragEdge {
+                        kind: "contains".to_string(),
+                        from: a.clone(),
+                        to: b.clone(),
+                        target_type: String::new(),
+                    });
+            } else if graph
+                .nodes
+                .get(a)
+                .is_some_and(|n| n.kind == NodeKind::Language)
+                && graph.nodes.get(b).is_some_and(|n| n.kind == NodeKind::File)
+            {
+                // A `Language -> File` edge rides the File's bucket the same
+                // way; a `Language -> Module` edge stays unbucketed.
+                index
+                    .language_edges_by_file
                     .entry(b.clone())
                     .or_default()
                     .push(FragEdge {
