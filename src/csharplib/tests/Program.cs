@@ -86,6 +86,7 @@ public static class TestMain
             TestFrameworkNet4x(baseDir);
             TestFrameworkCarriedFallback(baseDir);
             TestUnrestoredPackageTargets(baseDir);
+            TestFrontendAssemblyIsolation(baseDir);
         }
         catch (Exception ex)
         {
@@ -1616,6 +1617,50 @@ public static class TestMain
         Check("unrestored: the scan spawned no process (marker dir empty)",
             Directory.GetFileSystemEntries(markers).Length == 0, Join(Directory.GetFileSystemEntries(markers)));
         Check("unrestored: PATH restored after the scan", Environment.GetEnvironmentVariable("PATH") == oldPath, "");
+    }
+
+    /// <summary>
+    /// Project and projectless sources naming Microsoft.CodeAnalysis types with no Roslyn reference stay
+    /// unbound as-written `unknown` targets (the carried runtime holds none of the frontend's own Roslyn/Razor
+    /// assemblies), while System.Console.WriteLine in the same sources binds as stdlib.
+    /// </summary>
+    private static void TestFrontendAssemblyIsolation(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "frontend-isolation"));
+        const string body = "\n{\n    public Microsoft.CodeAnalysis.SyntaxTree Tree;\n"
+            + "    public void Go() { Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(\"x\"); System.Console.WriteLine(\"x\"); }\n}\n";
+        FwProject(Path.Combine(dir, "App"), "Microsoft.NET.Sdk", "net8.0");
+        WriteSource(Path.Combine(dir, "App"), "Caller.cs", "namespace App;\n\npublic class Caller" + body);
+        WriteSource(Path.Combine(dir, "Loose"), "Loose.cs", "namespace Loose;\n\npublic class L" + body);
+
+        var leaked = CarriedRuntime().Select(r => Path.GetFileName(RefPath(r)))
+            .Where(n => n.StartsWith("Microsoft.CodeAnalysis", StringComparison.Ordinal) || n.Contains("Razor", StringComparison.Ordinal)).ToList();
+        Check("isolation: the carried runtime holds no Microsoft.CodeAnalysis or Razor assembly", leaked.Count == 0, Join(leaked));
+
+        var r = Isolated(dir, Path.Combine(dir, "nuget-empty"), () => RunScanner(dir));
+        var c = Canonicalize(ParseGraph(r.Out));
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        const string tree = "Microsoft.CodeAnalysis.SyntaxTree", parse = "Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText";
+        Check("isolation: scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        foreach (var (owner, label) in new[] { ("App.Caller", "project"), ("Loose.L", "projectless") })
+        {
+            Check($"isolation ({label}): SyntaxTree field is an unresolved_use named as written",
+                c.Records.Contains($"unresolved_use|{owner}|{tree}"), all);
+            Check($"isolation ({label}): ParseText is an unresolved_call named as written",
+                c.Records.Contains($"unresolved_call|{owner}.Go|{parse}"), all);
+            Check($"isolation ({label}): System.Console.WriteLine is an unresolved_call",
+                c.Records.Contains($"unresolved_call|{owner}.Go|System.Console.WriteLine"), all);
+        }
+        Check("isolation: Roslyn targets are category unknown (never stdlib/external)",
+            c.Records.Contains($"unresolved|{tree}|unknown") && c.Records.Contains($"unresolved|{parse}|unknown")
+            && !c.Records.Any(s => s.StartsWith("unresolved|Microsoft.CodeAnalysis", StringComparison.Ordinal) && !s.EndsWith("|unknown", StringComparison.Ordinal)), all);
+        Check("isolation: no resolved edge or node for any Microsoft.CodeAnalysis symbol",
+            !c.Records.Any(s => (s.StartsWith("calls|", StringComparison.Ordinal) || s.StartsWith("uses|", StringComparison.Ordinal)) && s.Contains("Microsoft.CodeAnalysis", StringComparison.Ordinal))
+            && !c.NodeFqns.Any(f => f.StartsWith("Microsoft.CodeAnalysis", StringComparison.Ordinal)), all);
+        Check("isolation: System.Console.WriteLine is categorized stdlib (bound against the carried runtime)",
+            c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
+        Check("isolation: NUGET_PACKAGES restored to the harness default",
+            Environment.GetEnvironmentVariable("NUGET_PACKAGES") == HarnessNugetPackages, "");
     }
 
     // ------------------------------------------------------------------
