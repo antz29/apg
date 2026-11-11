@@ -47,28 +47,53 @@ internal sealed class SourceDiscovery
             foreach (var file in files)
             {
                 var fullPath = Path.GetFullPath(file);
-                if (IsExcluded(fullPath)) continue;
-                if (_moduleDirs.Count > 0 && !_moduleDirs.Any(m => fullPath.StartsWith(m, StringComparison.Ordinal))) continue;
+                if (IsExcluded(fullPath, false)) continue;
                 yield return fullPath;
             }
 
             foreach (var subDir in subDirs)
             {
-                var name = Path.GetFileName(subDir);
-                if (name.StartsWith('.') || name == "bin" || name == "obj" || name == "node_modules")
-                    continue;
+                if (IsExcluded(subDir, true)) continue;
                 stack.Push(subDir);
             }
         }
     }
 
-    private bool IsExcluded(string path)
+    /// <summary>
+    /// The single skip/scope predicate for C# discovery and the project walk:
+    /// exclude-pattern match, the dot-dir/bin/obj/node_modules directory skip,
+    /// and the <c>--module</c> restriction on path-segment boundaries (a
+    /// directory is in scope when it is, lies inside, or is an ancestor of a
+    /// module dir; a file only when it lies inside one).
+    /// </summary>
+    internal bool IsExcluded(string path, bool isDirectory)
     {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
         foreach (var pat in _excludePatterns)
         {
-            if (path.Contains(pat, StringComparison.OrdinalIgnoreCase))
+            if (full.Contains(pat, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
-        return false;
+
+        if (isDirectory)
+        {
+            var name = Path.GetFileName(full);
+            if (name.StartsWith('.') || name == "bin" || name == "obj" || name == "node_modules")
+                return true;
+        }
+
+        if (_moduleDirs.Count == 0) return false;
+        foreach (var m in _moduleDirs)
+        {
+            var mod = Path.TrimEndingDirectorySeparator(Path.GetFullPath(m));
+            if (IsWithin(full, mod) || (isDirectory && IsWithin(mod, full)))
+                return false;
+        }
+        return true;
     }
+
+    // `path` equals `dir` or lies under it, matched on a separator boundary.
+    private static bool IsWithin(string path, string dir) =>
+        path.StartsWith(dir, StringComparison.Ordinal)
+        && (path.Length == dir.Length || path[dir.Length] == Path.DirectorySeparatorChar || dir.EndsWith(Path.DirectorySeparatorChar));
 }
