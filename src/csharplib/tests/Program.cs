@@ -85,6 +85,7 @@ public static class TestMain
             TestFrameworkPackSelection(baseDir);
             TestFrameworkNet4x(baseDir);
             TestFrameworkCarriedFallback(baseDir);
+            TestUnrestoredPackageTargets(baseDir);
         }
         catch (Exception ex)
         {
@@ -1518,6 +1519,103 @@ public static class TestMain
         Check("carried fallback scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
         Check("carried fallback scan: System.Console.WriteLine is an unresolved_call categorized stdlib",
             c.Records.Contains("unresolved_call|App.Caller.Go|System.Console.WriteLine") && c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
+    }
+
+    /// <summary>
+    /// A project referencing an unrestored package (no assets file, no packages/, empty global folder)
+    /// scans to completion; every unbound reference is one as-written `unknown` target with no
+    /// fragment/twin/nullable-suffixed target, and no process is spawned (sentinel shims on PATH and
+    /// as the injected dotnet root's dotnet leave the marker dir empty).
+    /// </summary>
+    private static void TestUnrestoredPackageTargets(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "unrestored-targets"));
+        var dir = Path.Combine(root, "scan");
+        var app = Path.Combine(dir, "App");
+        var shims = Directory.CreateDirectory(Path.Combine(root, "shims")).FullName;
+        var markers = Directory.CreateDirectory(Path.Combine(root, "markers")).FullName;
+        // Isolated reuses <dir>/iso-dotnet as the dotnet-root override; seed it with the dotnet shim alone.
+        var dotnetRoot = Directory.CreateDirectory(Path.Combine(dir, "iso-dotnet")).FullName;
+        void Shim(string folder, string name)
+        {
+            // `: >` is a shell builtin: the shim must mark without any PATH lookup.
+            var sh = WriteSource(folder, name, $"#!/bin/sh\n: > '{Path.Combine(markers, name)}'\n");
+            if (OperatingSystem.IsWindows())
+                WriteSource(folder, name + ".cmd", $"@type nul > \"{Path.Combine(markers, name)}\"\r\n");
+            else
+                File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        foreach (var name in new[] { "dotnet", "msbuild", "nuget" }) Shim(shims, name);
+        Shim(dotnetRoot, "dotnet");
+
+        RefProject(app, PkgRef("Unrestored.Pkg", "1.0.0"));
+        WriteSource(app, "Caller.cs", """
+            namespace App;
+
+            public class Caller
+            {
+                public Unrestored.Pkg.Widget Field;
+                public void Go() { Unrestored.Pkg.Widget.Make(); var w = new Unrestored.Pkg.Widget(); }
+            }
+            public class N { public Unrestored.Pkg.Widget? W; }
+            public class G { public Foo<Bar> Gen; }
+            public class L { public System.Collections.Generic.List<Bar> Lst; }
+            public class X : Unrestored.Pkg.Base { }
+            public class Y : Unrestored.Pkg.IThing { }
+            """);
+
+        var oldPath = Environment.GetEnvironmentVariable("PATH");
+        (int Code, string Out, string Err) r;
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", shims);
+            r = Isolated(dir, Path.Combine(dir, "nuget-empty"), () => RunScanner(dir));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+        }
+
+        var g = ParseGraph(r.Out);
+        var c = Canonicalize(g);
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        // Raw (non-deduplicated) unresolved edges, endpoints canonicalized: a twin edge must show up twice.
+        var raw = g.Edges.Where(e => e.Type.StartsWith("unresolved_", StringComparison.Ordinal))
+            .Select(e => $"{e.Type}|{(c.IdToFqn.TryGetValue(e.From, out var f) ? f : e.From)}|{e.To}").ToList();
+        List<string> UsesFrom(string from) => raw.Where(s => s.StartsWith($"unresolved_use|{from}|", StringComparison.Ordinal))
+            .Select(s => s.Split('|')[2]).OrderBy(s => s, StringComparer.Ordinal).ToList();
+
+        Check("unrestored: scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        Check("unrestored: call, creation and field are unresolved edges to as-written unknown targets",
+            c.Records.Contains("unresolved_call|App.Caller.Go|Unrestored.Pkg.Widget.Make")
+            && c.Records.Contains("unresolved_call|App.Caller.Go|Unrestored.Pkg.Widget")
+            && c.Records.Contains("unresolved_use|App.Caller|Unrestored.Pkg.Widget")
+            && c.Records.Contains("unresolved|Unrestored.Pkg.Widget.Make|unknown")
+            && c.Records.Contains("unresolved|Unrestored.Pkg.Widget|unknown"), all);
+        Check("unrestored: one unresolved node per target name",
+            g.Unres.Count == c.UnresFqns.Count, all);
+        Check("unrestored: the member-access call is exactly one unresolved_call named as written",
+            raw.Count(s => s == "unresolved_call|App.Caller.Go|Unrestored.Pkg.Widget.Make") == 1, Join(raw) + "\n" + all);
+        var fragments = new[] { "Unrestored", "Pkg", "Widget", "Make", "Unrestored.Pkg", "Pkg.Widget", "Foo", "Unrestored.Pkg.Widget?" };
+        Check("unrestored: no target for any qualified-name or member-access fragment, bare generic or nullable suffix",
+            !fragments.Any(c.UnresFqns.Contains), all);
+        Check("unrestored: the field's use is exactly the qualified name as written",
+            UsesFrom("App.Caller").SequenceEqual(new[] { "Unrestored.Pkg.Widget" }), Join(raw));
+        Check("unrestored: the base type is exactly one as-written use from X (no GetFullFqn twin)",
+            UsesFrom("App.X").SequenceEqual(new[] { "Unrestored.Pkg.Base" }), Join(raw));
+        Check("unrestored: the interface is exactly one as-written use from Y (no GetFullFqn twin)",
+            UsesFrom("App.Y").SequenceEqual(new[] { "Unrestored.Pkg.IThing" }), Join(raw));
+        Check("unrestored: Widget? lands on the one Unrestored.Pkg.Widget target",
+            UsesFrom("App.N").SequenceEqual(new[] { "Unrestored.Pkg.Widget" }), Join(raw));
+        Check("unrestored: Foo<Bar> yields exactly the targets Foo<Bar> and Bar",
+            UsesFrom("App.G").SequenceEqual(new[] { "Bar", "Foo<Bar>" }), Join(raw));
+        var listUses = UsesFrom("App.L").Distinct().ToList();
+        Check("unrestored: List<Bar> yields Bar beside the bound List use",
+            listUses.Count == 2 && listUses[0] == "Bar" && listUses[1].StartsWith("System.Collections.Generic.List", StringComparison.Ordinal)
+            && c.Records.Contains($"unresolved|{listUses[1]}|stdlib"), Join(raw) + "\n" + all);
+        Check("unrestored: the scan spawned no process (marker dir empty)",
+            Directory.GetFileSystemEntries(markers).Length == 0, Join(Directory.GetFileSystemEntries(markers)));
+        Check("unrestored: PATH restored after the scan", Environment.GetEnvironmentVariable("PATH") == oldPath, "");
     }
 
     // ------------------------------------------------------------------
