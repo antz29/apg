@@ -59,6 +59,8 @@ public static class TestMain
             TestProjectSdkElementNoDefaultItems(baseDir);
             TestProjectFrameworkStyle(baseDir);
             TestSolutionReader(baseDir);
+            TestPerProjectScan(baseDir);
+            TestZeroProjectTree(baseDir);
         }
         catch (Exception ex)
         {
@@ -735,6 +737,102 @@ public static class TestMain
         File.WriteAllText(crlf, SlnBody.Replace("\r\n", "\n").Replace("\n", "\r\n"), new UTF8Encoding(true));
         got = ReadSolution(crlf);
         Check("sln: CRLF + BOM file reads identically", got.SequenceEqual(want), Join(got));
+    }
+
+    // ------------------------------------------------------------------
+    // Per-project scan: real SDK-style .csproj trees through Scanner.Run
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// App references a multi-targeted Lib defining FEATURE; loose .cs files sit
+    /// outside both projects. Cross-project calls resolve in full and targeted
+    /// scans to the same canonical FQN; DefineConstants gates per project; Lib
+    /// compiles once; projectless File parents are the first namespace or empty.
+    /// </summary>
+    private static void TestPerProjectScan(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "per-project"));
+        WriteSource(Path.Combine(dir, "Lib"), "Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+                <DefineConstants>FEATURE</DefineConstants>
+              </PropertyGroup>
+            </Project>
+            """);
+        var util = WriteSource(Path.Combine(dir, "Lib"), "Util.cs",
+            "namespace Lib;\n\npublic class Util\n{\n    public static int Twice(int x) { return x * 2; }\n#if FEATURE\n    public void Gated() { }\n#endif\n}\n");
+        WriteSource(Path.Combine(dir, "App"), "App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+              <ItemGroup><ProjectReference Include="..\Lib\Lib.csproj" /></ItemGroup>
+            </Project>
+            """);
+        var caller = WriteSource(Path.Combine(dir, "App"), "Caller.cs",
+            "namespace App;\n\npublic class Caller\n{\n    public int Go() { return Lib.Util.Twice(1); }\n#if FEATURE\n    public void AppGated() { }\n#endif\n}\n");
+        var loose = WriteSource(Path.Combine(dir, "Loose"), "Loose.cs",
+            "namespace First.Inner { public class X { } }\nnamespace Second { public class Y { } }\n");
+        var bare = WriteSource(Path.Combine(dir, "Loose"), "Bare.cs", "public class Bare { }\n");
+
+        var r = RunScanner(dir);
+        Check("per-project scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var c = Canonicalize(g);
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+
+        const string callee = "Lib.Util.Twice";
+        Check("full scan: cross-project call is a resolved calls edge to Lib.Util.Twice",
+            c.NodeFqns.Contains(callee) && c.Records.Contains($"calls|App.Caller.Go|{callee}"), all);
+
+        var funcFqns = c.Records.Where(s => s.StartsWith("function|", StringComparison.Ordinal)).Select(s => s.Split('|')[1]).ToList();
+        var structFqns = c.Records.Where(s => s.StartsWith("struct|", StringComparison.Ordinal)).Select(s => s.Split('|')[1]).ToList();
+        Check("DefineConstants: FEATURE-gated declaration emitted in the defining project (Lib.Util.Gated)",
+            funcFqns.Contains("Lib.Util.Gated"), all);
+        Check("DefineConstants: FEATURE-gated declaration absent where undefined (App.Caller.AppGated)",
+            !funcFqns.Any(f => f.Contains("AppGated", StringComparison.Ordinal)), all);
+        Check("multi-targeted Lib compiles once: one Util struct and one Twice function record",
+            g.Structs.Count(s => s.Parent == "Lib" && s.Name == "Util") == 1
+            && g.Funcs.Count(f => f.Parent == "Lib.Util" && f.Name == "Twice") == 1, all);
+        Check("no duplicate declaration records",
+            funcFqns.Count == g.Funcs.Count && structFqns.Count == g.Structs.Count
+            && g.Files.Select(f => f.Split('|')[0]).Distinct().Count() == g.Files.Count, all);
+
+        Check("projectless .cs File parent is its first namespace's module identity (First.Inner)",
+            g.Files.Any(f => f.StartsWith($"{loose}|First.Inner|", StringComparison.Ordinal)), Join(g.Files));
+        Check("projectless .cs declarations are graphed", structFqns.Contains("First.Inner.X") && structFqns.Contains("Second.Y"), all);
+        Check("namespace-less projectless .cs File record has an empty parent",
+            g.Files.Any(f => f.StartsWith($"{bare}||", StringComparison.Ordinal)), Join(g.Files));
+
+        // Targeted: the calling file only; Lib's file is not emitted.
+        var targets = WriteTargets(baseDir, "per-project.targets", caller);
+        var tr = RunScanner(dir, "--targets", targets);
+        Check("targeted per-project scan exits 0", tr.Code == 0, "exit " + tr.Code + "\n" + tr.Err);
+        var tg = ParseGraph(tr.Out);
+        var tc = Canonicalize(tg);
+        var tall = Join(tc.Records) + "\nSTDERR:\n" + tr.Err;
+        Check("targeted scan omits the referenced project's declarations",
+            !tc.Records.Any(s => IsDecl(s) && RecordPath(s) == util), tall);
+        var goId = tg.Funcs.FirstOrDefault(f => f.Parent == "App.Caller" && f.Name == "Go")?.Id ?? "";
+        Check("targeted scan: cross-project call lands on the callee's canonical FQN, identical to the full scan's",
+            goId != "" && tg.Edges.Any(e => e.Type == "calls" && e.From == goId && e.To == callee), tall);
+    }
+
+    /// <summary>A tree with no .csproj/.sln is still fully graphed: files, declarations and cross-file calls.</summary>
+    private static void TestZeroProjectTree(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "zero-project"));
+        var a = WriteSource(dir, "A.cs", "namespace Z;\n\npublic class A { public void Run() { new B().Hit(); } }\n");
+        var b = WriteSource(Path.Combine(dir, "sub"), "B.cs", "namespace Z;\n\npublic class B { public void Hit() { } }\n");
+
+        var r = RunScanner(dir);
+        Check("zero-project scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var c = Canonicalize(ParseGraph(r.Out));
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        Check("zero-project tree: every file has a File record under its namespace",
+            c.Records.Any(s => s.StartsWith($"file|{a}|Z|", StringComparison.Ordinal))
+            && c.Records.Any(s => s.StartsWith($"file|{b}|Z|", StringComparison.Ordinal)), all);
+        Check("zero-project tree: declarations graphed", c.NodeFqns.Contains("Z.A.Run") && c.NodeFqns.Contains("Z.B.Hit"), all);
+        Check("zero-project tree: cross-file call resolved", c.Records.Contains("calls|Z.A.Run|Z.B.Hit"), all);
     }
 
     // ------------------------------------------------------------------
