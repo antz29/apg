@@ -9,7 +9,8 @@ use crate::layers::{NodeProperties, properties_from_json, properties_json};
 use crate::schema::Record;
 
 /// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
-/// R21): the six code pairs, the two plan pairs, the requirements tree
+/// R21): the code pairs (including the language-rooted Language ⊃ File for a
+/// namespace-less projectless C# file), the two plan pairs, the requirements tree
 /// (Requirement ⊃ Requirement; a Stakeholder/User roots a Requirement through
 /// `requires`), the plain-named domain hierarchy (Group ⊃ Group/Entity/Service
 /// and Entity ⊃ Value), and the solution hierarchy (System ⊃ Container ⊃
@@ -18,6 +19,7 @@ pub(crate) fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
     matches!(
         (a, b),
         (NodeKind::Language, NodeKind::Module)
+            | (NodeKind::Language, NodeKind::File)
             | (NodeKind::Module, NodeKind::Module)
             | (NodeKind::Module, NodeKind::File)
             | (NodeKind::File, NodeKind::Struct)
