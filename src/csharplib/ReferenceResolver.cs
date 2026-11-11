@@ -75,10 +75,10 @@ internal static class ReferenceResolver
         return refs;
     }
 
-    /// <summary>Dotnet root for in-process scans; null = the default lookup, set = the only root consulted.</summary>
+    /// <summary>Dotnet root for in-process scans; null = APG_CSHARP_DOTNET_ROOT, else the default lookup; set = the only root consulted.</summary>
     internal static string? DotnetRootOverride { get; set; }
 
-    /// <summary>Reference Assemblies root (…\Microsoft\Framework) for in-process scans; null = the default lookup, set = the only root consulted.</summary>
+    /// <summary>Reference Assemblies root (…\Microsoft\Framework) for in-process scans; null = APG_CSHARP_REFASM_ROOT, else the default lookup; set = the only root consulted.</summary>
     internal static string? ReferenceAssembliesRootOverride { get; set; }
 
     /// <summary>
@@ -91,7 +91,9 @@ internal static class ReferenceResolver
     /// the carried runtime; when none is found a new copy of the carried
     /// runtime references is returned. <paramref name="dotnetRoot"/> and
     /// <paramref name="referenceAssembliesRoot"/> win over the static
-    /// overrides, which win over the default lookup. Offline; every dll goes
+    /// overrides, which win over non-empty APG_CSHARP_DOTNET_ROOT /
+    /// APG_CSHARP_REFASM_ROOT, which win over the default lookup; the first
+    /// set one is the only root consulted. Offline; every dll goes
     /// through <see cref="MetadataReferenceCache.Get"/>; the list is new per call.
     /// </summary>
     public static List<MetadataReference> ResolveFrameworkReferences(
@@ -127,7 +129,8 @@ internal static class ReferenceResolver
                         frameworks.Add("Microsoft.AspNetCore.App");
                 }
                 frameworks.AddRange(project.FrameworkReferences);
-                var roots = (dotnetRoot ?? DotnetRootOverride) is { } root ? new[] { root } : DefaultDotnetRoots();
+                var roots = (dotnetRoot ?? DotnetRootOverride ?? EnvRoot("APG_CSHARP_DOTNET_ROOT")) is { } root
+                    ? new[] { root } : DefaultDotnetRoots();
                 foreach (var fw in frameworks.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     // The first root holding a matching pack wins, in lookup order.
@@ -150,7 +153,8 @@ internal static class ReferenceResolver
                 break;
             case (Family.Framework, var v):
                 var ver = "v" + v;
-                var refAsmRoot = referenceAssembliesRoot ?? ReferenceAssembliesRootOverride ?? DefaultReferenceAssembliesRoot();
+                var refAsmRoot = referenceAssembliesRoot ?? ReferenceAssembliesRootOverride
+                    ?? EnvRoot("APG_CSHARP_REFASM_ROOT") ?? DefaultReferenceAssembliesRoot();
                 var dir = refAsmRoot == null ? null : Path.Combine(refAsmRoot, ".NETFramework", ver);
                 if (dir != null && Directory.Exists(dir))
                 {
@@ -171,6 +175,10 @@ internal static class ReferenceResolver
         // Never alongside the carried runtime: duplicate System assemblies make System types ambiguous.
         return refs.Count > 0 ? refs : new List<MetadataReference>(CompilationLoader.GetDefaultMetadataReferences());
     }
+
+    /// <summary>A root override env var reaching the spawned frontend process; unset or empty = null.</summary>
+    private static string? EnvRoot(string name) =>
+        Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : null;
 
     /// <summary>DOTNET_ROOT, then the platform default install dirs.</summary>
     private static IEnumerable<string> DefaultDotnetRoots()
