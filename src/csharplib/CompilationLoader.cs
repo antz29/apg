@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -61,11 +63,10 @@ internal static class CompilationLoader
     /// </summary>
     public static CSharpCompilation CreateCompilation(List<SyntaxTree> syntaxTrees)
     {
-        var references = GetDefaultMetadataReferences();
         return CSharpCompilation.Create(
             "ApgScanAssembly",
             syntaxTrees,
-            references,
+            GetDefaultMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
     }
 
@@ -77,7 +78,7 @@ internal static class CompilationLoader
     public static CSharpCompilation CreateProjectCompilation(
         CsharpProject project, List<SyntaxTree> syntaxTrees, IEnumerable<CSharpCompilation> referencedCompilations)
     {
-        var references = GetDefaultMetadataReferences();
+        var references = new List<MetadataReference>(GetDefaultMetadataReferences());
         foreach (var referenced in referencedCompilations)
         {
             references.Add(referenced.ToMetadataReference());
@@ -103,64 +104,31 @@ internal static class CompilationLoader
         return unitModels;
     }
 
-    internal static List<MetadataReference> GetDefaultMetadataReferences()
+    private const string CarriedRuntimePrefix = "apg.refs/";
+
+    // Lazy rethrows the original exception, so an empty set surfaces as `csharpfrontend error:`.
+    private static readonly Lazy<ImmutableArray<MetadataReference>> CarriedRuntime = new(LoadCarriedRuntime);
+
+    /// <summary>
+    /// The carried runtime: the net9.0 Microsoft.NETCore.App reference
+    /// assemblies embedded in this assembly under <c>apg.refs/</c>, created
+    /// once and shared read-only. Callers adding references copy first.
+    /// </summary>
+    internal static IReadOnlyList<MetadataReference> GetDefaultMetadataReferences() => CarriedRuntime.Value;
+
+    private static ImmutableArray<MetadataReference> LoadCarriedRuntime()
     {
-        var refs = new List<MetadataReference>();
-        
-        // When running as single-file or standard, try trusted platform assemblies first,
-        // then fall back to AppDomain / AppContext.BaseDirectory / runtime directory.
-        var tpa = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
-        if (!string.IsNullOrEmpty(tpa))
+        var asm = typeof(CompilationLoader).Assembly;
+        var refs = ImmutableArray.CreateBuilder<MetadataReference>();
+        foreach (var name in asm.GetManifestResourceNames()
+                     .Where(n => n.StartsWith(CarriedRuntimePrefix, StringComparison.Ordinal))
+                     .OrderBy(n => n, StringComparer.Ordinal))
         {
-            foreach (var path in tpa.Split(Path.PathSeparator))
-            {
-                if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
-                try
-                {
-                    refs.Add(MetadataReference.CreateFromFile(path));
-                }
-                catch
-                {
-                    // Skip unreadable
-                }
-            }
+            using var stream = asm.GetManifestResourceStream(name)!;
+            refs.Add(MetadataReference.CreateFromStream(stream, filePath: name));
         }
-
         if (refs.Count == 0)
-        {
-            var baseDir = AppContext.BaseDirectory;
-            if (Directory.Exists(baseDir))
-            {
-                foreach (var dll in Directory.GetFiles(baseDir, "*.dll"))
-                {
-                    try
-                    {
-                        refs.Add(MetadataReference.CreateFromFile(dll));
-                    }
-                    catch
-                    {
-                        // Skip
-                    }
-                }
-            }
-        }
-
-        // Also reference loaded assemblies where possible
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            try
-            {
-                if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location) && File.Exists(asm.Location))
-                {
-                    refs.Add(MetadataReference.CreateFromFile(asm.Location));
-                }
-            }
-            catch
-            {
-                // Skip
-            }
-        }
-
-        return refs;
+            throw new InvalidOperationException($"no carried-runtime reference assemblies embedded under `{CarriedRuntimePrefix}`");
+        return refs.ToImmutable();
     }
 }
