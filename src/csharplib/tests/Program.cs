@@ -371,7 +371,7 @@ public static class TestMain
         var cshtml = WriteSource(dir, "V.cshtml", "<p>v</p>");
         var razor = WriteSource(dir, "C.razor", "<p>c</p>");
 
-        var args = new object?[] { new List<string> { cs, csx, cshtml, razor }, null };
+        var args = new object?[] { new List<string> { cs, csx, cshtml, razor }, null, null };
         var trees = (List<SyntaxTree>)FrontendType("CompilationLoader").GetMethod("ParseTrees")!.Invoke(null, args)!;
         var heldBack = (List<string>)args[1]!;
 

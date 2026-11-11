@@ -16,16 +16,18 @@ namespace Apg.CsharpFrontend;
 internal static class CompilationLoader
 {
     /// <summary>
-    /// Parses every discovered file into a syntax tree (UTF-8, latest language
-    /// version): .cs as regular C#, .csx as a script. .cshtml/.razor are never
+    /// Parses every discovered file into a syntax tree (UTF-8) with
+    /// <paramref name="options"/> — a project's preprocessor symbols and
+    /// language version; null means latest language version, no symbols:
+    /// .cs as regular C#, .csx as a script. .cshtml/.razor are never
     /// parsed as C#; their paths are returned through <paramref name="heldBack"/>
     /// in discovery order.
     /// </summary>
-    public static List<SyntaxTree> ParseTrees(IEnumerable<string> files, out List<string> heldBack)
+    public static List<SyntaxTree> ParseTrees(IEnumerable<string> files, out List<string> heldBack, CSharpParseOptions? options = null)
     {
         var syntaxTrees = new List<SyntaxTree>();
         heldBack = new List<string>();
-        var options = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
+        options ??= CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
         foreach (var file in files)
         {
             if (file.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase)
