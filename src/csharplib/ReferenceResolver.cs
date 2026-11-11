@@ -88,8 +88,9 @@ internal static class ReferenceResolver
     /// framework (highest installed version with the TFM's major.minor), for
     /// net4x the Reference Assemblies dir, else the
     /// microsoft.netframework.referenceassemblies package. A found set replaces
-    /// the carried runtime; when none is found a new copy of the carried
-    /// runtime references is returned. <paramref name="dotnetRoot"/> and
+    /// the carried runtime; when none is found — or the required
+    /// Microsoft.NETCore.App pack is not found — a new list of the carried
+    /// runtime references is returned, followed by any found extra packs. <paramref name="dotnetRoot"/> and
     /// <paramref name="referenceAssembliesRoot"/> win over the static
     /// overrides, which win over non-empty APG_CSHARP_DOTNET_ROOT /
     /// APG_CSHARP_REFASM_ROOT, which win over the default lookup; the first
@@ -117,6 +118,7 @@ internal static class ReferenceResolver
             }
         }
 
+        var coreMissing = false;
         var baseTfm = project.TargetFramework?.Split('-')[0].ToLowerInvariant();
         switch (baseTfm == null ? null : ParseTfm(baseTfm))
         {
@@ -129,6 +131,7 @@ internal static class ReferenceResolver
                         frameworks.Add("Microsoft.AspNetCore.App");
                 }
                 frameworks.AddRange(project.FrameworkReferences);
+                coreMissing = frameworks.Contains("Microsoft.NETCore.App", StringComparer.OrdinalIgnoreCase);
                 var roots = (dotnetRoot ?? DotnetRootOverride ?? EnvRoot("APG_CSHARP_DOTNET_ROOT")) is { } root
                     ? new[] { root } : DefaultDotnetRoots();
                 foreach (var fw in frameworks.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -147,6 +150,7 @@ internal static class ReferenceResolver
                             .FirstOrDefault();
                         if (best == null) continue;
                         AddDir(Path.Combine(best, "ref", baseTfm!));
+                        coreMissing &= !fw.Equals("Microsoft.NETCore.App", StringComparison.OrdinalIgnoreCase);
                         break;
                     }
                 }
@@ -172,8 +176,12 @@ internal static class ReferenceResolver
                 if (pkgDir != null) AddDir(pkgDir);
                 break;
         }
-        // Never alongside the carried runtime: duplicate System assemblies make System types ambiguous.
-        return refs.Count > 0 ? refs : new List<MetadataReference>(CompilationLoader.GetDefaultMetadataReferences());
+        // A required but missing NETCore.App pack leaves no System.Runtime: fall back to the carried
+        // runtime, keeping any found extra packs (e.g. AspNetCore.App) appended after it.
+        var carried = CompilationLoader.GetDefaultMetadataReferences();
+        if (coreMissing) return carried.Concat(refs.Where(r => !carried.Contains(r))).ToList();
+        // Never alongside a found NETCore.App pack: duplicate System assemblies make System types ambiguous.
+        return refs.Count > 0 ? refs : new List<MetadataReference>(carried);
     }
 
     /// <summary>A root override env var reaching the spawned frontend process; unset or empty = null.</summary>

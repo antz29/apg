@@ -86,6 +86,7 @@ public static class TestMain
             TestFrameworkPackSelection(baseDir);
             TestFrameworkNet4x(baseDir);
             TestFrameworkCarriedFallback(baseDir);
+            TestFrameworkPartialPacks(baseDir);
             TestEnvRootOverrides(baseDir);
             TestUnrestoredPackageTargets(baseDir);
             TestFrontendAssemblyIsolation(baseDir);
@@ -1579,6 +1580,26 @@ public static class TestMain
         Check("carried fallback scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
         Check("carried fallback scan: System.Console.WriteLine is an unresolved_call categorized stdlib",
             c.Records.Contains("unresolved_call|App.Caller.Go|System.Console.WriteLine") && c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
+    }
+
+    /// <summary>
+    /// A Web net8.0 project whose dotnet root holds only Microsoft.AspNetCore.App.Ref 8.0 (no
+    /// NETCore.App.Ref): a new list of the carried runtime (so its System.Runtime) followed by the
+    /// found AspNetCore.App pack, never the AspNetCore pack alone.
+    /// </summary>
+    private static void TestFrameworkPartialPacks(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "fw-partial"));
+        var asp = PutStub(Path.Combine(dir, "iso-dotnet", "packs", "Microsoft.AspNetCore.App.Ref", "8.0.12", "ref", "net8.0", "Microsoft.AspNetCore.dll"),
+            StubAssembly("Microsoft.AspNetCore", "StubPartialAsp"));
+        var csproj = FwProject(Path.Combine(dir, "App"), "Microsoft.NET.Sdk.Web", "net8.0");
+        var carried = CarriedRuntime();
+        var refs = Isolated(dir, Path.Combine(dir, "nuget"), () => FrameworkRefs(csproj));
+        var got = refs.Select(r => Path.GetFullPath(RefPath(r))).ToList();
+        Check("partial packs: missing NETCore.App keeps the carried runtime's System.Runtime",
+            refs.Any(r => carried.Contains(r) && Path.GetFileName(RefPath(r)) == "System.Runtime.dll"), Join(got));
+        Check("partial packs: a new list of the carried runtime followed by exactly the found AspNetCore.App pack",
+            !ReferenceEquals(refs, carried) && refs.Take(carried.Count).SequenceEqual(carried) && got.Skip(carried.Count).SequenceEqual(new[] { asp }), Join(got));
     }
 
     /// Runs `body` with NUGET_PACKAGES = an empty dir, APG_CSHARP_DOTNET_ROOT / APG_CSHARP_REFASM_ROOT
