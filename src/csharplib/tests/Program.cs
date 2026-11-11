@@ -61,6 +61,7 @@ public static class TestMain
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
+            TestFilteredSharedFileRegistration(baseDir);
         }
         catch (Exception ex)
         {
@@ -814,6 +815,48 @@ public static class TestMain
             !tc.Records.Any(s => IsDecl(s) && RecordPath(s) == util), tall);
         var goId = tg.Funcs.FirstOrDefault(f => f.Parent == "App.Caller" && f.Name == "Go")?.Id ?? "";
         Check("targeted scan: cross-project call lands on the callee's canonical FQN, identical to the full scan's",
+            goId != "" && tg.Edges.Any(e => e.Type == "calls" && e.From == goId && e.To == callee), tall);
+    }
+
+    /// <summary>
+    /// Projects A and B both compile Shared/S.cs (A owns it: first in build
+    /// order). B's target file calls S.Hit through B's copy; a filtered scan
+    /// must count S.Hit once (no overload suffix) and map B's symbol back to
+    /// the owner's, landing on the full scan's plain FQN.
+    /// </summary>
+    private static void TestFilteredSharedFileRegistration(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "shared-file"));
+        const string proj = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+              <ItemGroup><Compile Include="../Shared/S.cs" /></ItemGroup>
+            </Project>
+            """;
+        WriteSource(Path.Combine(dir, "A"), "A.csproj", proj);
+        WriteSource(Path.Combine(dir, "B"), "B.csproj", proj);
+        WriteSource(Path.Combine(dir, "Shared"), "S.cs", "namespace Sh;\n\npublic class S\n{\n    public static void Hit() { }\n}\n");
+        var caller = WriteSource(Path.Combine(dir, "B"), "Caller.cs",
+            "namespace Bn;\n\npublic class Caller\n{\n    public void Go() { Sh.S.Hit(); }\n}\n");
+
+        const string callee = "Sh.S.Hit";
+        var full = RunScanner(dir);
+        Check("shared-file full scan exits 0", full.Code == 0, "exit " + full.Code + "\n" + full.Err);
+        var fg = ParseGraph(full.Out);
+        var fc = Canonicalize(fg);
+        var fall = Join(fc.Records) + "\nSTDERR:\n" + full.Err;
+        Check("shared-file full scan emits Sh.S.Hit exactly once",
+            fg.Funcs.Count(f => f.Parent == "Sh.S" && f.Name == "Hit") == 1 && fc.NodeFqns.Contains(callee), fall);
+        Check("shared-file full scan: calls edge to the plain FQN Sh.S.Hit",
+            fc.Records.Contains($"calls|Bn.Caller.Go|{callee}"), fall);
+
+        var targets = WriteTargets(baseDir, "shared-file.targets", caller);
+        var tr = RunScanner(dir, "--targets", targets);
+        Check("shared-file targeted scan exits 0", tr.Code == 0, "exit " + tr.Code + "\n" + tr.Err);
+        var tg = ParseGraph(tr.Out);
+        var tall = Join(Canonicalize(tg).Records) + "\nSTDERR:\n" + tr.Err;
+        var goId = tg.Funcs.FirstOrDefault(f => f.Parent == "Bn.Caller" && f.Name == "Go")?.Id ?? "";
+        Check("shared-file targeted scan: call lands on the plain FQN Sh.S.Hit (no params suffix), as in the full scan",
             goId != "" && tg.Edges.Any(e => e.Type == "calls" && e.From == goId && e.To == callee), tall);
     }
 
