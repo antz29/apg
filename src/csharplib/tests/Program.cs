@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace CsharpFrontend.Tests;
 
@@ -75,6 +76,12 @@ public static class TestMain
             TestProjectLoadedOnce(baseDir);
             TestDiscoverFilesScope(baseDir);
             TestOverloadFailureKeepsBoundMethod(baseDir);
+            TestRestoredReferencesBindInScan(baseDir);
+            TestReferencePrecedence(baseDir);
+            TestAssetsLongFormTarget(baseDir);
+            TestPackageFolderSelection(baseDir);
+            TestPackagesFolderAncestorScope(baseDir);
+            TestPackageVersionRules(baseDir);
         }
         catch (Exception ex)
         {
@@ -1115,6 +1122,276 @@ public static class TestMain
             c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
         Check("overload failure: no unbound as-written target is emitted",
             !c.UnresFqns.Contains("Console.WriteLine") && !c.Records.Any(s => s.EndsWith("|unknown", StringComparison.Ordinal)), all);
+    }
+
+    // ------------------------------------------------------------------
+    // ReferenceResolver: restored package/assembly references over temp trees,
+    // with stub assemblies emitted in-process by Roslyn. Every case runs under
+    // Isolated (its own NUGET_PACKAGES and root overrides, defaults restored after).
+    // ------------------------------------------------------------------
+
+    /// A stub assembly declaring `{ns}.T` with a static Hit(), compiled against the carried runtime.
+    private static byte[] StubAssembly(string name, string ns)
+    {
+        var refs = (IEnumerable<MetadataReference>)FrontendType("CompilationLoader")
+            .GetMethod("GetDefaultMetadataReferences", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
+        var compilation = CSharpCompilation.Create(name,
+            new[] { CSharpSyntaxTree.ParseText($"namespace {ns} {{ public class T {{ public static void Hit() {{ }} }} }}") },
+            refs, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var ms = new MemoryStream();
+        var result = compilation.Emit(ms);
+        if (!result.Success) throw new InvalidOperationException("stub emit failed:\n" + Join(result.Diagnostics.Select(d => d.ToString())));
+        return ms.ToArray();
+    }
+
+    private static string PutStub(string path, byte[] image)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, image);
+        return Path.GetFullPath(path);
+    }
+
+    /// SDK-style net8.0 App.csproj in `dir` with the given reference items.
+    private static string RefProject(string dir, string items) => WriteSource(dir, "App.csproj",
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>\n  <ItemGroup>"
+        + items + "</ItemGroup>\n</Project>\n");
+
+    private static string PkgRef(string id, string? version) => version == null
+        ? $"<PackageReference Include=\"{id}\" />"
+        : $"<PackageReference Include=\"{id}\" Version=\"{version}\" />";
+
+    /// obj/project.assets.json under `projectDir`: one package under `targetKey`, its library path id/version, one package folder.
+    private static void WriteAssets(string projectDir, string id, string version, string targetKey, string folder, string compile)
+    {
+        var key = $"{id}/{version}";
+        var assets = new Dictionary<string, object>
+        {
+            ["version"] = 3,
+            ["targets"] = new Dictionary<string, object>
+            {
+                [targetKey] = new Dictionary<string, object>
+                {
+                    [key] = new Dictionary<string, object> { ["type"] = "package", ["compile"] = new Dictionary<string, object> { [compile] = new Dictionary<string, object>() } },
+                },
+            },
+            ["libraries"] = new Dictionary<string, object> { [key] = new Dictionary<string, object> { ["type"] = "package", ["path"] = $"{id.ToLowerInvariant()}/{version}" } },
+            ["packageFolders"] = new Dictionary<string, object> { [folder + "/"] = new Dictionary<string, object>() },
+        };
+        WriteSource(Path.Combine(projectDir, "obj"), "project.assets.json", JsonSerializer.Serialize(assets));
+    }
+
+    /// Runs `body` with NUGET_PACKAGES = `nuget` and both ReferenceResolver root overrides on fresh empty
+    /// dirs under `dir`; restores the harness defaults (never unset) in a finally.
+    private static T Isolated<T>(string dir, string nuget, Func<T> body)
+    {
+        var resolver = FrontendType("ReferenceResolver");
+        var flags = BindingFlags.NonPublic | BindingFlags.Static;
+        try
+        {
+            Environment.SetEnvironmentVariable("NUGET_PACKAGES", Directory.CreateDirectory(nuget).FullName);
+            resolver.GetProperty("DotnetRootOverride", flags)!.SetValue(null, Directory.CreateDirectory(Path.Combine(dir, "iso-dotnet")).FullName);
+            resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.SetValue(null, Directory.CreateDirectory(Path.Combine(dir, "iso-refasm")).FullName);
+            return body();
+        }
+        finally
+        {
+            ApplyHarnessDefaults();
+        }
+    }
+
+    /// ReferenceResolver.Resolve over the read project, as full dll paths in result order.
+    private static List<string> ResolvePaths(string csproj, string scanRoot)
+        => ((IEnumerable<MetadataReference>)FrontendType("ReferenceResolver").GetMethod("Resolve")!.Invoke(null, new[] { ReadProject(csproj), scanRoot })!)
+            .Select(r => Path.GetFullPath(((PortableExecutableReference)r).FilePath!)).ToList();
+
+    /// <summary>
+    /// A package from obj/project.assets.json, an assembly from its HintPath, a package from the
+    /// solution packages/ folder and one from the global packages folder each bind the caller's
+    /// call and type use into the stub's metadata (external), where an unrestored one stays unknown.
+    /// </summary>
+    private static void TestRestoredReferencesBindInScan(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-scan"));
+        void Case(string name, string ns, Func<string, string, string> arrange)
+        {
+            var dir = Path.Combine(root, name);
+            var app = Path.Combine(dir, "App");
+            var nuget = Path.Combine(dir, "nuget");
+            WriteSource(app, "Caller.cs", $"namespace App;\n\npublic class Caller\n{{\n    public {ns}.T Field;\n    public void Go() {{ {ns}.T.Hit(); }}\n}}\n");
+            RefProject(app, arrange(dir, nuget));
+            var r = Isolated(dir, nuget, () => RunScanner(dir));
+            var c = Canonicalize(ParseGraph(r.Out));
+            var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+            var category = name == "unrestored" ? "unknown" : "external";
+            Check($"restored refs ({name}): scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+            Check($"restored refs ({name}): call {ns}.T.Hit is {category}",
+                c.Records.Contains($"unresolved_call|App.Caller.Go|{ns}.T.Hit") && c.Records.Contains($"unresolved|{ns}.T.Hit|{category}"), all);
+            Check($"restored refs ({name}): type use {ns}.T is {category}",
+                c.Records.Contains($"unresolved|{ns}.T|{category}") && c.Records.Any(s => s.StartsWith("unresolved_use|", StringComparison.Ordinal) && s.EndsWith($"|{ns}.T", StringComparison.Ordinal)), all);
+        }
+
+        Case("assets", "StubAssets", (dir, _) =>
+        {
+            var folder = Path.Combine(dir, "restored");
+            PutStub(Path.Combine(folder, "stub.assets", "1.0.0", "lib", "net8.0", "Stub.Assets.dll"), StubAssembly("Stub.Assets", "StubAssets"));
+            WriteAssets(Path.Combine(dir, "App"), "Stub.Assets", "1.0.0", "net8.0", folder, "lib/net8.0/Stub.Assets.dll");
+            return PkgRef("Stub.Assets", "1.0.0");
+        });
+        Case("hintpath", "StubHint", (dir, _) =>
+        {
+            PutStub(Path.Combine(dir, "lib", "Stub.Hint.dll"), StubAssembly("Stub.Hint", "StubHint"));
+            return "<Reference Include=\"Stub.Hint\"><HintPath>..\\lib\\Stub.Hint.dll</HintPath></Reference>";
+        });
+        Case("packages-folder", "StubPkgs", (dir, _) =>
+        {
+            PutStub(Path.Combine(dir, "packages", "Stub.Pkgs.1.0.0", "lib", "net8.0", "Stub.Pkgs.dll"), StubAssembly("Stub.Pkgs", "StubPkgs"));
+            return PkgRef("Stub.Pkgs", "1.0.0");
+        });
+        Case("global-folder", "StubGlobal", (_, nuget) =>
+        {
+            PutStub(Path.Combine(nuget, "stub.global", "1.0.0", "lib", "net8.0", "Stub.Global.dll"), StubAssembly("Stub.Global", "StubGlobal"));
+            return PkgRef("Stub.Global", "1.0.0");
+        });
+        Case("unrestored", "StubMissing", (_, _) => PkgRef("Stub.Missing", "1.0.0"));
+    }
+
+    /// <summary>
+    /// A package present in the assets file's folder, the packages/ folder and the global folder
+    /// resolves from the assets file; without the assets file from packages/; with neither, from
+    /// the global folder.
+    /// </summary>
+    private static void TestReferencePrecedence(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-precedence"));
+        var image = StubAssembly("Stub.Prec", "StubPrec");
+        string Assets(string dir) => PutStub(Path.Combine(dir, "restored", "stub.prec", "1.0.0", "lib", "net8.0", "Stub.Prec.dll"), image);
+        string Packages(string dir) => PutStub(Path.Combine(dir, "packages", "Stub.Prec.1.0.0", "lib", "net8.0", "Stub.Prec.dll"), image);
+        string Global(string dir) => PutStub(Path.Combine(dir, "nuget", "stub.prec", "1.0.0", "lib", "net8.0", "Stub.Prec.dll"), image);
+
+        foreach (var (name, present) in new[] { ("assets", 3), ("packages", 2), ("global", 1) })
+        {
+            var dir = Path.Combine(root, name);
+            var app = Path.Combine(dir, "App");
+            var csproj = RefProject(app, PkgRef("Stub.Prec", "1.0.0"));
+            var global = Global(dir);
+            var packages = present >= 2 ? Packages(dir) : null;
+            string? assets = null;
+            if (present == 3)
+            {
+                assets = Assets(dir);
+                WriteAssets(app, "Stub.Prec", "1.0.0", "net8.0", Path.Combine(dir, "restored"), "lib/net8.0/Stub.Prec.dll");
+            }
+            var want = assets ?? packages ?? global;
+            var got = Isolated(dir, Path.Combine(dir, "nuget"), () => ResolvePaths(csproj, dir));
+            Check($"precedence: with {present} location(s) the package resolves from {name} alone",
+                got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+        }
+    }
+
+    /// <summary>
+    /// An assets file keyed by the long form (.NETCoreApp,Version=v8.0) resolves like the short
+    /// form (net8.0), the dll taken from its recorded packageFolders (not the global folder).
+    /// </summary>
+    private static void TestAssetsLongFormTarget(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-assets-form"));
+        var image = StubAssembly("Stub.Form", "StubForm");
+        var got = new Dictionary<string, (string Want, List<string> Got)>();
+        foreach (var (name, key) in new[] { ("long", ".NETCoreApp,Version=v8.0"), ("short", "net8.0") })
+        {
+            var dir = Path.Combine(root, name);
+            var app = Path.Combine(dir, "App");
+            var csproj = RefProject(app, PkgRef("Stub.Form", "1.0.0"));
+            var folder = Path.Combine(dir, "recorded-folder");
+            var want = PutStub(Path.Combine(folder, "stub.form", "1.0.0", "lib", "net8.0", "Stub.Form.dll"), image);
+            WriteAssets(app, "Stub.Form", "1.0.0", key, folder, "lib/net8.0/Stub.Form.dll");
+            got[name] = (want, Isolated(dir, Path.Combine(dir, "nuget-empty"), () => ResolvePaths(csproj, dir)));
+        }
+        Check("assets long-form target key resolves the package from its recorded packageFolders",
+            got["long"].Got.SequenceEqual(new[] { got["long"].Want }), Join(got["long"].Got));
+        Check("assets short-form target key resolves the same way",
+            got["short"].Got.SequenceEqual(new[] { got["short"].Want }), Join(got["short"].Got));
+    }
+
+    /// <summary>
+    /// A package holding ref/ and lib/ resolves ref/ only; a net8.0 project picks net6.0 alone from
+    /// net6.0/netstandard2.0/net48, and netstandard2.0 alone from netstandard2.0/net48.
+    /// </summary>
+    private static void TestPackageFolderSelection(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-folders"));
+        var image = StubAssembly("Stub.Sel", "StubSel");
+        var cases = new (string Name, string[] Folders, string Want)[]
+        {
+            ("ref-over-lib", new[] { "ref/net8.0", "lib/net8.0" }, "ref/net8.0"),
+            ("net6-of-three", new[] { "lib/net6.0", "lib/netstandard2.0", "lib/net48" }, "lib/net6.0"),
+            ("netstandard-of-two", new[] { "lib/netstandard2.0", "lib/net48" }, "lib/netstandard2.0"),
+        };
+        foreach (var (name, folders, wantFolder) in cases)
+        {
+            var dir = Path.Combine(root, name);
+            var nuget = Path.Combine(dir, "nuget");
+            var csproj = RefProject(Path.Combine(dir, "App"), PkgRef("Stub.Sel", "1.0.0"));
+            var pkg = Path.Combine(nuget, "stub.sel", "1.0.0");
+            foreach (var f in folders) PutStub(Path.Combine(pkg, f, "Stub.Sel.dll"), image);
+            var want = Path.GetFullPath(Path.Combine(pkg, wantFolder, "Stub.Sel.dll"));
+            var got = Isolated(dir, nuget, () => ResolvePaths(csproj, dir));
+            Check($"package folder selection ({name}): exactly {wantFolder}", got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+        }
+    }
+
+    /// <summary>
+    /// packages/ two levels above the project (below the scan root) is found; a packages/ above
+    /// the scan root is ignored (global folder empty, so nothing resolves).
+    /// </summary>
+    private static void TestPackagesFolderAncestorScope(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-packages-scope"));
+        var image = StubAssembly("Stub.Anc", "StubAnc");
+
+        var below = Path.Combine(root, "below", "scan");
+        var csproj = RefProject(Path.Combine(below, "x", "y", "App"), PkgRef("Stub.Anc", "1.0.0"));
+        // Project dir x/y/App: x is two levels above it, the scan root three.
+        var want = PutStub(Path.Combine(below, "x", "packages", "Stub.Anc.1.0.0", "lib", "net8.0", "Stub.Anc.dll"), image);
+        var got = Isolated(below, Path.Combine(root, "below", "nuget-empty"), () => ResolvePaths(csproj, below));
+        Check("packages/ two levels above the project, below the scan root, is used",
+            got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+
+        var above = Path.Combine(root, "above");
+        var scan = Path.Combine(above, "scan");
+        csproj = RefProject(Path.Combine(scan, "App"), PkgRef("Stub.Anc", "1.0.0"));
+        PutStub(Path.Combine(above, "packages", "Stub.Anc.1.0.0", "lib", "net8.0", "Stub.Anc.dll"), image);
+        got = Isolated(scan, Path.Combine(above, "nuget-empty"), () => ResolvePaths(csproj, scan));
+        Check("packages/ above the scan root is ignored", got.Count == 0, Join(got));
+    }
+
+    /// <summary>
+    /// A version-less PackageReference takes its version from an ancestor Directory.Packages.props
+    /// PackageVersion; a floating 1.* picks the highest present 1.x folder (1.10.0 over 1.2.0, not 2.0.0).
+    /// </summary>
+    private static void TestPackageVersionRules(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-versions"));
+        var image = StubAssembly("Stub.Ver", "StubVer");
+
+        var cpm = Path.Combine(root, "central");
+        var nuget = Path.Combine(cpm, "nuget");
+        WriteSource(cpm, "Directory.Packages.props",
+            "<Project>\n  <ItemGroup><PackageVersion Include=\"Stub.Ver\" Version=\"2.0.0\" /></ItemGroup>\n</Project>\n");
+        var csproj = RefProject(Path.Combine(cpm, "src", "App"), PkgRef("Stub.Ver", null));
+        foreach (var v in new[] { "1.0.0", "2.0.0", "3.0.0" }) PutStub(Path.Combine(nuget, "stub.ver", v, "lib", "net8.0", "Stub.Ver.dll"), image);
+        var want = Path.GetFullPath(Path.Combine(nuget, "stub.ver", "2.0.0", "lib", "net8.0", "Stub.Ver.dll"));
+        var got = Isolated(cpm, nuget, () => ResolvePaths(csproj, cpm));
+        Check("version-less PackageReference takes the ancestor Directory.Packages.props PackageVersion",
+            got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+
+        var flt = Path.Combine(root, "floating");
+        nuget = Path.Combine(flt, "nuget");
+        csproj = RefProject(Path.Combine(flt, "App"), PkgRef("Stub.Ver", "1.*"));
+        foreach (var v in new[] { "1.2.0", "1.10.0", "2.0.0" }) PutStub(Path.Combine(nuget, "stub.ver", v, "lib", "net8.0", "Stub.Ver.dll"), image);
+        want = Path.GetFullPath(Path.Combine(nuget, "stub.ver", "1.10.0", "lib", "net8.0", "Stub.Ver.dll"));
+        got = Isolated(flt, nuget, () => ResolvePaths(csproj, flt));
+        Check("floating 1.* picks the highest present 1.x folder", got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
     }
 
     // ------------------------------------------------------------------
