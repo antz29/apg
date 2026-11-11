@@ -288,7 +288,8 @@ public class Scanner
 
     public void Run()
     {
-        var files = new SourceDiscovery(_moduleDirs, _excludePatterns).DiscoverFiles(_rootDir).ToList();
+        var discovery = new SourceDiscovery(_moduleDirs, _excludePatterns);
+        var files = discovery.DiscoverFiles(_rootDir).ToList();
         if (files.Count == 0)
         {
             Console.Error.WriteLine("No .cs, .csx, .cshtml or .razor files found to scan.");
@@ -297,26 +298,132 @@ public class Scanner
 
         Console.Error.WriteLine($"Scanning {files.Count} C# source files...");
 
-        // Parse all syntax trees, then compile with core BCL metadata
-        // references: one compilation over every .cs tree, plus one per .csx
-        // script over exactly that script's tree, so a script binds only its
-        // own declarations (scripts sharing one compilation would merge into
-        // one Script class). The .cs compilation always covers the FULL .cs
-        // set: the target set filters emission, not resolution, so a target
-        // file's references resolve exactly.
-        var syntaxTrees = CompilationLoader.ParseTrees(files, out List<string> heldBack);
-        var csTrees = syntaxTrees.Where(t => t.Options.Kind != SourceCodeKind.Script).ToList();
-        var byTree = CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(csTrees), csTrees)
-            .Concat(syntaxTrees.Where(t => t.Options.Kind == SourceCodeKind.Script)
-                .SelectMany(t => CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(new List<SyntaxTree> { t }), new List<SyntaxTree> { t })))
-            .ToDictionary(u => u.Tree);
+        // Project discovery: a dedicated .sln/.csproj walk under the root with
+        // the same skip/scope predicate as source discovery; projects are
+        // de-duplicated by full path (walk- and .sln-reached alike). An
+        // unreadable .sln/.csproj warns and is skipped, never failing the scan.
+        var projectPaths = new SortedSet<string>(StringComparer.Ordinal);
+        var solutions = new List<string>();
+        var dirs = new Stack<string>();
+        dirs.Push(_rootDir);
+        while (dirs.Count > 0)
+        {
+            var dir = dirs.Pop();
+            try
+            {
+                foreach (var f in Directory.GetFiles(dir))
+                {
+                    if (discovery.IsExcluded(f, false)) continue;
+                    if (f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectPaths.Add(Path.GetFullPath(f));
+                    else if (f.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)) solutions.Add(f);
+                }
+                foreach (var d in Directory.GetDirectories(dir))
+                {
+                    if (!discovery.IsExcluded(d, true)) dirs.Push(d);
+                }
+            }
+            catch
+            {
+                // Unreadable directory: skipped, as in source discovery.
+            }
+        }
+        foreach (var sln in solutions)
+        {
+            try
+            {
+                foreach (var p in SolutionReader.Read(sln))
+                {
+                    if (!discovery.IsExcluded(p, false)) projectPaths.Add(p);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Warning: could not read solution {sln}: {ex.Message}");
+            }
+        }
+        var projects = new Dictionary<string, CsharpProject>(StringComparer.Ordinal);
+        foreach (var path in projectPaths)
+        {
+            try
+            {
+                projects[path] = ProjectFileReader.Read(path);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Warning: could not read project {path}: {ex.Message}");
+            }
+        }
+
+        // Loaded projects a project references (as written, relative to its
+        // directory); a missing or unloaded reference is dropped.
+        IEnumerable<CsharpProject> References(CsharpProject p) => p.ProjectReferences
+            .Select(r => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(p.Path)!, r.Replace('\\', Path.DirectorySeparatorChar))))
+            .Distinct()
+            .Where(projects.ContainsKey)
+            .Select(r => projects[r]);
+
+        // Project-reference (topological) order; a reference cycle is cut at
+        // its back edge, so that reference is simply not a compilation reference.
+        var order = new List<CsharpProject>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        void Visit(CsharpProject p)
+        {
+            if (!visited.Add(p.Path)) return;
+            foreach (var r in References(p)) Visit(r);
+            order.Add(p);
+        }
+        foreach (var p in projects.Values.OrderBy(p => p.Path, StringComparer.Ordinal)) Visit(p);
+
+        // Compile with core BCL metadata references: one compilation per
+        // project over its discovered files (SourcePaths, plus the Razor files
+        // under its directory so its compilation holds them back), one
+        // projectless compilation over every other .cs/.cshtml/.razor file,
+        // and one per .csx script over exactly that script's tree, so a script
+        // binds only its own declarations (scripts sharing one compilation
+        // would merge into one Script class). Each compilation covers its FULL
+        // set: the target set filters emission, not resolution. A file
+        // compiled by several projects emits from the first compilation
+        // (build order) only; held-back Razor is the union, emitted once.
+        static bool IsRazor(string f) =>
+            f.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
+        var nonScripts = files.Where(f => !f.EndsWith(".csx", StringComparison.OrdinalIgnoreCase)).ToList();
+        var owned = new HashSet<string>(StringComparer.Ordinal);
+        var heldBack = new HashSet<string>(StringComparer.Ordinal);
+        var byPath = new Dictionary<string, (SyntaxTree Tree, SemanticModel Model, CompilationUnitSyntax Root)>(StringComparer.Ordinal);
+        var compiled = new Dictionary<string, CSharpCompilation>(StringComparer.Ordinal);
+        foreach (var p in order)
+        {
+            var sources = new HashSet<string>(p.SourcePaths, StringComparer.Ordinal);
+            var projectDir = Path.GetDirectoryName(p.Path)! + Path.DirectorySeparatorChar;
+            var mine = nonScripts.Where(f => IsRazor(f) ? f.StartsWith(projectDir, StringComparison.Ordinal) : sources.Contains(f)).ToList();
+            owned.UnionWith(mine);
+            var version = p.LanguageVersion is { } lv && LanguageVersionFacts.TryParse(lv, out var parsed) ? parsed : LanguageVersion.Latest;
+            var options = CSharpParseOptions.Default.WithLanguageVersion(version).WithPreprocessorSymbols(p.PreprocessorSymbols);
+            var trees = CompilationLoader.ParseTrees(mine, out var held, options);
+            heldBack.UnionWith(held);
+            var compilation = CompilationLoader.CreateProjectCompilation(p, trees,
+                References(p).Where(r => compiled.ContainsKey(r.Path)).Select(r => compiled[r.Path]).ToList());
+            compiled[p.Path] = compilation;
+            foreach (var u in CompilationLoader.BuildModels(compilation, trees)) byPath.TryAdd(u.Tree.FilePath, u);
+        }
+        var loose = nonScripts.Where(f => !owned.Contains(f)).ToList();
+        var looseTrees = CompilationLoader.ParseTrees(loose, out var looseHeld);
+        heldBack.UnionWith(looseHeld);
+        foreach (var u in CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(looseTrees), looseTrees)) byPath.TryAdd(u.Tree.FilePath, u);
+        var scripts = files.Where(f => f.EndsWith(".csx", StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var t in CompilationLoader.ParseTrees(scripts, out _))
+        {
+            var one = new List<SyntaxTree> { t };
+            foreach (var u in CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(one), one)) byPath.TryAdd(u.Tree.FilePath, u);
+        }
 
         // An all-targets request (every discovered file selected) is the full
         // path, so it stays byte-identical to a plain full scan.
         bool filtered = _filtered && !files.All(f => _targetFiles.Contains(f));
 
-        // One semantic model per tree, joined back in discovery order.
-        var unitModels = syntaxTrees.Select(t => byTree[t]).ToList();
+        // One semantic model per file, from its emitting compilation, joined
+        // back in discovery order.
+        var unitModels = files.Where(byPath.ContainsKey).Select(f => byPath[f]).ToList();
 
         if (filtered)
         {
@@ -340,7 +447,7 @@ public class Scanner
 
         // Held-back .cshtml/.razor files stay graphed as file-only nodes (no
         // namespace, so the root parent a namespace-less .cs file gets).
-        foreach (var path in heldBack)
+        foreach (var path in files.Where(heldBack.Contains))
         {
             if (filtered && !IsTargetFile(path)) continue;
             var text = Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(path, Encoding.UTF8));
