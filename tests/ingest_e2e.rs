@@ -2661,4 +2661,95 @@ mod e2e {
         }
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn namespace_less_csharp_file_is_contained_by_its_language() {
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "csharp",
+            config: None,
+            base: None,
+        };
+        let in_edges = |graph: &apg::graph::Graph, file: &str| -> BTreeSet<String> {
+            graph
+                .contains
+                .iter()
+                .filter(|(_, b)| b == file)
+                .map(|(a, _)| a.clone())
+                .collect()
+        };
+        // (a) Mixed stream: only the csharp empty parent roots under its
+        // Language; go's stays uncontained, md's lands under the `md.` root.
+        let records = vec![
+            Record::LangSwitch {
+                language: "csharp".to_string(),
+            },
+            Record::Module {
+                fqn: "Acme.App".to_string(),
+            },
+            file_rec("cs/Top.cs", "", 10),
+            file_rec("cs/Named.cs", "Acme.App", 20),
+            Record::LangSwitch {
+                language: "go".to_string(),
+            },
+            file_rec("go/orphan.go", "", 5),
+            Record::LangSwitch {
+                language: "md".to_string(),
+            },
+            Record::Module { fqn: String::new() },
+            file_rec("README.md", "", 3),
+        ];
+        let (graph, _) = ingest(records, &opts, None);
+        assert_eq!(
+            graph.nodes.get("csharp").map(|n| n.kind),
+            Some(NodeKind::Language)
+        );
+        assert_eq!(
+            in_edges(&graph, "cs/Top.cs"),
+            BTreeSet::from(["csharp".to_string()]),
+            "the namespace-less C# file hangs off the csharp Language"
+        );
+        assert_eq!(
+            in_edges(&graph, "cs/Named.cs"),
+            BTreeSet::from(["csharp.Acme.App".to_string()]),
+            "the namespaced C# file sits under its rooted module only"
+        );
+        assert!(graph.nodes.contains_key("go/orphan.go"));
+        assert!(
+            in_edges(&graph, "go/orphan.go").is_empty(),
+            "a go empty parent stays uncontained"
+        );
+        assert_eq!(
+            in_edges(&graph, "README.md"),
+            BTreeSet::from(["md.".to_string()]),
+            "the md repo-root file sits under the `md.` root module"
+        );
+
+        // (b) All-namespace-less csharp stream: no Module record at all.
+        let records = vec![
+            Record::LangSwitch {
+                language: "csharp".to_string(),
+            },
+            file_rec("Program.cs", "", 4),
+        ];
+        let (graph, _) = ingest(records, &opts, None);
+        let languages: Vec<&str> = graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == NodeKind::Language)
+            .map(|(fqn, _)| fqn.as_str())
+            .collect();
+        assert_eq!(
+            languages,
+            vec!["csharp"],
+            "exactly one csharp Language node"
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("csharp".to_string(), "Program.cs".to_string())),
+            "Program.cs is contained by its Language, not left uncontained"
+        );
+    }
 }
