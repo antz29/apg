@@ -387,7 +387,10 @@ public class Scanner
         }
         foreach (var p in projects.Values.OrderBy(p => p.Path, StringComparer.Ordinal)) Visit(p);
 
-        // Compile with core BCL metadata references: one compilation per
+        // Each project compilation uses its resolved framework, package and
+        // assembly references, with the carried runtime as fallback; the
+        // projectless compilation and each per-script .csx compilation keep
+        // the carried-runtime references. One compilation per
         // project over its discovered files (SourcePaths, plus the Razor files
         // under its directory so its compilation holds them back), one
         // projectless compilation over every other .cs/.cshtml/.razor file,
@@ -414,7 +417,7 @@ public class Scanner
             var options = CSharpParseOptions.Default.WithLanguageVersion(version).WithPreprocessorSymbols(p.PreprocessorSymbols);
             var trees = CompilationLoader.ParseTrees(mine, out var held, options);
             heldBack.UnionWith(held);
-            var compilation = CompilationLoader.CreateProjectCompilation(p, trees,
+            var compilation = CompilationLoader.CreateProjectCompilation(p, scanRoot, trees,
                 References(p).Where(r => compiled.ContainsKey(r.Path)).Select(r => compiled[r.Path]).ToList());
             compiled[p.Path] = compilation;
             foreach (var u in CompilationLoader.BuildModels(compilation, trees)) byPath.TryAdd(u.Tree.FilePath, u);

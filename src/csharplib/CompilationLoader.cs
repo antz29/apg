@@ -72,13 +72,20 @@ internal static class CompilationLoader
 
     /// <summary>
     /// Builds one project's compilation, named after the project, over its
-    /// parsed trees with core BCL metadata references plus a compilation
-    /// reference to each already-built referenced project's compilation.
+    /// parsed trees with its framework references first, then its resolved
+    /// package and assembly references, de-duplicated by reference identity,
+    /// then a compilation reference to each already-built referenced
+    /// project's compilation.
     /// </summary>
     public static CSharpCompilation CreateProjectCompilation(
-        CsharpProject project, List<SyntaxTree> syntaxTrees, IEnumerable<CSharpCompilation> referencedCompilations)
+        CsharpProject project, string scanRoot, List<SyntaxTree> syntaxTrees, IEnumerable<CSharpCompilation> referencedCompilations)
     {
-        var references = new List<MetadataReference>(GetDefaultMetadataReferences());
+        var references = new List<MetadataReference>();
+        var seen = new HashSet<MetadataReference>();
+        foreach (var reference in ReferenceResolver.ResolveFrameworkReferences(project).Concat(ReferenceResolver.Resolve(project, scanRoot)))
+        {
+            if (seen.Add(reference)) references.Add(reference);
+        }
         foreach (var referenced in referencedCompilations)
         {
             references.Add(referenced.ToMetadataReference());
