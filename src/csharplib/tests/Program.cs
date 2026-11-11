@@ -40,6 +40,13 @@ public static class TestMain
         string baseDir = Path.Combine(Path.GetTempPath(), "apg-csharp-test-" + Guid.NewGuid().ToString("N"));
         try
         {
+            // Harness-wide reference isolation: no test may read the developer's NuGet cache, dotnet or Reference Assemblies dirs.
+            string iso = Path.GetFullPath(Path.Combine(baseDir, "isolation"));
+            HarnessNugetPackages = Directory.CreateDirectory(Path.Combine(iso, "nuget")).FullName;
+            HarnessDotnetRoot = Directory.CreateDirectory(Path.Combine(iso, "dotnet")).FullName;
+            HarnessRefAsmRoot = Directory.CreateDirectory(Path.Combine(iso, "refasm")).FullName;
+            ApplyHarnessDefaults();
+
             string proj = Path.GetFullPath(Path.Combine(baseDir, "proj"));
             WriteFixture(proj);
 
@@ -86,6 +93,22 @@ public static class TestMain
         }
         Console.WriteLine($"{_failures} TEST(S) FAILED");
         return 1;
+    }
+
+    // Empty isolation roots set by Main before any test; deleted with baseDir on exit.
+    private static string HarnessNugetPackages = "";
+    private static string HarnessDotnetRoot = "";
+    private static string HarnessRefAsmRoot = "";
+
+    /// Sets NUGET_PACKAGES and both ReferenceResolver root overrides to the harness
+    /// defaults; a test that swaps any of them in calls this in its finally (never unset/null).
+    private static void ApplyHarnessDefaults()
+    {
+        Environment.SetEnvironmentVariable("NUGET_PACKAGES", HarnessNugetPackages);
+        var resolver = FrontendType("ReferenceResolver");
+        var flags = BindingFlags.NonPublic | BindingFlags.Static;
+        resolver.GetProperty("DotnetRootOverride", flags)!.SetValue(null, HarnessDotnetRoot);
+        resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.SetValue(null, HarnessRefAsmRoot);
     }
 
     // ------------------------------------------------------------------
