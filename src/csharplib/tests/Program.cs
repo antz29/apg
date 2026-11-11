@@ -89,6 +89,7 @@ public static class TestMain
             TestUnrestoredPackageTargets(baseDir);
             TestFrontendAssemblyIsolation(baseDir);
             TestCachedReferenceIsolation(baseDir);
+            TestSharedReferenceCache(baseDir);
         }
         catch (Exception ex)
         {
@@ -1783,6 +1784,67 @@ public static class TestMain
         Check("cached refs: carried set count unchanged", before.Count == after.Count, $"{before.Count} -> {after.Count}");
         Check("cached refs: carried set is the same instances",
             before.Count == after.Count && before.Zip(after).All(p => ReferenceEquals(p.First, p.Second)), "");
+    }
+
+    /// <summary>
+    /// Shared resolver-reference cache: A and B naming one HintPath dll (B through a `..` segment)
+    /// and one temp dotnet root's net8.0 pack get the same MetadataReference instances in distinct
+    /// lists, MetadataReferenceCache.Get is idempotent per path, and CreateProjectCompilation for A
+    /// and B shares those instances. Runs under Isolated (empty NUGET_PACKAGES, temp roots).
+    /// </summary>
+    private static void TestSharedReferenceCache(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "shared-refs"));
+        var hint = PutStub(Path.Combine(root, "lib", "Stub.Shared.dll"), StubAssembly("Stub.Shared", "StubShared"));
+        var packDir = Path.Combine(root, "iso-dotnet", "packs", "Microsoft.NETCore.App.Ref", "8.0.0", "ref", "net8.0");
+        PutStub(Path.Combine(packDir, "System.Runtime.dll"), StubAssembly("System.Runtime", "StubRuntime"));
+        PutStub(Path.Combine(packDir, "System.Extra.dll"), StubAssembly("System.Extra", "StubExtra"));
+        string Proj(string name, string hintPath) => FwProject(Path.Combine(root, name), "Microsoft.NET.Sdk", "net8.0",
+            $"<Reference Include=\"Stub.Shared\"><HintPath>{hintPath}</HintPath></Reference>");
+        var a = Proj("A", "..\\lib\\Stub.Shared.dll");
+        var b = Proj("B", "..\\B\\..\\lib\\Stub.Shared.dll");
+        var resolver = FrontendType("ReferenceResolver");
+        var get = FrontendType("MetadataReferenceCache").GetMethod("Get")!;
+        var create = FrontendType("CompilationLoader").GetMethod("CreateProjectCompilation")!;
+        List<MetadataReference> Resolve(string csproj) => (List<MetadataReference>)resolver.GetMethod("Resolve")!.Invoke(null, new object[] { ReadProject(csproj), root })!;
+        CSharpCompilation Compile(string csproj) => (CSharpCompilation)create.Invoke(null, new object[]
+            { ReadProject(csproj), root, new List<SyntaxTree> { CSharpSyntaxTree.ParseText("namespace X; public class T { }") }, Array.Empty<CSharpCompilation>() })!;
+
+        Isolated(root, Path.Combine(root, "nuget"), () =>
+        {
+            var ra = Resolve(a);
+            var rb = Resolve(b);
+            MetadataReference? Hint(List<MetadataReference> refs) => refs.FirstOrDefault(r => Path.GetFullPath(RefPath(r)) == hint);
+            var ha = Hint(ra);
+            Check("shared refs: A and B resolve the HintPath dll to the same instance",
+                ha != null && ReferenceEquals(ha, Hint(rb)), Join(ra.Concat(rb).Select(RefPath)));
+            Check("shared refs: A's and B's Resolve lists are distinct objects", !ReferenceEquals(ra, rb), "");
+            int bCount = rb.Count;
+            ra.Add(MetadataReference.CreateFromImage(StubAssembly("Stub.Extra", "StubExtraAdded")));
+            var rc = Resolve(a);
+            Check("shared refs: adding to A's list leaves B's list and a third Resolve unchanged",
+                rb.Count == bCount && rc.Count == ra.Count - 1 && ReferenceEquals(Hint(rc), ha), $"B {bCount}->{rb.Count}, third {rc.Count}, A {ra.Count}");
+
+            var fa = FrameworkRefs(a);
+            var fb = FrameworkRefs(b);
+            Check("shared refs: the net8.0 pack resolves both dlls", fa.Count == 2 && fa.All(r => RefPath(r).StartsWith(packDir, StringComparison.Ordinal)), Join(fa.Select(RefPath)));
+            Check("shared refs: A's and B's pack references are the same instances element for element",
+                fa.Count == fb.Count && fa.Zip(fb).All(p => ReferenceEquals(p.First, p.Second)), Join(fa.Concat(fb).Select(RefPath)));
+            Check("shared refs: A's and B's framework lists are distinct objects", !ReferenceEquals(fa, fb), "");
+
+            Check("shared refs: MetadataReferenceCache.Get twice returns the same instance",
+                ReferenceEquals(get.Invoke(null, new object[] { hint }), get.Invoke(null, new object[] { hint })), "");
+
+            var ca = Compile(a);
+            var cb = Compile(b);
+            foreach (var shared in fa.Append(ha!))
+                Check($"shared refs: both compilations hold {Path.GetFileName(RefPath(shared))} as one instance",
+                    ca.References.Count(r => ReferenceEquals(r, shared)) == 1 && cb.References.Count(r => ReferenceEquals(r, shared)) == 1,
+                    Join(ca.References.Concat(cb.References).Select(r => r.Display ?? "")));
+            return 0;
+        });
+        Check("shared refs: NUGET_PACKAGES restored to the harness default",
+            Environment.GetEnvironmentVariable("NUGET_PACKAGES") == HarnessNugetPackages, "");
     }
 
     // ------------------------------------------------------------------
