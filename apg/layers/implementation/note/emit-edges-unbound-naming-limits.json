@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "emit-edges-unbound-naming-limits",
+  "body": "EdgeEmitter.EmitEdges names an unbound call or type by the raw syntax text, so a reference split across lines keeps its inner whitespace and newlines in the target name. An unbound implicit var emits no use of its inferred type. A bound qualified generic type use such as System.Collections.Generic.List<Bar> emits its unresolved_use twice, once from the qualified name and once from its right-hand part, because outermost-name absorption applies only to unbound types. Upgrade by normalising the as-written name, and by absorbing bound qualified-name fragments, when exact per-edge counts or single-line names matter.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitEdges",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

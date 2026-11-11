@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "carried-runtime-patch-follows-restore",
+  "body": "GetDefaultMetadataReferences serves the net9.0 Microsoft.NETCore.App reference assemblies that CsharpFrontend.csproj embeds at build time, and the embedded set is whichever 9.0.x targeting-pack patch NuGet restored on the build machine (9.0.22 on the reference build), so two builds can carry slightly different reference sets. The embedding target also relies on the SDK's internal ResolveTargetingPackAssets target and FrameworkReferenceName metadata; an SDK that renames either yields an empty set, caught only by this method's empty-set hard error. Upgrade by pinning the targeting-pack version when the carried set must be identical across builds.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.GetDefaultMetadataReferences",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

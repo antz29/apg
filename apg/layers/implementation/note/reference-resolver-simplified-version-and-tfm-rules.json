@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "reference-resolver-simplified-version-and-tfm-rules",
+  "body": "ReferenceResolver.Resolve compares prerelease labels as whole case-insensitive strings rather than label by label as NuGet does, so ranges and floats over prerelease versions can pick a different version than a restore would. Its package-folder fallback takes the highest netstandard folder even for a net4x project, so a package whose best match is netstandard2.1 is loaded although .NET Framework cannot use it. Upgrade when prerelease ranges or floats must match NuGet exactly, or when net4x projects with netstandard2.1-only packages appear.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.ReferenceResolver.Resolve",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

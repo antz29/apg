@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "framework-references-net4x-no-facades",
+  "body": "ReferenceResolver.ResolveFrameworkReferences loads only the top-level .NETFramework/v4.x reference assemblies for a net4x project, not the Facades/ subfolder, so a net4x project that uses netstandard-based packages may leave types such as those forwarded through netstandard.dll unresolved. Upgrade by adding the Facades/ dlls when net4x scans show such unresolved types.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.ReferenceResolver.ResolveFrameworkReferences",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
