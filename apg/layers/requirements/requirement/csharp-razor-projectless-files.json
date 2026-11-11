@@ -17,6 +17,11 @@
       "kind": "driven-by",
       "source": "domain.service.csharp-razor-compilation",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
     }
   ]
 }

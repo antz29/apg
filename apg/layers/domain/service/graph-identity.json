@@ -17,6 +17,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.csharp-projectless-sources",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.csharp-razor-projectless-files",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.fast-project-start",
       "properties": {}
     },
