@@ -62,7 +62,7 @@ internal static class ReferenceResolver
 
             if (packagesDir != null)
             {
-                var candidates = Directory.GetDirectories(packagesDir)
+                var candidates = (List(() => Directory.GetDirectories(packagesDir)) ?? [])
                     .Select(d => (Dir: d, Text: Path.GetFileName(d)))
                     .Where(x => x.Text.StartsWith(id + ".", StringComparison.OrdinalIgnoreCase))
                     .Select(x => (x.Dir, Text: x.Text[(id.Length + 1)..]));
@@ -70,7 +70,7 @@ internal static class ReferenceResolver
             }
             var globalPkg = Path.Combine(globalDir, id.ToLowerInvariant());
             if (Directory.Exists(globalPkg))
-                AddPackage(Directory.GetDirectories(globalPkg).Select(d => (d, Path.GetFileName(d))), predicate, tfm, Add);
+                AddPackage((List(() => Directory.GetDirectories(globalPkg)) ?? []).Select(d => (d, Path.GetFileName(d))), predicate, tfm, Add);
         }
         return refs;
     }
@@ -103,7 +103,7 @@ internal static class ReferenceResolver
         var seen = new HashSet<MetadataReference>();
         void AddDir(string dir)
         {
-            foreach (var dll in Directory.GetFiles(dir, "*.dll").OrderBy(f => f, StringComparer.Ordinal))
+            foreach (var dll in (List(() => Directory.GetFiles(dir, "*.dll")) ?? []).OrderBy(f => f, StringComparer.Ordinal))
             {
                 try
                 {
@@ -138,7 +138,7 @@ internal static class ReferenceResolver
                     {
                         var packDir = Path.Combine(candidateRoot, "packs", fw + ".Ref");
                         if (!Directory.Exists(packDir)) continue;
-                        var best = Directory.GetDirectories(packDir)
+                        var best = (List(() => Directory.GetDirectories(packDir)) ?? [])
                             .Select(d => (Dir: d, Ver: ParseVersion(Path.GetFileName(d))))
                             .Where(x => x.Ver is { } pv && pv.Number.Major == v.Major && pv.Number.Minor == v.Minor
                                 && Directory.Exists(Path.Combine(x.Dir, "ref", baseTfm!)))
@@ -163,7 +163,7 @@ internal static class ReferenceResolver
                 }
                 var pkg = Path.Combine(GlobalPackagesFolder(), "microsoft.netframework.referenceassemblies." + baseTfm);
                 if (!Directory.Exists(pkg)) break;
-                var pkgDir = Directory.GetDirectories(pkg)
+                var pkgDir = (List(() => Directory.GetDirectories(pkg)) ?? [])
                     .Select(d => (Dir: d, Ver: ParseVersion(Path.GetFileName(d))))
                     .Where(x => x.Ver != null)
                     .OrderByDescending(x => x.Ver!.Value)
@@ -230,7 +230,20 @@ internal static class ReferenceResolver
                 .Select(e => e.Attribute("Version")?.Value ?? e.Elements().FirstOrDefault(c => c.Name.LocalName == "Version")?.Value)
                 .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
         }
-        catch (Exception e) when (e is IOException or System.Xml.XmlException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A directory listing, or null when it cannot be read: an unreadable location counts as not found.</summary>
+    private static string[]? List(Func<string[]> list)
+    {
+        try
+        {
+            return list();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -287,7 +300,7 @@ internal static class ReferenceResolver
             }
             return resolved;
         }
-        catch (Exception e) when (e is JsonException or IOException or InvalidOperationException)
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return null;
         }
@@ -306,7 +319,8 @@ internal static class ReferenceResolver
         if (best == null) return false;
         var folder = ChooseFolder(Path.Combine(best, "ref"), tfm) ?? ChooseFolder(Path.Combine(best, "lib"), tfm);
         if (folder == null) return false;
-        foreach (var dll in Directory.GetFiles(folder, "*.dll").OrderBy(f => f, StringComparer.Ordinal)) add(dll);
+        if (List(() => Directory.GetFiles(folder, "*.dll")) is not { } dlls) return false;
+        foreach (var dll in dlls.OrderBy(f => f, StringComparer.Ordinal)) add(dll);
         return true;
     }
 
@@ -320,7 +334,7 @@ internal static class ReferenceResolver
     private static string? ChooseFolder(string treeDir, string? tfm)
     {
         if (!Directory.Exists(treeDir)) return null;
-        var dirs = Directory.GetDirectories(treeDir);
+        var dirs = List(() => Directory.GetDirectories(treeDir)) ?? [];
         if (tfm != null && dirs.FirstOrDefault(d => Path.GetFileName(d).Equals(tfm, StringComparison.OrdinalIgnoreCase)) is { } exact)
             return exact;
         var parsed = dirs.Select(d => (Dir: d, Tfm: ParseTfm(Path.GetFileName(d)))).Where(x => x.Tfm != null).ToList();

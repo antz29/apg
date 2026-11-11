@@ -82,6 +82,7 @@ public static class TestMain
             TestPackageFolderSelection(baseDir);
             TestPackagesFolderAncestorScope(baseDir);
             TestPackageVersionRules(baseDir);
+            TestUnreadableReferenceLocations(baseDir);
             TestFrameworkPackSelection(baseDir);
             TestFrameworkNet4x(baseDir);
             TestFrameworkCarriedFallback(baseDir);
@@ -1400,6 +1401,61 @@ public static class TestMain
         want = Path.GetFullPath(Path.Combine(nuget, "stub.ver", "1.10.0", "lib", "net8.0", "Stub.Ver.dll"));
         got = Isolated(flt, nuget, () => ResolvePaths(csproj, flt));
         Check("floating 1.* picks the highest present 1.x folder", got.SequenceEqual(new[] { want }), "want " + want + "\ngot:\n" + Join(got));
+    }
+
+    /// <summary>
+    /// An unreadable obj/project.assets.json and an unreadable packages/ folder count as not found:
+    /// the scan exits 0 and the package resolves from the global folder, or stays unknown without one.
+    /// Skipped where permissions are not enforced (Windows, root).
+    /// </summary>
+    private static void TestUnreadableReferenceLocations(string baseDir)
+    {
+        if (OperatingSystem.IsWindows()) { Console.WriteLine("SKIP: unreadable reference locations (Windows)"); return; }
+        var root = Path.GetFullPath(Path.Combine(baseDir, "refs-unreadable"));
+        var image = StubAssembly("Stub.Lock", "StubLock");
+        foreach (var withGlobal in new[] { true, false })
+        {
+            var name = withGlobal ? "global" : "none";
+            var dir = Path.Combine(root, name);
+            var app = Path.Combine(dir, "App");
+            var nuget = Path.Combine(dir, "nuget");
+            WriteSource(app, "Caller.cs", "namespace App;\n\npublic class Caller\n{\n    public void Go() { StubLock.T.Hit(); }\n}\n");
+            var csproj = RefProject(app, PkgRef("Stub.Lock", "1.0.0"));
+            PutStub(Path.Combine(dir, "restored", "stub.lock", "1.0.0", "lib", "net8.0", "Stub.Lock.dll"), image);
+            WriteAssets(app, "Stub.Lock", "1.0.0", "net8.0", Path.Combine(dir, "restored"), "lib/net8.0/Stub.Lock.dll");
+            PutStub(Path.Combine(dir, "packages", "Stub.Lock.1.0.0", "lib", "net8.0", "Stub.Lock.dll"), image);
+            var global = withGlobal ? PutStub(Path.Combine(nuget, "stub.lock", "1.0.0", "lib", "net8.0", "Stub.Lock.dll"), image) : null;
+            var assets = Path.Combine(app, "obj", "project.assets.json");
+            var packages = Path.Combine(dir, "packages");
+            var fileMode = File.GetUnixFileMode(assets);
+            var dirMode = File.GetUnixFileMode(packages);
+            try
+            {
+                File.SetUnixFileMode(assets, UnixFileMode.None);
+                File.SetUnixFileMode(packages, UnixFileMode.None);
+                try
+                {
+                    File.ReadAllBytes(assets);
+                    Console.WriteLine("SKIP: unreadable reference locations (permissions not enforced)");
+                    return;
+                }
+                catch (UnauthorizedAccessException) { }
+                var got = Isolated(dir, nuget, () => ResolvePaths(csproj, dir));
+                var want = global == null ? Array.Empty<string>() : new[] { global };
+                Check($"unreadable locations ({name}): resolve falls through", got.SequenceEqual(want), "want " + Join(want) + "\ngot:\n" + Join(got));
+                var r = Isolated(dir, nuget, () => RunScanner(dir));
+                var c = Canonicalize(ParseGraph(r.Out));
+                var category = withGlobal ? "external" : "unknown";
+                Check($"unreadable locations ({name}): scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+                Check($"unreadable locations ({name}): StubLock.T.Hit is {category}",
+                    c.Records.Contains($"unresolved|StubLock.T.Hit|{category}"), Join(c.Records) + "\nSTDERR:\n" + r.Err);
+            }
+            finally
+            {
+                File.SetUnixFileMode(packages, dirMode);
+                File.SetUnixFileMode(assets, fileMode);
+            }
+        }
     }
 
     // ------------------------------------------------------------------
