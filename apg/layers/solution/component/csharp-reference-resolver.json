@@ -22,6 +22,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.MetadataReferenceCache.Get",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.ReferenceResolver.Resolve",
       "properties": {}
     },
