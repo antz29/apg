@@ -63,6 +63,7 @@ public static class TestMain
             TestZeroProjectTree(baseDir);
             TestFilteredSharedFileRegistration(baseDir);
             TestProjectWalkSkips(baseDir);
+            TestSlnProjectScope(baseDir);
             TestProjectWalkModuleScope(baseDir);
             TestProjectLoadedOnce(baseDir);
             TestDiscoverFilesScope(baseDir);
@@ -927,6 +928,42 @@ public static class TestMain
         {
             Check($"project walk: a .csproj under {s.Dir}/ is not loaded ({s.Method} stays gated)",
                 !g.Funcs.Any(f => f.Name == s.Method), all);
+        }
+    }
+
+    /// <summary>
+    /// A .sln-listed project is held to the walk's scope: one under a dot-dir,
+    /// bin/ or obj/ ancestor, or outside the scan root, is not loaded, so the
+    /// shared Src source it compiles stays projectless (its symbol never ungates).
+    /// </summary>
+    private static void TestSlnProjectScope(string baseDir)
+    {
+        var outer = Path.GetFullPath(Path.Combine(baseDir, "sln-scope"));
+        var dir = Path.Combine(outer, "root");
+        var listed = new (string Dir, string Rel, string Symbol, string Method)[]
+        {
+            (Path.Combine(dir, ".build", "Gen"), @".build\Gen\Gen.csproj", "FROM_DOT", "FromDotDir"),
+            (Path.Combine(dir, "bin", "B"), @"bin\B\Gen.csproj", "FROM_BIN", "FromBin"),
+            (Path.Combine(dir, "obj", "O"), @"obj\O\Gen.csproj", "FROM_OBJ", "FromObj"),
+            (Path.Combine(outer, "Other", "x"), @"..\Other\x\Gen.csproj", "FROM_OUT", "FromOutside"),
+        };
+        // One shared source per project, so build order never masks a case.
+        foreach (var s in listed)
+        {
+            WriteSource(s.Dir, "Gen.csproj", ScopeProject(s.Symbol, (s.Dir.StartsWith(dir) ? "../../Src/" : "../../root/Src/") + s.Method + ".cs"));
+            WriteSource(Path.Combine(dir, "Src"), s.Method + ".cs", $"namespace Sl;\n\npublic class {s.Method}\n{{\n" + Gated(s.Symbol, "Gated") + "}\n");
+        }
+        WriteSource(dir, "App.sln", "Microsoft Visual Studio Solution File, Format Version 12.00\n" + string.Concat(listed.Select((s, i) =>
+            $"Project(\"{{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}}\") = \"G{i}\", \"{s.Rel}\", \"{{1111111{i}-1111-1111-1111-111111111111}}\"\nEndProject\n")));
+
+        var r = RunScanner(dir);
+        Check("sln-scope scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var all = Join(Canonicalize(g).Records) + "\nSTDERR:\n" + r.Err;
+        foreach (var s in listed)
+        {
+            Check($"sln scope: .sln-listed {s.Rel} is not loaded (Src/{s.Method}.cs graphed projectless, Sl.{s.Method}.Gated stays gated)",
+                g.Structs.Any(x => x.Parent == "Sl" && x.Name == s.Method) && !g.Funcs.Any(f => f.Parent == "Sl." + s.Method && f.Name == "Gated"), all);
         }
     }
 

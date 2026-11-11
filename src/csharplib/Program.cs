@@ -327,13 +327,26 @@ public class Scanner
                 // Unreadable directory: skipped, as in source discovery.
             }
         }
+        // A .sln-listed project gets the walk's scope: under the root, with no
+        // skipped directory between the root and it.
+        var scanRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_rootDir));
+        bool InWalkScope(string p)
+        {
+            var full = Path.GetFullPath(p);
+            if (!full.StartsWith(scanRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal) || discovery.IsExcluded(full, false)) return false;
+            for (var d = Path.GetDirectoryName(full)!; d.Length > scanRoot.Length; d = Path.GetDirectoryName(d)!)
+            {
+                if (discovery.IsExcluded(d, true)) return false;
+            }
+            return true;
+        }
         foreach (var sln in solutions)
         {
             try
             {
                 foreach (var p in SolutionReader.Read(sln))
                 {
-                    if (!discovery.IsExcluded(p, false)) projectPaths.Add(p);
+                    if (InWalkScope(p)) projectPaths.Add(p);
                 }
             }
             catch (Exception ex)
