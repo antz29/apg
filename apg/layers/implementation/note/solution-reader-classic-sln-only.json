@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "solution-reader-classic-sln-only",
+  "body": "SolutionReader.Read reads only the classic text .sln format and lists only .csproj entries; the XML .slnx solution format is neither read nor discovered by Scanner.Run's project walk. Upgrade when .slnx solutions need their project lists honoured.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.SolutionReader.Read",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "csproj-reader-unconditional-static-subset",
+  "body": "ProjectFileReader.Read evaluates no MSBuild conditions: a property or item under a Condition attribute or inside Choose/When/Otherwise is skipped, so a .NET Framework-style project whose DEBUG/TRACE DefineConstants sit only in Configuration-conditioned groups yields no preprocessor symbols, and framework-conditioned PackageReferences are dropped. It also derives no target framework from a .NET Framework-style TargetFrameworkVersion (v4.7.2 → net472), and ignores Compile Exclude/Update and Imported files such as Directory.Build.props. Upgrade when symbols or references from conditioned groups must reach the compilation, or when reference resolution needs the target framework of a net4x project.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.ProjectFileReader.Read",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

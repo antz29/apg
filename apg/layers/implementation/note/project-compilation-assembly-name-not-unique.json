@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-compilation-assembly-name-not-unique",
+  "body": "CreateProjectCompilation names each compilation's assembly after the project's Name, so two projects with the same name produce two compilations with the same assembly name. This is harmless unless a third project references both, in which case Roslyn imports only one of them (CS1703) and that project resolves fewer references. Upgrade by making the assembly name unique (for example suffixing a path hash) when same-named projects referenced together appear.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.CompilationLoader.CreateProjectCompilation",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
