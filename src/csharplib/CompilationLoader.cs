@@ -64,6 +64,26 @@ internal static class CompilationLoader
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
     }
 
+    /// <summary>
+    /// Builds one project's compilation, named after the project, over its
+    /// parsed trees with core BCL metadata references plus a compilation
+    /// reference to each already-built referenced project's compilation.
+    /// </summary>
+    public static CSharpCompilation CreateProjectCompilation(
+        CsharpProject project, List<SyntaxTree> syntaxTrees, IEnumerable<CSharpCompilation> referencedCompilations)
+    {
+        var references = GetDefaultMetadataReferences();
+        foreach (var referenced in referencedCompilations)
+        {
+            references.Add(referenced.ToMetadataReference());
+        }
+        return CSharpCompilation.Create(
+            project.Name,
+            syntaxTrees,
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
+    }
+
     /// <summary>One semantic model per tree, for the whole project.</summary>
     public static List<(SyntaxTree Tree, SemanticModel Model, CompilationUnitSyntax Root)> BuildModels(
         CSharpCompilation compilation, List<SyntaxTree> syntaxTrees)
