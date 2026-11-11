@@ -50,9 +50,14 @@ internal static class CompilationLoader
     }
 
     /// <summary>
-    /// Builds the compilation over the full syntax-tree set with core BCL
-    /// metadata references. The compilation always covers the FULL file set: a
-    /// target set filters emission, not resolution.
+    /// Builds a projectless compilation with core BCL metadata references
+    /// only, over trees already parsed at the latest language version. It has
+    /// exactly two uses: the single compilation over every .cs file outside
+    /// every project (always the FULL such set: a target set filters
+    /// emission, not resolution), and one compilation per .csx script over
+    /// exactly that script's tree. A .csx tree never joins the .cs
+    /// compilation, and no .cs tree joins a script's, so each script binds
+    /// only its own declarations.
     /// </summary>
     public static CSharpCompilation CreateCompilation(List<SyntaxTree> syntaxTrees)
     {
