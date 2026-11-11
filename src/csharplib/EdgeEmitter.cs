@@ -62,6 +62,11 @@ internal sealed class EdgeEmitter
                             TargetType = targetSymbol.ToString()
                         });
                     }
+                    // No symbol and no candidate: unbound (a failed overload against a bound method keeps its candidate above); nameof is a constant, not a call.
+                    else if (targetSymbol == null && !model.GetConstantValue(invocation).HasValue)
+                    {
+                        EmitUnboundCall(callerId, invocation.Expression.ToString(), null);
+                    }
                 }
             }
             // Resolve Calls from Object Creations (constructors)
@@ -72,8 +77,13 @@ internal sealed class EdgeEmitter
                 {
                     var symbolInfo = model.GetSymbolInfo(creation);
                     var targetSymbol = symbolInfo.Symbol ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+                    var createdTypeInfo = model.GetTypeInfo(creation).Type;
 
-                    if (targetSymbol is IMethodSymbol targetCtor)
+                    if (createdTypeInfo is null or IErrorTypeSymbol || createdTypeInfo.TypeKind == TypeKind.Error)
+                    {
+                        EmitUnboundCall(callerId, creation.Type.ToString(), createdTypeInfo);
+                    }
+                    else if (targetSymbol is IMethodSymbol targetCtor)
                     {
                         if (_scanner.TryResolveEndpoint(targetCtor, out var targetEndpoint))
                         {
@@ -129,6 +139,18 @@ internal sealed class EdgeEmitter
                     }
                 }
             }
+        }
+
+        // An unbound target is named by the reference as written; its category comes from the (unbound) type.
+        void EmitUnboundCall(string fromId, string asWritten, ITypeSymbol? type)
+        {
+            EmitUnresolvedNode(asWritten, UnresolvedClassifier.ClassifyCategory(type));
+            JsonlWriter.Write(new EdgeMsg
+            {
+                Type = "unresolved_call",
+                From = fromId,
+                To = asWritten
+            });
         }
     }
 
