@@ -1067,6 +1067,90 @@ fn agent_rows(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
     out
 }
 
+// ---------------------------------------------------------------------------
+// Language ⊃ File fixture (csharp-projects phase-04 task-26)
+// ---------------------------------------------------------------------------
+
+const CS_TOP: &str = "cs/Top.cs";
+const CS_NAMED: &str = "cs/Named.cs";
+
+/// A synthetic csharp stream over `cs/Top.cs` and `cs/Named.cs`, filtered to
+/// `only`. Each file sits in namespace `Some(ns)` or none (`None`: the empty
+/// parent of a namespace-less file, emitted declaration-less). A namespaced
+/// `Named.cs` declares `<ns>.Svc` with `f` (plus `h` when `named_h`).
+fn cs_records(
+    top_ns: Option<&str>,
+    named_ns: Option<&str>,
+    named_h: bool,
+    only: &[&str],
+    sha: &str,
+) -> Vec<apg::schema::Record> {
+    use apg::schema::Record;
+    let mut out = vec![
+        Record::ScanMeta {
+            git_sha: Some(sha.into()),
+            git_clean: Some(true),
+            content_key: Some(format!("{sha}-key")),
+            scanned_at: "2026-01-02T00:00:00Z".into(),
+        },
+        Record::LangSwitch {
+            language: "csharp".into(),
+        },
+    ];
+    for (path, ns) in [(CS_TOP, top_ns), (CS_NAMED, named_ns)] {
+        if !only.contains(&path) {
+            continue;
+        }
+        if let Some(ns) = ns {
+            out.push(Record::Module { fqn: ns.into() });
+        }
+        out.push(Record::File {
+            path: path.into(),
+            parent: ns.unwrap_or("").into(),
+            start_line: 1,
+            end_line: if named_h && path == CS_NAMED { 40 } else { 20 },
+        });
+        let Some(ns) = ns.filter(|_| path == CS_NAMED) else {
+            continue;
+        };
+        out.push(Record::Struct {
+            id: "s1".into(),
+            parent: ns.into(),
+            name: "Svc".into(),
+            path: path.into(),
+            start: 0,
+            end: 1,
+            start_line: 1,
+            end_line: 20,
+        });
+        let funs: &[(&str, &str, u32)] = if named_h {
+            &[("f1", "f", 2), ("f2", "h", 12)]
+        } else {
+            &[("f1", "f", 2)]
+        };
+        for (id, name, sl) in funs {
+            out.push(Record::Function {
+                id: (*id).into(),
+                parent: format!("{ns}.Svc"),
+                name: (*name).into(),
+                params: Vec::new(),
+                file: path.into(),
+                path: path.into(),
+                start: 0,
+                end: 1,
+                start_line: *sl,
+                end_line: sl + 5,
+            });
+            out.push(Record::Contains {
+                from: "s1".into(),
+                to: (*id).into(),
+                properties: NodeProperties::default(),
+            });
+        }
+    }
+    out
+}
+
 /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files
 /// and writes node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -7116,6 +7200,158 @@ mod e2e {
         }
         drop(conn);
         drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// csharp-projects task-26: a namespace-less csharp file's `Language ⊃
+    /// File` rel loads, survives a reuse splice that takes the file's unit from
+    /// the FactStore, and never goes stale when a file gains or loses its
+    /// namespace — each spliced DB equals a full rebuild of the same tree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
+    fn language_file_containment_splices_like_a_full_rebuild() {
+        use apg::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+        use apg::ingest::{IngestOptions, Reuse, ingest, ingest_with_reuse};
+
+        let dir = scratch("lang-file");
+        let key = CacheKey::compute(&ScanConfigKey::default());
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "csharp",
+            config: None,
+            base: None,
+        };
+        let both = [CS_TOP, CS_NAMED];
+
+        // (a) Full load: namespace-less Top.cs, namespaced Named.cs.
+        let (v1, _) = ingest(
+            cs_records(None, Some("App"), false, &both, "oldsha"),
+            &opts,
+            None,
+        );
+        let full_path = dir.join("full").join("db.lbug");
+        std::fs::create_dir_all(full_path.parent().unwrap()).unwrap();
+        build_db(&full_path, &v1);
+        let full = published_snapshot(&full_path);
+        assert!(
+            full.contains("Contains:csharp->cs/Top.cs"),
+            "the full load carries Language ⊃ File:\n{full:?}"
+        );
+        assert!(full.contains("Contains:csharp.App->cs/Named.cs"));
+        assert!(!full.contains("Contains:csharp->cs/Named.cs"));
+
+        // Every unchanged file's unit comes from the store (FileFragment::from_graph).
+        let mut store = FactStore::at(dir.join("facts"));
+        for (p, oid) in [(CS_TOP, "oid-top"), (CS_NAMED, "oid-named")] {
+            store
+                .put(
+                    &FileFragment::from_graph(&v1, p, p, oid, "csharp"),
+                    "/x",
+                    &key,
+                )
+                .unwrap();
+        }
+
+        // Seeds the v1 DB, splices the target-only spool + the reused unit, and
+        // proves the published DB equals a full rebuild of the new tree.
+        let run = |name: &str,
+                   reused: (&str, &str),
+                   target: &str,
+                   top_ns: Option<&str>,
+                   named_ns: Option<&str>,
+                   named_h: bool|
+         -> (BTreeSet<String>, Graph) {
+            let sub = dir.join(name);
+            std::fs::create_dir_all(&sub).unwrap();
+            let prev = sub.join("db.lbug");
+            build_db(&prev, &v1);
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &key,
+                files: vec![(reused.0.into(), "csharp".into(), reused.1.into())],
+                reader_root: "/x".into(),
+                skipped_langs: BTreeSet::new(),
+            };
+            let (assembled, _) = ingest_with_reuse(
+                cs_records(top_ns, named_ns, named_h, &[target], "newsha"),
+                &opts,
+                Some(&reuse),
+                None,
+            );
+            let targets: BTreeSet<String> = [target.to_string()].into_iter().collect();
+            let removed = BTreeSet::new();
+            let seeded = seed_or_panic(&prev);
+            seeded
+                .apply(&SpliceDelta {
+                    graph: &assembled,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: Some("newsha".into()),
+                        git_clean: Some(true),
+                        content_key: Some("newsha-key".into()),
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+            publish(seeded).unwrap();
+            let (rebuilt, _) = ingest(
+                cs_records(top_ns, named_ns, named_h, &both, "newsha"),
+                &opts,
+                None,
+            );
+            let reference = sub.join("reference.lbug");
+            build_db(&reference, &rebuilt);
+            let spliced = published_snapshot(&prev);
+            assert_eq!(
+                spliced,
+                published_snapshot(&reference),
+                "{name}: the spliced DB's nodes and Contains rels equal a full rebuild"
+            );
+            assert_eq!(
+                table_counts(&prev),
+                table_counts(&reference),
+                "{name}: every table's row count equals a full rebuild"
+            );
+            (spliced, assembled)
+        };
+
+        // (b) Only Named.cs changes; Top.cs's unit is reused from the store.
+        let (b, assembled) = run(
+            "reuse",
+            (CS_TOP, "oid-top"),
+            CS_NAMED,
+            None,
+            Some("App"),
+            true,
+        );
+        assert!(
+            assembled
+                .contains
+                .contains(&("csharp".to_string(), CS_TOP.to_string())),
+            "the cached unit re-roots Top.cs under its Language"
+        );
+        assert!(b.contains("Contains:csharp->cs/Top.cs"), "{b:?}");
+        assert!(b.contains("Function:csharp.App.Svc.h:"), "{b:?}");
+
+        // (c1) Top.cs gains a namespace: no stale Language ⊃ File rel.
+        let (c1, _) = run(
+            "gain",
+            (CS_NAMED, "oid-named"),
+            CS_TOP,
+            Some("Lib"),
+            Some("App"),
+            false,
+        );
+        assert!(!c1.contains("Contains:csharp->cs/Top.cs"), "{c1:?}");
+        assert!(c1.contains("Contains:csharp.Lib->cs/Top.cs"), "{c1:?}");
+
+        // (c2) Named.cs loses its namespace: it moves under the Language.
+        let (c2, _) = run("lose", (CS_TOP, "oid-top"), CS_NAMED, None, None, false);
+        assert!(c2.contains("Contains:csharp->cs/Named.cs"), "{c2:?}");
+        assert!(!c2.contains("Contains:csharp.App->cs/Named.cs"), "{c2:?}");
+        assert!(c2.contains("Contains:csharp->cs/Top.cs"), "{c2:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
