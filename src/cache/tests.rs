@@ -538,4 +538,67 @@ mod unit {
         assert_eq!((loc.start_line, loc.end_line), (1, 274));
         assert_eq!(node.code_type, "docs");
     }
+
+    /// csharp-projects phase-04 task-24: a namespace-less file's
+    /// Language→File containment rides its own fact unit (both extraction
+    /// paths agree), the Language root never enters `modules`, and the
+    /// Language→Module scaffolding edge rides no file's unit.
+    #[test]
+    fn language_file_contains_rides_its_file_fragment() {
+        let bare = "/r/Program.cs";
+        let named = "/r/Lib/Widget.cs";
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "csharp".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert("csharp.Lib".into(), module_node());
+        g.contains.insert(("csharp".into(), "csharp.Lib".into()));
+        g.nodes
+            .insert(bare.into(), located_node(NodeKind::File, bare));
+        g.nodes.insert(
+            "csharp.Program".into(),
+            located_node(NodeKind::Struct, bare),
+        );
+        g.contains.insert(("csharp".into(), bare.into()));
+        g.contains.insert((bare.into(), "csharp.Program".into()));
+        g.nodes
+            .insert(named.into(), located_node(NodeKind::File, named));
+        g.nodes.insert(
+            "csharp.Lib.Widget".into(),
+            located_node(NodeKind::Struct, named),
+        );
+        g.contains.insert(("csharp.Lib".into(), named.into()));
+        g.contains
+            .insert((named.into(), "csharp.Lib.Widget".into()));
+
+        let index = FileIndex::build(&g);
+        let frag = |abs: &str| {
+            let got = FileFragment::from_index(&index, abs, "rel", "oid", "csharp");
+            assert_eq!(
+                got,
+                FileFragment::from_graph(&g, abs, "rel", "oid", "csharp"),
+                "index fragment differs for {abs}"
+            );
+            got
+        };
+        let b = frag(bare);
+        let n = frag(named);
+
+        let has = |f: &FileFragment, from: &str, to: &str| {
+            f.edges
+                .iter()
+                .any(|e| e.kind == "contains" && e.from == from && e.to == to)
+        };
+        assert!(has(&b, "csharp", bare), "{:?}", b.edges);
+        assert!(b.inputs.contains("csharp"), "{:?}", b.inputs);
+        assert!(b.modules.is_empty(), "{:?}", b.modules);
+        assert_eq!(n.modules, vec!["csharp.Lib".to_string()]);
+        for f in [&b, &n] {
+            assert!(!has(f, "csharp", "csharp.Lib"), "{:?}", f.edges);
+        }
+    }
 }
