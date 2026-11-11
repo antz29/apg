@@ -557,19 +557,53 @@ public class Scanner
     /// unresolved edge exactly as in a full scan.
     internal bool TryResolveEndpoint(ISymbol symbol, out string endpoint)
     {
-        if (_symbolToId.TryGetValue(symbol, out var id))
+        // A constructed generic member maps to its definition.
+        symbol = symbol.OriginalDefinition;
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            endpoint = id;
-            return true;
-        }
-        if (_filtered && _projectSymbols.Contains(symbol))
-        {
-            endpoint = CanonicalFqn(symbol);
-            return true;
+            if (_symbolToId.TryGetValue(symbol, out var id))
+            {
+                endpoint = id;
+                return true;
+            }
+            if (_filtered && _projectSymbols.Contains(symbol))
+            {
+                endpoint = CanonicalFqn(symbol);
+                return true;
+            }
+            if (attempt == 1 || symbol.DeclaringSyntaxReferences.IsEmpty) break;
+
+            // A symbol seen through another compilation (a project reference,
+            // retargeted or not, or another project's copy of a shared file)
+            // is a different instance: map it back by its declaration site —
+            // text offsets, so independent of the compilation that parsed it.
+            int known = _symbolToId.Count + _projectSymbols.Count;
+            if (_declSitesCount != known)
+            {
+                _declSites.Clear();
+                foreach (var s in _symbolToId.Keys.Concat(_projectSymbols))
+                {
+                    foreach (var r in s.DeclaringSyntaxReferences)
+                        _declSites.TryAdd((r.SyntaxTree.FilePath, r.Span.Start, s.Kind, s.MetadataName), s);
+                }
+                _declSitesCount = known;
+            }
+            ISymbol? owner = null;
+            foreach (var r in symbol.DeclaringSyntaxReferences)
+            {
+                if (_declSites.TryGetValue((r.SyntaxTree.FilePath, r.Span.Start, symbol.Kind, symbol.MetadataName), out owner)) break;
+            }
+            if (owner == null) break;
+            symbol = owner;
         }
         endpoint = "";
         return false;
     }
+
+    // Declaration-site index (path, start, kind, metadata name) -> the emitted
+    // or registered symbol, rebuilt lazily when either set has grown.
+    private readonly Dictionary<(string, int, SymbolKind, string), ISymbol> _declSites = new();
+    private int _declSitesCount = -1;
 
     // Shared emission state the pass emitters read/write (the emitters hold
     // this Scanner as a collaborator; the maps stay here so id allocation and
