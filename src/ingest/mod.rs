@@ -464,6 +464,28 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     for (frag, stored_root, _) in &loaded {
         let (_, _, edges) = frag.project(stored_root, &reuse.reader_root);
         for e in edges {
+            // A cached Language→File edge (a namespace-less unit) carries its
+            // language root, which no Module record reintroduces; create the
+            // root exactly as pass 2b does before applying the edge.
+            if e.kind == "contains"
+                && !graph.nodes.contains_key(&e.from)
+                && crate::layers::LANGUAGE_ROOTS.contains(&e.from.as_str())
+                && graph
+                    .nodes
+                    .get(&e.to)
+                    .is_some_and(|n| n.kind == NodeKind::File)
+            {
+                select_language(&mut progress, &e.from);
+                insert_node(
+                    graph,
+                    e.from.clone(),
+                    Node {
+                        kind: NodeKind::Language,
+                        ..Node::default()
+                    },
+                    progress.as_deref_mut(),
+                );
+            }
             if !graph.nodes.contains_key(&e.from) || !graph.nodes.contains_key(&e.to) {
                 continue;
             }
