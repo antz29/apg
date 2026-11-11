@@ -469,10 +469,13 @@ public class Scanner
     /// True when `path` is in the target set (always true with no filter).
     private bool IsTargetFile(string path) => !_filtered || _targetFiles.Contains(path);
 
-    /// Registration prepass over the full project: records every declared
-    /// project symbol and counts each method-like declaration's
-    /// `(parent,name)` group so the canonical FQN can carry the ingestor's
-    /// overload suffix.
+    /// Filtered-scan registration prepass over every compilation: records
+    /// each declared project symbol and counts each method-like declaration's
+    /// `(parent,name)` group so the canonical FQN carries the ingestor's
+    /// overload suffix. `units` holds one entry per emitted file, bound to the
+    /// one compilation that file is emitted from, and only each unit's own
+    /// syntax root is walked — so a file compiled by several projects counts
+    /// its methods once and the group sizes match the emitted records.
     private void RegisterUniverse(List<(SyntaxTree Tree, SemanticModel Model, CompilationUnitSyntax Root)> units)
     {
         foreach (var (_, model, root) in units)
