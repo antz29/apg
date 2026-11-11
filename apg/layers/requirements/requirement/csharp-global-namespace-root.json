@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "csharp-global-namespace-root",
+  "body": "A C# type declared in the global namespace has the csharp language root as its parent, so type `Alpha` is csharp.Alpha and its member `M` is csharp.Alpha.M.",
+  "properties": {
+    "feature": "csharp-projects"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.csharp-project-aware-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
+    }
+  ]
+}

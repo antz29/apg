@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-project-collision-qualifier",
-  "body": "When compilations share a type's namespace-based FQN, each project member's parent is module csharp.<project-id>.<Namespace> under its project module, the project id kept whole as one dotted segment; projectless members keep the plain FQN.",
+  "body": "When compilations share a type's namespace-based FQN, each project member's parent is csharp.<project-id>.<Namespace>, or csharp.<project-id> for the global namespace, the project id one whole segment; projectless members keep the plain FQN.",
   "properties": {
     "feature": "csharp-projects"
   },

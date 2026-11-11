@@ -17,6 +17,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.csharp-global-namespace-root",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.csharp-projectless-sources",
       "properties": {}
     },
