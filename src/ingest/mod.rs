@@ -784,11 +784,16 @@ fn ingest_records(
                     // leaves empty for a code declaration: root it to the bare
                     // `<language>.` root module so the `Module → File` edge from
                     // the repo-root module to the repo-root files survives
-                    // (`md.` ⊃ the repo-root Markdown files). A code stream's
-                    // empty parent stays empty (the anomaly).
+                    // (`md.` ⊃ the repo-root Markdown files). A csharp stream's
+                    // empty parent is a namespace-less file: it hangs off the
+                    // bare `csharp` Language node (registered here as a Module
+                    // record would, so Pass B4 materialises it). Any other code
+                    // stream's empty parent stays empty (the anomaly).
                     let parent =
                         if parent.is_empty() && crate::classify::is_structural_language(&lang) {
                             root_module_fqn(&lang, "", base)
+                        } else if parent.is_empty() && lang == "csharp" {
+                            lang.clone()
                         } else {
                             rooted_scope(&lang, &parent, &module_identities, base)
                         };
@@ -796,6 +801,9 @@ fn ingest_records(
                     if is_blacklisted(&parent, Some(&identity), &lang, opts) {
                         skipped += 1;
                         continue;
+                    }
+                    if parent == lang && !languages.contains(&lang) {
+                        languages.push(lang.clone());
                     }
                     if !files.contains_key(&identity) {
                         files.insert(identity.clone(), parent.clone());
@@ -1407,7 +1415,8 @@ fn ingest_records(
     // File→unit is derived from every located node's path (a file contains all
     // structs and functions declared in it). A missing module parent (shadowed
     // or blacklisted) leaves the File node in place but prunes the Module→File
-    // edge, like any other dangling-edge cleanup.
+    // edge, like any other dangling-edge cleanup. A namespace-less csharp file's
+    // parent is its Language node (Language→File).
     for (file_path, parent) in &files {
         if parent.is_empty() {
             continue;
@@ -1415,7 +1424,7 @@ fn ingest_records(
         if graph
             .nodes
             .get(parent)
-            .is_some_and(|n| n.kind == NodeKind::Module)
+            .is_some_and(|n| matches!(n.kind, NodeKind::Module | NodeKind::Language))
         {
             graph.contains.insert((parent.clone(), file_path.clone()));
         }
