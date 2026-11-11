@@ -88,6 +88,7 @@ public static class TestMain
             TestEnvRootOverrides(baseDir);
             TestUnrestoredPackageTargets(baseDir);
             TestFrontendAssemblyIsolation(baseDir);
+            TestCachedReferenceIsolation(baseDir);
         }
         catch (Exception ex)
         {
@@ -1747,6 +1748,41 @@ public static class TestMain
             c.Records.Contains("unresolved|System.Console.WriteLine|stdlib"), all);
         Check("isolation: NUGET_PACKAGES restored to the harness default",
             Environment.GetEnvironmentVariable("NUGET_PACKAGES") == HarnessNugetPackages, "");
+    }
+
+    /// <summary>
+    /// Two projects A and B compiled back to back through CreateProjectCompilation, A with a
+    /// referenced compilation C: B holds no CompilationReference to C or A, A holds C's exactly
+    /// once, and the carried set is the same instances at the same count before and after.
+    /// Runs at the harness defaults (no Isolated swap).
+    /// </summary>
+    private static void TestCachedReferenceIsolation(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "cached-refs"));
+        var create = FrontendType("CompilationLoader").GetMethod("CreateProjectCompilation")!;
+        CSharpCompilation Compile(string name, IEnumerable<CSharpCompilation> referenced)
+        {
+            var dir = Path.Combine(root, name);
+            var csproj = FwProject(dir, "Microsoft.NET.Sdk", "net8.0");
+            var src = WriteSource(dir, name + ".cs", $"namespace {name};\n\npublic class {name}T {{ }}\n");
+            var trees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(File.ReadAllText(src), path: src) };
+            return (CSharpCompilation)create.Invoke(null, new object[] { ReadProject(csproj), root, trees, referenced })!;
+        }
+
+        var before = CarriedRuntime().ToList();
+        var c = CSharpCompilation.Create("C", new[] { CSharpSyntaxTree.ParseText("namespace C; public class CT { }") });
+        var a = Compile("A", new[] { c });
+        var b = Compile("B", Array.Empty<CSharpCompilation>());
+        var after = CarriedRuntime().ToList();
+
+        static string Names(CSharpCompilation x) => Join(x.References.Select(r => r.Display ?? r.GetType().Name));
+        Check("cached refs: B holds no CompilationReference to C or A",
+            !b.References.OfType<CompilationReference>().Any(r => r.Compilation == c || r.Compilation == a), Names(b));
+        Check("cached refs: A holds C's CompilationReference exactly once",
+            a.References.OfType<CompilationReference>().Count(r => r.Compilation == c) == 1, Names(a));
+        Check("cached refs: carried set count unchanged", before.Count == after.Count, $"{before.Count} -> {after.Count}");
+        Check("cached refs: carried set is the same instances",
+            before.Count == after.Count && before.Zip(after).All(p => ReferenceEquals(p.First, p.Second)), "");
     }
 
     // ------------------------------------------------------------------
