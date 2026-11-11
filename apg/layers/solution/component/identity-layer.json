@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "identity-layer",
-  "body": "The ingestor-side identity layer: it renders file, language-root and module identities from the repository-relative base, roots a file in no module directly under its language root, and keeps absolute paths for the tool boundary.",
+  "body": "The ingestor-side identity layer: it renders file, language-root and module identities from the repository-relative base, roots a moduleless file directly under its language root, and keeps absolute paths for the tool boundary.",
   "properties": {},
   "out": [
     {
