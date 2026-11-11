@@ -75,6 +75,124 @@ internal static class ReferenceResolver
         return refs;
     }
 
+    /// <summary>Dotnet root for in-process scans; null = the default lookup, set = the only root consulted.</summary>
+    internal static string? DotnetRootOverride { get; set; }
+
+    /// <summary>Reference Assemblies root (…\Microsoft\Framework) for in-process scans; null = the default lookup, set = the only root consulted.</summary>
+    internal static string? ReferenceAssembliesRootOverride { get; set; }
+
+    /// <summary>
+    /// Resolves <paramref name="project"/>'s framework references from the
+    /// reference assemblies of its target framework on this machine: for
+    /// .NET Core/5+ the targeting pack of each explicit or Sdk/TFM-implied
+    /// framework (highest installed version with the TFM's major.minor), for
+    /// net4x the Reference Assemblies dir, else the
+    /// microsoft.netframework.referenceassemblies package. A found set replaces
+    /// the carried runtime; when none is found a new copy of the carried
+    /// runtime references is returned. <paramref name="dotnetRoot"/> and
+    /// <paramref name="referenceAssembliesRoot"/> win over the static
+    /// overrides, which win over the default lookup. Offline; every dll goes
+    /// through <see cref="MetadataReferenceCache.Get"/>; the list is new per call.
+    /// </summary>
+    public static List<MetadataReference> ResolveFrameworkReferences(
+        CsharpProject project, string? dotnetRoot = null, string? referenceAssembliesRoot = null)
+    {
+        var refs = new List<MetadataReference>();
+        var seen = new HashSet<MetadataReference>();
+        void AddDir(string dir)
+        {
+            foreach (var dll in Directory.GetFiles(dir, "*.dll").OrderBy(f => f, StringComparer.Ordinal))
+            {
+                try
+                {
+                    var r = MetadataReferenceCache.Get(dll);
+                    if (seen.Add(r)) refs.Add(r);
+                }
+                catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException)
+                {
+                    // An unreadable dll stays unresolved, as in GetDefaultMetadataReferences.
+                }
+            }
+        }
+
+        var baseTfm = project.TargetFramework?.Split('-')[0].ToLowerInvariant();
+        switch (baseTfm == null ? null : ParseTfm(baseTfm))
+        {
+            case (Family.Core, var v):
+                var frameworks = new List<string>();
+                if (project.IsSdkStyle && v >= new Version(3, 0))
+                {
+                    frameworks.Add("Microsoft.NETCore.App");
+                    if (project.Sdk.Trim().Equals("Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase))
+                        frameworks.Add("Microsoft.AspNetCore.App");
+                }
+                frameworks.AddRange(project.FrameworkReferences);
+                var roots = (dotnetRoot ?? DotnetRootOverride) is { } root ? new[] { root } : DefaultDotnetRoots();
+                foreach (var fw in frameworks.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    // The first root holding a matching pack wins, in lookup order.
+                    foreach (var candidateRoot in roots)
+                    {
+                        var packDir = Path.Combine(candidateRoot, "packs", fw + ".Ref");
+                        if (!Directory.Exists(packDir)) continue;
+                        var best = Directory.GetDirectories(packDir)
+                            .Select(d => (Dir: d, Ver: ParseVersion(Path.GetFileName(d))))
+                            .Where(x => x.Ver is { } pv && pv.Number.Major == v.Major && pv.Number.Minor == v.Minor
+                                && Directory.Exists(Path.Combine(x.Dir, "ref", baseTfm!)))
+                            .OrderByDescending(x => x.Ver!.Value)
+                            .Select(x => x.Dir)
+                            .FirstOrDefault();
+                        if (best == null) continue;
+                        AddDir(Path.Combine(best, "ref", baseTfm!));
+                        break;
+                    }
+                }
+                break;
+            case (Family.Framework, var v):
+                var ver = "v" + v;
+                var refAsmRoot = referenceAssembliesRoot ?? ReferenceAssembliesRootOverride ?? DefaultReferenceAssembliesRoot();
+                var dir = refAsmRoot == null ? null : Path.Combine(refAsmRoot, ".NETFramework", ver);
+                if (dir != null && Directory.Exists(dir))
+                {
+                    AddDir(dir);
+                    break;
+                }
+                var pkg = Path.Combine(GlobalPackagesFolder(), "microsoft.netframework.referenceassemblies." + baseTfm);
+                if (!Directory.Exists(pkg)) break;
+                var pkgDir = Directory.GetDirectories(pkg)
+                    .Select(d => (Dir: d, Ver: ParseVersion(Path.GetFileName(d))))
+                    .Where(x => x.Ver != null)
+                    .OrderByDescending(x => x.Ver!.Value)
+                    .Select(x => Path.Combine(x.Dir, "build", ".NETFramework", ver))
+                    .FirstOrDefault(Directory.Exists);
+                if (pkgDir != null) AddDir(pkgDir);
+                break;
+        }
+        // Never alongside the carried runtime: duplicate System assemblies make System types ambiguous.
+        return refs.Count > 0 ? refs : new List<MetadataReference>(CompilationLoader.GetDefaultMetadataReferences());
+    }
+
+    /// <summary>DOTNET_ROOT, then the platform default install dirs.</summary>
+    private static IEnumerable<string> DefaultDotnetRoots()
+    {
+        if (Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } env) yield return env;
+        if (OperatingSystem.IsWindows())
+        {
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet");
+            yield break;
+        }
+        yield return "/usr/local/share/dotnet";
+        yield return "/usr/share/dotnet";
+        yield return "/usr/lib/dotnet";
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet");
+    }
+
+    /// <summary>%ProgramFiles(x86)%\Reference Assemblies\Microsoft\Framework, or null when unset.</summary>
+    private static string? DefaultReferenceAssembliesRoot() =>
+        Environment.GetEnvironmentVariable("ProgramFiles(x86)") is { Length: > 0 } pf
+            ? Path.Combine(pf, "Reference Assemblies", "Microsoft", "Framework")
+            : null;
+
     private static string GlobalPackagesFolder() =>
         Environment.GetEnvironmentVariable("NUGET_PACKAGES") is { Length: > 0 } env
             ? env

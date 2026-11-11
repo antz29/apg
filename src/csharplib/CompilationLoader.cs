@@ -103,7 +103,7 @@ internal static class CompilationLoader
         return unitModels;
     }
 
-    private static List<MetadataReference> GetDefaultMetadataReferences()
+    internal static List<MetadataReference> GetDefaultMetadataReferences()
     {
         var refs = new List<MetadataReference>();
         
