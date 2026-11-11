@@ -244,13 +244,15 @@ impl FileFragment {
         }
         // A Module→File edge is authored by neither endpoint's file (the module
         // has no file and the File node is the target). Store it on the file's
-        // unit so a cached projection can rebuild the containment.
+        // unit so a cached projection can rebuild the containment. A
+        // Language→File edge (a namespace-less file) rides the same way, but the
+        // Language root never enters `modules`.
         for (a, b) in &graph.contains {
             if b == abs_path
                 && graph
                     .nodes
                     .get(a)
-                    .is_some_and(|n| n.kind == NodeKind::Module)
+                    .is_some_and(|n| matches!(n.kind, NodeKind::Module | NodeKind::Language))
             {
                 edges.push(FragEdge {
                     kind: "contains".to_string(),
