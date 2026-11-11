@@ -381,6 +381,19 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
         delete_authored_rels(conn, "Module", AUTH_RELS_CONTAINS, &delete_modules)?;
     report.edges_deleted += deleted;
     report.dml_statements += stmts;
+    // A Language root never enters the delete scope, so its `Language -> File`
+    // rel to a delta/disappearing File is dropped here (step 6 re-merges it
+    // when the File still sits at the root): a File that gains or loses a
+    // namespace keeps exactly a full rebuild's containment.
+    if !delete_files.is_empty() {
+        let pattern = format!(
+            "MATCH (:Language)-[r:Contains]->(n:File) WHERE n.fqn IN [{}]",
+            literal_list(&delete_files)
+        );
+        report.edges_deleted += count(conn, &format!("{pattern} RETURN count(*)"))? as u64;
+        conn.query(&format!("{pattern} DELETE r"))?;
+        report.dml_statements += 1;
+    }
 
     // --- 4. Upsert the delta's nodes in place (batched, one statement/label) --
     //
