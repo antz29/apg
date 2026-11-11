@@ -62,8 +62,9 @@ internal sealed class EdgeEmitter
                             TargetType = targetSymbol.ToString()
                         });
                     }
-                    // No symbol and no candidate: unbound (a failed overload against a bound method keeps its candidate above); nameof is a constant, not a call.
-                    else if (targetSymbol == null && !model.GetConstantValue(invocation).HasValue)
+                    // No symbol and no candidate: unbound (a failed overload against a bound method keeps its candidate above); nameof is a constant, not a call;
+                    // a dynamic call (LateBound) has no compile-time target at all, so it emits nothing.
+                    else if (targetSymbol == null && symbolInfo.CandidateReason != CandidateReason.LateBound && !model.GetConstantValue(invocation).HasValue)
                     {
                         EmitUnboundCall(callerId, invocation.Expression.ToString(), null);
                     }

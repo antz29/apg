@@ -89,6 +89,7 @@ public static class TestMain
             TestFrameworkPartialPacks(baseDir);
             TestEnvRootOverrides(baseDir);
             TestUnrestoredPackageTargets(baseDir);
+            TestDynamicCallsEmitNothing(baseDir);
             TestFrontendAssemblyIsolation(baseDir);
             TestCachedReferenceIsolation(baseDir);
             TestSharedReferenceCache(baseDir);
@@ -1782,6 +1783,45 @@ public static class TestMain
         Check("unrestored: the scan spawned no process (marker dir empty)",
             Directory.GetFileSystemEntries(markers).Length == 0, Join(Directory.GetFileSystemEntries(markers)));
         Check("unrestored: PATH restored after the scan", Environment.GetEnvironmentVariable("PATH") == oldPath, "");
+    }
+
+    /// <summary>
+    /// A dynamically bound call (`d.Foo()` on a dynamic receiver, or a call whose dynamic argument defers
+    /// overload resolution to runtime) has no compile-time target: it emits no unresolved_call, so
+    /// same-named dynamic locals across methods never merge into one target; an unbound package call in
+    /// the same scan still yields its one as-written unresolved_call.
+    /// </summary>
+    private static void TestDynamicCallsEmitNothing(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "dynamic-calls"));
+        var app = Path.Combine(dir, "App");
+        RefProject(app, PkgRef("Unrestored.Pkg", "1.0.0"));
+        WriteSource(app, "Dyn.cs", """
+            namespace App;
+
+            public class Dyn
+            {
+                public void A() { dynamic d = 1; d.Foo(); }
+                public void B() { dynamic d = 2; d.Foo(); }
+                public void C() { dynamic d = 3; dynamic h = 4; h.Late(d); }
+                public void E() { dynamic d = 5; Unrestored.Pkg.Widget.Make(); }
+            }
+            """);
+
+        var r = Isolated(dir, Path.Combine(dir, "nuget-empty"), () => RunScanner(dir));
+        var g = ParseGraph(r.Out);
+        var c = Canonicalize(g);
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        var calls = g.Edges.Where(e => e.Type == "unresolved_call")
+            .Select(e => $"{(c.IdToFqn.TryGetValue(e.From, out var f) ? f : e.From)}|{e.To}").ToList();
+
+        Check("dynamic: scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        Check("dynamic: no unresolved_call or target for a dynamically bound call",
+            !calls.Any(s => s.StartsWith("App.Dyn.A|", StringComparison.Ordinal) || s.StartsWith("App.Dyn.B|", StringComparison.Ordinal)
+                || s.StartsWith("App.Dyn.C|", StringComparison.Ordinal))
+            && !new[] { "d.Foo", "h.Late" }.Any(c.UnresFqns.Contains), Join(calls) + "\n" + all);
+        Check("dynamic: the unbound package call keeps its one as-written unresolved_call",
+            calls.SequenceEqual(new[] { "App.Dyn.E|Unrestored.Pkg.Widget.Make" }), Join(calls) + "\n" + all);
     }
 
     /// <summary>
