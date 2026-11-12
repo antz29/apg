@@ -57,7 +57,15 @@ internal sealed class DeclarationEmitter
         }
     }
 
-    public void EmitFileAndDeclarations(SyntaxTree tree, SemanticModel model, CompilationUnitSyntax root, bool emit)
+    /// <summary>
+    /// Emits one file and its declarations from the compilation it is passed in
+    /// — the caller passes a shared file once, with its owning project's model.
+    /// A project file (non-null <paramref name="owner"/>) is parented to its
+    /// project module; a projectless .cs file keeps its namespace parent and a
+    /// .csx script its own script module. Collision members' struct records
+    /// carry their qualified parent (<see cref="SymbolNaming.GetParentScopeFqn"/>).
+    /// </summary>
+    public void EmitFileAndDeclarations(SyntaxTree tree, SemanticModel model, CompilationUnitSyntax root, bool emit, CsharpProject? owner = null)
     {
         var filePath = tree.FilePath;
         var text = tree.GetText();
@@ -96,7 +104,7 @@ internal sealed class DeclarationEmitter
             JsonlWriter.Write(new FileMsg
             {
                 Path = filePath,
-                Parent = defaultNamespace,
+                Parent = !isScript && owner != null ? owner.Path : defaultNamespace,
                 StartLine = 1,
                 EndLine = totalLines
             });
