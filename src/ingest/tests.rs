@@ -238,6 +238,37 @@ mod unit {
         assert_eq!(rooted_scope("go", "", &rust_go, base), "");
     }
 
+    /// csharp-projects phase-06 task-17: a C# global-namespace type has an
+    /// empty parent, which roots at the bare `csharp` Language id (never `""`
+    /// and never `csharp.`), so `Alpha` renders `csharp.Alpha`, not
+    /// `csharp..Alpha`. Non-empty C# scopes root as every language does, and
+    /// the empty-parent rendering of every other stream is unchanged.
+    #[test]
+    fn rooted_scope_roots_empty_csharp_parent_at_language_root() {
+        let base = Path::new("/repo");
+        let none = HashMap::new();
+        let global = rooted_scope("csharp", "", &none, base);
+        assert_eq!(global, "csharp");
+        assert_eq!(format!("{global}.Alpha"), "csharp.Alpha");
+        assert_eq!(format!("{global}.Alpha`1"), "csharp.Alpha`1");
+        let alpha = rooted_scope("csharp", "Alpha", &none, base);
+        assert_eq!(alpha, "csharp.Alpha");
+        assert_eq!(format!("{alpha}.M"), "csharp.Alpha.M");
+        assert_eq!(
+            rooted_scope("csharp", "Alpha.Inner", &none, base),
+            "csharp.Alpha.Inner"
+        );
+        assert_eq!(
+            rooted_scope("csharp", "Acme.App", &none, base),
+            "csharp.Acme.App"
+        );
+        // Every other stream's empty-parent rendering is unchanged.
+        for lang in ["rust", "go", "py", "md"] {
+            assert_eq!(rooted_scope(lang, "", &none, base), "", "{lang}");
+        }
+        assert_eq!(rooted_scope("cobol", "", &none, base), "cobol.");
+    }
+
     /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
     /// `repo_relative_identity` renders a scanner path relative to the
     /// git-toplevel base (the scan root is the non-git fallback),
