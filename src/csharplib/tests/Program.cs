@@ -96,6 +96,7 @@ public static class TestMain
             TestSourceOwnership();
             TestCollisionQualifierScan(baseDir);
             TestCollisionQualifierDirect();
+            TestProjectModules(baseDir);
         }
         catch (Exception ex)
         {
@@ -2157,6 +2158,58 @@ public static class TestMain
         (g, all) = ScanUnique("same assembly name", dir);
         Check("same assembly name: each App project gets its own qualified parent",
             StructParent(g, fa, "Alpha") == ap + ".N" && StructParent(g, fb, "Alpha") == bp + ".N", all);
+    }
+
+    /// <summary>
+    /// Module modelling over a full scan: One.sln lists A and B, Two.sln lists B; C is
+    /// unlisted; Shared/S.cs is compiled by A and B (owner A: first in path order).
+    /// </summary>
+    private static void TestProjectModules(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "project-modules"));
+        const string linked = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n  <ItemGroup><Compile Include=\"../Shared/S.cs\" /></ItemGroup>\n</Project>\n";
+        var pa = WriteSource(Path.Combine(dir, "A"), "A.csproj", linked);
+        var pb = WriteSource(Path.Combine(dir, "B"), "B.csproj", linked);
+        var pc = WriteSource(Path.Combine(dir, "C"), "C.csproj", SdkProject);
+        var fa = WriteSource(Path.Combine(dir, "A"), "A.cs", "namespace Na;\n\npublic class TA\n{\n    public void Ma() { }\n}\n");
+        var fb = WriteSource(Path.Combine(dir, "B"), "B.cs", "namespace Nb.Inner;\n\npublic class TB\n{\n    public void Mb() { }\n}\n");
+        var fc = WriteSource(Path.Combine(dir, "C"), "C.cs", "namespace Nc;\n\npublic class TC { }\n");
+        var fs = WriteSource(Path.Combine(dir, "Shared"), "S.cs", "namespace Sh;\n\npublic class S\n{\n    public void Hit() { }\n}\n");
+        string Entry(string name, string rel, int i) =>
+            $"Project(\"{{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}}\") = \"{name}\", \"{rel}\", \"{{1111111{i}-1111-1111-1111-111111111111}}\"\nEndProject\n";
+        const string header = "Microsoft Visual Studio Solution File, Format Version 12.00\n";
+        var one = WriteSource(dir, "One.sln", header + Entry("A", @"A\A.csproj", 1) + Entry("B", @"B\B.csproj", 2));
+        var two = WriteSource(dir, "Two.sln", header + Entry("B", @"B\B.csproj", 3));
+
+        var (g, all) = ScanUnique("project modules", dir);
+        bool Contains(string from, string to) => g.Edges.Any(e => e.Type == "contains" && e.From == from && e.To == to);
+
+        foreach (var sln in new[] { one, two })
+        {
+            Check($"project modules: one module per .sln, absolute path kept whole ({sln})",
+                g.Modules.Count(m => m == sln) == 1 && !g.Modules.Any(m => m != sln && sln.StartsWith(m + ".", StringComparison.Ordinal)), all);
+        }
+        Check("project modules: One.sln contains A and B; Two.sln contains B only",
+            Contains(one, pa) && Contains(one, pb) && Contains(two, pb) && !Contains(two, pa), all);
+        Check("project modules: B (listed by two solutions) is one module contained by both",
+            g.Modules.Count(m => m == pb) == 1 && g.Edges.Count(e => e.Type == "contains" && e.To == pb) == 2, all);
+        Check("project modules: unlisted C is a top-level module (emitted once, contained by nothing)",
+            g.Modules.Count(m => m == pc) == 1 && !g.Edges.Any(e => e.Type == "contains" && e.To == pc), all);
+        foreach (var (f, p) in new[] { (fa, pa), (fb, pb), (fc, pc) })
+        {
+            Check($"project modules: {Path.GetFileName(f)} is contained by its project module",
+                g.Files.Count(x => x.StartsWith(f + "|", StringComparison.Ordinal)) == 1
+                && g.Files.Any(x => x.StartsWith($"{f}|{p}|", StringComparison.Ordinal)), Join(g.Files));
+        }
+        var shared = g.Files.Where(f => f.StartsWith(fs + "|", StringComparison.Ordinal)).ToList();
+        Check("project modules: shared S.cs emitted once, under its owner A",
+            shared.Count == 1 && shared[0].StartsWith($"{fs}|{pa}|", StringComparison.Ordinal), Join(g.Files));
+        Check("project modules: S.Hit emitted once", g.Funcs.Count(f => f.Name == "Hit") == 1, all);
+        Check("project modules: declarations keep namespace-based FQNs",
+            StructParent(g, fa, "TA") == "Na" && HasFunc(g, fa, "Ma", "Na.TA")
+            && StructParent(g, fb, "TB") == "Nb.Inner" && HasFunc(g, fb, "Mb", "Nb.Inner.TB")
+            && StructParent(g, fc, "TC") == "Nc"
+            && StructParent(g, fs, "S") == "Sh" && HasFunc(g, fs, "Hit", "Sh.S"), all);
     }
 
     /// <summary>
