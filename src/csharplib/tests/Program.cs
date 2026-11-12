@@ -448,25 +448,29 @@ public static class TestMain
     }
 
     /// <summary>
-    /// A held-back .cshtml/.razor file is emitted as a file record only (root
-    /// parent, 1..line-count) with no declarations, and honours the target filter.
+    /// A held-back .cshtml/.razor file — one with a Razor error included — is
+    /// emitted exactly once, through the Razor stage, as one File record
+    /// spanning 1..its own line count; the scan exits 0 and the target filter
+    /// is honoured.
     /// </summary>
     private static void TestHeldBackFilesAreFileOnly(string baseDir)
     {
         var dir = Path.GetFullPath(Path.Combine(baseDir, "heldback"));
         var cs = WriteSource(dir, "A.cs", "namespace App;\n\npublic class A { }\n");
-        var cshtml = WriteSource(dir, "V.cshtml", "@page\n<h1>Hi</h1>\n@code { void M() { } }");
+        var cshtml = WriteSource(dir, "V.cshtml", "@page\n<h1>Hi</h1>\n@functions { void M() { } }");
         var razor = WriteSource(dir, "C.razor", "<p>one</p>\n<p>two</p>");
+        var bad = WriteSource(dir, "Bad.razor", "<p>bad</p>\n@code {");
 
         var r = RunScanner(dir);
-        Check("held-back scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
-        var c = Canonicalize(ParseGraph(r.Out));
-        Check("held-back .cshtml emits a file-only record (root parent, 1..3)",
-            c.Records.Contains($"file|{cshtml}||1|3"), Join(c.Records));
-        Check("held-back .razor emits a file-only record (root parent, 1..2)",
-            c.Records.Contains($"file|{razor}||1|2"), Join(c.Records));
-        Check("held-back files emit no struct/function declarations",
-            !c.Records.Any(s => IsDecl(s) && (RecordPath(s) == cshtml || RecordPath(s) == razor)), Join(c.Records));
+        Check("held-back scan exits 0 (a Razor error never fails the scan)", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        foreach (var (path, lines) in new[] { (cshtml, 3), (razor, 2), (bad, 2) })
+        {
+            var records = g.Files.Where(f => f.StartsWith(path + "|", StringComparison.Ordinal)).ToList();
+            Check($"{Path.GetFileName(path)} is emitted exactly once as one File record spanning 1..{lines}",
+                records.Count == 1 && records[0].EndsWith($"|1|{lines}", StringComparison.Ordinal), Join(g.Files));
+        }
+        var c = Canonicalize(g);
         Check("the .cs file beside held-back files still emits its declarations",
             c.Records.Any(s => IsDecl(s) && RecordPath(s) == cs), Join(c.Records));
 

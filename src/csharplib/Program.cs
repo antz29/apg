@@ -397,34 +397,33 @@ public class Scanner
         // assembly references, with the carried runtime as fallback; the
         // projectless compilation and each per-script .csx compilation keep
         // the carried-runtime references. One compilation per
-        // project over its discovered files (SourcePaths, plus the Razor files
-        // under its directory so its compilation holds them back), one
-        // projectless compilation over every other .cs/.cshtml/.razor file,
-        // and one per .csx script over exactly that script's tree, so a script
-        // binds only its own declarations (scripts sharing one compilation
-        // would merge into one Script class). Each compilation covers its FULL
-        // set: the target set filters emission, not resolution. A file
-        // compiled by several projects emits from its owner's compilation
-        // only; held-back Razor is the union, emitted once.
+        // project over its discovered SourcePaths plus the Razor files it owns
+        // (AssignOwners), one projectless compilation over every other .cs
+        // and every unowned .cshtml/.razor file, and one per .csx script over
+        // exactly that script's tree, so a script binds only its own
+        // declarations (scripts sharing one compilation would merge into one
+        // Script class). Each compilation covers its FULL set: the target set
+        // filters emission, not resolution. A file compiled by several
+        // projects emits from its owner's compilation only; every Razor file is
+        // the Razor input of exactly one compilation.
         static bool IsRazor(string f) =>
             f.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
         var nonScripts = files.Where(f => !f.EndsWith(".csx", StringComparison.OrdinalIgnoreCase)).ToList();
         var owned = new HashSet<string>(StringComparer.Ordinal);
-        var heldBack = new HashSet<string>(StringComparer.Ordinal);
         var byPath = new Dictionary<string, (SyntaxTree Tree, SemanticModel Model, CompilationUnitSyntax Root)>(StringComparer.Ordinal);
         var compiled = new Dictionary<string, CSharpCompilation>(StringComparer.Ordinal);
         foreach (var p in order)
         {
             var sources = new HashSet<string>(p.SourcePaths, StringComparer.Ordinal);
-            var projectDir = Path.GetDirectoryName(p.Path)! + Path.DirectorySeparatorChar;
-            var mine = nonScripts.Where(f => IsRazor(f) ? f.StartsWith(projectDir, StringComparison.Ordinal) : sources.Contains(f)).ToList();
+            var mine = nonScripts.Where(f => IsRazor(f) ? owners.TryGetValue(f, out var ro) && ro == p : sources.Contains(f)).ToList();
             owned.UnionWith(mine);
             var version = p.LanguageVersion is { } lv && LanguageVersionFacts.TryParse(lv, out var parsed) ? parsed : LanguageVersion.Latest;
             var options = CSharpParseOptions.Default.WithLanguageVersion(version).WithPreprocessorSymbols(p.PreprocessorSymbols);
             var trees = CompilationLoader.ParseTrees(mine, out var held, options);
-            heldBack.UnionWith(held);
-            var compilation = CompilationLoader.CreateProjectCompilation(p, scanRoot, trees,
-                References(p).Where(r => compiled.ContainsKey(r.Path)).Select(r => compiled[r.Path]).ToList());
+            // Referenced projects come first (topological order), so their entries are already Razor-carrying.
+            var compilation = WithRazor(CompilationLoader.CreateProjectCompilation(p, scanRoot, trees,
+                References(p).Where(r => compiled.ContainsKey(r.Path)).Select(r => compiled[r.Path]).ToList()),
+                p, Path.GetDirectoryName(p.Path)!, held, trees);
             compiled[p.Path] = compilation;
             foreach (var u in CompilationLoader.BuildModels(compilation, trees))
             {
@@ -433,8 +432,8 @@ public class Scanner
         }
         var loose = nonScripts.Where(f => !owned.Contains(f)).ToList();
         var looseTrees = CompilationLoader.ParseTrees(loose, out var looseHeld);
-        heldBack.UnionWith(looseHeld);
-        foreach (var u in CompilationLoader.BuildModels(CompilationLoader.CreateCompilation(looseTrees), looseTrees)) byPath.TryAdd(u.Tree.FilePath, u);
+        var looseCompilation = WithRazor(CompilationLoader.CreateCompilation(looseTrees), null, scanRoot, looseHeld, looseTrees);
+        foreach (var u in CompilationLoader.BuildModels(looseCompilation, looseTrees)) byPath.TryAdd(u.Tree.FilePath, u);
         var scripts = files.Where(f => f.EndsWith(".csx", StringComparison.OrdinalIgnoreCase)).ToList();
         foreach (var t in CompilationLoader.ParseTrees(scripts, out _))
         {
@@ -476,15 +475,6 @@ public class Scanner
                 owner: owners.GetValueOrDefault(tree.FilePath));
         }
 
-        // Held-back .cshtml/.razor files stay graphed as file-only nodes (no
-        // namespace, so the root parent a namespace-less .cs file gets).
-        foreach (var path in files.Where(heldBack.Contains))
-        {
-            if (filtered && !IsTargetFile(path)) continue;
-            var text = Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(path, Encoding.UTF8));
-            JsonlWriter.Write(new FileMsg { Path = path, Parent = "", StartLine = 1, EndLine = Math.Max(1, text.Lines.Count) });
-        }
-
         // Pass 2: Semantic walk for edges (calls & uses) — target files only
         // when a filter is in force.
         var edges = new EdgeEmitter(this);
@@ -495,6 +485,47 @@ public class Scanner
                 edges.EmitEdges(tree, model, root);
             }
         }
+    }
+
+    /// The Razor stage for one project (or the projectless) compilation:
+    /// the declaration-only trees join it, then each Razor input's full-pass
+    /// tree (the tag-helper hand-off seeing the declaration-carrying
+    /// compilation) replaces the declaration-only tree of the same FilePath,
+    /// is added when there is none, and any unpaired declaration-only tree is
+    /// removed — one generated tree per compiled Razor input. The generated
+    /// trees are appended to <paramref name="trees"/>. A Razor error never
+    /// fails the scan: an erroring file keeps whatever tree it produced, and
+    /// a file the engine cannot read at all warns and is skipped.
+    private static CSharpCompilation WithRazor(CSharpCompilation compilation, CsharpProject? project, string rootDirectory,
+                                               List<string> razorFiles, List<SyntaxTree> trees)
+    {
+        if (razorFiles.Count == 0) return compilation;
+        var engine = RazorCompiler.CreateProjectEngine(rootDirectory);
+        var declarations = RazorCompiler.CompileDeclarations(engine, project, rootDirectory, razorFiles);
+        compilation = compilation.AddSyntaxTrees(declarations);
+        var full = new List<SyntaxTree>();
+        foreach (var file in razorFiles)
+        {
+            try
+            {
+                var (tree, errors) = RazorCompiler.Compile(engine, project, rootDirectory, [file], compilation).Single();
+                if (errors.Count > 0) Console.Error.WriteLine($"Warning: Razor errors in {file}: {string.Join("; ", errors)}");
+                full.Add(tree);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Warning: could not compile Razor file {file}: {ex.Message}");
+            }
+        }
+        var unpaired = declarations.ToDictionary(t => t.FilePath, StringComparer.Ordinal);
+        foreach (var tree in full)
+        {
+            compilation = unpaired.Remove(tree.FilePath, out var declaration)
+                ? compilation.ReplaceSyntaxTree(declaration, tree)
+                : compilation.AddSyntaxTrees(tree);
+        }
+        trees.AddRange(full);
+        return compilation.RemoveSyntaxTrees(unpaired.Values);
     }
 
     /// True when `path` is in the target set (always true with no filter).
