@@ -1609,6 +1609,24 @@ mod e2e {
             .map(|(fqn, _)| fqn)
             .collect();
         assert_eq!(structs.len(), files.len(), "each file declares a Struct");
+        // The global-namespace structs render language-rooted, and the
+        // FactStore round-trip carries exactly those identities.
+        let struct_fqns = |g: &apg::graph::Graph| -> BTreeSet<String> {
+            g.nodes
+                .iter()
+                .filter(|(_, n)| n.kind == NodeKind::Struct)
+                .map(|(fqn, _)| fqn.clone())
+                .collect()
+        };
+        let pinned: BTreeSet<String> = ["csharp.Alpha".to_string(), "csharp.Beta".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(struct_fqns(&full), pinned, "full ingest Struct set");
+        assert_eq!(
+            struct_fqns(&assembled),
+            pinned,
+            "reused assembly Struct set"
+        );
         let node_set =
             |g: &apg::graph::Graph| -> BTreeSet<String> { g.nodes.keys().cloned().collect() };
         assert_eq!(node_set(&assembled), node_set(&full));
