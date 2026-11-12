@@ -22,6 +22,8 @@ internal sealed class EdgeEmitter
         _scanner = scanner;
     }
 
+    // Edge records carry no location: a Razor-generated edge reaches its Razor file and mapped span through its
+    // `from` declaration, which DeclarationEmitter already places via RazorSourceMap.MapSpan.
     public void EmitEdges(SyntaxTree tree, SemanticModel model, CompilationUnitSyntax root)
     {
         foreach (var node in root.DescendantNodes())
