@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-modules-reread-solutions",
+  "body": "DeclarationEmitter.EmitProjectModules re-reads every .sln with SolutionReader.Read instead of reusing the solution-to-project lists from Scanner.Run's discovery pass, so each solution is parsed twice per scan and an unreadable one is skipped silently here. Upgrade by passing the discovery lists in if solution reading becomes costly or needs evaluation.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitProjectModules",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

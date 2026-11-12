@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "source-ownership-absolute-path-order",
+  "body": "SourceOwnership.AssignOwners orders projects by their absolute project-file paths with ordinal comparison, which equals repository-relative path order only while every loaded project lies under the one scan root; nested project directories resolve to the deepest containing project. Upgrade to comparing repository-relative paths if projects outside the scan root are ever loaded.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.SourceOwnership.AssignOwners",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

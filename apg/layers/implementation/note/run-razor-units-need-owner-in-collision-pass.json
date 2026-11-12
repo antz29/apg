@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "run-razor-units-need-owner-in-collision-pass",
+  "body": "Scanner.Run passes CollisionQualifier.Compute the owning project of each project .cs unit and null for projectless and script units; Razor-generated trees do not yet join project compilations, so no Razor owner is passed. When they do, each Razor unit must carry its containing project, or two projects generating the same view type would collide as projectless.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.Scanner.Run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

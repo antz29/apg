@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "collision-qualifier-skips-delegates",
+  "body": "CollisionQualifier.Compute considers only top-level BaseTypeDeclarationSyntax types, so a delegate declared at the same FQN in two projects is never a collision member; this is safe only because DeclarationEmitter emits no struct record for delegates. Revisit if delegates are ever emitted as struct records.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.CollisionQualifier.Compute",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

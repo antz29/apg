@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "shared-file-endpoints-owner-view-only",
+  "body": "Scanner.TryResolveEndpoint maps a shared-file symbol to the owner's declaration by declaration site, so a declaration that exists only in a non-owner project's view of a shared file (behind an #if symbol the owner does not define) has no emitted declaration and references to it become unresolved. Revisit if per-project #if differences in shared files matter.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.Scanner.TryResolveEndpoint",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

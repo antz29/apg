@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "module-hierarchy-needs-project-modules-first",
+  "body": "DeclarationEmitter.EmitModuleHierarchy finds a collision-qualified parent's project prefix by matching the shortest prefix already present in the scanner's emitted-module set, so it depends on EmitProjectModules having run first; without it a qualified parent would be split at every dot of the project path. Upgrade by passing the project path in explicitly if Scanner.Run's pass order ever changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.EmitModuleHierarchy",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
