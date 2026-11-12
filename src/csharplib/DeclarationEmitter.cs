@@ -119,7 +119,8 @@ internal sealed class DeclarationEmitter
                 if (symbol == null) continue;
 
                 string parentFqn = SymbolNaming.GetParentScopeFqn(symbol);
-                if (!isScript && !string.IsNullOrEmpty(parentFqn))
+                // A nested type's parent is its containing type, never a module; its modules came with its outer type.
+                if (symbol.ContainingType == null && !isScript && !string.IsNullOrEmpty(parentFqn))
                 {
                     EmitModuleHierarchy(parentFqn);
                 }
