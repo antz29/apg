@@ -317,9 +317,10 @@ pub fn ingest_delta(
 /// an FQN wins; a cached node fills a gap and supersedes a `planned`
 /// placeholder — the plan store's placeholder never masks the real declaration
 /// the cache still holds, exactly as a scanned declaration supersedes one in
-/// [`insert_node`]. Cached edges are added only when both endpoints exist after
-/// the merge (the same dangling-edge rule the ingestor applies), and a cached
-/// edge already present is a no-op.
+/// [`insert_node`]; a cached Struct/Function shadows a fresh Module at its FQN
+/// (Pass B2's "type beats module"). Cached edges are added only when both
+/// endpoints exist after the merge (the same dangling-edge rule the ingestor
+/// applies), and a cached edge already present is a no-op.
 ///
 /// The merge is deliberately THREE passes — every unit's nodes first, then the
 /// module records, then every unit's edges — so a cross-file edge whose
@@ -367,6 +368,16 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
                 Some(existing)
                     if existing.status.as_deref() == Some("planned") && node.status.is_none() =>
                 {
+                    graph.nodes.insert(fqn, node);
+                }
+                // Type beats module, exactly as Pass B2 on a full scan: the fresh
+                // Module is shadowed and dropped with its contains edges in and
+                // out; pass 3 re-adds the cached declaration's own edges.
+                Some(existing)
+                    if existing.kind == NodeKind::Module
+                        && matches!(kind, NodeKind::Struct | NodeKind::Function) =>
+                {
+                    graph.contains.retain(|(a, b)| *a != fqn && *b != fqn);
                     graph.nodes.insert(fqn, node);
                 }
                 Some(_) => {
