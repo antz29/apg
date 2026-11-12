@@ -316,13 +316,30 @@ internal sealed class DeclarationEmitter
     private void EmitModuleHierarchy(string fqn)
     {
         if (string.IsNullOrEmpty(fqn)) return;
-        var parts = fqn.Split('.');
         string current = "";
+        string rest = fqn;
+        if (Path.IsPathRooted(fqn))
+        {
+            // Qualified collision parent: start under the already-emitted project module (EmitProjectModules), its path never split at dots.
+            for (int dot = fqn.IndexOf('.'); ; dot = fqn.IndexOf('.', dot + 1))
+            {
+                var prefix = dot < 0 ? fqn : fqn[..dot];
+                if (_scanner.EmittedModules.Contains(prefix))
+                {
+                    current = prefix;
+                    rest = dot < 0 ? "" : fqn[(dot + 1)..];
+                    break;
+                }
+                if (dot < 0) break;
+            }
+            if (rest.Length == 0) return; // global-namespace member: its parent IS the project module
+        }
+        var parts = rest.Split('.');
 
         for (int i = 0; i < parts.Length; i++)
         {
             string prev = current;
-            current = i == 0 ? parts[0] : $"{current}.{parts[i]}";
+            current = current.Length == 0 ? parts[0] : $"{current}.{parts[i]}";
 
             if (_scanner.EmittedModules.Add(current))
             {
