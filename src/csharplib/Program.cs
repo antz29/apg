@@ -137,10 +137,10 @@ public static class Program
                     foreach (var method in typeDecl.Members.OfType<MethodDeclarationSyntax>())
                     {
                         // Only @code/@functions methods #line-map into the Razor file; generated plumbing does not.
-                        var head = RazorSourceMap.MapSpan(generated, method.Identifier.Span);
-                        if (head is not { } h || h.Path != razorPath) continue;
-                        var whole = RazorSourceMap.MapSpan(generated, method.Span);
-                        int endLine = whole is { } w && w.Path == razorPath && w.EndLine >= h.StartLine ? w.EndLine : h.StartLine;
+                        var h = RazorSourceMap.MapSpan(generated, method.Identifier.Span, razorLines.Count);
+                        if (!h.Mapped) continue;
+                        var w = RazorSourceMap.MapSpan(generated, method.Span, razorLines.Count);
+                        int endLine = w.Mapped && w.EndLine >= h.StartLine ? w.EndLine : h.StartLine;
                         string funcId = $"{idPrefix}{++nextId}";
                         JsonlWriter.Write(new FuncMsg
                         {
