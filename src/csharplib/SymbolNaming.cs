@@ -93,6 +93,11 @@ internal static class SymbolNaming
                 var parent = GetFullFqn(symbol.ContainingType);
                 return string.IsNullOrEmpty(parent) ? typeName : $"{parent}.{typeName}";
             }
+            if (CollisionQualifier.QualifiedParent(namedType) is { } qualified)
+            {
+                // A top-level collision member renders under its project-qualified parent; nested types and members inherit it via the recursion above.
+                return $"{qualified}.{typeName}";
+            }
             if (symbol.ContainingNamespace is { IsGlobalNamespace: false } ns1)
             {
                 return $"{ns1.ToDisplayString()}.{typeName}";
