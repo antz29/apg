@@ -236,3 +236,23 @@ pub(crate) fn root_edge_endpoint(
     }
     endpoint.to_string()
 }
+
+/// [`root_edge_endpoint`] for a streamed edge: a csharp endpoint it leaves
+/// unchanged (no module-identity prefix) that is not a declaration record id
+/// the stream already admitted is a global-namespace canonical FQN (`Alpha.M`),
+/// rooted at the bare `csharp` Language id like its declaration
+/// ([`rooted_scope`]). The C# frontend emits every declaration record before
+/// its edges, so the admitted-id test is exact.
+pub(crate) fn root_stream_edge_endpoint(
+    language: &str,
+    endpoint: &str,
+    is_declaration_id: impl Fn(&str) -> bool,
+    module_identities: &HashMap<String, HashSet<String>>,
+    base: &Path,
+) -> String {
+    let rooted = root_edge_endpoint(language, endpoint, module_identities, base);
+    if language == "csharp" && rooted == endpoint && !is_declaration_id(endpoint) {
+        return format!("{language}.{endpoint}");
+    }
+    rooted
+}

@@ -41,7 +41,9 @@ pub use identity::*;
 
 pub(crate) use blacklist::is_blacklisted;
 pub(crate) use edges::{EdgeReader, filter_edges, kind_is, valid_contains_pair, write_edge};
-pub(crate) use identity::{root_edge_endpoint, root_module_endpoint, rooted_scope};
+#[cfg(test)]
+pub(crate) use identity::root_edge_endpoint;
+pub(crate) use identity::{root_module_endpoint, root_stream_edge_endpoint, rooted_scope};
 pub(crate) use render::{FuncDecl, render_function_fqns};
 
 pub struct IngestOptions<'a> {
@@ -641,6 +643,9 @@ fn ingest_records(
     // a `contains` endpoint can be told from an opaque declaration id and a
     // cross-stream canonical FQN can be rooted by its module prefix.
     let mut module_identities: HashMap<String, HashSet<String>> = HashMap::new();
+    // Every struct/function record id admitted so far: an edge endpoint naming
+    // one is an opaque id, never a global-namespace csharp canonical FQN.
+    let mut declared_ids: HashSet<String> = HashSet::new();
     // Rooted module FQN -> its language, for the `Language -Contains-> Module`
     // attachment after the module nodes land.
     let mut module_language: HashMap<String, String> = HashMap::new();
@@ -713,6 +718,7 @@ fn ingest_records(
                     start_line,
                     end_line,
                 } => {
+                    declared_ids.insert(id.clone());
                     let fqn = format!(
                         "{}.{name}",
                         rooted_scope(&lang, &parent, &module_identities, base)
@@ -755,19 +761,22 @@ fn ingest_records(
                     end,
                     start_line,
                     end_line,
-                } => funcs.push(FuncDecl {
-                    id,
-                    parent: rooted_scope(&lang, &parent, &module_identities, base),
-                    name,
-                    params,
-                    file,
-                    path: repo_relative_identity(base, &path),
-                    start,
-                    end,
-                    start_line,
-                    end_line,
-                    language: lang.clone(),
-                }),
+                } => {
+                    declared_ids.insert(id.clone());
+                    funcs.push(FuncDecl {
+                        id,
+                        parent: rooted_scope(&lang, &parent, &module_identities, base),
+                        name,
+                        params,
+                        file,
+                        path: repo_relative_identity(base, &path),
+                        start,
+                        end,
+                        start_line,
+                        end_line,
+                        language: lang.clone(),
+                    })
+                }
                 Record::File {
                     path,
                     parent,
@@ -1230,7 +1239,8 @@ fn ingest_records(
                 // endpoints are module identities (root exactly) or opaque ids
                 // (leave). `Calls`/`Uses` endpoints are opaque ids for emitted
                 // units or an UNROOTED canonical FQN for a cross-stream target
-                // (phase-02 task-9) — root the latter by its module prefix.
+                // (phase-02 task-9) — root the latter by its module prefix
+                // (a global-namespace csharp one at the bare `csharp` root).
                 // `Unresolved*` roots only the `from` (the emitted unit); the
                 // `to` is a FOREIGN name, never rooted.
                 Record::Contains {
@@ -1252,8 +1262,20 @@ fn ingest_records(
                 } => write_edge(
                     &mut sw,
                     Record::Calls {
-                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
-                        to: root_edge_endpoint(&lang, &to, &module_identities, base),
+                        from: root_stream_edge_endpoint(
+                            &lang,
+                            &from,
+                            |e| declared_ids.contains(e),
+                            &module_identities,
+                            base,
+                        ),
+                        to: root_stream_edge_endpoint(
+                            &lang,
+                            &to,
+                            |e| declared_ids.contains(e),
+                            &module_identities,
+                            base,
+                        ),
                         properties,
                     },
                 ),
@@ -1267,12 +1289,24 @@ fn ingest_records(
                     let to = if copy {
                         to
                     } else {
-                        root_edge_endpoint(&lang, &to, &module_identities, base)
+                        root_stream_edge_endpoint(
+                            &lang,
+                            &to,
+                            |e| declared_ids.contains(e),
+                            &module_identities,
+                            base,
+                        )
                     };
                     write_edge(
                         &mut sw,
                         Record::Uses {
-                            from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                            from: root_stream_edge_endpoint(
+                                &lang,
+                                &from,
+                                |e| declared_ids.contains(e),
+                                &module_identities,
+                                base,
+                            ),
                             to,
                             properties,
                         },
@@ -1285,7 +1319,13 @@ fn ingest_records(
                 } => write_edge(
                     &mut sw,
                     Record::UnresolvedCall {
-                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                        from: root_stream_edge_endpoint(
+                            &lang,
+                            &from,
+                            |e| declared_ids.contains(e),
+                            &module_identities,
+                            base,
+                        ),
                         to,
                         target_type,
                     },
@@ -1293,7 +1333,13 @@ fn ingest_records(
                 Record::UnresolvedUse { from, to } => write_edge(
                     &mut sw,
                     Record::UnresolvedUse {
-                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                        from: root_stream_edge_endpoint(
+                            &lang,
+                            &from,
+                            |e| declared_ids.contains(e),
+                            &module_identities,
+                            base,
+                        ),
                         to,
                     },
                 ),
