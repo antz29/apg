@@ -492,10 +492,18 @@ public class Scanner
     /// one compilation that file is emitted from, and only each unit's own
     /// syntax root is walked — so a file compiled by several projects counts
     /// its methods once and the group sizes match the emitted records.
-    private void RegisterUniverse(List<(SyntaxTree Tree, SemanticModel Model, CompilationUnitSyntax Root)> units)
+    /// With the SourceOwnership.AssignOwners result (`owners`) and the project
+    /// compilations by project path (`compiled`), a project file registers
+    /// only from its owner's compilation; a file with no owner (projectless
+    /// .cs, or a .csx script) registers from its one compilation.
+    private void RegisterUniverse(List<(SyntaxTree Tree, SemanticModel Model, CompilationUnitSyntax Root)> units,
+                                  Dictionary<string, CsharpProject>? owners = null,
+                                  Dictionary<string, CSharpCompilation>? compiled = null)
     {
-        foreach (var (_, model, root) in units)
+        foreach (var (tree, model, root) in units)
         {
+            if (owners != null && compiled != null && owners.TryGetValue(tree.FilePath, out var owner)
+                && (!compiled.TryGetValue(owner.Path, out var ownerCompilation) || model.Compilation != ownerCompilation)) continue;
             foreach (var member in root.DescendantNodes())
             {
                 if (member is BaseTypeDeclarationSyntax typeDecl)
