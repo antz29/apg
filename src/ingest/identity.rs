@@ -154,12 +154,18 @@ fn has_module_prefix(identities: &HashSet<String>, name: &str) -> bool {
 /// an empty parent, and its root module `cobol.` renders `cobol..PROG`. A
 /// root-level COBOL scope parent (`PROG`, `PROG.SEC`) that names no module
 /// prefix roots under that same empty root module (`cobol..PROG.SEC`).
+/// csharp is the other exception: a global-namespace type is declared with an
+/// empty parent and roots at the bare `csharp` Language id (`csharp.Alpha`,
+/// never `csharp..Alpha`), the same parent a namespace-less file hangs off.
 pub(crate) fn rooted_scope(
     language: &str,
     parent: &str,
     module_identities: &HashMap<String, HashSet<String>>,
     base: &Path,
 ) -> String {
+    if parent.is_empty() && language == "csharp" {
+        return language.to_string();
+    }
     if parent.is_empty() && language != "cobol" {
         return String::new();
     }
