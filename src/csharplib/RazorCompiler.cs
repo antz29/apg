@@ -80,6 +80,34 @@ internal static class RazorCompiler
     }
 
     /// <summary>
+    /// The root namespace for one Razor file's generated code: the owning
+    /// <paramref name="project"/>'s RootNamespace, else its project name, else
+    /// (projectless, <paramref name="project"/> null) the global namespace,
+    /// returned as the empty string. A <c>@namespace</c> directive overrides
+    /// it — the file's own <paramref name="text"/> first, else the innermost
+    /// of the applied <paramref name="imports"/> (outermost first, as
+    /// <see cref="CollectImports"/> returns them); within a document the last
+    /// directive wins.
+    /// </summary>
+    public static string ResolveRootNamespace(CsharpProject? project, string text, IReadOnlyList<RazorSourceDocument> imports)
+    {
+        var documents = imports.Select(i =>
+        {
+            var chars = new char[i.Length];
+            i.CopyTo(0, chars, 0, i.Length);
+            return new string(chars);
+        }).Append(text);
+        var directive = documents.Select(d => NamespaceDirectivePattern.Matches(d).LastOrDefault()?.Groups[1].Value).LastOrDefault(n => n is not null);
+        if (directive is not null) return directive;
+        if (project is null) return "";
+        return string.IsNullOrWhiteSpace(project.RootNamespace) ? project.Name : project.RootNamespace.Trim();
+    }
+
+    /// <summary>A line-leading <c>@namespace</c> directive and its namespace.</summary>
+    private static readonly System.Text.RegularExpressions.Regex NamespaceDirectivePattern =
+        new(@"^[ \t]*@namespace[ \t]+([^\s;]+)", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    /// <summary>
     /// Compiles one <c>.cshtml</c> (MVC view) or <c>.razor</c> (component)
     /// file's in-memory <paramref name="text"/> to a generated-C# syntax tree
     /// whose <c>#line</c> directives name <paramref name="filePath"/>, so
