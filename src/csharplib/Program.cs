@@ -293,6 +293,7 @@ public class Scanner
         if (files.Count == 0)
         {
             Console.Error.WriteLine("No .cs, .csx, .cshtml or .razor files found to scan.");
+            CollisionQualifier.Compute([]); // every scan replaces an earlier in-process scan's map
             return;
         }
 
@@ -366,6 +367,8 @@ public class Scanner
                 Console.Error.WriteLine($"Warning: could not read project {path}: {ex.Message}");
             }
         }
+        // The one owning project per project source file; projectless .cs and .csx have no entry.
+        var owners = SourceOwnership.AssignOwners(projects.Values);
 
         // Loaded projects a project references (as written, relative to its
         // directory); a missing or unloaded reference is dropped.
@@ -398,8 +401,8 @@ public class Scanner
         // binds only its own declarations (scripts sharing one compilation
         // would merge into one Script class). Each compilation covers its FULL
         // set: the target set filters emission, not resolution. A file
-        // compiled by several projects emits from the first compilation
-        // (build order) only; held-back Razor is the union, emitted once.
+        // compiled by several projects emits from its owner's compilation
+        // only; held-back Razor is the union, emitted once.
         static bool IsRazor(string f) =>
             f.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
         var nonScripts = files.Where(f => !f.EndsWith(".csx", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -420,7 +423,10 @@ public class Scanner
             var compilation = CompilationLoader.CreateProjectCompilation(p, scanRoot, trees,
                 References(p).Where(r => compiled.ContainsKey(r.Path)).Select(r => compiled[r.Path]).ToList());
             compiled[p.Path] = compilation;
-            foreach (var u in CompilationLoader.BuildModels(compilation, trees)) byPath.TryAdd(u.Tree.FilePath, u);
+            foreach (var u in CompilationLoader.BuildModels(compilation, trees))
+            {
+                if (owners.TryGetValue(u.Tree.FilePath, out var o) && o == p) byPath[u.Tree.FilePath] = u;
+            }
         }
         var loose = nonScripts.Where(f => !owned.Contains(f)).ToList();
         var looseTrees = CompilationLoader.ParseTrees(loose, out var looseHeld);
@@ -441,6 +447,10 @@ public class Scanner
         // back in discovery order.
         var unitModels = files.Where(byPath.ContainsKey).Select(f => byPath[f]).ToList();
 
+        // Collision qualification over every emitted unit (target or not), before
+        // any naming, so a filtered scan names exactly as the full scan does.
+        CollisionQualifier.Compute(unitModels.Select(u => (u.Model, u.Root, owners.GetValueOrDefault(u.Tree.FilePath))));
+
         if (filtered)
         {
             // Register the whole project's declaration universe and overload
@@ -448,7 +458,7 @@ public class Scanner
             // declared in a non-emitted file lands on that symbol's canonical
             // FQN (the cached unit supplies the node).
             Console.Error.WriteLine($"Target set in force: emitting facts for {files.Count(f => IsTargetFile(f))} of {files.Count} files.");
-            RegisterUniverse(unitModels);
+            RegisterUniverse(unitModels, owners, compiled);
         }
 
         // Pass 1: Collect declarations & emit nodes. Module scaffolding is
@@ -456,9 +466,11 @@ public class Scanner
         // still contributes its module hierarchy; only its declarations and
         // edges are withheld.
         var declarations = new DeclarationEmitter(this);
+        declarations.EmitProjectModules(solutions, projects.Values);
         foreach (var (tree, model, root) in unitModels)
         {
-            declarations.EmitFileAndDeclarations(tree, model, root, emit: !filtered || IsTargetFile(tree.FilePath));
+            declarations.EmitFileAndDeclarations(tree, model, root, emit: !filtered || IsTargetFile(tree.FilePath),
+                owner: owners.GetValueOrDefault(tree.FilePath));
         }
 
         // Held-back .cshtml/.razor files stay graphed as file-only nodes (no
