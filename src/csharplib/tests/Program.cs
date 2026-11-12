@@ -97,6 +97,7 @@ public static class TestMain
             TestCollisionQualifierScan(baseDir);
             TestCollisionQualifierDirect();
             TestProjectModules(baseDir);
+            TestQualifiedIdentityScan(baseDir);
         }
         catch (Exception ex)
         {
@@ -2210,6 +2211,107 @@ public static class TestMain
             && StructParent(g, fb, "TB") == "Nb.Inner" && HasFunc(g, fb, "Mb", "Nb.Inner.TB")
             && StructParent(g, fc, "TC") == "Nc"
             && StructParent(g, fs, "S") == "Sh" && HasFunc(g, fs, "Hit", "Sh.S"), all);
+    }
+
+    /// <summary>
+    /// Qualified identities end to end: collision members' records, module chains
+    /// and call/use endpoints (full and target-filtered scans), shared-file
+    /// references landing on the owner's identity, and a projectless
+    /// global-namespace filtered scan's endpoints (no leading dot, no root).
+    /// </summary>
+    private static void TestQualifiedIdentityScan(string baseDir)
+    {
+        // Targeted scan of `dir` over `files`: exit 0, canonical records + failure detail.
+        (Canonical C, string All) Targeted(string label, string dir, params string[] files)
+        {
+            var r = RunScanner(dir, "--targets", WriteTargets(baseDir, label.Replace(' ', '-') + ".targets", files));
+            Check(label + ": targeted scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+            var c = Canonicalize(ParseGraph(r.Out));
+            return (c, Join(c.Records) + "\nSTDERR:\n" + r.Err);
+        }
+
+        // Two projects plus a projectless tree each declare N.Sub.Alpha (with an overload group) and call it.
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "qualified-calls"));
+        const string alpha = "namespace N.Sub;\n\npublic class Alpha\n{\n    public void M() { }\n    public void O(int x) { }\n    public void O(string s) { }\n}\n";
+        string Use(string name) => $"namespace U;\n\npublic class {name}\n{{\n    public void Go()\n    {{\n        N.Sub.Alpha a = new N.Sub.Alpha();\n        a.M();\n        a.O(1);\n    }}\n}}\n";
+        var p1 = WriteSource(Path.Combine(dir, "P1"), "P1.csproj", SdkProject);
+        var p2 = WriteSource(Path.Combine(dir, "P2"), "P2.csproj", SdkProject);
+        var a1 = WriteSource(Path.Combine(dir, "P1"), "Alpha.cs", alpha);
+        var a2 = WriteSource(Path.Combine(dir, "P2"), "Alpha.cs", alpha);
+        var a0 = WriteSource(Path.Combine(dir, "Loose"), "Alpha.cs", alpha);
+        var u1 = WriteSource(Path.Combine(dir, "P1"), "Use1.cs", Use("Use1"));
+        var u2 = WriteSource(Path.Combine(dir, "P2"), "Use2.cs", Use("Use2"));
+        var u0 = WriteSource(Path.Combine(dir, "Loose"), "Use0.cs", Use("Use0"));
+        var (g, all) = ScanUnique("qualified calls", dir);
+        var full = Canonicalize(g);
+        bool Contains(string from, string to) => g.Edges.Any(e => e.Type == "contains" && e.From == from && e.To == to);
+        foreach (var (p, a) in new[] { (p1, a1), (p2, a2) })
+        {
+            Check($"qualified calls: distinct qualified struct record `<P>.N.Sub.Alpha` ({p})",
+                g.Structs.Count(s => s.Path == a && s.Name == "Alpha" && s.Parent == p + ".N.Sub") == 1, all);
+            Check($"qualified calls: module chain <P> -> <P>.N -> <P>.N.Sub, each emitted once ({p})",
+                new[] { p, p + ".N", p + ".N.Sub" }.All(m => g.Modules.Count(x => x == m) == 1)
+                && Contains(p, p + ".N") && Contains(p + ".N", p + ".N.Sub"), all);
+        }
+        Check("qualified calls: projectless Alpha keeps the plain parent N.Sub",
+            StructParent(g, a0, "Alpha") == "N.Sub" && g.Structs.Count(s => s.Name == "Alpha") == 3, all);
+
+        // Each caller's expected endpoints: its own compilation's Alpha.
+        var expect = new[] { ("Use1", p1 + ".N.Sub.Alpha"), ("Use2", p2 + ".N.Sub.Alpha"), ("Use0", "N.Sub.Alpha") };
+        var (tc, tall) = Targeted("qualified calls", dir, u1, u2, u0);
+        foreach (var (scan, c, detail) in new[] { ("full", full, all), ("targeted", tc, tall) })
+        {
+            foreach (var (user, t) in expect)
+            {
+                foreach (var rec in new[] { $"calls|U.{user}.Go|{t}.M", $"calls|U.{user}.Go|{t}.O(int)", $"uses|U.{user}.Go|{t}" })
+                {
+                    Check($"qualified calls ({scan}): {rec}", c.Records.Contains(rec), detail);
+                }
+            }
+        }
+        Check("qualified calls (targeted): no Alpha declaration emitted",
+            !tc.Records.Any(s => IsDecl(s) && new[] { a1, a2, a0 }.Contains(RecordPath(s))), tall);
+        Check("qualified calls (targeted): every FQN endpoint is a full-scan node",
+            tc.Records.Where(s => s.StartsWith("calls|", StringComparison.Ordinal) || s.StartsWith("uses|", StringComparison.Ordinal))
+                .All(s => full.NodeFqns.Contains(s.Split('|')[2])), tall);
+
+        // Shared file in B's directory, also compiled by A (first in path and build order): B owns it.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "qualified-shared"));
+        var pa = WriteSource(Path.Combine(dir, "A"), "A.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n  <ItemGroup><Compile Include=\"../B/S.cs\" /></ItemGroup>\n</Project>\n");
+        var pb = WriteSource(Path.Combine(dir, "B"), "B.csproj", SdkProject);
+        var fs = WriteSource(Path.Combine(dir, "B"), "S.cs", "namespace Sh;\n\npublic class S\n{\n    public static void Hit() { }\n    public static void Hit(int x) { }\n}\n");
+        var ca = WriteSource(Path.Combine(dir, "A"), "CallA.cs", "namespace Ca;\n\npublic class CallA\n{\n    public void Go() { Sh.S.Hit(1); }\n}\n");
+        WriteSource(Path.Combine(dir, "B"), "CallB.cs", "namespace Cb;\n\npublic class CallB\n{\n    public void Go() { Sh.S.Hit(2); }\n}\n");
+        Check("shared fixture: A sorts before B (owner B is not first in path order)", string.CompareOrdinal(pa, pb) < 0, "");
+        (g, all) = ScanUnique("qualified shared", dir);
+        full = Canonicalize(g);
+        const string hit = "Sh.S.Hit(int)";
+        Check("qualified shared: S.cs emitted once, under its owner B",
+            g.Files.Count(f => f.StartsWith(fs + "|", StringComparison.Ordinal)) == 1
+            && g.Files.Any(f => f.StartsWith($"{fs}|{pb}|", StringComparison.Ordinal)), Join(g.Files));
+        Check("qualified shared: Hit(int) emitted once with its overload suffix",
+            g.Funcs.Count(f => f.Name == "Hit") == 2 && full.NodeFqns.Contains(hit), all);
+        Check("qualified shared (full): A's call lands on the owner's identity", full.Records.Contains($"calls|Ca.CallA.Go|{hit}"), all);
+        Check("qualified shared (full): B's call lands on the owner's identity", full.Records.Contains($"calls|Cb.CallB.Go|{hit}"), all);
+        (tc, tall) = Targeted("qualified shared", dir, ca);
+        Check("qualified shared (targeted A caller): shared declarations not emitted",
+            !tc.Records.Any(s => IsDecl(s) && RecordPath(s) == fs), tall);
+        Check("qualified shared (targeted A caller): call lands on the full scan's FQN, suffix included",
+            tc.Records.Contains($"calls|Ca.CallA.Go|{hit}"), tall);
+
+        // Projectless global namespace, only B.cs targeted: endpoints carry no leading dot and no root.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "qualified-global"));
+        WriteSource(dir, "A.cs", "class Alpha { public void M() {} }\n");
+        var gb = WriteSource(dir, "B.cs", "class Beta { Alpha a; void Go() { new Alpha().M(); } }\n");
+        var r = RunScanner(dir, "--targets", WriteTargets(baseDir, "qualified-global.targets", gb));
+        Check("qualified global: targeted scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var edges = ParseGraph(r.Out).Edges;
+        var gall = r.Out + "\nSTDERR:\n" + r.Err;
+        Check("qualified global: uses endpoint exactly `Alpha`", edges.Any(e => e.Type == "uses" && e.To == "Alpha"), gall);
+        Check("qualified global: calls endpoint exactly `Alpha.M`", edges.Any(e => e.Type == "calls" && e.To == "Alpha.M"), gall);
+        Check("qualified global: no endpoint with a leading dot or csharp. root",
+            !edges.Any(e => e.To.StartsWith(".", StringComparison.Ordinal) || e.To.StartsWith("csharp.", StringComparison.Ordinal)), gall);
     }
 
     /// <summary>
