@@ -50,6 +50,28 @@ internal static class ProjectFileReader
                 removes.Add(GlobRegex(Abs(dir, pattern)));
         p.SourcePaths.AddRange(sources.Distinct().Where(s => !removes.Any(r => r.IsMatch(Norm(s)))));
 
+        // Razor files: SDK default **/*.cshtml + **/*.razor (minus bin/ obj/) with Content/None Include/Remove;
+        // a .NET Framework project lists its views as explicit Content Includes.
+        var razorItems = (p.IsSdkStyle ? Items(root, "Content").Concat(Items(root, "None")) : Items(root, "Content")).ToList();
+        string[] razorExts = p.IsSdkStyle ? [".cshtml", ".razor"] : [".cshtml"];
+        var razor = new List<string>();
+        var razorRemoves = new List<Regex>();
+        if (p.IsSdkStyle)
+        {
+            razor.AddRange(Expand(dir, "**/*.cshtml").Concat(Expand(dir, "**/*.razor")));
+            razorRemoves.Add(GlobRegex(Abs(dir, "bin/**")));
+            razorRemoves.Add(GlobRegex(Abs(dir, "obj/**")));
+        }
+        foreach (var c in razorItems)
+            foreach (var pattern in SplitList(c.Attribute("Include")?.Value))
+                razor.AddRange(Expand(dir, pattern));
+        foreach (var c in razorItems)
+            foreach (var pattern in SplitList(c.Attribute("Remove")?.Value))
+                razorRemoves.Add(GlobRegex(Abs(dir, pattern)));
+        p.RazorPaths.AddRange(razor.Distinct()
+            .Where(s => razorExts.Any(e => s.EndsWith(e, StringComparison.OrdinalIgnoreCase)))
+            .Where(s => !razorRemoves.Any(r => r.IsMatch(Norm(s)))));
+
         foreach (var r in Items(root, "ProjectReference"))
             if (r.Attribute("Include")?.Value is { Length: > 0 } include) p.ProjectReferences.Add(include);
         foreach (var r in Items(root, "PackageReference"))

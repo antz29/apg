@@ -28,6 +28,9 @@ internal sealed class CsharpProject
     /// <summary>Absolute paths of the compiled source files.</summary>
     public List<string> SourcePaths { get; } = new();
 
+    /// <summary>Absolute paths of the project's Razor files (.cshtml/.razor); never in <see cref="SourcePaths"/>.</summary>
+    public List<string> RazorPaths { get; } = new();
+
     /// <summary>ProjectReference paths as written.</summary>
     public List<string> ProjectReferences { get; } = new();
 
