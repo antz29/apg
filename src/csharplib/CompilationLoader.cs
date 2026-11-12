@@ -22,8 +22,10 @@ internal static class CompilationLoader
     /// <paramref name="options"/> — a project's preprocessor symbols and
     /// language version; null means latest language version, no symbols:
     /// .cs as regular C#, .csx as a script. .cshtml/.razor are never
-    /// parsed as C#; their paths are returned through <paramref name="heldBack"/>
-    /// in discovery order.
+    /// parsed as C#: <paramref name="heldBack"/> is the compilation's Razor
+    /// inputs — every .cshtml/.razor path of <paramref name="files"/>, as
+    /// given (absolute, from discovery), in discovery order — for the Razor
+    /// stage.
     /// </summary>
     public static List<SyntaxTree> ParseTrees(IEnumerable<string> files, out List<string> heldBack, CSharpParseOptions? options = null)
     {
