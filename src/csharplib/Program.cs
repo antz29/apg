@@ -97,6 +97,7 @@ public static class Program
             try
             {
                 var engine = RazorCompiler.CreateProjectEngine(rootDir);
+                var compilation = CompilationLoader.CreateCompilation(RazorCompiler.CompileDeclarations(engine, null, rootDir, razorPaths));
                 var modules = new HashSet<string>(StringComparer.Ordinal);
                 int nextId = 0;
                 foreach (var razorPath in razorPaths)
@@ -104,7 +105,9 @@ public static class Program
                     if (!File.Exists(razorPath)) throw new FileNotFoundException($"Razor input not found: {razorPath}");
                     var razorText = File.ReadAllText(razorPath);
                     var razorLines = Microsoft.CodeAnalysis.Text.SourceText.From(razorText).Lines;
-                    var generated = RazorCompiler.Compile(engine, razorPath, razorText);
+                    var (generated, errors) = RazorCompiler.Compile(engine, null, rootDir, [razorPath], compilation).Single();
+                    if (errors.Count > 0)
+                        throw new InvalidOperationException($"Razor compile failed for {razorPath}: {string.Join("; ", errors)}");
                     var typeDecl = generated.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>().First();
                     string ns = typeDecl.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault()?.Name.ToString() ?? "";
 

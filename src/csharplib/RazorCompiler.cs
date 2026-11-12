@@ -121,53 +121,12 @@ internal static class RazorCompiler
     /// </summary>
     public static List<SyntaxTree> CompileDeclarations(RazorProjectEngine engine, CsharpProject? project, string rootDirectory, IEnumerable<string> razorFiles)
     {
-        const string GlobalSentinel = "__ApgGlobalNamespace"; // lets Razor compute class names and folder suffixes, stripped below
         var trees = new List<SyntaxTree>();
         foreach (var filePath in razorFiles)
         {
             try
             {
-                var text = File.ReadAllText(filePath);
-                var imports = CollectImports(filePath, rootDirectory);
-                var rootNamespace = ResolveRootNamespace(project, text, imports);
-                var fileKind = FileKinds.GetFileKindFromFilePath(filePath);
-                var source = RazorSourceDocument.Create(text, new RazorSourceDocumentProperties(filePath, Path.GetRelativePath(rootDirectory, filePath)));
-                var parserOptions = RazorParserOptions.Create(options =>
-                {
-                    foreach (var feature in engine.EngineFeatures.OfType<IConfigureRazorParserOptionsFeature>().OrderBy(f => f.Order))
-                        feature.Configure(options);
-                }, fileKind);
-                var codeGenerationOptions = RazorCodeGenerationOptions.Create(options =>
-                {
-                    foreach (var feature in engine.EngineFeatures.OfType<IConfigureRazorCodeGenerationOptionsFeature>().OrderBy(f => f.Order))
-                        feature.Configure(options);
-                    options.RootNamespace = rootNamespace.Length > 0 ? rootNamespace : GlobalSentinel;
-                    options.SuppressPrimaryMethodBody = true;
-                });
-                var document = RazorCodeDocument.Create(source, imports, parserOptions, codeGenerationOptions);
-                document.SetFileKind(fileKind);
-                foreach (var phase in engine.Engine.Phases)
-                {
-                    // Razor's defaults (MVC's `AspNetCore`, a component's fallback) and the sentinel give way to the resolved root namespace.
-                    if (phase is IRazorOptimizationPhase && document.GetDocumentIntermediateNode().FindPrimaryNamespace() is { } ns)
-                    {
-                        if (ns.Content is "AspNetCore" or "__GeneratedComponent" or GlobalSentinel)
-                            ns.Content = rootNamespace;
-                        else if (ns.Content.StartsWith(GlobalSentinel + ".", StringComparison.Ordinal))
-                            ns.Content = ns.Content[(GlobalSentinel.Length + 1)..];
-                    }
-                    // The global namespace: its members move up to the document (optimization passes still need the node, codegen cannot write it).
-                    if (phase is IRazorCSharpLoweringPhase && document.GetDocumentIntermediateNode().FindPrimaryNamespace() is { Content.Length: 0 } global)
-                    {
-                        var children = document.GetDocumentIntermediateNode().Children;
-                        var at = children.IndexOf(global);
-                        children.RemoveAt(at);
-                        foreach (var child in global.Children.Reverse())
-                            children.Insert(at, child);
-                    }
-                    phase.Execute(document);
-                }
-                trees.Add(CSharpSyntaxTree.ParseText(document.GetCSharpDocument().GeneratedCode, new CSharpParseOptions(LanguageVersion.Latest), filePath));
+                trees.Add(Generate(engine, project, rootDirectory, filePath, declarationsOnly: true).Tree);
             }
             catch (Exception)
             {
@@ -177,27 +136,85 @@ internal static class RazorCompiler
         return trees;
     }
 
+    /// <summary>
+    /// The full Razor pass over the Razor files of one compilation: first
+    /// hands <paramref name="compilation"/> — the one already carrying
+    /// <see cref="CompileDeclarations"/>' trees, its metadata references and
+    /// its references to the referenced projects' Razor-carrying compilations —
+    /// to the engine's <see cref="SuppliedCompilationTagHelperFeature"/>, so
+    /// child component tags bind to components declared in this or a
+    /// referenced project; then compiles each of <paramref name="razorFiles"/>
+    /// (absolute paths) with the same imports and root namespace as
+    /// <see cref="CompileDeclarations"/>. Returns, per file in order, its
+    /// <c>#line</c>-carrying generated-C# tree, whose FilePath is the Razor
+    /// file's own absolute path, and that file's Razor error diagnostics.
+    /// Never throws on a Razor error: an erroring file still yields whatever
+    /// tree the engine produced (possibly declaring nothing) with its errors.
+    /// </summary>
+    public static List<(SyntaxTree Tree, IReadOnlyList<RazorDiagnostic> Errors)> Compile(
+        RazorProjectEngine engine, CsharpProject? project, string rootDirectory, IEnumerable<string> razorFiles, Compilation compilation)
+    {
+        engine.EngineFeatures.OfType<SuppliedCompilationTagHelperFeature>().Single().Compilation = compilation;
+        return razorFiles.Select(filePath => Generate(engine, project, rootDirectory, filePath, declarationsOnly: false)).ToList();
+    }
+
+    /// <summary>
+    /// Compiles one Razor file with its imports and resolved root namespace
+    /// (shared by both passes so they declare the same types); with
+    /// <paramref name="declarationsOnly"/> the primary method body is suppressed.
+    /// </summary>
+    private static (SyntaxTree Tree, IReadOnlyList<RazorDiagnostic> Errors) Generate(
+        RazorProjectEngine engine, CsharpProject? project, string rootDirectory, string filePath, bool declarationsOnly)
+    {
+        const string GlobalSentinel = "__ApgGlobalNamespace"; // lets Razor compute class names and folder suffixes, stripped below
+        var text = File.ReadAllText(filePath);
+        var imports = CollectImports(filePath, rootDirectory);
+        var rootNamespace = ResolveRootNamespace(project, text, imports);
+        var fileKind = FileKinds.GetFileKindFromFilePath(filePath);
+        var source = RazorSourceDocument.Create(text, new RazorSourceDocumentProperties(filePath, Path.GetRelativePath(rootDirectory, filePath)));
+        var parserOptions = RazorParserOptions.Create(options =>
+        {
+            foreach (var feature in engine.EngineFeatures.OfType<IConfigureRazorParserOptionsFeature>().OrderBy(f => f.Order))
+                feature.Configure(options);
+        }, fileKind);
+        var codeGenerationOptions = RazorCodeGenerationOptions.Create(options =>
+        {
+            foreach (var feature in engine.EngineFeatures.OfType<IConfigureRazorCodeGenerationOptionsFeature>().OrderBy(f => f.Order))
+                feature.Configure(options);
+            options.RootNamespace = rootNamespace.Length > 0 ? rootNamespace : GlobalSentinel;
+            options.SuppressPrimaryMethodBody = declarationsOnly;
+        });
+        var document = RazorCodeDocument.Create(source, imports, parserOptions, codeGenerationOptions);
+        document.SetFileKind(fileKind);
+        foreach (var phase in engine.Engine.Phases)
+        {
+            // Razor's defaults (MVC's `AspNetCore`, a component's fallback) and the sentinel give way to the resolved root namespace.
+            if (phase is IRazorOptimizationPhase && document.GetDocumentIntermediateNode().FindPrimaryNamespace() is { } ns)
+            {
+                if (ns.Content is "AspNetCore" or "__GeneratedComponent" or GlobalSentinel)
+                    ns.Content = rootNamespace;
+                else if (ns.Content.StartsWith(GlobalSentinel + ".", StringComparison.Ordinal))
+                    ns.Content = ns.Content[(GlobalSentinel.Length + 1)..];
+            }
+            // The global namespace: its members move up to the document (optimization passes still need the node, codegen cannot write it).
+            if (phase is IRazorCSharpLoweringPhase && document.GetDocumentIntermediateNode().FindPrimaryNamespace() is { Content.Length: 0 } global)
+            {
+                var children = document.GetDocumentIntermediateNode().Children;
+                var at = children.IndexOf(global);
+                children.RemoveAt(at);
+                foreach (var child in global.Children.Reverse())
+                    children.Insert(at, child);
+            }
+            phase.Execute(document);
+        }
+        var csharp = document.GetCSharpDocument();
+        var errors = csharp.Diagnostics.Where(d => d.Severity == RazorDiagnosticSeverity.Error).ToList();
+        return (CSharpSyntaxTree.ParseText(csharp.GeneratedCode, new CSharpParseOptions(LanguageVersion.Latest), filePath), errors);
+    }
+
     /// <summary>A line-leading <c>@namespace</c> directive and its namespace.</summary>
     private static readonly System.Text.RegularExpressions.Regex NamespaceDirectivePattern =
         new(@"^[ \t]*@namespace[ \t]+([^\s;]+)", System.Text.RegularExpressions.RegexOptions.Multiline);
-
-    /// <summary>
-    /// Compiles one <c>.cshtml</c> (MVC view) or <c>.razor</c> (component)
-    /// file's in-memory <paramref name="text"/> to a generated-C# syntax tree
-    /// whose <c>#line</c> directives name <paramref name="filePath"/>, so
-    /// <see cref="RazorSourceMap.MapSpan"/> maps its declarations back to it.
-    /// Throws <see cref="InvalidOperationException"/> on any Razor error.
-    /// </summary>
-    public static SyntaxTree Compile(RazorProjectEngine engine, string filePath, string text)
-    {
-        var source = RazorSourceDocument.Create(text, new RazorSourceDocumentProperties(filePath, Path.GetFileName(filePath)));
-        var csharp = engine.Process(source, FileKinds.GetFileKindFromFilePath(filePath), Array.Empty<RazorSourceDocument>(), Array.Empty<TagHelperDescriptor>())
-            .GetCSharpDocument();
-        var errors = csharp.Diagnostics.Where(d => d.Severity == RazorDiagnosticSeverity.Error).ToList();
-        if (errors.Count > 0)
-            throw new InvalidOperationException($"Razor compile failed for {filePath}: {string.Join("; ", errors)}");
-        return CSharpSyntaxTree.ParseText(csharp.GeneratedCode, new CSharpParseOptions(LanguageVersion.Latest), filePath + ".g.cs");
-    }
 
     /// <summary>
     /// An empty project file system, so the engine never reads the disk;
