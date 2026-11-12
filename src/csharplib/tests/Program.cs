@@ -66,6 +66,7 @@ public static class TestMain
             TestProjectSdkStyle(baseDir);
             TestProjectSdkElementNoDefaultItems(baseDir);
             TestProjectFrameworkStyle(baseDir);
+            TestProjectRazorMembership(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -746,6 +747,65 @@ public static class TestMain
             packages.SequenceEqual(new (string, string?)[] { ("Newtonsoft.Json", "12.0.3") }),
             Join(packages.Select(x => x.ToString())));
         Check(".NET Framework-style csproj: RootNamespace read", Prop<string>(p, "RootNamespace") == "Legacy", Prop<string>(p, "RootNamespace"));
+    }
+
+    /// <summary>
+    /// Razor membership: SDK default **/*.cshtml + **/*.razor minus bin/obj and Content Remove;
+    /// .NET Framework explicit Content Include; a Razor file two projects claim is owned by the containing one.
+    /// </summary>
+    private static void TestProjectRazorMembership(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "csproj-razor"));
+
+        // SDK-style: globbed views/components, bin/obj and Content Remove excluded.
+        var web = Path.Combine(root, "Web");
+        var index = WriteSource(Path.Combine(web, "Pages"), "Index.cshtml", "<h1/>");
+        var counter = WriteSource(Path.Combine(web, "Components"), "Counter.razor", "<p/>");
+        var dropped = WriteSource(Path.Combine(web, "Pages"), "Dropped.cshtml", "<p/>");
+        WriteSource(Path.Combine(web, "bin", "Debug"), "B.cshtml", "<p/>");
+        WriteSource(Path.Combine(web, "obj"), "O.razor", "<p/>");
+        var webProj = WriteSource(web, "Web.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk.Web">
+              <ItemGroup><Content Remove="Pages/Dropped.cshtml" /></ItemGroup>
+            </Project>
+            """);
+        var sdk = ReadProject(webProj);
+        var sdkRazor = Prop<List<string>>(sdk, "RazorPaths");
+        var wantSdk = new[] { index, counter };
+        Check("SDK-style csproj: Razor default glob minus bin/obj and Content Remove",
+            new SortedSet<string>(wantSdk, StringComparer.Ordinal).SetEquals(sdkRazor), SetDiff(wantSdk, sdkRazor));
+        Check("SDK-style csproj: Content Remove'd Razor file omitted", !sdkRazor.Contains(dropped), Join(sdkRazor));
+
+        // .NET Framework-style: only the explicit Content Include.
+        var fw = Path.Combine(root, "Mvc");
+        var home = WriteSource(Path.Combine(fw, "Views", "Home"), "Index.cshtml", "<h1/>");
+        WriteSource(Path.Combine(fw, "Views", "Home"), "Unlisted.cshtml", "<p/>");
+        var fwProj = WriteSource(fw, "Mvc.csproj", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <ItemGroup><Content Include="Views\Home\Index.cshtml" /></ItemGroup>
+            </Project>
+            """);
+        var fwRazor = Prop<List<string>>(ReadProject(fwProj), "RazorPaths");
+        Check(".NET Framework-style csproj: Razor file from explicit Content Include only",
+            fwRazor.SequenceEqual(new[] { home }), Join(fwRazor));
+
+        // Two claimants: Alpha (first in path order) includes Web's view; Web contains it and owns it.
+        var alphaProj = WriteSource(Path.Combine(root, "Alpha"), "Alpha.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup><Content Include="../Web/Pages/Index.cshtml" /></ItemGroup>
+            </Project>
+            """);
+        var alpha = ReadProject(alphaProj);
+        Check("Razor file claimed by two projects (fixture)",
+            Prop<List<string>>(alpha, "RazorPaths").Contains(index) && sdkRazor.Contains(index), Join(Prop<List<string>>(alpha, "RazorPaths")));
+        var projType = FrontendType("CsharpProject");
+        var arr = Array.CreateInstance(projType, 2);
+        arr.SetValue(alpha, 0);
+        arr.SetValue(sdk, 1);
+        var owners = (System.Collections.IDictionary)FrontendType("SourceOwnership").GetMethod("AssignOwners")!.Invoke(null, new object[] { arr })!;
+        var owner = owners.Contains(index) ? Prop<string>(owners[index]!, "Path") : "<none>";
+        Check("Razor file claimed by two projects: owned by the containing project", owner == Prop<string>(sdk, "Path"), owner);
     }
 
     // ------------------------------------------------------------------
