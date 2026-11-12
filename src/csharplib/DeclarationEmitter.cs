@@ -22,6 +22,41 @@ internal sealed class DeclarationEmitter
         _scanner = scanner;
     }
 
+    /// <summary>
+    /// Emits one whole-path module per readable <c>.sln</c> and per loaded
+    /// project (keyed by absolute file path; the ingestor renders it
+    /// repo-relative as one segment), plus a <c>contains</c> edge from each
+    /// solution to every loaded project it lists. A project several solutions
+    /// list is one module under each; an unlisted project stays top-level.
+    /// </summary>
+    public void EmitProjectModules(IEnumerable<string> solutionPaths, IEnumerable<CsharpProject> projects)
+    {
+        var loaded = projects.Select(p => p.Path).ToHashSet(StringComparer.Ordinal);
+        var listed = new List<(string Sln, List<string> Projects)>();
+        foreach (var sln in solutionPaths.Select(Path.GetFullPath).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal))
+        {
+            List<string> members;
+            try
+            {
+                members = SolutionReader.Read(sln);
+            }
+            catch
+            {
+                continue; // unreadable .sln: already warned and skipped by project discovery
+            }
+            listed.Add((sln, members.Where(loaded.Contains).OrderBy(p => p, StringComparer.Ordinal).ToList()));
+        }
+
+        foreach (var fqn in listed.Select(l => l.Sln).Concat(loaded.OrderBy(p => p, StringComparer.Ordinal)))
+        {
+            if (_scanner.EmittedModules.Add(fqn)) JsonlWriter.Write(new ModuleMsg { Fqn = fqn });
+        }
+        foreach (var (sln, members) in listed)
+        {
+            foreach (var p in members) JsonlWriter.Write(new EdgeMsg { Type = "contains", From = sln, To = p });
+        }
+    }
+
     public void EmitFileAndDeclarations(SyntaxTree tree, SemanticModel model, CompilationUnitSyntax root, bool emit)
     {
         var filePath = tree.FilePath;
