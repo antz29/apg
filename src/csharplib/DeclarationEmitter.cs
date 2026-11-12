@@ -75,6 +75,8 @@ internal sealed class DeclarationEmitter
         // A Razor tree's FilePath is its .cshtml/.razor file: the File record spans that file's own lines, never the generated C#'s.
         var text = isRazor ? Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(filePath, System.Text.Encoding.UTF8)) : tree.GetText();
         int totalLines = Math.Max(1, text.Lines.Count);
+        // Razor declarations take Razor lines but keep generated-tree byte offsets, so the ingestor's struct⊇function offset check still holds.
+        int? razorLines = isRazor ? totalLines : null;
 
         // Determine parent module / namespace for file
         string defaultNamespace = "";
@@ -142,7 +144,7 @@ internal sealed class DeclarationEmitter
                     _scanner.SymbolToId[symbol] = id;
 
                     var span = typeDecl.Span;
-                    var lineSpan = tree.GetLineSpan(span);
+                    var (startLine, endLine) = LineSpan(tree, span, razorLines);
 
                     string name = SymbolNaming.GetTypeNameWithArity(symbol);
                     string fullFqn = string.IsNullOrEmpty(parentFqn) ? name : $"{parentFqn}.{name}";
@@ -156,8 +158,8 @@ internal sealed class DeclarationEmitter
                         Path = filePath,
                         Start = span.Start,
                         End = span.End,
-                        StartLine = lineSpan.StartLinePosition.Line + 1,
-                        EndLine = lineSpan.EndLinePosition.Line + 1
+                        StartLine = startLine,
+                        EndLine = endLine
                     });
 
                     // If nested type, emit Struct -> Struct Contains edge
@@ -174,20 +176,37 @@ internal sealed class DeclarationEmitter
             }
             else if (emit && member is MethodDeclarationSyntax methodDecl)
             {
-                EmitMethod(methodDecl, model, tree, filePath);
+                EmitMethod(methodDecl, model, tree, filePath, razorLines);
             }
             else if (emit && member is ConstructorDeclarationSyntax ctorDecl)
             {
-                EmitConstructor(ctorDecl, model, tree, filePath);
+                EmitConstructor(ctorDecl, model, tree, filePath, razorLines);
             }
             else if (emit && member is PropertyDeclarationSyntax propDecl)
             {
-                EmitPropertyAccessors(propDecl, model, tree, filePath);
+                EmitPropertyAccessors(propDecl, model, tree, filePath, razorLines);
             }
         }
     }
 
-    private void EmitMethod(MethodDeclarationSyntax methodDecl, SemanticModel model, SyntaxTree tree, string filePath)
+    /// <summary>
+    /// The 1-based inclusive line span of a declaration: its own tree's lines,
+    /// or — for a Razor-generated tree (non-null <paramref name="razorLines"/>,
+    /// the Razor file's line count) — <see cref="RazorSourceMap.MapSpan"/>'s
+    /// Razor line span (whole-file when unmapped).
+    /// </summary>
+    private static (int StartLine, int EndLine) LineSpan(SyntaxTree tree, Microsoft.CodeAnalysis.Text.TextSpan span, int? razorLines)
+    {
+        if (razorLines is int n)
+        {
+            var (start, end, _) = RazorSourceMap.MapSpan(tree, span, n);
+            return (start, end);
+        }
+        var lineSpan = tree.GetLineSpan(span);
+        return (lineSpan.StartLinePosition.Line + 1, lineSpan.EndLinePosition.Line + 1);
+    }
+
+    private void EmitMethod(MethodDeclarationSyntax methodDecl, SemanticModel model, SyntaxTree tree, string filePath, int? razorLines)
     {
         var symbol = model.GetDeclaredSymbol(methodDecl);
         if (symbol == null) return;
@@ -196,7 +215,7 @@ internal sealed class DeclarationEmitter
         _scanner.SymbolToId[symbol] = id;
 
         var span = methodDecl.Span;
-        var lineSpan = tree.GetLineSpan(span);
+        var (startLine, endLine) = LineSpan(tree, span, razorLines);
         string parentFqn = SymbolNaming.GetParentScopeFqn(symbol);
 
         var paramTypes = symbol.Parameters.Select(SymbolNaming.GetParameterTypeString).ToList();
@@ -215,8 +234,8 @@ internal sealed class DeclarationEmitter
             Path = filePath,
             Start = span.Start,
             End = span.End,
-            StartLine = lineSpan.StartLinePosition.Line + 1,
-            EndLine = lineSpan.EndLinePosition.Line + 1
+            StartLine = startLine,
+            EndLine = endLine
         });
 
         // If enclosed in a type, emit Struct -> Function Contains edge
@@ -231,7 +250,7 @@ internal sealed class DeclarationEmitter
         }
     }
 
-    private void EmitConstructor(ConstructorDeclarationSyntax ctorDecl, SemanticModel model, SyntaxTree tree, string filePath)
+    private void EmitConstructor(ConstructorDeclarationSyntax ctorDecl, SemanticModel model, SyntaxTree tree, string filePath, int? razorLines)
     {
         var symbol = model.GetDeclaredSymbol(ctorDecl);
         if (symbol == null) return;
@@ -240,7 +259,7 @@ internal sealed class DeclarationEmitter
         _scanner.SymbolToId[symbol] = id;
 
         var span = ctorDecl.Span;
-        var lineSpan = tree.GetLineSpan(span);
+        var (startLine, endLine) = LineSpan(tree, span, razorLines);
         string parentFqn = SymbolNaming.GetParentScopeFqn(symbol);
 
         var paramTypes = symbol.Parameters.Select(SymbolNaming.GetParameterTypeString).ToList();
@@ -258,8 +277,8 @@ internal sealed class DeclarationEmitter
             Path = filePath,
             Start = span.Start,
             End = span.End,
-            StartLine = lineSpan.StartLinePosition.Line + 1,
-            EndLine = lineSpan.EndLinePosition.Line + 1
+            StartLine = startLine,
+            EndLine = endLine
         });
 
         if (symbol.ContainingType != null && _scanner.TryResolveEndpoint(symbol.ContainingType, out var parentStructEndpoint))
@@ -273,28 +292,28 @@ internal sealed class DeclarationEmitter
         }
     }
 
-    private void EmitPropertyAccessors(PropertyDeclarationSyntax propDecl, SemanticModel model, SyntaxTree tree, string filePath)
+    private void EmitPropertyAccessors(PropertyDeclarationSyntax propDecl, SemanticModel model, SyntaxTree tree, string filePath, int? razorLines)
     {
         var propSymbol = model.GetDeclaredSymbol(propDecl);
         if (propSymbol == null) return;
 
         if (propSymbol.GetMethod != null)
         {
-            EmitAccessor(propSymbol.GetMethod, propDecl, tree, filePath, $"get_{propSymbol.Name}");
+            EmitAccessor(propSymbol.GetMethod, propDecl, tree, filePath, $"get_{propSymbol.Name}", razorLines);
         }
         if (propSymbol.SetMethod != null)
         {
-            EmitAccessor(propSymbol.SetMethod, propDecl, tree, filePath, $"set_{propSymbol.Name}");
+            EmitAccessor(propSymbol.SetMethod, propDecl, tree, filePath, $"set_{propSymbol.Name}", razorLines);
         }
     }
 
-    private void EmitAccessor(IMethodSymbol symbol, PropertyDeclarationSyntax propDecl, SyntaxTree tree, string filePath, string name)
+    private void EmitAccessor(IMethodSymbol symbol, PropertyDeclarationSyntax propDecl, SyntaxTree tree, string filePath, string name, int? razorLines)
     {
         var id = _scanner.NextId();
         _scanner.SymbolToId[symbol] = id;
 
         var span = propDecl.Span;
-        var lineSpan = tree.GetLineSpan(span);
+        var (startLine, endLine) = LineSpan(tree, span, razorLines);
         string parentFqn = SymbolNaming.GetParentScopeFqn(symbol);
 
         var paramTypes = symbol.Parameters.Select(SymbolNaming.GetParameterTypeString).ToList();
@@ -311,8 +330,8 @@ internal sealed class DeclarationEmitter
             Path = filePath,
             Start = span.Start,
             End = span.End,
-            StartLine = lineSpan.StartLinePosition.Line + 1,
-            EndLine = lineSpan.EndLinePosition.Line + 1
+            StartLine = startLine,
+            EndLine = endLine
         });
 
         if (symbol.ContainingType != null && _scanner.TryResolveEndpoint(symbol.ContainingType, out var parentStructEndpoint))
