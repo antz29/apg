@@ -564,9 +564,12 @@ public class Scanner
             return fqn;
         }
         // A type renders `parent.name`, where `parent` is exactly what the
-        // emitted struct record carries (the containing type's FQN, or the
-        // namespace).
-        return $"{SymbolNaming.GetParentScopeFqn(symbol)}.{SymbolNaming.GetTypeNameWithArity((INamedTypeSymbol)symbol)}";
+        // emitted struct record carries (the containing type's FQN, the
+        // collision-qualified project scope, or the namespace); an empty
+        // (global-namespace) parent renders the bare name, never `.name`.
+        string typeParent = SymbolNaming.GetParentScopeFqn(symbol);
+        string typeName = SymbolNaming.GetTypeNameWithArity((INamedTypeSymbol)symbol);
+        return typeParent.Length == 0 ? typeName : $"{typeParent}.{typeName}";
     }
 
     /// Resolves an edge endpoint: the opaque id when the target symbol is part
