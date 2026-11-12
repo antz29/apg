@@ -96,7 +96,7 @@ public static class Program
         {
             try
             {
-                var engine = RazorCompiler.CreateProjectEngine();
+                var engine = RazorCompiler.CreateProjectEngine(rootDir);
                 var modules = new HashSet<string>(StringComparer.Ordinal);
                 int nextId = 0;
                 foreach (var razorPath in razorPaths)

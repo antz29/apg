@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc.Razor.Extensions;
 using Microsoft.AspNetCore.Razor.Language;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Razor;
 
 namespace Apg.CsharpFrontend;
 
@@ -12,15 +13,46 @@ namespace Apg.CsharpFrontend;
 internal static class RazorCompiler
 {
     /// <summary>
-    /// A Razor 6.0 project engine with the MVC view (RazorExtensions) and the
-    /// built-in component features. No tag-helper discovery and no metadata
-    /// references, so nothing reads a loaded assembly's file path — it runs
-    /// inside the single-file publish.
+    /// The Razor 6.0 project engine for one project compilation (or the
+    /// projectless one), rooted at <paramref name="projectDirectory"/> (the
+    /// scan root for the projectless compilation): the ASP.NET Core MVC
+    /// configuration (RazorExtensions) for every <c>.cshtml</c> and the
+    /// component configuration for every <c>.razor</c>. Tag helpers come from
+    /// a <see cref="SuppliedCompilationTagHelperFeature"/> in place of the
+    /// stock CompilationTagHelperFeature; its compilation is supplied later,
+    /// per compilation, never here.
     /// </summary>
-    public static RazorProjectEngine CreateProjectEngine()
+    public static RazorProjectEngine CreateProjectEngine(string projectDirectory)
     {
         var configuration = RazorConfiguration.Create(RazorLanguageVersion.Version_6_0, "MVC-3.0", Array.Empty<RazorExtension>());
-        return RazorProjectEngine.Create(configuration, new InMemoryFileSystem(), RazorExtensions.Register);
+        return RazorProjectEngine.Create(configuration, RazorProjectFileSystem.Create(projectDirectory), builder =>
+        {
+            builder.Features.Add(new SuppliedCompilationTagHelperFeature());
+            CompilerFeatures.Register(builder);
+            RazorExtensions.Register(builder);
+        });
+    }
+
+    /// <summary>
+    /// An <see cref="ITagHelperFeature"/> whose descriptors are computed by the
+    /// engine's registered <see cref="ITagHelperDescriptorProvider"/>s over
+    /// the supplied <see cref="Compilation"/> — unlike the stock feature, it
+    /// sees in-memory declaration trees. No compilation, no descriptors.
+    /// </summary>
+    internal sealed class SuppliedCompilationTagHelperFeature : RazorEngineFeatureBase, ITagHelperFeature
+    {
+        public Compilation? Compilation { get; set; }
+
+        public IReadOnlyList<TagHelperDescriptor> GetDescriptors()
+        {
+            var results = new List<TagHelperDescriptor>();
+            if (Compilation is null) return results;
+            var context = TagHelperDescriptorProviderContext.Create(results);
+            context.SetCompilation(Compilation);
+            foreach (var provider in Engine.Features.OfType<ITagHelperDescriptorProvider>().OrderBy(p => p.Order))
+                provider.Execute(context);
+            return results;
+        }
     }
 
     /// <summary>
