@@ -575,6 +575,9 @@ public class Scanner
     /// Resolves an edge endpoint: the opaque id when the target symbol is part
     /// of the emitted (target) set, else the canonical FQN when it is project
     /// code declared in a non-emitted file (the cached unit supplies its node).
+    /// A shared file's declaration seen from any compiling project maps by its
+    /// declaration site to the one emitted/registered symbol — the owning
+    /// project's — so every project's references land on one identity.
     /// Returns false for a foreign symbol (external/stdlib), which becomes an
     /// unresolved edge exactly as in a full scan.
     internal bool TryResolveEndpoint(ISymbol symbol, out string endpoint)
