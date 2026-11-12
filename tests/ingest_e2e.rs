@@ -2854,4 +2854,160 @@ mod e2e {
             "Program.cs is contained by its Language, not left uncontained"
         );
     }
+
+    /// csharp-projects task-20: global-namespace C# types (empty parent) root
+    /// at the bare `csharp` Language id — in a full stream, through a
+    /// target-filtered stream's canonical-FQN edges, and beside
+    /// collision-qualified project modules.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool/FactStore dir); run via cargo test-e2e"]
+    fn global_namespace_csharp_types_root_under_csharp() {
+        use apg::cache::{CacheKey, FactStore, FileFragment, FileIndex, ScanConfigKey};
+
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "csharp",
+            config: None,
+            base: None,
+        };
+        let cs = || Record::LangSwitch {
+            language: "csharp".to_string(),
+        };
+        let a_records = || {
+            vec![
+                file_rec("cs/A.cs", "", 10),
+                srec("a0", "", "Alpha", "cs/A.cs"),
+                srec("a1", "Alpha", "Inner", "cs/A.cs"),
+                srec("a2", "", "Alpha`1", "cs/A.cs"),
+                frec("a3", "Alpha", "M", "cs/A.cs"),
+            ]
+        };
+        let b_records = |call_to: &str, use_to: &str| {
+            vec![
+                file_rec("cs/B.cs", "", 10),
+                srec("b0", "", "Beta", "cs/B.cs"),
+                frec("b1", "Beta", "Run", "cs/B.cs"),
+                Record::Calls {
+                    from: "b1".to_string(),
+                    to: call_to.to_string(),
+                    properties: NodeProperties::default(),
+                },
+                Record::Uses {
+                    from: "b1".to_string(),
+                    to: use_to.to_string(),
+                    properties: NodeProperties::default(),
+                },
+            ]
+        };
+
+        // (a) Full stream with opaque-id edges.
+        let mut records = vec![cs()];
+        records.extend(a_records());
+        records.extend(b_records("a3", "a0"));
+        let (full, _) = ingest(records, &opts, None);
+        for (fqn, kind) in [
+            ("csharp.Alpha", NodeKind::Struct),
+            ("csharp.Alpha.Inner", NodeKind::Struct),
+            ("csharp.Alpha`1", NodeKind::Struct),
+            ("csharp.Beta", NodeKind::Struct),
+            ("csharp.Alpha.M", NodeKind::Function),
+        ] {
+            assert_eq!(
+                full.nodes.get(fqn).map(|n| n.kind),
+                Some(kind),
+                "{fqn}: {:?}",
+                full.nodes.keys().collect::<Vec<_>>()
+            );
+        }
+        for fqn in full.nodes.keys() {
+            assert!(!fqn.starts_with('.'), "unrooted FQN `{fqn}`");
+            assert!(
+                !fqn.starts_with("csharp..") && !fqn.starts_with("csharp.csharp"),
+                "malformed or twice-rooted FQN `{fqn}`"
+            );
+        }
+        for file in ["cs/A.cs", "cs/B.cs"] {
+            assert!(
+                full.contains
+                    .contains(&("csharp".to_string(), file.to_string())),
+                "csharp -> {file}: {:?}",
+                full.contains
+            );
+        }
+        let call = ("csharp.Beta.Run".to_string(), "csharp.Alpha.M".to_string());
+        let used = ("csharp.Beta.Run".to_string(), "csharp.Alpha".to_string());
+        assert!(full.calls.contains(&call), "{:?}", full.calls);
+        assert!(full.uses.contains(&used), "{:?}", full.uses);
+
+        // (b) Target-filtered: only cs/B.cs re-emitted, its cross-stream edges
+        // carry the UNROOTED canonical FQNs; cs/A.cs comes from the fact store.
+        let dir = std::env::temp_dir().join(format!("apg-global-cs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+        let index = FileIndex::build(&full);
+        let frag = FileFragment::from_index(&index, "cs/A.cs", "cs/A.cs", "oid-a", "csharp");
+        store.put(&frag, "/x", &cache_key).unwrap();
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![(
+                "cs/A.cs".to_string(),
+                "csharp".to_string(),
+                "oid-a".to_string(),
+            )],
+            reader_root: "/x".into(),
+            skipped_langs: BTreeSet::new(),
+        };
+        let mut targeted = vec![cs()];
+        targeted.extend(b_records("Alpha.M", "Alpha"));
+        let (filtered, _) = ingest_with_reuse(targeted, &opts, Some(&reuse), None);
+        assert!(filtered.calls.contains(&call), "{:?}", filtered.calls);
+        assert!(filtered.uses.contains(&used), "{:?}", filtered.uses);
+        assert_eq!(filtered.calls, full.calls);
+        assert_eq!(filtered.uses, full.uses);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // (c) Collision-qualified global pair: one Alpha under each project.
+        let base = Path::new("/r");
+        let records = vec![
+            cs(),
+            Record::Module {
+                fqn: "/r/P1/P1.csproj".to_string(),
+            },
+            Record::Module {
+                fqn: "/r/P2/P2.csproj".to_string(),
+            },
+            file_rec("/r/P1/A.cs", "/r/P1/P1.csproj", 10),
+            file_rec("/r/P2/A.cs", "/r/P2/P2.csproj", 10),
+            srec("p1", "/r/P1/P1.csproj", "Alpha", "/r/P1/A.cs"),
+            srec("p2", "/r/P2/P2.csproj", "Alpha", "/r/P2/A.cs"),
+        ];
+        let (graph, _) = ingest(
+            records,
+            &IngestOptions {
+                base: Some(base),
+                ..opts
+            },
+            None,
+        );
+        let of_kind = |kind: NodeKind| -> BTreeSet<&str> {
+            graph
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.kind == kind)
+                .map(|(fqn, _)| fqn.as_str())
+                .collect()
+        };
+        assert_eq!(
+            of_kind(NodeKind::Module),
+            BTreeSet::from(["csharp.P1/P1.csproj", "csharp.P2/P2.csproj"]),
+            "no trailing-dot module"
+        );
+        assert_eq!(
+            of_kind(NodeKind::Struct),
+            BTreeSet::from(["csharp.P1/P1.csproj.Alpha", "csharp.P2/P2.csproj.Alpha"]),
+            "two distinct collision-qualified Alphas"
+        );
+    }
 }
