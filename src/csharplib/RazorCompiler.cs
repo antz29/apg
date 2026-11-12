@@ -56,6 +56,30 @@ internal static class RazorCompiler
     }
 
     /// <summary>
+    /// The import documents for one Razor file: every <c>_ViewImports.cshtml</c>
+    /// (for a <c>.cshtml</c>) or <c>_Imports.razor</c> (for a <c>.razor</c>) in
+    /// the file's directory and each ancestor up to and including
+    /// <paramref name="rootDirectory"/> — the owning project's directory, or
+    /// the scan root for a projectless file — outermost first, as the engine
+    /// applies them.
+    /// </summary>
+    public static IReadOnlyList<RazorSourceDocument> CollectImports(string filePath, string rootDirectory)
+    {
+        var importName = filePath.EndsWith(".razor", StringComparison.OrdinalIgnoreCase) ? "_Imports.razor" : "_ViewImports.cshtml";
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDirectory));
+        var imports = new List<RazorSourceDocument>();
+        for (var dir = Path.GetDirectoryName(Path.GetFullPath(filePath)); dir is not null; dir = Path.GetDirectoryName(dir))
+        {
+            var import = Path.Combine(dir, importName);
+            if (File.Exists(import))
+                imports.Add(RazorSourceDocument.Create(File.ReadAllText(import), new RazorSourceDocumentProperties(import, Path.GetRelativePath(root, import))));
+            if (string.Equals(Path.TrimEndingDirectorySeparator(dir), root, StringComparison.Ordinal)) break;
+        }
+        imports.Reverse();
+        return imports;
+    }
+
+    /// <summary>
     /// Compiles one <c>.cshtml</c> (MVC view) or <c>.razor</c> (component)
     /// file's in-memory <paramref name="text"/> to a generated-C# syntax tree
     /// whose <c>#line</c> directives name <paramref name="filePath"/>, so
