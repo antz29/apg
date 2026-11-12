@@ -5,9 +5,10 @@ using Microsoft.CodeAnalysis;
 namespace Apg.CsharpFrontend;
 
 /// <summary>
-/// Pure symbol→identity helpers: namespace/type/method FQN fragments, arity
+/// Symbol→identity helpers: namespace/type/method FQN fragments, arity
 /// suffixes, parameter-type display, emitted method names, and overload-group
-/// keys. No scanner state — every method is a pure function of its symbol.
+/// keys. They read CollisionQualifier's per-scan collision map and are
+/// otherwise pure functions of their symbol.
 /// </summary>
 internal static class SymbolNaming
 {
@@ -46,6 +47,10 @@ internal static class SymbolNaming
         if (symbol.ContainingType != null)
         {
             return GetFullFqn(symbol.ContainingType);
+        }
+        if (symbol is INamedTypeSymbol type && CollisionQualifier.QualifiedParent(type) is { } qualified)
+        {
+            return qualified;
         }
         return symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : "";
     }
