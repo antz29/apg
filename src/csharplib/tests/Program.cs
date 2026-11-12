@@ -98,6 +98,7 @@ public static class TestMain
             TestCollisionQualifierDirect();
             TestProjectModules(baseDir);
             TestQualifiedIdentityScan(baseDir);
+            TestNestedTypeModules(baseDir);
         }
         catch (Exception ex)
         {
@@ -2312,6 +2313,61 @@ public static class TestMain
         Check("qualified global: calls endpoint exactly `Alpha.M`", edges.Any(e => e.Type == "calls" && e.To == "Alpha.M"), gall);
         Check("qualified global: no endpoint with a leading dot or csharp. root",
             !edges.Any(e => e.To.StartsWith(".", StringComparison.Ordinal) || e.To.StartsWith("csharp.", StringComparison.Ordinal)), gall);
+    }
+
+    /// <summary>
+    /// A nested type's parent is its containing type, never a module: projectless
+    /// global, namespaced and two-project collision trees emit no module named
+    /// after a type (full and target-filtered scans).
+    /// </summary>
+    private static void TestNestedTypeModules(string baseDir)
+    {
+        // Targeted scan of `dir` over `files`: exit 0, raw graph + failure detail.
+        (RawGraph G, string All) Targeted(string label, string dir, params string[] files)
+        {
+            var r = RunScanner(dir, "--targets", WriteTargets(baseDir, label.Replace(' ', '-') + ".targets", files));
+            Check(label + ": targeted scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+            return (ParseGraph(r.Out), r.Out + "\nSTDERR:\n" + r.Err);
+        }
+
+        // Projectless global namespace: Alpha with a nested Inner, and a caller in another file.
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "nested-global"));
+        const string galpha = "class Alpha { public void M() {} class Inner {} }\n";
+        WriteSource(dir, "Alpha.cs", galpha);
+        var caller = WriteSource(dir, "Caller.cs", "class Caller { Alpha a; void Go() { a.M(); } }\n");
+        var (g, all) = ScanUnique("nested global", dir);
+        Check("nested global (full): no `Alpha` module record", !g.Modules.Contains("Alpha"), all);
+        var (tg, tall) = Targeted("nested global", dir, caller);
+        Check("nested global (targeted): no `Alpha` module record", !tg.Modules.Contains("Alpha"), tall);
+        var callerId = tg.Structs.FirstOrDefault(s => s.Name == "Caller")?.Id ?? "<missing>";
+        Check("nested global (targeted): Caller's field-reference uses edge lands on exactly `Alpha`",
+            tg.Edges.Any(e => e.Type == "uses" && e.From == callerId && e.To == "Alpha"), tall);
+        Check("nested global (targeted): calls endpoint exactly `Alpha.M`", tg.Edges.Any(e => e.Type == "calls" && e.To == "Alpha.M"), tall);
+
+        // Namespaced: Ns is a module, Ns.Outer is not.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "nested-ns"));
+        var outer = WriteSource(dir, "Outer.cs", "namespace Ns;\n\nclass Outer { class In {} }\n");
+        (g, all) = ScanUnique("nested namespaced", dir);
+        (tg, tall) = Targeted("nested namespaced", dir, outer);
+        foreach (var (scan, mods, detail) in new[] { ("full", g.Modules, all), ("targeted", tg.Modules, tall) })
+        {
+            Check($"nested namespaced ({scan}): `Ns` module emitted, no `Ns.Outer` module",
+                mods.Contains("Ns") && !mods.Contains("Ns.Outer"), detail);
+        }
+
+        // Two-project global collision: Inner under `<P>.Alpha`, no `<P>.Alpha` module.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "nested-collide"));
+        var p1 = WriteSource(Path.Combine(dir, "P1"), "P1.csproj", SdkProject);
+        var p2 = WriteSource(Path.Combine(dir, "P2"), "P2.csproj", SdkProject);
+        var a1 = WriteSource(Path.Combine(dir, "P1"), "Alpha.cs", galpha);
+        var a2 = WriteSource(Path.Combine(dir, "P2"), "Alpha.cs", galpha);
+        (g, all) = ScanUnique("nested collision", dir);
+        foreach (var (p, a) in new[] { (p1, a1), (p2, a2) })
+        {
+            Check($"nested collision: project module emitted once ({p})", g.Modules.Count(m => m == p) == 1, Join(g.Modules));
+            Check($"nested collision: Inner under `<P>.Alpha` ({p})", StructParent(g, a, "Inner") == p + ".Alpha", all);
+            Check($"nested collision: no `<P>.Alpha` module record ({p})", !g.Modules.Contains(p + ".Alpha"), Join(g.Modules));
+        }
     }
 
     /// <summary>
