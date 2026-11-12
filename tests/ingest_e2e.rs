@@ -2644,6 +2644,151 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// csharp-projects phase-06 task-27: a cached Struct `csharp.Acme.Foo`
+    /// shadows the fresh Module `Acme.Foo` a re-streamed sibling file emits,
+    /// exactly as Pass B2's "type beats module" does on a full ingest.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool/FactStore dir); run via cargo test-e2e"]
+    fn cached_type_beats_fresh_same_fqn_module() {
+        use apg::cache::{
+            CacheKey, FactStore, FileFragment, FileIndex, ModuleScaffolding, ScanConfigKey,
+        };
+
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "csharp",
+            config: None,
+            base: None,
+        };
+        let cs = || Record::LangSwitch {
+            language: "csharp".to_string(),
+        };
+        let module = |fqn: &str| Record::Module {
+            fqn: fqn.to_string(),
+        };
+        let p1 = || {
+            vec![
+                module("Acme"),
+                file_rec("cs/Foo.cs", "Acme", 10),
+                srec("f0", "Acme", "Foo", "cs/Foo.cs"),
+                frec("f1", "Acme.Foo", "M", "cs/Foo.cs"),
+                Record::Contains {
+                    from: "f0".to_string(),
+                    to: "f1".to_string(),
+                    properties: NodeProperties::default(),
+                },
+            ]
+        };
+        let p2 = |use_to: &str| {
+            vec![
+                module("Acme"),
+                module("Acme.Foo"),
+                file_rec("cs/Bar.cs", "Acme.Foo", 10),
+                srec("b0", "Acme.Foo", "Bar", "cs/Bar.cs"),
+                Record::Uses {
+                    from: "b0".to_string(),
+                    to: use_to.to_string(),
+                    properties: NodeProperties::default(),
+                },
+            ]
+        };
+        let edges = |g: &apg::graph::Graph| -> BTreeSet<(&'static str, String, String)> {
+            let mut set = BTreeSet::new();
+            for (kind, pairs) in [
+                ("contains", &g.contains),
+                ("calls", &g.calls),
+                ("uses", &g.uses),
+                ("unresolved_uses", &g.unresolved_uses),
+            ] {
+                set.extend(pairs.iter().map(|(a, b)| (kind, a.clone(), b.clone())));
+            }
+            set.extend(
+                g.unresolved_calls
+                    .iter()
+                    .map(|(a, b, _)| ("unresolved_calls", a.clone(), b.clone())),
+            );
+            set
+        };
+        let nodes = |g: &apg::graph::Graph| -> BTreeSet<(String, String)> {
+            g.nodes
+                .iter()
+                .map(|(fqn, n)| (fqn.clone(), format!("{:?}", n.kind)))
+                .collect()
+        };
+        let check = |g: &apg::graph::Graph, run: &str| {
+            assert_eq!(
+                g.nodes.get("csharp.Acme.Foo").map(|n| n.kind),
+                Some(NodeKind::Struct),
+                "{run}: {:?}",
+                nodes(g)
+            );
+            let c = |a: &str, b: &str| g.contains.contains(&(a.to_string(), b.to_string()));
+            assert!(
+                c("csharp.Acme.Foo", "csharp.Acme.Foo.M"),
+                "{run}: {:?}",
+                g.contains
+            );
+            assert!(
+                g.uses.contains(&(
+                    "csharp.Acme.Foo.Bar".to_string(),
+                    "csharp.Acme.Foo".to_string()
+                )),
+                "{run}: {:?}",
+                g.uses
+            );
+            assert!(
+                !g.nodes
+                    .iter()
+                    .any(|(f, n)| f == "csharp.Acme.Foo" && n.kind == NodeKind::Module),
+                "{run}: no Module csharp.Acme.Foo"
+            );
+            assert!(
+                !g.contains.iter().any(|(_, b)| b == "cs/Bar.cs"),
+                "{run}: cs/Bar.cs has no contains in-edge: {:?}",
+                g.contains
+            );
+            assert!(!c("csharp", "csharp.Acme.Foo"), "{run}");
+            assert!(!c("csharp.Acme", "csharp.Acme.Foo"), "{run}");
+        };
+
+        // (a) Full stream, Bar→Foo Uses by Foo's opaque id.
+        let mut records = vec![cs()];
+        records.extend(p1());
+        records.extend(p2("f0"));
+        let (full, _) = ingest(records, &opts, None);
+        check(&full, "full");
+
+        // (b) Target-filtered: only cs/Bar.cs re-streamed, its Uses carrying
+        // the unrooted canonical FQN; cs/Foo.cs comes from the fact store.
+        let dir = std::env::temp_dir().join(format!("apg-type-beats-mod-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+        let index = FileIndex::build(&full);
+        let frag = FileFragment::from_index(&index, "cs/Foo.cs", "cs/Foo.cs", "oid-foo", "csharp");
+        store.put(&frag, "/x", &cache_key).unwrap();
+        let scaffolding = ModuleScaffolding::extract(&full, Path::new("/x"));
+        store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![(
+                "cs/Foo.cs".to_string(),
+                "csharp".to_string(),
+                "oid-foo".to_string(),
+            )],
+            reader_root: "/x".into(),
+            skipped_langs: BTreeSet::new(),
+        };
+        let mut targeted = vec![cs()];
+        targeted.extend(p2("Acme.Foo"));
+        let (filtered, _) = ingest_with_reuse(targeted, &opts, Some(&reuse), None);
+        check(&filtered, "reused");
+        assert_eq!(nodes(&filtered), nodes(&full));
+        assert_eq!(edges(&filtered), edges(&full));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Task-59 regression for task-58 (34c6b1e1): a COBOL `kind=copy` uses
     /// target is an absolute copybook path. Pass A must leave it unrooted. The
     /// fixture makes the root module `""` known for `cobol`, which arms the
