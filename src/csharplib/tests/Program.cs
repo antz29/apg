@@ -94,6 +94,8 @@ public static class TestMain
             TestCachedReferenceIsolation(baseDir);
             TestSharedReferenceCache(baseDir);
             TestSourceOwnership();
+            TestCollisionQualifierScan(baseDir);
+            TestCollisionQualifierDirect();
         }
         catch (Exception ex)
         {
@@ -2022,6 +2024,227 @@ public static class TestMain
         // No compiling project contains the file: first in path order, regardless of input order.
         string d1 = R("d1", "D.csproj"), d2 = R("d2", "D.csproj"), w = R("shared", "w.cs");
         Expect("none contains: first in path order", Assign(P(d2, w), P(d1, w)), w, d1);
+    }
+
+    // ------------------------------------------------------------------
+    // CollisionQualifier: a top-level type several compilations declare gets
+    // its project-qualified parent (`<absolute project path>.<Namespace>`, or the
+    // path alone for the global namespace), emitted unrooted.
+    // ------------------------------------------------------------------
+
+    private const string SdkProject = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n</Project>\n";
+
+    /// Scans `dir`, checking exit 0 and no duplicate struct/function/module FQN; returns the raw graph and a failure detail.
+    private static (RawGraph G, string All) ScanUnique(string label, string dir)
+    {
+        var r = RunScanner(dir);
+        Check(label + ": scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var g = ParseGraph(r.Out);
+        var c = Canonicalize(g);
+        var all = Join(c.Records) + "\nSTDERR:\n" + r.Err;
+        var structs = g.Structs.Select(s => c.IdToFqn[s.Id]).ToList();
+        var funcs = g.Funcs.Select(f => c.IdToFqn[f.Id]).ToList();
+        Check(label + ": no duplicate FQN per kind",
+            structs.Distinct().Count() == structs.Count && funcs.Distinct().Count() == funcs.Count
+            && g.Modules.Distinct().Count() == g.Modules.Count, all);
+        return (g, all);
+    }
+
+    private static string? StructParent(RawGraph g, string path, string name)
+        => g.Structs.FirstOrDefault(s => s.Path == path && s.Name == name)?.Parent;
+
+    private static bool HasFunc(RawGraph g, string path, string name, string parent)
+        => g.Funcs.Any(f => f.File == path && f.Name == name && f.Parent == parent);
+
+    /// <summary>
+    /// Full scans over two-project collisions: namespaced (plus a projectless
+    /// member and a single-compilation type), global-namespace (nested and
+    /// generic), projectless-vs-project global Program, top-level statements,
+    /// a partial type over a P1-owned shared file, and two App.csproj projects.
+    /// </summary>
+    private static void TestCollisionQualifierScan(string baseDir)
+    {
+        // Namespaced: N.Alpha in P1, P2 and a projectless file; N.Solo in P1 only.
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "collide-ns"));
+        const string alpha = "namespace N;\n\npublic class Alpha\n{\n    public void M() { }\n}\n";
+        var p1 = WriteSource(Path.Combine(dir, "P1"), "P1.csproj", SdkProject);
+        var p2 = WriteSource(Path.Combine(dir, "P2"), "P2.csproj", SdkProject);
+        var a1 = WriteSource(Path.Combine(dir, "P1"), "Alpha.cs", alpha);
+        var a2 = WriteSource(Path.Combine(dir, "P2"), "Alpha.cs", alpha);
+        var a0 = WriteSource(Path.Combine(dir, "Loose"), "Alpha.cs", alpha);
+        var solo = WriteSource(Path.Combine(dir, "P1"), "Solo.cs", "namespace N;\n\npublic class Solo { }\n");
+        var (g, all) = ScanUnique("namespaced collision", dir);
+        foreach (var (p, a) in new[] { (p1, a1), (p2, a2) })
+        {
+            var parent = StructParent(g, a, "Alpha") ?? "<missing>";
+            Check($"namespaced collision: Alpha's raw parent is `<project path>.N` ({p})", parent == p + ".N", all);
+            Check("namespaced collision: project prefix byte-equals that project's module record, path whole",
+                g.Modules.Contains(p) && parent.StartsWith(p + ".", StringComparison.Ordinal), all);
+            Check("namespaced collision: raw parent carries no csharp. root", !parent.StartsWith("csharp.", StringComparison.Ordinal), all);
+            Check("namespaced collision: member M under the qualified Alpha", HasFunc(g, a, "M", p + ".N.Alpha"), all);
+        }
+        Check("namespaced collision: projectless member keeps the plain FQN (N.Alpha, N.Alpha.M)",
+            StructParent(g, a0, "Alpha") == "N" && HasFunc(g, a0, "M", "N.Alpha"), all);
+        Check("namespaced collision: single-compilation type is unqualified (N.Solo)", StructParent(g, solo, "Solo") == "N", all);
+
+        // Global namespace: Alpha (with M and Inner) and Alpha<T> in P1 and P2; Solo in P1 only.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "collide-global"));
+        const string galpha = "class Alpha\n{\n    void M() { }\n    class Inner { }\n}\n\nclass Alpha<T> { }\n";
+        p1 = WriteSource(Path.Combine(dir, "P1"), "P1.csproj", SdkProject);
+        p2 = WriteSource(Path.Combine(dir, "P2"), "P2.csproj", SdkProject);
+        a1 = WriteSource(Path.Combine(dir, "P1"), "Alpha.cs", galpha);
+        a2 = WriteSource(Path.Combine(dir, "P2"), "Alpha.cs", galpha);
+        solo = WriteSource(Path.Combine(dir, "P1"), "Solo.cs", "class Solo { }\n");
+        (g, all) = ScanUnique("global collision", dir);
+        foreach (var (p, a) in new[] { (p1, a1), (p2, a2) })
+        {
+            Check($"global collision: Alpha's parent byte-equals the project module record, no trailing dot ({p})",
+                StructParent(g, a, "Alpha") == p && g.Modules.Contains(p), all);
+            Check("global collision: Inner under `<P>.Alpha`", StructParent(g, a, "Inner") == p + ".Alpha", all);
+            Check("global collision: M under `<P>.Alpha`", HasFunc(g, a, "M", p + ".Alpha"), all);
+            Check("global collision: Alpha`1 under `<P>`", StructParent(g, a, "Alpha`1") == p, all);
+            Check("global collision: project module emitted exactly once, no `<P>.` module",
+                g.Modules.Count(m => m == p) == 1 && !g.Modules.Contains(p + "."), Join(g.Modules));
+        }
+        Check("global collision: distinct Alpha struct FQNs per project",
+            g.Structs.Where(s => s.Name == "Alpha").Select(s => s.Parent + "." + s.Name).Distinct().Count() == 2, all);
+        Check("global collision: single global type in one compilation is unqualified (empty parent)", StructParent(g, solo, "Solo") == "", all);
+
+        // A projectless global Program beside a project global Program.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "collide-program"));
+        var pp = WriteSource(Path.Combine(dir, "P"), "P.csproj", SdkProject);
+        var pf = WriteSource(Path.Combine(dir, "P"), "Program.cs", "class Program { }\n");
+        var lf = WriteSource(Path.Combine(dir, "Loose"), "Program.cs", "class Program { }\n");
+        (g, all) = ScanUnique("projectless vs project Program", dir);
+        Check("projectless global Program keeps an empty parent; the project one gets its project identity",
+            StructParent(g, lf, "Program") == "" && StructParent(g, pf, "Program") == pp, all);
+
+        // Two projects each holding a top-level-statements Program.cs.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "collide-toplevel"));
+        const string exe = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n</Project>\n";
+        foreach (var name in new[] { "T1", "T2" })
+        {
+            WriteSource(Path.Combine(dir, name), name + ".csproj", exe);
+            WriteSource(Path.Combine(dir, name), "Program.cs", "System.Console.WriteLine(1);\n");
+        }
+        ScanUnique("top-level statements in two projects", dir);
+
+        // Partial T (namespaced) and G (global): one part in P1's Shared.cs, linked into P2; one in P2's Own.cs.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "collide-partial"));
+        p1 = WriteSource(Path.Combine(dir, "P1"), "P1.csproj", SdkProject);
+        p2 = WriteSource(Path.Combine(dir, "P2"), "P2.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n  <ItemGroup><Compile Include=\"../P1/Shared.cs\" /></ItemGroup>\n</Project>\n");
+        var shared = WriteSource(Path.Combine(dir, "P1"), "Shared.cs",
+            "namespace N\n{\n    public partial class T\n    {\n        public void A() { }\n    }\n}\n\npublic partial class G\n{\n    public void A() { }\n}\n");
+        var own = WriteSource(Path.Combine(dir, "P2"), "Own.cs",
+            "namespace N\n{\n    public partial class T\n    {\n        public void B() { }\n    }\n}\n\npublic partial class G\n{\n    public void B() { }\n}\n");
+        (g, all) = ScanUnique("partial over shared file", dir);
+        Check("partial over shared file: P1's T under `<P1>.N`, P2's T under `<P2>.N`",
+            StructParent(g, shared, "T") == p1 + ".N" && StructParent(g, own, "T") == p2 + ".N"
+            && g.Structs.Count(s => s.Name == "T") == 2, all);
+        Check("partial over shared file: global G under `<P1>` / `<P2>`",
+            StructParent(g, shared, "G") == p1 && StructParent(g, own, "G") == p2 && g.Structs.Count(s => s.Name == "G") == 2, all);
+        Check("partial over shared file: members under their own project's type",
+            HasFunc(g, shared, "A", p1 + ".N.T") && HasFunc(g, own, "B", p2 + ".N.T")
+            && HasFunc(g, shared, "A", p1 + ".G") && HasFunc(g, own, "B", p2 + ".G"), all);
+
+        // Two projects both compiled as `App`.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "collide-app"));
+        var ap = WriteSource(Path.Combine(dir, "a"), "App.csproj", SdkProject);
+        var bp = WriteSource(Path.Combine(dir, "b"), "App.csproj", SdkProject);
+        var fa = WriteSource(Path.Combine(dir, "a"), "Alpha.cs", alpha);
+        var fb = WriteSource(Path.Combine(dir, "b"), "Alpha.cs", alpha);
+        (g, all) = ScanUnique("same assembly name", dir);
+        Check("same assembly name: each App project gets its own qualified parent",
+            StructParent(g, fa, "Alpha") == ap + ".N" && StructParent(g, fb, "Alpha") == bp + ".N", all);
+    }
+
+    /// <summary>
+    /// CollisionQualifier.QualifiedParent over in-memory compilations after a
+    /// direct Compute; leaves the stored maps empty (final Compute over no units).
+    /// </summary>
+    private static void TestCollisionQualifierDirect()
+    {
+        var projType = FrontendType("CsharpProject");
+        var qualifier = FrontendType("CollisionQualifier");
+        var refs = (IEnumerable<MetadataReference>)FrontendType("CompilationLoader")
+            .GetMethod("GetDefaultMetadataReferences", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
+        string R(params string[] parts) => Path.Combine(new[] { Path.GetPathRoot(Path.GetTempPath())!, "cq" }.Concat(parts).ToArray());
+        object P(string path)
+        {
+            var p = Activator.CreateInstance(projType)!;
+            projType.GetProperty("Path")!.SetValue(p, path);
+            return p;
+        }
+        var tupleType = typeof(ValueTuple<,,>).MakeGenericType(typeof(SemanticModel), typeof(Microsoft.CodeAnalysis.CSharp.Syntax.CompilationUnitSyntax), projType);
+        void Compute(params (Compilation C, SyntaxTree T, object? Owner)[] units)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(tupleType))!;
+            foreach (var (c, t, o) in units) list.Add(Activator.CreateInstance(tupleType, c.GetSemanticModel(t), t.GetRoot(), o));
+            qualifier.GetMethod("Compute")!.Invoke(null, new object[] { list });
+        }
+        string? QP(INamedTypeSymbol? t) => t == null ? "<missing type>" : (string?)qualifier.GetMethod("QualifiedParent")!.Invoke(null, new object[] { t });
+        void Expect(string name, string? got, string? want)
+            => Check("QualifiedParent: " + name, got == want, $"want {want ?? "<null>"}, got {got ?? "<null>"}");
+        SyntaxTree Tree(string path, string text) => CSharpSyntaxTree.ParseText(text, path: path);
+        CSharpCompilation Comp(string name, params SyntaxTree[] trees)
+            => CSharpCompilation.Create(name, trees, refs, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        try
+        {
+            const string code = "namespace N\n{\n    public class Alpha\n    {\n        public class Inner { }\n    }\n\n    public class Gen<T> { }\n}\n\npublic class G { }\n";
+            // Both project compilations are named `App`: the assembly-keyed map must still tell them apart.
+            string p1 = R("p1", "App.csproj"), p2 = R("p2", "App.csproj");
+            var t1 = Tree(R("p1", "A.cs"), code);
+            var s1 = Tree(R("p1", "Solo.cs"), "namespace N { public class Solo { } }\n");
+            var t2 = Tree(R("p2", "A.cs"), code);
+            var t0 = Tree(R("loose", "A.cs"), code);
+            var c1 = Comp("App", t1, s1);
+            var c2 = Comp("App", t2);
+            var c0 = Comp("Loose", t0);
+            var o1 = P(p1);
+            Compute((c1, t1, o1), (c1, s1, o1), (c2, t2, P(p2)), (c0, t0, null));
+
+            Expect("P1's namespaced type -> `<P1 path>.N`", QP(c1.GetTypeByMetadataName("N.Alpha")), p1 + ".N");
+            Expect("P2's namespaced type -> `<P2 path>.N` (same assembly name App)", QP(c2.GetTypeByMetadataName("N.Alpha")), p2 + ".N");
+            Expect("P1's global type -> `<P1 path>`", QP(c1.GetTypeByMetadataName("G")), p1);
+            Expect("P2's global type -> `<P2 path>`", QP(c2.GetTypeByMetadataName("G")), p2);
+            Expect("nested type -> null", QP(c1.GetTypeByMetadataName("N.Alpha+Inner")), null);
+            Expect("projectless member (namespaced) -> null", QP(c0.GetTypeByMetadataName("N.Alpha")), null);
+            Expect("projectless member (global) -> null", QP(c0.GetTypeByMetadataName("G")), null);
+            Expect("single-compilation type -> null", QP(c1.GetTypeByMetadataName("N.Solo")), null);
+            Expect("metadata type -> null", QP(c1.GetSpecialType(SpecialType.System_Object)), null);
+            var gen = c1.GetTypeByMetadataName("N.Gen`1");
+            Expect("generic definition Gen<T> -> `<P1 path>.N`", QP(gen), p1 + ".N");
+            Expect("constructed Gen<int> -> its definition's parent",
+                gen == null ? "<missing type>" : QP(gen.Construct(c1.GetSpecialType(SpecialType.System_Int32))), QP(gen));
+
+            // Partial T / G: one part in a P1-owned shared file (first tree in P2's compilation too), one in P2's own file.
+            string q1 = R("q1", "P1.csproj"), q2 = R("q2", "P2.csproj");
+            var shared = Tree(R("q1", "Shared.cs"), "namespace N { public partial class T { public void A() { } } }\npublic partial class G { public void A() { } }\n");
+            var own = Tree(R("q2", "Own.cs"), "namespace N { public partial class T { public void B() { } } }\npublic partial class G { public void B() { } }\n");
+            var d1 = Comp("P1", shared);
+            var d2 = Comp("P2", shared, own);
+            Compute((d1, shared, P(q1)), (d2, own, P(q2)));
+            var p2T = d2.GetTypeByMetadataName("N.T");
+            var p2G = d2.GetTypeByMetadataName("G");
+            Check("partial fixture: P2's T and G first declare in the shared file",
+                p2T?.DeclaringSyntaxReferences[0].SyntaxTree.FilePath == shared.FilePath
+                && p2G?.DeclaringSyntaxReferences[0].SyntaxTree.FilePath == shared.FilePath, "");
+            Expect("partial over shared file: P1's T -> `<P1 path>.N`", QP(d1.GetTypeByMetadataName("N.T")), q1 + ".N");
+            Expect("partial over shared file: P2's T -> `<P2 path>.N`", QP(p2T), q2 + ".N");
+            Expect("partial over shared file: P1's global G -> `<P1 path>`", QP(d1.GetTypeByMetadataName("G")), q1);
+            Expect("partial over shared file: P2's global G -> `<P2 path>`", QP(p2G), q2);
+
+            // A second Compute with no collision replaces the stored maps.
+            Compute((c1, t1, o1));
+            Expect("after a collision-free Compute, the earlier member -> null", QP(c1.GetTypeByMetadataName("N.Alpha")), null);
+            Expect("after a collision-free Compute, the earlier partial member -> null", QP(p2T), null);
+        }
+        finally
+        {
+            Compute(); // leave the stored maps empty for later tests
+        }
     }
 
     // ------------------------------------------------------------------
