@@ -93,6 +93,7 @@ public static class TestMain
             TestFrontendAssemblyIsolation(baseDir);
             TestCachedReferenceIsolation(baseDir);
             TestSharedReferenceCache(baseDir);
+            TestSourceOwnership();
         }
         catch (Exception ex)
         {
@@ -1962,6 +1963,65 @@ public static class TestMain
         });
         Check("shared refs: NUGET_PACKAGES restored to the harness default",
             Environment.GetEnvironmentVariable("NUGET_PACKAGES") == HarnessNugetPackages, "");
+    }
+
+    // ------------------------------------------------------------------
+    // SourceOwnership.AssignOwners (internal, reached by reflection; in memory)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Owner rules: containing project dir wins; nested → deepest containing dir
+    /// regardless of path order; same-depth tie / none containing → first in
+    /// project-path order (independent of input order); single project → it; projectless → none.
+    /// </summary>
+    private static void TestSourceOwnership()
+    {
+        var projType = FrontendType("CsharpProject");
+        string R(params string[] parts) => Path.Combine(new[] { Path.GetPathRoot(Path.GetTempPath())!, "own" }.Concat(parts).ToArray());
+        object P(string path, params string[] sources)
+        {
+            var p = Activator.CreateInstance(projType)!;
+            projType.GetProperty("Path")!.SetValue(p, path);
+            var list = (List<string>)projType.GetProperty("SourcePaths")!.GetValue(p)!;
+            list.AddRange(sources);
+            return p;
+        }
+        System.Collections.IDictionary Assign(params object[] projects)
+        {
+            var arr = Array.CreateInstance(projType, projects.Length);
+            for (int i = 0; i < projects.Length; i++) arr.SetValue(projects[i], i);
+            return (System.Collections.IDictionary)FrontendType("SourceOwnership").GetMethod("AssignOwners")!.Invoke(null, new object[] { arr })!;
+        }
+        string Owner(System.Collections.IDictionary owners, string file)
+            => owners.Contains(file) ? (string)projType.GetProperty("Path")!.GetValue(owners[file])! : "<none>";
+        void Expect(string name, System.Collections.IDictionary owners, string file, string want)
+        {
+            var got = Owner(owners, file);
+            Check("ownership: " + name, got == want, $"file {file}: want {want}, got {got}");
+        }
+
+        // Shared by two projects: the containing project wins though it is second in path order.
+        string a = R("a", "A.csproj"), b = R("b", "B.csproj"), bx = R("b", "x.cs"), only = R("a", "only.cs"), loose = R("loose.cs");
+        var o1 = Assign(P(b, bx), P(a, bx, only));
+        Expect("two projects: containing project owns", o1, bx, b);
+        Expect("single-project file owned by its project", o1, only, a);
+        Expect("projectless file has no owner", o1, loose, "<none>");
+
+        // Nested: deepest containing dir wins whether it sorts after (n) or before (q) the outer project.
+        string nOuter = R("n", "Outer.csproj"), nInner = R("n", "inner", "Inner.csproj"), ny = R("n", "inner", "y.cs");
+        Expect("nested: deeper project wins (sorts after outer)", Assign(P(nOuter, ny), P(nInner, ny)), ny, nInner);
+        Expect("nested: deeper project wins (input order reversed)", Assign(P(nInner, ny), P(nOuter, ny)), ny, nInner);
+        string qOuter = R("q", "Q.csproj"), qInner = R("q", "A", "In.csproj"), qy = R("q", "A", "y.cs");
+        Check("nested fixture: inner sorts before outer", string.CompareOrdinal(qInner, qOuter) < 0, "");
+        Expect("nested: deeper project wins (sorts before outer)", Assign(P(qOuter, qy), P(qInner, qy)), qy, qInner);
+
+        // Same-depth tie: first in path order, regardless of input order.
+        string s1 = R("s", "P1.csproj"), s2 = R("s", "P2.csproj"), sz = R("s", "z.cs");
+        Expect("same-depth tie: first in path order", Assign(P(s2, sz), P(s1, sz)), sz, s1);
+
+        // No compiling project contains the file: first in path order, regardless of input order.
+        string d1 = R("d1", "D.csproj"), d2 = R("d2", "D.csproj"), w = R("shared", "w.cs");
+        Expect("none contains: first in path order", Assign(P(d2, w), P(d1, w)), w, d1);
     }
 
     // ------------------------------------------------------------------
