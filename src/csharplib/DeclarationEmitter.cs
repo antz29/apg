@@ -62,15 +62,19 @@ internal sealed class DeclarationEmitter
     /// — the caller passes a shared file once, with its owning project's model.
     /// A project file (non-null <paramref name="owner"/>) is parented to its
     /// project module; a projectless .cs file keeps its namespace parent and a
-    /// .csx script its own script module. Collision members' struct records
+    /// .csx script its own script module. A Razor-generated tree (FilePath a
+    /// .cshtml/.razor file) gets its File record under that Razor path, spanning
+    /// the Razor file's own line count, with the same parent rules. Collision members' struct records
     /// carry their qualified parent (<see cref="SymbolNaming.GetParentScopeFqn"/>).
     /// </summary>
     public void EmitFileAndDeclarations(SyntaxTree tree, SemanticModel model, CompilationUnitSyntax root, bool emit, CsharpProject? owner = null)
     {
         var filePath = tree.FilePath;
-        var text = tree.GetText();
-        var lines = text.Lines;
-        int totalLines = Math.Max(1, lines.Count);
+        bool isRazor = filePath.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase)
+            || filePath.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
+        // A Razor tree's FilePath is its .cshtml/.razor file: the File record spans that file's own lines, never the generated C#'s.
+        var text = isRazor ? Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(filePath, System.Text.Encoding.UTF8)) : tree.GetText();
+        int totalLines = Math.Max(1, text.Lines.Count);
 
         // Determine parent module / namespace for file
         string defaultNamespace = "";
