@@ -201,6 +201,56 @@ mod unit {
         assert_eq!(root_edge_endpoint("rust", "PROG", &modules, base), "PROG");
     }
 
+    /// csharp-projects task-19: a csharp global-namespace canonical FQN edge
+    /// endpoint roots at the bare `csharp` id, declared ids and module-prefixed
+    /// endpoints keep root_edge_endpoint's rendering, and other languages are
+    /// untouched by the csharp rule.
+    #[test]
+    fn root_stream_edge_endpoint_roots_global_csharp_canonical_fqn() {
+        let base = Path::new("/r");
+        let modules: HashMap<String, HashSet<String>> = HashMap::from([
+            (
+                "csharp".to_string(),
+                HashSet::from(["Acme.App".to_string(), "/r/P1/P1.csproj".to_string()]),
+            ),
+            ("cobol".to_string(), HashSet::from(["".to_string()])),
+        ]);
+        let declared = |id: &str| id == "cs1" || id == "n7";
+        let root =
+            |lang: &str, ep: &str| root_stream_edge_endpoint(lang, ep, declared, &modules, base);
+        assert_eq!(root("csharp", "Alpha"), "csharp.Alpha");
+        assert_eq!(root("csharp", "Alpha.M"), "csharp.Alpha.M");
+        assert_eq!(root("csharp", "Alpha.Inner"), "csharp.Alpha.Inner");
+        assert_eq!(root("csharp", "Alpha`1"), "csharp.Alpha`1");
+        assert_eq!(root("csharp", "cs1"), "cs1");
+        assert_eq!(root("csharp", "n7"), "n7");
+        assert_eq!(root("csharp", "Acme.App.Svc.f"), "csharp.Acme.App.Svc.f");
+        assert_eq!(
+            root("csharp", "Acme.App.Svc.f"),
+            root_edge_endpoint("csharp", "Acme.App.Svc.f", &modules, base)
+        );
+        let collision = root("csharp", "/r/P1/P1.csproj.Alpha");
+        assert_eq!(
+            collision,
+            root_edge_endpoint("csharp", "/r/P1/P1.csproj.Alpha", &modules, base)
+        );
+        assert_eq!(
+            collision,
+            format!(
+                "{}.Alpha",
+                root_module_endpoint("csharp", "/r/P1/P1.csproj", &modules, base)
+            )
+        );
+        assert!(!collision.starts_with("csharp.csharp."), "{collision}");
+        assert!(!collision.contains("/r/"), "{collision}");
+        assert_eq!(root("go", "Alpha"), "Alpha");
+        assert_eq!(root("rust", "Alpha.M"), "Alpha.M");
+        assert_eq!(
+            root("cobol", "PROG"),
+            root_edge_endpoint("cobol", "PROG", &modules, base)
+        );
+    }
+
     /// cobol-frontend task-34: with `""` a known COBOL identity, a root-level
     /// scope parent (`PROG`, `ACCT`, `PROG.SEC`) roots under the empty root
     /// module (`cobol..PROG`), while a subdirectory scope with a known module
