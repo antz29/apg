@@ -10,7 +10,8 @@ internal static class SourceOwnership
     /// Maps every source path a loaded project compiles to its owning project:
     /// the sole compiling project, else the compiling project whose directory
     /// contains the file (the nearest when nested), else the first compiling
-    /// project in project-path order. A projectless file has no entry.
+    /// project in project-path order. A projectless file has no entry. Razor
+    /// paths a project records (RazorPaths) are covered by the same rule.
     /// </summary>
     public static Dictionary<string, CsharpProject> AssignOwners(IEnumerable<CsharpProject> projects)
     {
@@ -18,7 +19,7 @@ internal static class SourceOwnership
         var compilers = new Dictionary<string, List<CsharpProject>>(StringComparer.Ordinal);
         foreach (var p in projects.OrderBy(p => p.Path, StringComparer.Ordinal))
         {
-            foreach (var f in p.SourcePaths.Distinct(StringComparer.Ordinal))
+            foreach (var f in p.SourcePaths.Concat(p.RazorPaths).Distinct(StringComparer.Ordinal))
             {
                 if (!compilers.TryGetValue(f, out var list)) compilers[f] = list = new();
                 list.Add(p);
