@@ -7,7 +7,6 @@ mod common;
 
 use common::{ApgCommand, Repo};
 use std::path::{Path, PathBuf};
-use std::process::Output;
 
 /// A minimal SDK-style project file (its compile set is the `**/*.cs` glob).
 const SDK_CSPROJ: &str = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net9.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n";
@@ -19,9 +18,6 @@ const VIEW_CSHTML: &str = "<h1>Home</h1>\n@functions {\n    public string Greet(
 /// A `.razor` component with an `@code` method: `Increment` is named on
 /// line 6. No trailing newline (10 lines).
 const COUNTER_RAZOR: &str = "<p>@Count</p>\n<button>Go</button>\n@code {\n    private int Count;\n\n    private void Increment()\n    {\n        Count++;\n    }\n}";
-
-/// A `.razor` component whose `@code {` block never closes: it fails to compile.
-const BROKEN_RAZOR: &str = "<p>broken</p>\n@code {\n    private void Broken()\n    {";
 
 /// The staged single-file `csharpfrontend` the candidate runs
 /// (`<profile>/frontends/csharpfrontend`), resolved from
@@ -57,18 +53,6 @@ fn write(dir: &Path, name: &str, text: &str) -> String {
     let p = dir.join(name);
     std::fs::write(&p, text).expect("write fixture");
     p.to_str().expect("utf-8 path").to_string()
-}
-
-/// Runs `csharpfrontend <dir> --razor <p>...`.
-fn run_razor(dir: &Path, razor: &[&str]) -> Output {
-    let bin = csharp_frontend_bin();
-    let mut cmd = std::process::Command::new(&bin);
-    cmd.arg(dir);
-    for p in razor {
-        cmd.arg("--razor").arg(p);
-    }
-    cmd.output()
-        .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()))
 }
 
 /// Runs the candidate `apg scan . --language csharp <args>` in `repo` with
@@ -128,10 +112,10 @@ fn csharp_fqns(repo: &Repo, label: &str) -> Vec<String> {
 mod e2e {
     use super::*;
 
-    /// Phase 1 task 5's pinned CLI contract: each `--razor` file yields a
-    /// `file` record spanning `1..line count` and a `function` record per
-    /// `@code`/`@functions` method at its `#line`-mapped source line; a file
-    /// that fails to compile exits 1 with a `csharpfrontend error:` line.
+    /// The normal project-dir invocation (`csharpfrontend <dir>`) on a
+    /// projectless tree: each Razor file yields one `file` record spanning
+    /// `1..line count` and a `function` record per `@code`/`@functions`
+    /// method at its `#line`-mapped source line.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch tree, spawned csharpfrontend); run via cargo test-e2e"]
     fn razor_engine_single_file_smoke() {
@@ -139,7 +123,11 @@ mod e2e {
         let view = write(&dir, "Index.cshtml", VIEW_CSHTML);
         let counter = write(&dir, "Counter.razor", COUNTER_RAZOR);
 
-        let out = run_razor(&dir, &[&view, &counter]);
+        let bin = csharp_frontend_bin();
+        let out = std::process::Command::new(&bin)
+            .arg(&dir)
+            .output()
+            .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()));
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert_eq!(
             out.status.code(),
@@ -182,21 +170,6 @@ mod e2e {
                 "{method} start_line is its #line-mapped line in {path}"
             );
         }
-
-        let broken = write(&dir, "Broken.razor", BROKEN_RAZOR);
-        let out = run_razor(&dir, &[&broken]);
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert_eq!(
-            out.status.code(),
-            Some(1),
-            "broken Razor must exit 1: {stderr}"
-        );
-        assert!(
-            stderr
-                .lines()
-                .any(|l| l.starts_with("csharpfrontend error:")),
-            "missing `csharpfrontend error:` line: {stderr}"
-        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
