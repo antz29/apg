@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "with-razor-per-file-compile",
+  "body": "Scanner.WithRazor calls RazorCompiler.Compile once per Razor file, so tag-helper descriptors are recomputed for every file, and a file whose Compile throws for a non-Razor reason (such as an unreadable file) is warned about on stderr and gets no File record at all. Upgrade to one batched Compile call with a per-file fallback if large Razor projects scan slowly, and emit a File record without declarations if such files must still appear in the graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.Scanner.WithRazor",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

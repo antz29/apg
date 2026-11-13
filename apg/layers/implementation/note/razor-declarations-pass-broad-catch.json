@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-declarations-pass-broad-catch",
+  "body": "RazorCompiler.CompileDeclarations catches every exception per Razor file and silently returns no declaration tree for it, not only Razor and file-read failures, so an unexpected engine fault is invisible at this stage. Upgrade by narrowing the catch or warning on stderr if a dropped declaration tree ever hides a real bug.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.CompileDeclarations",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

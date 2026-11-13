@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-declaration-byte-offsets-generated",
+  "body": "DeclarationEmitter.LineSpan gives a Razor-generated declaration the Razor file's mapped lines, but its start/end byte offsets stay offsets into the generated C#, not the Razor file, so lines and path point at the Razor file while offsets do not. Upgrade to Razor-file offsets if anything downstream starts slicing Razor files by start/end or joining them against hunks by offset.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.DeclarationEmitter.LineSpan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

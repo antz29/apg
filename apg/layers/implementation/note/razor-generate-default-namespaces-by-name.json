@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-generate-default-namespaces-by-name",
+  "body": "RazorCompiler.Generate recognises Razor 6.0's default namespaces by name (AspNetCore for MVC views, __GeneratedComponent for components) and replaces them with the resolved root namespace, and represents the global namespace with an __ApgGlobalNamespace placeholder that it unwraps before C# generation, which also drops Razor's #line hidden for those files. Upgrade to checking whether a namespace directive was applied if a later Razor package changes its defaults.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.Generate",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

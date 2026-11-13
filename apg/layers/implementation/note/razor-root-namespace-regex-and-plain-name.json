@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-root-namespace-regex-and-plain-name",
+  "body": "RazorCompiler.ResolveRootNamespace finds @namespace with a line-based regex rather than Razor's parser, so a directive inside a Razor comment or code block is still picked up; and with RootNamespace unset it falls back to the plain project name, without the .NET SDK's space-to-underscore replacement. Upgrade to reading the directive from the Razor syntax tree, and match the SDK default, if either case appears in real projects.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.ResolveRootNamespace",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

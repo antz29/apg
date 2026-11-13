@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "razor-collect-imports-root-walk",
+  "body": "RazorCompiler.CollectImports stops its ancestor walk only when it meets the root directory by exact, case-sensitive path comparison, so a Razor file outside its root, or a root whose casing differs from the file path's on a case-insensitive filesystem, walks up to the filesystem root and can apply imports from above the project. Upgrade if a caller can ever pass a file outside its root or differently-cased paths.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.RazorCompiler.CollectImports",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
