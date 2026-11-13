@@ -1223,6 +1223,100 @@ public static class TestMain
     private static bool HasFuncIn(RawGraph g, string path, string name) => g.Funcs.Any(f => f.File == path && f.Name == name);
 
     // ------------------------------------------------------------------
+    // Solution fixture: one tree exercising every project-model element at once
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Writes under <paramref name="root"/> (a harness temp dir) App.sln listing the SDK-style Web (net8.0;net9.0,
+    /// ProjectReference to Legacy) and the .NET Framework-style packages.config Legacy, plus the unlisted SDK-style
+    /// Tools (net8.0). Shared/Common.cs is compiled by Web and Tools; Twin.Dup is declared in Web and Tools. Web
+    /// resolves Stub.Assets from obj/project.assets.json whose packageFolders is the in-tree restored/ folder,
+    /// Legacy resolves Stub.Legacy from the root packages/ folder, and Web's Stub.Missing is unrestored. Razor:
+    /// Web/Components/Counter.razor (@code, Web/_Imports.razor) joins Web by globbing, Legacy/Views/Home/Index.cshtml
+    /// (@functions, Legacy/Views/_ViewImports.cshtml) joins Legacy by Content Include, Web/Pages/Dropped.razor is
+    /// Content Remove'd; Loose/ holds the projectless Loose.cs, Script.csx, Part.razor and Views/Page.cshtml.
+    /// </summary>
+    private static (string Root, string Sln, string Web, string Legacy, string Tools, string Caller, string Core,
+        string Shared, string WebDup, string ToolsDup, string Counter, string View, string Dropped,
+        string LooseCs, string Csx, string LooseRazor, string LooseView, string Restored) WriteSolutionFixture(string root)
+    {
+        root = Path.GetFullPath(root);
+        var webDir = Path.Combine(root, "Web");
+        var legacyDir = Path.Combine(root, "Legacy");
+        var toolsDir = Path.Combine(root, "Tools");
+        var loose = Path.Combine(root, "Loose");
+
+        var sln = WriteSource(root, "App.sln", "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+            + "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Web\", \"Web\\Web.csproj\", \"{11111111-1111-1111-1111-111111111111}\"\nEndProject\n"
+            + "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Legacy\", \"Legacy\\Legacy.csproj\", \"{22222222-2222-2222-2222-222222222222}\"\nEndProject\n");
+
+        // Web: SDK-style, multi-targeted; restored, unrestored and project references; one Razor file removed.
+        var web = WriteSource(webDir, "Web.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFrameworks>net8.0;net9.0</TargetFrameworks></PropertyGroup>
+              <ItemGroup>
+                <Compile Include="../Shared/Common.cs" />
+                <Content Remove="Pages/Dropped.razor" />
+                <PackageReference Include="Stub.Assets" Version="1.0.0" />
+                <PackageReference Include="Stub.Missing" Version="1.0.0" />
+                <ProjectReference Include="..\Legacy\Legacy.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+        var restored = Path.Combine(root, "restored");
+        PutStub(Path.Combine(restored, "stub.assets", "1.0.0", "lib", "net8.0", "Stub.Assets.dll"), StubAssembly("Stub.Assets", "StubAssets"));
+        WriteAssets(webDir, "Stub.Assets", "1.0.0", "net8.0", restored, "lib/net8.0/Stub.Assets.dll");
+        var caller = WriteSource(webDir, "Caller.cs",
+            "namespace Web;\n\npublic class Caller\n{\n    public StubAssets.T Field;\n"
+            + "    public void Go() { Legacy.Core.Run(); StubAssets.T.Hit(); StubMissing.T.Hit(); Sh.Common.Ping(); }\n}\n");
+        WriteSource(Path.Combine(webDir, "Helpers"), "Helper.cs", "namespace WebLib;\n\npublic static class Helper\n{\n    public static void Ping() { }\n}\n");
+        var webDup = WriteSource(webDir, "Dup.cs", "namespace Twin;\n\npublic class Dup\n{\n    public void M() { }\n}\n");
+        WriteSource(webDir, "_Imports.razor", "@using WebLib\n");
+        var counter = WriteSource(Path.Combine(webDir, "Components"), "Counter.razor", "<p>c</p>\n@code {\n    void Go() { Helper.Ping(); }\n}\n");
+        var dropped = WriteSource(Path.Combine(webDir, "Pages"), "Dropped.razor", "<p>d</p>\n@code {\n    void Gone() { }\n}\n");
+
+        // Legacy: .NET Framework-style with packages.config; explicit Compile and Content items only.
+        var legacy = WriteSource(legacyDir, "Legacy.csproj", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup><TargetFrameworkVersion>v4.8</TargetFrameworkVersion><RootNamespace>Legacy</RootNamespace></PropertyGroup>
+              <ItemGroup><Compile Include="Core.cs" /></ItemGroup>
+              <ItemGroup>
+                <Content Include="Views\_ViewImports.cshtml" />
+                <Content Include="Views\Home\Index.cshtml" />
+              </ItemGroup>
+            </Project>
+            """);
+        WriteSource(legacyDir, "packages.config",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<packages>\n  <package id=\"Stub.Legacy\" version=\"1.0.0\" targetFramework=\"net48\" />\n</packages>\n");
+        // Framework-style projects carry no TargetFramework, so the netstandard folder is the compatible one.
+        PutStub(Path.Combine(root, "packages", "Stub.Legacy.1.0.0", "lib", "netstandard2.0", "Stub.Legacy.dll"), StubAssembly("Stub.Legacy", "StubLegacy"));
+        var core = WriteSource(legacyDir, "Core.cs",
+            "namespace Legacy\n{\n    public static class Core\n    {\n        public static void Run() { StubLegacy.T.Hit(); }\n    }\n}\n");
+        WriteSource(Path.Combine(legacyDir, "Views"), "_ViewImports.cshtml", "@using Legacy\n");
+        var view = WriteSource(Path.Combine(legacyDir, "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n@functions {\n    void Go() { Core.Run(); }\n}\n");
+
+        // Tools: unlisted SDK-style; shares Common.cs with Web and declares the twin Twin.Dup.
+        var tools = WriteSource(toolsDir, "Tools.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+              <ItemGroup><Compile Include="../Shared/Common.cs" /></ItemGroup>
+            </Project>
+            """);
+        var toolsDup = WriteSource(toolsDir, "Dup.cs", "namespace Twin;\n\npublic class Dup\n{\n    public void M() { }\n}\n");
+        var shared = WriteSource(Path.Combine(root, "Shared"), "Common.cs", "namespace Sh;\n\npublic static class Common\n{\n    public static void Ping() { }\n}\n");
+
+        // Projectless: outside every project directory, claimed by no project.
+        var looseCs = WriteSource(loose, "Loose.cs", "namespace LooseNs;\n\npublic class Free\n{\n    public void Run() { }\n}\n");
+        var csx = WriteSource(loose, "Script.csx", "void Hello() { }\n");
+        var looseRazor = WriteSource(loose, "Part.razor", "<p>p</p>\n@code {\n    void Go() { }\n}\n");
+        var looseView = WriteSource(Path.Combine(loose, "Views"), "Page.cshtml", "<h1>p</h1>\n@functions {\n    void Go() { }\n}\n");
+
+        return (root, sln, web, legacy, tools, caller, core, shared, webDup, toolsDup, counter, view, dropped,
+            looseCs, csx, looseRazor, looseView, restored);
+    }
+
+    // ------------------------------------------------------------------
     // SolutionReader: static .sln reading (internal, reached by reflection)
     // ------------------------------------------------------------------
 
