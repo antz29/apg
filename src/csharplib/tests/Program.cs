@@ -69,6 +69,7 @@ public static class TestMain
             TestProjectRazorMembership(baseDir);
             TestRazorImports(baseDir);
             TestRazorRootNamespace(baseDir);
+            TestRazorComponentBinding(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -902,6 +903,111 @@ public static class TestMain
         Check("razor root namespace: projectless .razor is global plus folder", StructParent(g, lComp, "Counter") == "Pages", all);
         Check("razor root namespace: projectless .cshtml is in the global namespace", StructParent(g, lView, "Views_Home_Index") == "", all);
         Check("razor root namespace: @namespace overrides the projectless global namespace", StructParent(g, lOver, "Loose") == "Loose.Ns", all);
+    }
+
+    // The closed component surface: Razor 6.0.36's ComponentSymbols.Create needs the first seven types, the
+    // generated BuildRenderTree of a parameterless child tag calls only these RenderTreeBuilder members.
+    private const string ComponentsStub = """
+        namespace Microsoft.AspNetCore.Components
+        {
+            public interface IComponent { }
+            public abstract class ComponentBase : IComponent
+            {
+                protected virtual void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder) { }
+            }
+            [System.AttributeUsage(System.AttributeTargets.Property)]
+            public sealed class ParameterAttribute : System.Attribute { }
+            public delegate void RenderFragment(Rendering.RenderTreeBuilder builder);
+            public delegate RenderFragment RenderFragment<TValue>(TValue value);
+            public readonly struct EventCallback { }
+            public readonly struct EventCallback<TValue> { }
+        }
+        namespace Microsoft.AspNetCore.Components.Rendering
+        {
+            public sealed class RenderTreeBuilder
+            {
+                public void OpenComponent<TComponent>(int sequence) { }
+                public void CloseComponent() { }
+                public void OpenElement(int sequence, string elementName) { }
+                public void CloseElement() { }
+                public void AddMarkupContent(int sequence, string markupContent) { }
+                public void AddContent(int sequence, string textContent) { }
+                public void AddContent(int sequence, object textContent) { }
+                public void AddAttribute(int sequence, string name, string value) { }
+                public void AddAttribute(int sequence, string name, object value) { }
+            }
+        }
+        """;
+
+    private static readonly string[] ComponentsStubTypes =
+    {
+        "Microsoft.AspNetCore.Components.IComponent", "Microsoft.AspNetCore.Components.ComponentBase",
+        "Microsoft.AspNetCore.Components.ParameterAttribute", "Microsoft.AspNetCore.Components.RenderFragment",
+        "Microsoft.AspNetCore.Components.RenderFragment`1", "Microsoft.AspNetCore.Components.EventCallback",
+        "Microsoft.AspNetCore.Components.EventCallback`1", "Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder",
+    };
+
+    /// <summary>
+    /// Component binding over one full scan of two Sdk.Web net9.0 projects (App references Lib): App's Page.razor
+    /// tags App's Local.razor and Lib's Shared.razor; each tag yields a resolved uses/calls edge from Page.razor
+    /// to the child's generated type, never an unresolved one. The temp dotnet root holds the carried runtime as
+    /// NETCore.App.Ref 9.0.0 and the in-process ComponentsStub as AspNetCore.App.Ref 9.0.0, the only definition
+    /// of its eight types; the Reference Assemblies root and NUGET_PACKAGES are empty (Isolated).
+    /// </summary>
+    private static void TestRazorComponentBinding(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "razor-components"));
+        var scan = Path.Combine(root, "scan");
+        var refs = Path.Combine(root, "iso-dotnet", "packs");
+        var asm = typeof(Apg.CsharpFrontend.Scanner).Assembly;
+        const string prefix = "apg.refs/";
+        var core = Path.Combine(refs, "Microsoft.NETCore.App.Ref", "9.0.0", "ref", "net9.0");
+        foreach (var name in asm.GetManifestResourceNames().Where(n => n.StartsWith(prefix, StringComparison.Ordinal)))
+        {
+            using var s = asm.GetManifestResourceStream(name)!;
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            PutStub(Path.Combine(core, name[prefix.Length..]), ms.ToArray());
+        }
+
+        var stub = CSharpCompilation.Create("Microsoft.AspNetCore.Components", new[] { CSharpSyntaxTree.ParseText(ComponentsStub) },
+            CarriedRuntime(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var stubErrors = stub.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        Check("component stub compiles with zero errors", stubErrors.Count == 0, Join(stubErrors.Select(d => d.ToString())));
+        if (stubErrors.Count > 0) return;
+        using (var ms = new MemoryStream())
+        {
+            stub.Emit(ms);
+            PutStub(Path.Combine(refs, "Microsoft.AspNetCore.App.Ref", "9.0.0", "ref", "net9.0", "Microsoft.AspNetCore.Components.dll"), ms.ToArray());
+        }
+        // Single-definition rule: over the whole written reference set each of the eight names binds to one symbol.
+        var probe = CSharpCompilation.Create("Probe", null,
+            Directory.GetFiles(refs, "*.dll", SearchOption.AllDirectories).Select(f => MetadataReference.CreateFromFile(f)));
+        var missing = ComponentsStubTypes.Where(t => probe.GetTypeByMetadataName(t) == null).ToList();
+        Check("component stub: each of its eight types has exactly one definition in the reference set", missing.Count == 0, Join(missing));
+
+        const string web = "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n  <ItemGroup>{0}</ItemGroup>\n</Project>\n";
+        WriteSource(Path.Combine(scan, "Lib"), "Lib.csproj", string.Format(web, ""));
+        var shared = WriteSource(Path.Combine(scan, "Lib"), "Shared.razor", "<p class=\"shared\">shared</p>\n");
+        WriteSource(Path.Combine(scan, "App"), "App.csproj", string.Format(web, "<ProjectReference Include=\"..\\Lib\\Lib.csproj\" />"));
+        var local = WriteSource(Path.Combine(scan, "App"), "Local.razor", "<span>local</span>\n");
+        var page = WriteSource(Path.Combine(scan, "App"), "Page.razor", "<div class=\"page\">\n    <Local />\n    <Lib.Shared />\n</div>\n");
+
+        var (g, all) = Isolated(root, Path.Combine(root, "nuget"), () => ScanUnique("razor component binding", scan));
+        var fromPage = new HashSet<string>(g.Funcs.Where(f => f.File == page).Select(f => f.Id)
+            .Concat(g.Structs.Where(s => s.Path == page).Select(s => s.Id)), StringComparer.Ordinal);
+        bool Bound(string file, string name)
+        {
+            var targets = new HashSet<string>(g.Structs.Where(s => s.Path == file && s.Name == name).Select(s => s.Id)
+                .Concat(g.Funcs.Where(f => f.File == file).Select(f => f.Id)), StringComparer.Ordinal);
+            return g.Structs.Any(s => s.Path == file && s.Name == name)
+                && g.Edges.Any(e => (e.Type == "uses" || e.Type == "calls") && fromPage.Contains(e.From) && targets.Contains(e.To));
+        }
+        bool Unbound(string fqn) => g.Edges.Any(e => e.Type.StartsWith("unresolved_", StringComparison.Ordinal) && fromPage.Contains(e.From) && e.To == fqn);
+        Check("razor components: a child tag declared in the same project binds to its generated type",
+            Bound(local, "Local") && !Unbound("App.Local"), all);
+        Check("razor components: a child tag declared in a referenced project binds to its generated type",
+            Bound(shared, "Shared") && !Unbound("Lib.Shared"), all);
     }
 
     // ------------------------------------------------------------------
