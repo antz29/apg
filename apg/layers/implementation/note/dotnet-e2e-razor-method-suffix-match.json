@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "dotnet-e2e-razor-method-suffix-match",
+  "body": "The dotnet_repo_scan_graph_shape e2e finds each Razor-declared method by its file path plus a .Greet/.Increment name suffix rather than an exact FQN, so a change to how Razor-generated classes are named would go unnoticed there. Upgrade to exact FQNs if the generated-class naming must be pinned end to end.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.csharp_scan_e2e.e2e.dotnet_repo_scan_graph_shape",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

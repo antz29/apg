@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "unresolved-category-per-name-first-wins",
+  "body": "EdgeEmitter.EmitUnresolvedNode writes one unresolved record per target name for the whole scan, so the first compilation to emit a name sets its category: in a multi-project scan, a name bound in one compilation (stdlib/external) and unbound in another (unknown) carries only the first compilation's category, depending on compilation order. Upgrade to per-reference categories if any consumer needs a shared name's category per compilation.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.EdgeEmitter.EmitUnresolvedNode",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
