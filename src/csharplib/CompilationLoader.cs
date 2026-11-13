@@ -11,7 +11,10 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Apg.CsharpFrontend;
 
 /// <summary>
-/// Roslyn compilation loading: parse trees, core BCL metadata references, the
+/// Roslyn compilation loading: parse trees, metadata references (the carried
+/// runtime — the embedded net9.0 reference assemblies — for a projectless
+/// compilation; a project's resolved framework, package and assembly
+/// references for a project compilation), the
 /// <see cref="CSharpCompilation"/>, and one <see cref="SemanticModel"/> per
 /// tree.
 /// </summary>
@@ -54,8 +57,9 @@ internal static class CompilationLoader
     }
 
     /// <summary>
-    /// Builds a projectless compilation with core BCL metadata references
-    /// only, over trees already parsed at the latest language version. It has
+    /// Builds a projectless compilation with the carried runtime only (the
+    /// embedded net9.0 reference assemblies,
+    /// <see cref="GetDefaultMetadataReferences"/>), over trees already parsed at the latest language version. It has
     /// exactly two uses: the single compilation over every .cs file outside
     /// every project (always the FULL such set: a target set filters
     /// emission, not resolution), and one compilation per .csx script over
