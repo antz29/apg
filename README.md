@@ -7,7 +7,9 @@ a program graph of its types, functions, and call/use relationships, and
 stores it in a LadybugDB graph database that you can query with Cypher from
 inside opencode. The bundled structural scanner also graphs the tracked
 text/config/packaging files the code frontends don't claim — Markdown, shell,
-YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files.
+YAML, JSON, TOML, XML (including MSBuild `.csproj`/`.vbproj`/`.vcxproj`/
+`.sqlproj`/`.props`/`.targets` and `.config`/`.resx`), `.sln` solutions,
+Dockerfile, Makefile, INI, and residual files.
 
 ```
 Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
@@ -17,10 +19,13 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
 
 - **Per-language scanner frontends** installed separately via brew — install
   only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python,
-  COBOL),
+  COBOL; the C# frontend is project-aware and Razor-compiling, claiming
+  `.cs`/`.csx`/`.cshtml`/`.razor`),
   plus a **bundled structural scanner** in the base package that graphs the
   tracked text/config/packaging files the code frontends don't claim (Markdown,
-  shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files),
+  shell, YAML, JSON, TOML, XML — MSBuild `.csproj`/`.vbproj`/`.vcxproj`/
+  `.sqlproj`/`.props`/`.targets` and `.config`/`.resx` included — `.sln`,
+  Dockerfile, Makefile, INI, and residual files),
   and a **bundled agent frontend** that graphs `.opencode/agents/*.md`
   definitions as `Agent` nodes.
 - **Exact edges for Go, Java, Rust, TypeScript, and C#** — call resolution uses
@@ -69,7 +74,18 @@ imports resolve even before `npm install`.
 
 The other four frontends need no runtime at scan time: the C++ frontend is a
 native tree-sitter binary, the C# frontend (`apg-csharp`) is a self-contained
-single-file publish (its .NET SDK is build-time only), the Python
+single-file publish (its .NET SDK is build-time only) that never runs MSBuild,
+`dotnet` or NuGet — it reads restored references offline, in order
+`obj/project.assets.json`, then `HintPath` / the solution `packages/` folder,
+then the NuGet global packages folder, and framework packs from the dotnet
+root with its embedded net9 reference assemblies as fallback; a reference not
+restored locally becomes an unresolved target named as written in source, with
+category `unknown`. Two variables override the framework roots:
+`APG_CSHARP_DOTNET_ROOT` (the dotnet root for framework packs) and
+`APG_CSHARP_REFASM_ROOT` (the .NET Framework Reference Assemblies root). Set
+non-empty, only the named root is read for that lookup — no fallback to
+`DOTNET_ROOT`, `~/.dotnet`, the platform dotnet dirs or the Reference
+Assemblies dirs; unset or empty keeps the default lookup. The Python
 (`apg-py`) frontend resolves from filesystem markers and never shells out, and
 the COBOL frontend (`apg-cobol`) is a self-contained binary that never shells
 out. The
@@ -92,7 +108,7 @@ ceiling.
 | C++ (`apg-cpp`) | `gcc` (`-std=c11`) + `g++` (`-std=c++17`); vendored tree-sitter | none (native) | vendored tree-sitter language ABI v15 + vendored tree-sitter-cpp grammar content |
 | Rust (`apg-rust`) | stable Rust + network (git-pinned rust-analyzer crates) | `cargo` + `rustc` | rust-analyzer tag `2026-08-17` (0.0.348) |
 | TypeScript (`apg-ts`) | `node` + `npm ci` | `node` on `PATH`, spawned `node <dir>/scanner.mjs` | `typescript 5.9.3` |
-| C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` |
+| C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file; reads restored references offline — `obj/project.assets.json`, then `HintPath` / the solution `packages/` folder, then the NuGet global packages folder; framework packs from the dotnet root, else the embedded net9 reference assemblies; `APG_CSHARP_DOTNET_ROOT` / `APG_CSHARP_REFASM_ROOT`, when non-empty, are the only dotnet / Reference Assemblies root read; a reference not restored locally becomes an unresolved target named as written, category `unknown`) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` + Razor `6.0.36` (`Microsoft.AspNetCore.Mvc.Razor.Extensions`, `Microsoft.AspNetCore.Razor.Language`, `Microsoft.CodeAnalysis.Razor`); ceiling = Razor 6.0 (MVC5 `.cshtml` views compile under the ASP.NET Core MVC configuration) |
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
 | COBOL (`apg-cobol`) | stable Rust `1.98.1` + crates.io (`serde`, `serde_json`) | none (self-contained binary, never shells out) | no engine pin (hand-written parser); ceiling = the dialect table: `cobol85` (default), `cobol2002`, `cobol2014`, `ibm` (`cobol2023` is refused) |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
@@ -396,12 +412,14 @@ One `Agent` node exists per definition file under `.opencode/agents/`: its FQN i
 the extension-stripped file name (`agent.go-frontend-implementer`), located at
 that definition file's path and line span beside the file's `File` node.
 
-Edge types: `Contains` (Module→Module, Module→File, File→Struct, File→Function,
-Struct→Struct, Struct→Function), `Calls` (Function→Function), `Uses`
+Edge types: `Contains` (Language→Module, Language→File — C# only, for a
+namespace-less C# file — Module→Module, Module→File, File→Struct,
+File→Function, Struct→Struct, Struct→Function), `Calls` (Function→Function), `Uses`
 (Function|Struct→Struct), `UnresolvedCall` (Function→UnresolvedTarget, prop
 `target_type`), `UnresolvedUse` (Function|Struct→UnresolvedTarget).
 
-Containment is a strict tree: a module contains files, and a file contains the
+Containment is a strict tree: a module — or, for a namespace-less C# file, the
+`csharp` language root — contains files, and a file contains the
 structs and functions declared in it. For review workflows, this gives you the
 file scope directly: `MATCH (f:File {fqn:'...'})-[:Contains]->(n) RETURN n.fqn`
 lists a file's units, and every node's `start_line`/`end_line` joins against
@@ -419,7 +437,19 @@ rooted npm-package + file-path-prefixed form: a class `Button` in
 `src/components/Button.tsx` of package `@co/ui` is
 `ts.@co/ui.src.components.Button.Button`, and its method `onClick` is
 `ts.@co/ui.src.components.Button.Button.onClick` (each ES module file is its own
-namespace, so same-named symbols in different files never collide). The language
+namespace, so same-named symbols in different files never collide). In C#,
+each `.sln` is a module and each project a module (its path kept whole),
+contained by every solution listing it; an unlisted project is a module at the
+`csharp` root. Declarations keep namespace-based FQNs; only a cross-project
+duplicate gets the collision qualifier `csharp.<project path>.<Namespace>`. A
+global-namespace type has the `csharp` root as its parent (type `Alpha` is
+`csharp.Alpha`, its members `csharp.Alpha.<member>`); one declared in more than
+one compilation is qualified directly under its project module as
+`csharp.<repo-relative project path>.<Type>`, with no namespace segment
+(projectless members keep `csharp.<Type>`). A file several projects compile has
+one owning project, the first listed target framework is the one compiled, and
+a namespace-less C# file (a projectless `.cs` or Razor file declaring no
+namespace) sits directly under the `csharp` root. The language
 roots are disjoint, so a cross-language collision (`rust.apg` vs `py.apg`) is
 impossible by construction. Files and foreign references are NOT rooted: a
 `File.fqn` is its repo-relative path (relative to the git toplevel, or the scan
@@ -429,7 +459,8 @@ The bundled structural scanner contributes `File` nodes — and `Struct` nodes f
 the structures each format exposes (Markdown headings, shell functions, YAML
 keys, TOML tables, …) — for the tracked text/config/packaging files the code
 frontends don't claim. They are rooted under the structural stream ids (`md`,
-`sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`)
+`sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `sln`,
+`misc`)
 and their `code_type` is `config`, except Markdown (`md`), which keeps the
 built-in `docs`.
 
@@ -738,10 +769,10 @@ src/javalib/         Java scanner (javac)
 src/cpplib/          C++ scanner (tree-sitter)
 src/rustlib/         Rust scanner (rust-analyzer engine; separate Cargo project)
 src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
-src/csharplib/       C# scanner (Roslyn; separate build)
+src/csharplib/       C# scanner — .cs/.csx/.cshtml/.razor (Roslyn + Razor; project-aware; separate build)
 src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
 src/cobollib/        COBOL scanner (hand-written COBOL parser; separate Cargo project)
-src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
+src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML (incl. MSBuild .csproj/.vbproj/.vcxproj/.sqlproj/.props/.targets, .config/.resx)/sln/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
 src/agentlib/        bundled agent-definition frontend — `.opencode/agents/*.md` → Agent nodes (standalone non-workspace Rust crate)
 opencode-suite/      install template for `apg init` (plugins/, lib/, agents/; embedded in src/main.rs)
 install.sh           curl | sh installer for Linux (prebuilt release tarballs)
