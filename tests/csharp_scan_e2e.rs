@@ -55,8 +55,16 @@ fn write(dir: &Path, name: &str, text: &str) -> String {
     p.to_str().expect("utf-8 path").to_string()
 }
 
+/// A per-repo scratch HOME (`<repo root>-home`, a sibling under the temp
+/// dir), so no child reads the developer's `~/.config/opencode`.
+fn home(repo: &Repo) -> String {
+    let h = format!("{}-home", repo.root.display());
+    std::fs::create_dir_all(&h).expect("create scratch HOME");
+    h
+}
+
 /// Runs the candidate `apg scan . --language csharp <args>` in `repo` with
-/// NUGET_PACKAGES, APG_CSHARP_DOTNET_ROOT and APG_CSHARP_REFASM_ROOT on
+/// HOME, NUGET_PACKAGES, APG_CSHARP_DOTNET_ROOT and APG_CSHARP_REFASM_ROOT on
 /// empty scratch dirs (outside the repo), asserting exit 0 and no csharp
 /// frontend failure. Returns the scan log (stderr).
 fn scan_csharp(repo: &Repo, tag: &str, args: &[&str]) -> String {
@@ -70,6 +78,7 @@ fn scan_csharp(repo: &Repo, tag: &str, args: &[&str]) -> String {
     full.extend_from_slice(args);
     let out = ApgCommand::new(&full)
         .cwd(&repo.root)
+        .env("HOME", &home(repo))
         .env("NUGET_PACKAGES", &dir("nuget"))
         .env("APG_CSHARP_DOTNET_ROOT", &dir("dotnet"))
         .env("APG_CSHARP_REFASM_ROOT", &dir("refasm"))
@@ -88,6 +97,7 @@ fn scan_csharp(repo: &Repo, tag: &str, args: &[&str]) -> String {
 fn query_col(repo: &Repo, cypher: &str, col: &str) -> Vec<String> {
     let out = ApgCommand::new(&["query", "--json", cypher])
         .cwd(&repo.root)
+        .env("HOME", &home(repo))
         .output();
     assert!(
         out.status.success(),
@@ -340,5 +350,135 @@ mod e2e {
                 }
             }
         }
+    }
+
+    /// A scratch .NET repo end to end: the solution module contains both
+    /// project modules, the cross-project call is a Calls edge, each Razor
+    /// file is a File under its project carrying `#line`-mapped declarations,
+    /// the .sln/.csproj/.props land in the sln/xml streams, and both the
+    /// project and the projectless System.Console.WriteLine calls bind via the
+    /// embedded carried runtime (stdlib) under empty NuGet/dotnet/refasm roots.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg + csharpfrontend); run via cargo test-e2e"]
+    fn dotnet_repo_scan_graph_shape() {
+        csharp_frontend_bin(); // fail loudly when the frontend is not staged
+
+        let repo = Repo::new("cs-dotnet");
+        repo.write(
+            "App.sln",
+            "Microsoft Visual Studio Solution File, Format Version 12.00\n\
+             Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Web\", \"Web\\Web.csproj\", \"{11111111-1111-1111-1111-111111111111}\"\nEndProject\n\
+             Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Lib\", \"Lib\\Lib.csproj\", \"{22222222-2222-2222-2222-222222222222}\"\nEndProject\n",
+        );
+        repo.write(
+            "Directory.Build.props",
+            "<Project>\n  <PropertyGroup>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>\n",
+        );
+        repo.write("Lib/Lib.csproj", SDK_CSPROJ);
+        repo.write(
+            "Lib/Core.cs",
+            "namespace Lib;\n\npublic static class Core\n{\n    public static void Run() { }\n}\n",
+        );
+        repo.write("Lib/Views/Index.cshtml", VIEW_CSHTML);
+        repo.write(
+            "Web/Web.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net9.0</TargetFramework>\n  </PropertyGroup>\n  <ItemGroup>\n    <ProjectReference Include=\"..\\Lib\\Lib.csproj\" />\n  </ItemGroup>\n</Project>\n",
+        );
+        repo.write(
+            "Web/Caller.cs",
+            "namespace Web;\n\npublic class Caller\n{\n    public void Go() { Lib.Core.Run(); System.Console.WriteLine(\"x\"); }\n}\n",
+        );
+        repo.write("Web/Components/Counter.razor", COUNTER_RAZOR);
+        repo.write(
+            "Loose/Free.cs",
+            "class Free\n{\n    void Run() { System.Console.WriteLine(\"y\"); }\n}\n",
+        );
+        repo.commit_all("fixture");
+        scan_csharp(&repo, "dotnet", &[]);
+
+        let (web, lib) = ("csharp.Web/Web.csproj", "csharp.Lib/Lib.csproj");
+        assert_eq!(
+            query_col(
+                &repo,
+                "MATCH (s:Module)-[:Contains]->(m:Module) WHERE s.fqn = 'csharp.App.sln' RETURN m.fqn ORDER BY m.fqn",
+                "m.fqn",
+            ),
+            vec![lib.to_string(), web.to_string()],
+            "solution module contains both projects"
+        );
+
+        let calls = "MATCH (a:Function)-[:Calls]->(b:Function) WHERE a.path = 'Web/Caller.cs' AND b.path = 'Lib/Core.cs' RETURN a.fqn, b.fqn";
+        assert_eq!(
+            query_col(&repo, calls, "a.fqn"),
+            vec!["csharp.Web.Caller.Go".to_string()],
+            "cross-project caller"
+        );
+        assert_eq!(
+            query_col(&repo, calls, "b.fqn"),
+            vec!["csharp.Lib.Core.Run".to_string()],
+            "cross-project callee"
+        );
+
+        for (path, module, method, line) in [
+            ("Lib/Views/Index.cshtml", lib, "Greet", "3"),
+            ("Web/Components/Counter.razor", web, "Increment", "6"),
+        ] {
+            assert_eq!(
+                query_col(
+                    &repo,
+                    &format!(
+                        "MATCH (m:Module)-[:Contains]->(f:File) WHERE f.fqn = '{path}' RETURN m.fqn"
+                    ),
+                    "m.fqn",
+                ),
+                vec![module.to_string()],
+                "{path} module"
+            );
+            let q = format!(
+                "MATCH (n:Function) WHERE n.path = '{path}' RETURN n.fqn, CAST(n.start_line AS STRING) AS line ORDER BY n.fqn"
+            );
+            let fqns = query_col(&repo, &q, "n.fqn");
+            let lines = query_col(&repo, &q, "line");
+            let hit = fqns
+                .iter()
+                .zip(&lines)
+                .find(|(f, _)| f.ends_with(&format!(".{method}")));
+            assert_eq!(
+                hit.map(|(_, l)| l.as_str()),
+                Some(line),
+                "{method} at its mapped line in {path}: {fqns:?} {lines:?}"
+            );
+        }
+
+        for (file, lang) in [
+            ("App.sln", "sln"),
+            ("Web/Web.csproj", "xml"),
+            ("Lib/Lib.csproj", "xml"),
+            ("Directory.Build.props", "xml"),
+        ] {
+            assert_eq!(
+                query_col(
+                    &repo,
+                    &format!(
+                        "MATCH (l:Language)-[:Contains*1..10]->(f:File) WHERE f.fqn = '{file}' RETURN DISTINCT l.fqn"
+                    ),
+                    "l.fqn",
+                ),
+                vec![lang.to_string()],
+                "{file} stream"
+            );
+        }
+
+        let unres = "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) WHERE u.fqn = 'System.Console.WriteLine' RETURN a.path, u.category ORDER BY a.path";
+        assert_eq!(
+            query_col(&repo, unres, "a.path"),
+            vec!["Loose/Free.cs".to_string(), "Web/Caller.cs".to_string()],
+            "UnresolvedCall to System.Console.WriteLine"
+        );
+        assert_eq!(
+            query_col(&repo, unres, "u.category"),
+            vec!["stdlib".to_string(); 2],
+            "System.Console.WriteLine category"
+        );
     }
 }
