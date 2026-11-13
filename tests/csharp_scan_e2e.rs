@@ -481,4 +481,47 @@ mod e2e {
             "System.Console.WriteLine category"
         );
     }
+
+    /// The broken-Razor error path: a `.razor` whose `@code` block is never
+    /// closed (Razor syntax error) beside a valid namespaced `.cs` class. The
+    /// scan still exits 0 without a csharp frontend failure, the broken file
+    /// is one File node, and the `.cs` declarations are graphed.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg + csharpfrontend); run via cargo test-e2e"]
+    fn broken_razor_scan_completes() {
+        csharp_frontend_bin(); // fail loudly when the frontend is not staged
+
+        let repo = Repo::new("cs-broken-razor");
+        repo.write(
+            "Shop/Cart.cs",
+            "namespace Shop;\n\npublic class Cart\n{\n    public void Add() { }\n}\n",
+        );
+        // Unclosed `@code {` block: the Razor parser reports a missing `}`.
+        repo.write(
+            "Shop/Broken.razor",
+            "<p>@Count</p>\n@code {\n    private int Count;\n\n    private void Bump()\n    {\n        Count++;\n",
+        );
+        repo.commit_all("fixture");
+        scan_csharp(&repo, "broken", &[]);
+
+        assert_eq!(
+            query_col(
+                &repo,
+                "MATCH (f:File) WHERE f.fqn = 'Shop/Broken.razor' RETURN CAST(count(*) AS STRING) AS n",
+                "n",
+            ),
+            vec!["1".to_string()],
+            "broken Razor file is exactly one File node"
+        );
+        let structs = csharp_fqns(&repo, "Struct");
+        let funcs = csharp_fqns(&repo, "Function");
+        assert!(
+            structs.contains(&"csharp.Shop.Cart".to_string()),
+            "missing csharp.Shop.Cart: {structs:?}"
+        );
+        assert!(
+            funcs.contains(&"csharp.Shop.Cart.Add".to_string()),
+            "missing csharp.Shop.Cart.Add: {funcs:?}"
+        );
+    }
 }
