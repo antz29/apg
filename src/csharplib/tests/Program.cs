@@ -109,6 +109,7 @@ public static class TestMain
             TestNestedTypeModules(baseDir);
             TestRazorPipelineIntegration(baseDir);
             TestSolutionFixtureGraphShapes(baseDir);
+            TestUnknownOptionRefused(baseDir);
         }
         catch (Exception ex)
         {
@@ -235,6 +236,47 @@ public static class TestMain
     // ------------------------------------------------------------------
     // Tests
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// An unknown `--` option is refused (exit 1, no stdout, stderr names it), while
+    /// the known flagged options still leave a bare positional exclude honoured.
+    /// </summary>
+    private static void TestUnknownOptionRefused(string baseDir)
+    {
+        string proj = Path.GetFullPath(Path.Combine(baseDir, "opts"));
+        WriteFixture(proj);
+        File.WriteAllText(Path.Combine(proj, "Gen.g.cs"), "namespace App;\n\npublic class Gen { }\n", new UTF8Encoding(false));
+
+        foreach (var opt in new[] { "--razor", "--bogus" })
+        {
+            var r = RunScanner(proj, opt);
+            Check($"unknown option {opt} exits 1", r.Code == 1, "exit " + r.Code + "\n" + r.Err);
+            Check($"unknown option {opt} writes no stdout", r.Out.Length == 0, r.Out);
+            Check($"unknown option {opt} is named on stderr", r.Err.Contains(opt, StringComparison.Ordinal), r.Err);
+        }
+
+        // Control: without the exclude, Gen.g.cs is scanned, so the exclude assertions below are meaningful.
+        Check("Gen.g.cs is scanned when not excluded", RunScanner(proj).Out.Contains("Gen.g.cs", StringComparison.Ordinal), "");
+
+        var plain = RunScanner(proj, ".g.cs");
+        var flagged = RunScanner(proj, "--id-prefix", "x", "--cache-dir", Path.Combine(baseDir, "opts-cache"), "--cache-key", "k", ".g.cs");
+        Check("flagged scan with positional exclude exits 0", flagged.Code == 0, "exit " + flagged.Code + "\n" + flagged.Err);
+        Check("plain scan with positional exclude exits 0", plain.Code == 0, "exit " + plain.Code + "\n" + plain.Err);
+
+        var flaggedGraph = ParseGraph(flagged.Out);
+        Check("flagged scan uses the x id prefix",
+            flaggedGraph.Structs.Count > 0 && flaggedGraph.Structs.All(s => s.Id.StartsWith('x')) && flaggedGraph.Funcs.All(f => f.Id.StartsWith('x')),
+            flagged.Out);
+        // Canonicalize maps ids to FQNs, so the comparison is "equal apart from the id prefix".
+        var a = Canonicalize(ParseGraph(plain.Out)).Records;
+        var b = Canonicalize(flaggedGraph).Records;
+        Check("flagged scan graph equals the plain scan graph apart from the id prefix", a.SetEquals(b), SetDiff(a, b));
+
+        foreach (var (name, r) in new[] { ("plain", plain), ("flagged", flagged) })
+        {
+            Check($"{name} scan carries no Gen.g.cs record", !r.Out.Contains("Gen.g.cs", StringComparison.Ordinal), r.Out);
+        }
+    }
 
     /// <summary>An all-targets request is byte-identical to a plain full scan.</summary>
     private static void TestFullScanEqualsAllTargets(string proj, string baseDir)
