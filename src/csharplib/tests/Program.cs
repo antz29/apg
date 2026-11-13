@@ -60,7 +60,7 @@ public static class TestMain
             TestCanonicalFormsDirectly(proj);
             TestDiscoverFilesClaimsAllExtensions(baseDir);
             TestParseTreesKindsAndHoldBack(baseDir);
-            TestHeldBackFilesAreFileOnly(baseDir);
+            TestRazorFilesEmittedOnceWithTargetFilter(baseDir);
             TestMixedCsCsxScan(baseDir);
             TestScriptMemberScope(baseDir);
             TestProjectSdkStyle(baseDir);
@@ -457,13 +457,13 @@ public static class TestMain
     }
 
     /// <summary>
-    /// A held-back .cshtml/.razor file — one with a Razor error included — is
+    /// Each .cshtml/.razor file — one with a Razor error included — is
     /// emitted exactly once, through the Razor stage, as one File record
     /// spanning 1..its own line count; the scan exits 0 and the target filter
     /// is honoured. The Razor File record's declarations (Razor-file path) and projectless parent are asserted by
     /// TestRazorUnboundAspNetCore, TestRazorSourceMapping and TestRazorUnmappedAnchors.
     /// </summary>
-    private static void TestHeldBackFilesAreFileOnly(string baseDir)
+    private static void TestRazorFilesEmittedOnceWithTargetFilter(string baseDir)
     {
         var dir = Path.GetFullPath(Path.Combine(baseDir, "heldback"));
         var cs = WriteSource(dir, "A.cs", "namespace App;\n\npublic class A { }\n");
@@ -472,7 +472,7 @@ public static class TestMain
         var bad = WriteSource(dir, "Bad.razor", "<p>bad</p>\n@code {");
 
         var r = RunScanner(dir);
-        Check("held-back scan exits 0 (a Razor error never fails the scan)", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        Check("Razor scan exits 0 (a Razor error never fails the scan)", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
         var g = ParseGraph(r.Out);
         foreach (var (path, lines) in new[] { (cshtml, 3), (razor, 2), (bad, 2) })
         {
@@ -481,12 +481,12 @@ public static class TestMain
                 records.Count == 1 && records[0].EndsWith($"|1|{lines}", StringComparison.Ordinal), Join(g.Files));
         }
         var c = Canonicalize(g);
-        Check("the .cs file beside held-back files still emits its declarations",
+        Check("the .cs file beside Razor files still emits its declarations",
             c.Records.Any(s => IsDecl(s) && RecordPath(s) == cs), Join(c.Records));
 
         var targets = WriteTargets(baseDir, "heldback.targets", cs);
         var t = Canonicalize(ParseGraph(RunScanner(dir, "--targets", targets).Out));
-        Check("a target filter omits non-target held-back file records",
+        Check("a target filter omits non-target Razor file records",
             !t.Records.Any(s => s.StartsWith("file|", StringComparison.Ordinal) && (s.Contains(cshtml) || s.Contains(razor))),
             Join(t.Records));
     }
