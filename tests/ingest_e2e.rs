@@ -2789,6 +2789,205 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// csharp-projects phase-11 task-4: a Struct beats a Function at the same
+    /// FQN whichever side is cached — global type `Acme`'s method `Foo` and
+    /// namespace `Acme`'s type `Foo` both render `csharp.Acme.Foo`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool/FactStore dir); run via cargo test-e2e"]
+    fn cached_struct_beats_fresh_same_fqn_function() {
+        use apg::cache::{
+            CacheKey, FactStore, FileFragment, FileIndex, ModuleScaffolding, ScanConfigKey,
+        };
+
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "csharp",
+            config: None,
+            base: None,
+        };
+        let cs = || Record::LangSwitch {
+            language: "csharp".to_string(),
+        };
+        let edge = |kind: &str, from: &str, to: &str| {
+            let (from, to, properties) = (from.to_string(), to.to_string(), Default::default());
+            match kind {
+                "contains" => Record::Contains {
+                    from,
+                    to,
+                    properties,
+                },
+                "calls" => Record::Calls {
+                    from,
+                    to,
+                    properties,
+                },
+                _ => Record::Uses {
+                    from,
+                    to,
+                    properties,
+                },
+            }
+        };
+        // cs/A.cs: global type Acme { Foo() uses Bar, calls Baz; Baz() calls Foo }.
+        let a = |bar: Option<&str>| {
+            let mut r = vec![
+                file_rec("cs/A.cs", "", 10),
+                srec("a0", "", "Acme", "cs/A.cs"),
+                frec("a1", "Acme", "Foo", "cs/A.cs"),
+                frec("a2", "Acme", "Baz", "cs/A.cs"),
+                edge("contains", "a0", "a1"),
+                edge("contains", "a0", "a2"),
+                edge("calls", "a1", "a2"),
+                edge("calls", "a2", "a1"),
+            ];
+            r.extend(bar.map(|b| edge("uses", "a1", b)));
+            r
+        };
+        // cs/B.cs: namespace Acme { type Foo; type Bar }.
+        let b = || {
+            vec![
+                Record::Module {
+                    fqn: "Acme".to_string(),
+                },
+                file_rec("cs/B.cs", "Acme", 10),
+                srec("b1", "Acme", "Foo", "cs/B.cs"),
+                srec("b2", "Acme", "Bar", "cs/B.cs"),
+            ]
+        };
+        // cs/C.cs: global type User { Run() uses Acme.Foo }.
+        let c = |foo: &str| {
+            vec![
+                file_rec("cs/C.cs", "", 10),
+                srec("c0", "", "User", "cs/C.cs"),
+                frec("c1", "User", "Run", "cs/C.cs"),
+                edge("contains", "c0", "c1"),
+                edge("uses", "c1", foo),
+            ]
+        };
+        let edges = |g: &apg::graph::Graph| -> BTreeSet<(&'static str, String, String)> {
+            let mut set = BTreeSet::new();
+            for (kind, pairs) in [
+                ("contains", &g.contains),
+                ("calls", &g.calls),
+                ("uses", &g.uses),
+                ("unresolved_uses", &g.unresolved_uses),
+            ] {
+                set.extend(pairs.iter().map(|(a, b)| (kind, a.clone(), b.clone())));
+            }
+            set.extend(
+                g.unresolved_calls
+                    .iter()
+                    .map(|(a, b, _)| ("unresolved_calls", a.clone(), b.clone())),
+            );
+            set
+        };
+        let nodes = |g: &apg::graph::Graph| -> BTreeSet<(String, String)> {
+            g.nodes
+                .iter()
+                .map(|(fqn, n)| (fqn.clone(), format!("{:?}", n.kind)))
+                .collect()
+        };
+        let foo = "csharp.Acme.Foo".to_string();
+
+        // (a) Full stream, opaque-id edges.
+        let mut records = vec![cs()];
+        records.extend(a(Some("b2")));
+        records.extend(b());
+        records.extend(c("b1"));
+        let (full, _) = ingest(records, &opts, None);
+        assert_eq!(
+            full.nodes.get(&foo).map(|n| n.kind),
+            Some(NodeKind::Struct),
+            "{:?}",
+            nodes(&full)
+        );
+        assert!(
+            full.contains
+                .contains(&("cs/B.cs".to_string(), foo.clone())),
+            "contains-in from B: {:?}",
+            full.contains
+        );
+        assert!(
+            full.uses
+                .contains(&("csharp.User.Run".to_string(), foo.clone())),
+            "User's uses-in: {:?}",
+            full.uses
+        );
+        let full_edges = edges(&full);
+        for (kind, a, b) in &full_edges {
+            assert!(
+                !(*kind == "contains" && *b == foo && a != "cs/B.cs"),
+                "shadowed method's contains-in {a} -> {b}"
+            );
+            assert!(
+                !(a == &foo && *kind != "contains"),
+                "shadowed method's own {kind} {a} -> {b}"
+            );
+            assert!(
+                !(*kind == "calls" && b == &foo),
+                "a call into the shadowed method {a} -> {b}"
+            );
+        }
+        let index = FileIndex::build(&full);
+        let scaffolding = ModuleScaffolding::extract(&full, Path::new("/x"));
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+        // Re-streams `fresh` with `cached` (path, fragment) from the FactStore.
+        let reused = |tag: &str, cached: (&str, FileFragment), fresh: Vec<Record>| {
+            let dir = std::env::temp_dir()
+                .join(format!("apg-struct-beats-fn-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut store = FactStore::at(dir.join("facts"));
+            store.put(&cached.1, "/x", &cache_key).unwrap();
+            store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![(
+                    cached.0.to_string(),
+                    "csharp".to_string(),
+                    format!("oid-{tag}"),
+                )],
+                reader_root: "/x".into(),
+                skipped_langs: BTreeSet::new(),
+            };
+            let mut stream = vec![cs()];
+            stream.extend(fresh);
+            let (g, _) = ingest_with_reuse(stream, &opts, Some(&reuse), None);
+            let _ = std::fs::remove_dir_all(&dir);
+            g
+        };
+
+        // (b) cs/A.cs + cs/C.cs re-streamed (canonical cross-file targets),
+        // cs/B.cs's Struct Foo cached: the cached Struct replaces the fresh Function.
+        let frag_b = FileFragment::from_index(&index, "cs/B.cs", "cs/B.cs", "oid-b", "csharp");
+        let mut fresh = a(Some("Acme.Bar"));
+        fresh.extend(c("Acme.Foo"));
+        let got = reused("b", ("cs/B.cs", frag_b), fresh);
+        assert_eq!(nodes(&got), nodes(&full), "B cached");
+        assert_eq!(edges(&got), full_edges, "B cached");
+
+        // (c) cs/B.cs + cs/C.cs re-streamed, cs/A.cs cached from a scan that
+        // predates cs/B.cs — its Function Foo (and the edges it sources) loses.
+        let (a_only, _) = ingest([vec![cs()], a(None)].concat(), &opts, None);
+        assert_eq!(
+            a_only.nodes.get(&foo).map(|n| n.kind),
+            Some(NodeKind::Function)
+        );
+        let frag_a = FileFragment::from_index(
+            &FileIndex::build(&a_only),
+            "cs/A.cs",
+            "cs/A.cs",
+            "oid-a",
+            "csharp",
+        );
+        let mut fresh = b();
+        fresh.extend(c("b1"));
+        let got = reused("a", ("cs/A.cs", frag_a), fresh);
+        assert_eq!(nodes(&got), nodes(&full), "A cached");
+        assert_eq!(edges(&got), full_edges, "A cached");
+    }
+
     /// Task-59 regression for task-58 (34c6b1e1): a COBOL `kind=copy` uses
     /// target is an absolute copybook path. Pass A must leave it unrooted. The
     /// fixture makes the root module `""` known for `cobol`, which arms the
