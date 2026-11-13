@@ -73,6 +73,7 @@ public static class TestMain
             TestRazorUnboundAspNetCore(baseDir);
             TestRazorMvc5View(baseDir);
             TestRazorSourceMapping(baseDir);
+            TestRazorUnmappedAnchors(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -1134,6 +1135,45 @@ public static class TestMain
                 g.Edges.Any(e => e.Type == "calls" && e.From == go[0].Id && make.Contains(e.To)), all);
             Check(label + ": type use Widget is a uses edge from the mapped method (Razor path, lines 4-7)",
                 g.Edges.Any(e => e.Type == "uses" && e.From == go[0].Id && widget.Contains(e.To)), all);
+        }
+    }
+
+    /// <summary>
+    /// Unmapped anchors: the generated class and its render method (ExecuteAsync / BuildRenderTree) sit outside
+    /// every #line mapping, so each is located at its Razor file's whole-file span, line 1 through the File record's
+    /// last line. Covers a projectless global-namespace pair (Razor's #line hidden lost by the namespace unwrap) and
+    /// a project-owned namespaced pair (#line hidden intact).
+    /// </summary>
+    private static void TestRazorUnmappedAnchors(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "razor-unmapped"));
+        var loose = Path.Combine(root, "loose");
+        var proj = Path.Combine(root, "proj");
+        WriteSource(proj, "Web.csproj", SdkProject);
+        foreach (var (scan, view, viewClass, comp, kind) in new[]
+        {
+            (loose, Path.Combine(loose, "Views"), "Views_Index", loose, "projectless, global namespace"),
+            (proj, Path.Combine(proj, "Views"), "Views_Index", Path.Combine(proj, "Pages"), "project-owned, namespaced"),
+        })
+        {
+            var cshtml = WriteSource(view, "Index.cshtml", "<h1>v</h1>\n@functions {\n    void Go() { }\n}\n<p>@DateTime.Now</p>\n<p>end</p>\n");
+            var razor = WriteSource(comp, "Counter.razor", "<p>c</p>\n@code {\n    void Go() { }\n}\n<p>@DateTime.Now</p>\n<div>\n    end\n</div>\n");
+            var (g, all) = ScanUnique($"razor unmapped anchors ({kind})", scan);
+            foreach (var (file, cls, render) in new[] { (cshtml, viewClass, "ExecuteAsync"), (razor, "Counter", "BuildRenderTree") })
+            {
+                var label = $"razor unmapped anchors ({kind}, {Path.GetFileName(file)})";
+                var rec = g.Files.Select(f => f.Split('|')).Where(x => x[0] == file).ToList();
+                Check(label + ": one File record spanning 1..last line", rec.Count == 1 && rec[0][2] == "1"
+                    && rec[0][3] == File.ReadAllText(file).Split('\n').Length.ToString(), all);
+                if (rec.Count != 1) continue;
+                int last = int.Parse(rec[0][3]);
+                var s = g.Structs.Where(x => x.Path == file && x.Name == cls).ToList();
+                Check($"{label}: generated class {cls} located at the whole-file span 1..{last}",
+                    s.Count == 1 && s[0].StartLine == 1 && s[0].EndLine == last, all);
+                var m = g.Funcs.Where(f => f.File == file && f.Name == render).ToList();
+                Check($"{label}: render method {render} located at the whole-file span 1..{last} (path is the Razor file)",
+                    m.Count == 1 && m[0].Path == file && m[0].StartLine == 1 && m[0].EndLine == last, all);
+            }
         }
     }
 
