@@ -458,7 +458,8 @@ public static class TestMain
     /// A held-back .cshtml/.razor file — one with a Razor error included — is
     /// emitted exactly once, through the Razor stage, as one File record
     /// spanning 1..its own line count; the scan exits 0 and the target filter
-    /// is honoured.
+    /// is honoured. The Razor File record's declarations (Razor-file path) and projectless parent are asserted by
+    /// TestRazorUnboundAspNetCore, TestRazorSourceMapping and TestRazorUnmappedAnchors.
     /// </summary>
     private static void TestHeldBackFilesAreFileOnly(string baseDir)
     {
