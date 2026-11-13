@@ -72,6 +72,7 @@ public static class TestMain
             TestRazorComponentBinding(baseDir);
             TestRazorUnboundAspNetCore(baseDir);
             TestRazorMvc5View(baseDir);
+            TestRazorSourceMapping(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -1105,6 +1106,35 @@ public static class TestMain
             Check($"{label}: {fqn} is an {edge} from the view to an unknown target named as written",
                 g.Unres.Count(u => u.Fqn == fqn) == 1 && g.Unres.Single(u => u.Fqn == fqn).Category == "unknown"
                 && g.Edges.Any(e => e.Type == edge && e.To == fqn && from.Contains(e.From)), all);
+    }
+
+    /// <summary>
+    /// Razor source mapping over one projectless full scan: an @functions method in a .cshtml and an @code method in
+    /// a .razor are each emitted with the Razor file as file/path and the #line-mapped span (lines 4–7), and their
+    /// call (Widget.Make) and type use (Widget) are calls/uses edges from that mapped method record — an edge carries
+    /// no location of its own and is attributed to its Razor file and lines through its `from` declaration.
+    /// </summary>
+    private static void TestRazorSourceMapping(string baseDir)
+    {
+        var scan = Path.GetFullPath(Path.Combine(baseDir, "razor-sourcemap"));
+        WriteSource(Path.Combine(scan, "Lib"), "Widget.cs", "namespace Lib;\n\npublic class Widget\n{\n    public static Widget Make() => new Widget();\n}\n");
+        const string body = "\n    void Go()\n    {\n        Widget w = Widget.Make();\n    }\n}\n";
+        var view = WriteSource(Path.Combine(scan, "Views"), "Index.cshtml", "@using Lib\n<h1>v</h1>\n@functions {" + body);
+        var comp = WriteSource(Path.Combine(scan, "Pages"), "Counter.razor", "@using Lib\n<p>c</p>\n@code {" + body);
+        var (g, all) = ScanUnique("razor source mapping", scan);
+        var widget = g.Structs.Where(s => s.Name == "Widget" && s.Path.EndsWith("Widget.cs", StringComparison.Ordinal)).Select(s => s.Id).ToList();
+        var make = g.Funcs.Where(f => f.Name == "Make" && f.File.EndsWith("Widget.cs", StringComparison.Ordinal)).Select(f => f.Id).ToList();
+        foreach (var (file, label) in new[] { (view, "razor source mapping (.cshtml @functions)"), (comp, "razor source mapping (.razor @code)") })
+        {
+            var go = g.Funcs.Where(f => f.Name == "Go" && f.File == file).ToList();
+            Check(label + ": method declaration emitted with the Razor file as file and path, #line-mapped lines 4-7",
+                go.Count == 1 && go[0].Path == file && go[0].StartLine == 4 && go[0].EndLine == 7, all);
+            if (go.Count != 1) continue;
+            Check(label + ": call Widget.Make is a calls edge from the mapped method (Razor path, lines 4-7)",
+                g.Edges.Any(e => e.Type == "calls" && e.From == go[0].Id && make.Contains(e.To)), all);
+            Check(label + ": type use Widget is a uses edge from the mapped method (Razor path, lines 4-7)",
+                g.Edges.Any(e => e.Type == "uses" && e.From == go[0].Id && widget.Contains(e.To)), all);
+        }
     }
 
     private static bool HasFuncIn(RawGraph g, string path, string name) => g.Funcs.Any(f => f.File == path && f.Name == name);
@@ -2832,7 +2862,7 @@ public static class TestMain
 
     private sealed class RawFunc
     {
-        public string Id = "", Parent = "", Name = "", File = "";
+        public string Id = "", Parent = "", Name = "", File = "", Path = "";
         public List<string> Params = new();
         public int Start, End, StartLine, EndLine;
     }
@@ -2887,7 +2917,7 @@ public static class TestMain
                 case "function":
                     g.Funcs.Add(new RawFunc
                     {
-                        Id = Str(e, "id"), Parent = Str(e, "parent"), Name = Str(e, "name"), File = Str(e, "file"),
+                        Id = Str(e, "id"), Parent = Str(e, "parent"), Name = Str(e, "name"), File = Str(e, "file"), Path = Str(e, "path"),
                         Params = StrArray(e, "params"),
                         Start = Num(e, "start"), End = Num(e, "end"),
                         StartLine = Num(e, "start_line"), EndLine = Num(e, "end_line"),
