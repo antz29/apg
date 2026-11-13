@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's user-documentation surface — README.md (install/usage/features and the frontend-dependency contract table) and SCHEMA.md (the durable-spec schema reference: the graph tiers, their types, cardinalities, and edge kinds). Works under the Ponytail discipline (fixed level ultra). Marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), removes/renames/moves README.md/SCHEMA.md via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same path), and commits its changes (git add/commit only; push/tag are human-approved and not granted to it). Never edits build/CI, the Rust source, opencode-suite/**, or .opencode/**.
+description: Implements plan tasks on the apg repo's user-documentation surface — README.md (install/usage/features and the frontend-dependency contract table) and SCHEMA.md (the durable-spec schema reference: the graph tiers, their types, cardinalities, and edge kinds). Works under the Ponytail discipline (fixed level ultra). Reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), removes/renames/moves README.md/SCHEMA.md via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same path), and commits once per task (git add/commit only; push/tag are human-approved and not granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits build/CI, the Rust source, opencode-suite/**, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -248,17 +248,30 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 
 ## Workflow
 
-1. Graph first. 2. Read the task's verb + target (`apg_plan_tasks`). 3. Scope,
-then the smallest complete change to `README.md`/`SCHEMA.md` — stop and report
-if uncovered or unjustified. 4. `apg_plan_done` (assertion only; `apg_plan_undone` if
-wrong). 5. Work Feedback one item at a time → claim. 6. `git add` +
-`git commit` at phase end; never push or tag. 7. Report with any `NOTE:` lines
-and the skipped/risk sign-off.
+1. Graph first.
+2. Read the task's verb + target (`apg_plan_tasks`).
+3. Scope, then the smallest complete change to `README.md`/`SCHEMA.md` — stop
+   and report if uncovered or unjustified (nothing written yet).
+4. **One commit per task**: `git add` + `git commit` once the task's change is
+   complete (you hold no gate — see Build-gate contract); never push or tag.
+5. Report with any `NOTE:` lines and the skipped/risk sign-off, and return
+   **without marking the task done**. The navigator checks the change and
+   rescans the worktree so the recorded HEAD catches up.
+6. When the navigator resumes this session after its rescan, run
+   `apg_plan_done` for that task (`apg_plan_undone` if the assertion was wrong)
+   and **nothing else**. Marking done with uncommitted changes, or before the
+   rescan, fails the graph's staleness check.
+7. Feedback: work one dispatched item at a time → an ACTIONED/WONT-FIX claim.
+
+A target-less task that writes nothing needs no commit: report and return; it
+is marked done (step 6) when the navigator says its condition holds.
 
 ## Hard boundaries
 
 - Never author spec/plan/review nodes; never call `apg_plan_note`.
 - Never action Feedback; never scan; never run `apg project start|merge`; never
   complete a phase.
+- Never mark a task done before its commit and the navigator's rescan —
+  `apg_plan_done` runs only when the navigator resumes you for it.
 - Never edit anything except the worktree `README.md` and `SCHEMA.md`.
 - Discovered work is reported, not implemented. Never guess.

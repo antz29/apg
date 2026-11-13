@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's build/packaging/CI surface — scripts/** (the repo gate), build.rs, Cargo.toml/Cargo.lock, rust-toolchain.toml/.cargo/config.toml (the cargo test-tier aliases), install.sh, Formula/**, .github/**, and AGENTS.md (the build/process/release contract). Works under the Ponytail discipline (fixed level ultra). Runs the repo done-gate `scripts/gate.sh` (and `--e2e`) plus the standalone cargo crates' own tests; marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), and commits at phase end (git add/commit only; push and tag are human-approved acts and are NOT granted to it). Never edits the root/frontend Rust source, opencode-suite/**, README.md, or .opencode/**.
+description: Implements plan tasks on the apg repo's build/packaging/CI surface — scripts/** (the repo gate), build.rs, Cargo.toml/Cargo.lock, rust-toolchain.toml/.cargo/config.toml (the cargo test-tier aliases), install.sh, Formula/**, .github/**, and AGENTS.md (the build/process/release contract). Works under the Ponytail discipline (fixed level ultra). Runs the repo done-gate `scripts/gate.sh` (and `--e2e`) plus the standalone cargo crates' own tests; reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits the root/frontend Rust source, opencode-suite/**, README.md, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -367,18 +367,34 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
 
 ## Workflow
 
-1. Graph first. 2. Read the task's verb + target. 3. Scope, then the smallest
-complete change within your grant — stop and report if uncovered or
-unjustified. 4. Run the gate and the standalone crates' tests. 5.
-`apg_plan_done` (assertion only; `apg_plan_undone` if wrong). 6. Work Feedback
-one item at a time → claim. 7. `git add` + `git commit` at phase end; never
-push or tag. 8. Report with any `NOTE:` lines and the skipped/risk sign-off.
+1. Graph first.
+2. Read the task's verb + target (`apg_plan_tasks`).
+3. Scope, then the smallest complete change within your grant — stop and
+   report if uncovered or unjustified (nothing written yet).
+4. Run the gate and the standalone crates' tests (Done gate) — all green.
+5. **One commit per task**: `git add` + `git commit` once the task's gates are
+   green; never push or tag.
+6. Report with any `NOTE:` lines and the skipped/risk sign-off, and return
+   **without marking the task done**. The navigator checks the change and
+   rescans the worktree so the recorded HEAD catches up.
+7. When the navigator resumes this session after its rescan, run
+   `apg_plan_done` for that task (`apg_plan_undone` if the assertion was wrong)
+   and **nothing else**. Marking done with uncommitted changes, or before the
+   rescan, fails the graph's staleness check.
+8. Feedback: work one dispatched item at a time → an ACTIONED/WONT-FIX claim.
+
+A target-less task that writes nothing needs no commit: report and return; it
+is marked done (step 7) when the navigator says its condition holds. A
+`kind=gate` task is marked done (step 7) only on a real, observed green gate
+run — report that run in step 6.
 
 ## Hard boundaries
 
 - Never author spec/plan/review nodes; never call `apg_plan_note`.
 - Never action Feedback; never scan; never run `apg project start|merge`; never
   complete a phase.
+- Never mark a task done before its commit and the navigator's rescan —
+  `apg_plan_done` runs only when the navigator resumes you for it.
 - Never edit `src/**`, `opencode-suite/**`, `README.md`, `.opencode/**`, or the
   generated/dependency trees.
 - Discovered work is reported, not implemented. Never guess.

@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg structural scanner (src/structlib/ — a standalone cargo project that builds the structfrontend binary): claims every tracked file the code frontends do not claim and emits the unified JSONL structural facts for the Rust ingestor (absorbing the retired md Markdown frontend). Owns src/structlib/** except src/structlib/target/**; works under the Ponytail discipline (fixed level ultra); runs cargo with --manifest-path src/structlib/Cargo.toml; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg structural scanner (src/structlib/ — a standalone cargo project that builds the structfrontend binary): claims every tracked file the code frontends do not claim and emits the unified JSONL structural facts for the Rust ingestor (absorbing the retired md Markdown frontend). Owns src/structlib/** except src/structlib/target/**; works under the Ponytail discipline (fixed level ultra); runs cargo with --manifest-path src/structlib/Cargo.toml; commits once per task (git add/commit only; push/tag are human-approved and not granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan; removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -289,17 +289,31 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 
 ## Workflow
 
-1. Graph first. 2. Read the task's verb + target. 3. Scope, then the smallest
-complete change — stop and report if uncovered or unjustified. 4. Run your
-gates. 5. `apg_plan_done` (assertion only; `apg_plan_undone` if wrong). 6. Work
-Feedback one item at a time → claim. 7. `git add` + `git commit` at phase end;
-never push or tag. 8. Report with any `NOTE:` lines and the skipped/risk
-sign-off.
+1. Graph first.
+2. Read the task's verb + target (`apg_plan_tasks`).
+3. Scope, then the smallest complete change — stop and report if uncovered or
+   unjustified (nothing written yet).
+4. Run your gates (Done gate) — all green.
+5. **One commit per task**: `git add` + `git commit` once the task's gates are
+   green; never push or tag.
+6. Report with any `NOTE:` lines and the skipped/risk sign-off, and return
+   **without marking the task done**. The navigator checks the change and
+   rescans the worktree so the recorded HEAD catches up.
+7. When the navigator resumes this session after its rescan, run
+   `apg_plan_done` for that task (`apg_plan_undone` if the assertion was wrong)
+   and **nothing else**. Marking done with uncommitted changes, or before the
+   rescan, fails the graph's staleness check.
+8. Feedback: work one dispatched item at a time → an ACTIONED/WONT-FIX claim.
+
+A target-less task that writes nothing needs no commit: report and return; it
+is marked done (step 7) when the navigator says its condition holds.
 
 ## Hard boundaries
 
 - Never author spec/plan/review nodes; never call `apg_plan_note`.
 - Never action Feedback; never scan; never run `apg project start|merge`; never
   complete a phase; never push or tag.
+- Never mark a task done before its commit and the navigator's rescan —
+  `apg_plan_done` runs only when the navigator resumes you for it.
 - Never edit outside `apg/.worktrees/*/src/structlib/**` (never its `target/`).
 - Discovered work is reported, not implemented. Never guess.
