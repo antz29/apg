@@ -68,6 +68,7 @@ public static class TestMain
             TestProjectFrameworkStyle(baseDir);
             TestProjectRazorMembership(baseDir);
             TestRazorImports(baseDir);
+            TestRazorRootNamespace(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -859,6 +860,48 @@ public static class TestMain
         (g, all) = ScanUnique("razor imports (projectless)", loose);
         Check("razor imports: projectless .cshtml applies the scan-root _ViewImports.cshtml", Binds(g, lview, "Go", "Hit"), all);
         Check("razor imports: projectless .razor applies the scan-root _Imports.razor", Binds(g, lcomp, "Go", "Hit"), all);
+    }
+
+    /// <summary>
+    /// Razor root namespace over full scans: the project's RootNamespace, else the project name, else (projectless)
+    /// the global namespace; components keep folder segments, MVC views carry the path in the class name; a
+    /// @namespace directive — in the file or an applied import — overrides each.
+    /// </summary>
+    private static void TestRazorRootNamespace(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "razor-rootns"));
+        var rooted = Path.Combine(root, "Rooted");
+        WriteSource(rooted, "Rooted.csproj", SdkProject.Replace("</TargetFramework>", "</TargetFramework><RootNamespace>MyApp</RootNamespace>"));
+        var rComp = WriteSource(Path.Combine(rooted, "Pages"), "Counter.razor", "<p>c</p>\n");
+        var rView = WriteSource(Path.Combine(rooted, "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n");
+        var rOver = WriteSource(Path.Combine(rooted, "Over"), "Over.razor", "@namespace Custom.Ns\n<p>o</p>\n");
+        WriteSource(Path.Combine(rooted, "Imp"), "_Imports.razor", "@namespace From.Import\n");
+        var rImp = WriteSource(Path.Combine(rooted, "Imp"), "Thing.razor", "<p>t</p>\n");
+        var named = Path.Combine(root, "NoRoot");
+        WriteSource(named, "NoRoot.csproj", SdkProject);
+        var nComp = WriteSource(Path.Combine(named, "Pages"), "Counter.razor", "<p>c</p>\n");
+        var nView = WriteSource(Path.Combine(named, "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n");
+        var nOver = WriteSource(Path.Combine(named, "Views"), "Other.cshtml", "@namespace Over.View\n<p>o</p>\n");
+        WriteSource(Path.Combine(named, "Imp"), "_ViewImports.cshtml", "@namespace View.Import\n");
+        var nImp = WriteSource(Path.Combine(named, "Imp"), "Page.cshtml", "<p>p</p>\n");
+        var (g, all) = ScanUnique("razor root namespace (projects)", root);
+        Check("razor root namespace: .razor takes RootNamespace plus folder", StructParent(g, rComp, "Counter") == "MyApp.Pages", all);
+        Check("razor root namespace: .cshtml takes RootNamespace, path in class name", StructParent(g, rView, "Views_Home_Index") == "MyApp", all);
+        Check("razor root namespace: .razor takes the project name when RootNamespace is unset", StructParent(g, nComp, "Counter") == "NoRoot.Pages", all);
+        Check("razor root namespace: .cshtml takes the project name when RootNamespace is unset", StructParent(g, nView, "Views_Home_Index") == "NoRoot", all);
+        Check("razor root namespace: @namespace overrides RootNamespace (.razor)", StructParent(g, rOver, "Over") == "Custom.Ns", all);
+        Check("razor root namespace: @namespace overrides the project name (.cshtml)", StructParent(g, nOver, "Views_Other") == "Over.View", all);
+        Check("razor root namespace: @namespace from _Imports.razor overrides RootNamespace", StructParent(g, rImp, "Thing") == "From.Import", all);
+        Check("razor root namespace: @namespace from _ViewImports.cshtml overrides the project name", StructParent(g, nImp, "Imp_Page") == "View.Import", all);
+
+        var loose = Path.GetFullPath(Path.Combine(baseDir, "razor-rootns-loose"));
+        var lComp = WriteSource(Path.Combine(loose, "Pages"), "Counter.razor", "<p>c</p>\n");
+        var lView = WriteSource(Path.Combine(loose, "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n");
+        var lOver = WriteSource(loose, "Loose.razor", "@namespace Loose.Ns\n<p>l</p>\n");
+        (g, all) = ScanUnique("razor root namespace (projectless)", loose);
+        Check("razor root namespace: projectless .razor is global plus folder", StructParent(g, lComp, "Counter") == "Pages", all);
+        Check("razor root namespace: projectless .cshtml is in the global namespace", StructParent(g, lView, "Views_Home_Index") == "", all);
+        Check("razor root namespace: @namespace overrides the projectless global namespace", StructParent(g, lOver, "Loose") == "Loose.Ns", all);
     }
 
     // ------------------------------------------------------------------
