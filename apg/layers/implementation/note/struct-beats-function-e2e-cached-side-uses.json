@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "struct-beats-function-e2e-cached-side-uses",
+  "body": "In cached_struct_beats_fresh_same_fqn_function's second reuse direction, A.cs's cached fragment comes from an A-only ingest and carries no uses edge from the losing method (Bar cannot resolve without B), so dropping the shadowed method's own uses is exercised only when that method is re-streamed fresh. Upgrade by giving the cached A fragment a resolved uses edge if a cached-side regression ever appears.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.ingest_e2e.e2e.cached_struct_beats_fresh_same_fqn_function",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
