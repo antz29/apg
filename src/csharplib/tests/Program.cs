@@ -108,6 +108,7 @@ public static class TestMain
             TestQualifiedIdentityScan(baseDir);
             TestNestedTypeModules(baseDir);
             TestRazorPipelineIntegration(baseDir);
+            TestSolutionFixtureGraphShapes(baseDir);
         }
         catch (Exception ex)
         {
@@ -1314,6 +1315,127 @@ public static class TestMain
 
         return (root, sln, web, legacy, tools, caller, core, shared, webDup, toolsDup, counter, view, dropped,
             looseCs, csx, looseRazor, looseView, restored);
+    }
+
+    /// <summary>
+    /// One in-process scan of WriteSolutionFixture's tree (plus PackMarker.cs in Web and a projectless
+    /// FallbackMarker.cs) under an isolated NUGET_PACKAGES and a stub dotnet root whose 8.0.x
+    /// NETCore.App.Ref pack holds only System.ApgPackMarker: every project-model element's graph shape,
+    /// the found pack binding Web, and the carried runtime binding the projectless compilation.
+    /// </summary>
+    private static void TestSolutionFixtureGraphShapes(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "solution-fixture"));
+        var fx = WriteSolutionFixture(Path.Combine(dir, "tree"));
+        var webDir = Path.GetDirectoryName(fx.Web)!;
+        var marker = CSharpCompilation.Create("System.ApgPackMarker",
+            new[] { CSharpSyntaxTree.ParseText("namespace System { public static class ApgPackMarker { public static void Ping() { } public static void Pong() { } } }") },
+            CarriedRuntime(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using (var ms = new MemoryStream())
+        {
+            var emitted = marker.Emit(ms);
+            if (!emitted.Success) throw new InvalidOperationException("marker emit failed:\n" + Join(emitted.Diagnostics.Select(d => d.ToString())));
+            // 8.0.x: the major.minor of Web's and Tools' first-listed target framework (net8.0).
+            PutStub(Path.Combine(dir, "dotnet", "packs", "Microsoft.NETCore.App.Ref", "8.0.0", "ref", "net8.0", "System.ApgPackMarker.dll"), ms.ToArray());
+        }
+        // Each call-target name is emitted by exactly one compilation, so its (one-per-name) category is order-independent.
+        var packMarker = WriteSource(webDir, "PackMarker.cs", "namespace Web;\n\npublic class PackMarker\n{\n"
+            + "    public void Mark() { System.ApgPackMarker.Ping(); System.Console.Beep(); }\n}\n");
+        var fallback = WriteSource(Path.GetDirectoryName(fx.LooseCs)!, "FallbackMarker.cs", "namespace LooseNs;\n\npublic class FallbackMarker\n{\n"
+            + "    public void Mark() { System.Console.WriteLine(\"x\"); System.ApgPackMarker.Pong(); }\n}\n");
+
+        var resolver = FrontendType("ReferenceResolver");
+        var flags = BindingFlags.NonPublic | BindingFlags.Static;
+        (RawGraph G, string All) scan;
+        try
+        {
+            Environment.SetEnvironmentVariable("NUGET_PACKAGES", Directory.CreateDirectory(Path.Combine(dir, "nuget")).FullName);
+            resolver.GetProperty("DotnetRootOverride", flags)!.SetValue(null, Path.Combine(dir, "dotnet"));
+            resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.SetValue(null, Directory.CreateDirectory(Path.Combine(dir, "refasm")).FullName);
+            scan = ScanUnique("solution fixture", fx.Root);
+        }
+        finally
+        {
+            ApplyHarnessDefaults();
+        }
+        var (g, all) = scan;
+        var c = Canonicalize(g);
+        bool Contains(string from, string to) => g.Edges.Any(e => e.Type == "contains" && e.From == from && e.To == to);
+        List<string> FileRecs(string path) => g.Files.Where(f => f.StartsWith(path + "|", StringComparison.Ordinal)).ToList();
+        bool FileUnder(string path, string parent) { var f = FileRecs(path); return f.Count == 1 && f[0].StartsWith($"{path}|{parent}|", StringComparison.Ordinal); }
+        string? FuncId(string file, string name) => g.Funcs.FirstOrDefault(f => f.File == file && f.Name == name)?.Id;
+        bool Edge(string type, string? from, string to) => from != null && g.Edges.Any(e => e.Type == type && e.From == from && e.To == to);
+        string? Category(string fqn) => g.Unres.FirstOrDefault(u => u.Fqn == fqn)?.Category;
+        bool CallsTo(string file, string name, string target) => FuncId(file, name) is { } id && c.Records.Contains($"calls|{c.IdToFqn[id]}|{target}");
+
+        // Modules: the .sln contains its listed projects; unlisted Tools sits at the csharp root.
+        Check("solution fixture: App.sln is one top-level module containing Web and Legacy",
+            g.Modules.Count(m => m == fx.Sln) == 1 && !g.Edges.Any(e => e.Type == "contains" && e.To == fx.Sln)
+            && Contains(fx.Sln, fx.Web) && Contains(fx.Sln, fx.Legacy), all);
+        Check("solution fixture: unlisted Tools is a top-level module, contained by nothing",
+            g.Modules.Count(m => m == fx.Tools) == 1 && !g.Edges.Any(e => e.Type == "contains" && e.To == fx.Tools), all);
+        Check("solution fixture: SDK-style Web and packages.config Legacy modules contain their compiled files",
+            FileUnder(fx.Caller, fx.Web) && FileUnder(fx.WebDup, fx.Web) && FileUnder(packMarker, fx.Web)
+            && FileUnder(Path.Combine(webDir, "Helpers", "Helper.cs"), fx.Web)
+            && FileUnder(fx.Core, fx.Legacy) && FileUnder(fx.ToolsDup, fx.Tools), Join(g.Files));
+        Check("solution fixture: cross-project call Web.Caller.Go -> Legacy.Core.Run is a resolved calls edge",
+            c.Records.Contains("calls|Web.Caller.Go|Legacy.Core.Run"), all);
+        Check("solution fixture: shared Common.cs emitted once, under its owner Tools",
+            FileUnder(fx.Shared, fx.Tools) && g.Funcs.Count(f => f.Parent == "Sh.Common" && f.Name == "Ping") == 1, all);
+
+        // The twin type: per-project raw parents, prefix byte-equal to the module record, unrooted.
+        foreach (var (p, f) in new[] { (fx.Web, fx.WebDup), (fx.Tools, fx.ToolsDup) })
+        {
+            var parent = StructParent(g, f, "Dup") ?? "<missing>";
+            Check($"solution fixture: Twin.Dup's raw parent is `<project path>.Twin` ({p})",
+                parent == p + ".Twin" && g.Modules.Contains(p) && !parent.StartsWith("csharp.", StringComparison.Ordinal)
+                && HasFunc(g, f, "M", p + ".Twin.Dup"), all);
+        }
+
+        // References: assets-file package from the in-tree packageFolders stub, packages/ for Legacy, unrestored unknown.
+        Check("solution fixture: Stub.Assets resolves from the in-tree restored/ stub (external)",
+            Edge("unresolved_call", FuncId(fx.Caller, "Go"), "StubAssets.T.Hit") && Category("StubAssets.T.Hit") == "external"
+            && Category("StubAssets.T") == "external", all);
+        Check("solution fixture: Legacy's packages.config Stub.Legacy resolves (external)",
+            Edge("unresolved_call", FuncId(fx.Core, "Run"), "StubLegacy.T.Hit") && Category("StubLegacy.T.Hit") == "external", all);
+        Check("solution fixture: unrestored Stub.Missing is an as-written unknown target",
+            Edge("unresolved_call", FuncId(fx.Caller, "Go"), "StubMissing.T.Hit") && Category("StubMissing.T.Hit") == "unknown", all);
+        Check("solution fixture: multi-targeted Web compiled once (one Caller struct, one Go)",
+            g.Structs.Count(s => s.Path == fx.Caller && s.Name == "Caller") == 1 && g.Funcs.Count(f => f.File == fx.Caller && f.Name == "Go") == 1, all);
+
+        // Projectless .cs/.csx/Razor.
+        Check("solution fixture: projectless .cs and .csx graphed",
+            FileUnder(fx.LooseCs, "LooseNs") && StructParent(g, fx.LooseCs, "Free") == "LooseNs"
+            && FileRecs(fx.Csx).Count == 1 && HasFuncIn(g, fx.Csx, "Hello"), all);
+
+        // Razor membership, once each, #line-mapped declarations, imports applied.
+        Check("solution fixture: globbed Counter.razor is one File record under Web, Go at its .razor line",
+            FileUnder(fx.Counter, fx.Web) && g.Funcs.Count(f => f.File == fx.Counter && f.Name == "Go" && f.StartLine == 3) == 1, all);
+        Check("solution fixture: Counter.razor's Go binds WebLib.Helper.Ping through Web/_Imports.razor",
+            CallsTo(fx.Counter, "Go", "WebLib.Helper.Ping"), all);
+        Check("solution fixture: Content-Included Index.cshtml is one File record under Legacy, Go at its .cshtml line",
+            FileUnder(fx.View, fx.Legacy) && g.Funcs.Count(f => f.File == fx.View && f.Name == "Go" && f.StartLine == 3) == 1, all);
+        Check("solution fixture: Index.cshtml's Go binds Legacy.Core.Run through Views/_ViewImports.cshtml",
+            CallsTo(fx.View, "Go", "Legacy.Core.Run"), all);
+        Check("solution fixture: Content-Removed Dropped.razor is not under Web but projectless (Web.Pages)",
+            FileUnder(fx.Dropped, "Web.Pages") && HasFuncIn(g, fx.Dropped, "Gone"), Join(g.Files));
+        Check("solution fixture: projectless Part.razor under Loose, Page.cshtml at the csharp root",
+            FileUnder(fx.LooseRazor, "Loose") && HasFuncIn(g, fx.LooseRazor, "Go")
+            && FileUnder(fx.LooseView, "") && HasFuncIn(g, fx.LooseView, "Go"), Join(g.Files) + "\n" + all);
+
+        // Framework outcomes on distinct compilations (no category assertion on the shared type names).
+        var webMark = FuncId(packMarker, "Mark");
+        var looseMark = FuncId(fallback, "Mark");
+        Check("solution fixture (a): Web's Ping binds from the found pack (stdlib), its Console.Beep is unknown",
+            Edge("unresolved_call", webMark, "System.ApgPackMarker.Ping") && Category("System.ApgPackMarker.Ping") == "stdlib"
+            && Edge("unresolved_call", webMark, "System.Console.Beep") && Category("System.Console.Beep") == "unknown", all);
+        Check("solution fixture (b): projectless Console.WriteLine binds from the carried runtime (stdlib), its Pong is unknown",
+            Edge("unresolved_call", looseMark, "System.Console.WriteLine") && Category("System.Console.WriteLine") == "stdlib"
+            && Edge("unresolved_call", looseMark, "System.ApgPackMarker.Pong") && Category("System.ApgPackMarker.Pong") == "unknown", all);
+        Check("solution fixture: harness defaults restored",
+            Environment.GetEnvironmentVariable("NUGET_PACKAGES") == HarnessNugetPackages
+            && (string?)resolver.GetProperty("DotnetRootOverride", flags)!.GetValue(null) == HarnessDotnetRoot
+            && (string?)resolver.GetProperty("ReferenceAssembliesRootOverride", flags)!.GetValue(null) == HarnessRefAsmRoot, "");
     }
 
     // ------------------------------------------------------------------
