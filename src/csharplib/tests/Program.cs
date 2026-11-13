@@ -71,6 +71,7 @@ public static class TestMain
             TestRazorRootNamespace(baseDir);
             TestRazorComponentBinding(baseDir);
             TestRazorUnboundAspNetCore(baseDir);
+            TestRazorMvc5View(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -1064,6 +1065,46 @@ public static class TestMain
                     && g.Edges.Any(e => e.Type == edge && e.To == fqn && from.Contains(e.From)), all);
             }
         }
+    }
+
+    /// <summary>
+    /// MVC5 view: a .cshtml Content-Included by a .NET Framework-style csproj, with no System.Web metadata anywhere
+    /// (Isolated), compiles under the ASP.NET Core MVC configuration; the scan completes and its System.Web and
+    /// @Html references are unresolved targets named as written.
+    /// </summary>
+    private static void TestRazorMvc5View(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "razor-mvc5"));
+        var scan = Path.Combine(dir, "scan");
+        WriteSource(scan, "Mvc.csproj", """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup><TargetFrameworkVersion>v4.8</TargetFrameworkVersion><RootNamespace>Mvc</RootNamespace></PropertyGroup>
+              <ItemGroup><Reference Include="System.Web" /><Reference Include="System.Web.Mvc" /></ItemGroup>
+              <ItemGroup><Content Include="Views\Home\Index.cshtml" /></ItemGroup>
+            </Project>
+            """);
+        var view = WriteSource(Path.Combine(scan, "Views", "Home"), "Index.cshtml",
+            "@using System.Web.Mvc\n@functions {\n    System.Web.HttpContextBase Ctx;\n    void Go() { System.Web.Mvc.MvcHtmlString.Create(\"x\"); }\n}\n<h1>@Html.Raw(\"x\")</h1>\n<p>@Html.ActionLink(\"a\", \"b\")</p>\n");
+        var (g, all) = Isolated(dir, Path.Combine(dir, "nuget"), () => ScanUnique("razor mvc5 view", scan));
+        const string label = "razor mvc5 view";
+        Check(label + ": no exception reported", !all.Contains("Exception", StringComparison.Ordinal), all);
+        Check(label + ": exactly one File record for the view", g.Files.Count(f => f.Split('|')[0] == view) == 1, all);
+        Check(label + ": compiled as an ASP.NET Core MVC view (RazorPage<dynamic>, ExecuteAsync, Go)",
+            g.Structs.Any(s => s.Path == view && s.Name == "Views_Home_Index") && HasFuncIn(g, view, "ExecuteAsync") && HasFuncIn(g, view, "Go")
+            && g.Unres.Any(u => u.Fqn == "global::Microsoft.AspNetCore.Mvc.Razor.RazorPage<dynamic>"), all);
+        var from = new HashSet<string>(g.Structs.Where(s => s.Path == view).Select(s => s.Id)
+            .Concat(g.Funcs.Where(f => f.File == view).Select(f => f.Id)), StringComparer.Ordinal);
+        foreach (var (edge, fqn) in new[]
+        {
+            ("unresolved_use", "System.Web.HttpContextBase"),
+            ("unresolved_call", "System.Web.Mvc.MvcHtmlString.Create"),
+            ("unresolved_call", "Html.Raw"),
+            ("unresolved_call", "Html.ActionLink"),
+        })
+            Check($"{label}: {fqn} is an {edge} from the view to an unknown target named as written",
+                g.Unres.Count(u => u.Fqn == fqn) == 1 && g.Unres.Single(u => u.Fqn == fqn).Category == "unknown"
+                && g.Edges.Any(e => e.Type == edge && e.To == fqn && from.Contains(e.From)), all);
     }
 
     private static bool HasFuncIn(RawGraph g, string path, string name) => g.Funcs.Any(f => f.File == path && f.Name == name);
