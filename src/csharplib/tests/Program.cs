@@ -107,6 +107,7 @@ public static class TestMain
             TestProjectModules(baseDir);
             TestQualifiedIdentityScan(baseDir);
             TestNestedTypeModules(baseDir);
+            TestRazorPipelineIntegration(baseDir);
         }
         catch (Exception ex)
         {
@@ -1176,6 +1177,47 @@ public static class TestMain
                     m.Count == 1 && m[0].Path == file && m[0].StartLine == 1 && m[0].EndLine == last, all);
             }
         }
+    }
+
+    /// <summary>
+    /// Razor through the phase-6 pipeline: (a) a .razor component's generated type is one struct record (no
+    /// declaration-only duplicate); (b) two projects sharing RootNamespace and Views/Home/Index.cshtml get
+    /// collision-qualified `<project path>.MyApp` parents, no duplicate FQN; (c) a targeted .cs calling an @code
+    /// overload of an untargeted .razor lands on the full scan's FQN, (params) suffix included.
+    /// </summary>
+    private static void TestRazorPipelineIntegration(string baseDir)
+    {
+        var dir = Path.GetFullPath(Path.Combine(baseDir, "razor-pipeline"));
+        WriteSource(dir, "Web.csproj", SdkProject);
+        var comp = WriteSource(Path.Combine(dir, "Pages"), "Counter.razor",
+            "<p>c</p>\n@code {\n    public void Hit() { }\n    public void Hit(int x) { }\n}\n");
+        var caller = WriteSource(dir, "Caller.cs", "namespace C;\n\npublic class Caller\n{\n    public void Go() { new Web.Pages.Counter().Hit(1); }\n}\n");
+        var (g, all) = ScanUnique("razor pipeline", dir);
+        var full = Canonicalize(g);
+        Check("razor pipeline (a): the component's generated type is exactly one struct record",
+            g.Structs.Count(s => s.Name == "Counter") == 1 && StructParent(g, comp, "Counter") == "Web.Pages", all);
+        Check("razor pipeline (a): its @code overloads are emitted once each", g.Funcs.Count(f => f.Name == "Hit") == 2, all);
+        const string call = "calls|C.Caller.Go|Web.Pages.Counter.Hit(int)";
+        Check("razor pipeline (c, full): call lands on the @code overload's FQN", full.Records.Contains(call), all);
+        var r = RunScanner(dir, "--targets", WriteTargets(baseDir, "razor-pipeline.targets", caller));
+        Check("razor pipeline (c): targeted scan exits 0", r.Code == 0, "exit " + r.Code + "\n" + r.Err);
+        var tc = Canonicalize(ParseGraph(r.Out));
+        var tall = Join(tc.Records) + "\nSTDERR:\n" + r.Err;
+        Check("razor pipeline (c, targeted): untargeted .razor declarations not emitted",
+            !tc.Records.Any(s => IsDecl(s) && RecordPath(s) == comp), tall);
+        Check("razor pipeline (c, targeted): call lands on the full scan's FQN, suffix included", tc.Records.Contains(call), tall);
+
+        // (b) Same RootNamespace in two projects, so both views would render MyApp.Views_Home_Index unqualified.
+        dir = Path.GetFullPath(Path.Combine(baseDir, "razor-collide"));
+        var rooted = SdkProject.Replace("</TargetFramework>", "</TargetFramework><RootNamespace>MyApp</RootNamespace>");
+        var p1 = WriteSource(Path.Combine(dir, "P1"), "P1.csproj", rooted);
+        var p2 = WriteSource(Path.Combine(dir, "P2"), "P2.csproj", rooted);
+        var v1 = WriteSource(Path.Combine(dir, "P1", "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n");
+        var v2 = WriteSource(Path.Combine(dir, "P2", "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n");
+        (g, all) = ScanUnique("razor collision", dir);
+        Check("razor collision: each view's generated type is collision-qualified `<project path>.MyApp`",
+            StructParent(g, v1, "Views_Home_Index") == p1 + ".MyApp" && StructParent(g, v2, "Views_Home_Index") == p2 + ".MyApp"
+            && g.Structs.Count(s => s.Name == "Views_Home_Index") == 2, all);
     }
 
     private static bool HasFuncIn(RawGraph g, string path, string name) => g.Funcs.Any(f => f.File == path && f.Name == name);
