@@ -13,7 +13,11 @@ files — the system of record at rest).
   `src/tslib/scanner.mjs` — a Node script using the official `typescript`
   compiler API, npm-installed with a committed `package-lock.json`, C#:
   `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary
-  built on Roslyn `Microsoft.CodeAnalysis.CSharp`, Python: `src/pylib` — a
+  built on Roslyn `Microsoft.CodeAnalysis.CSharp` plus the Razor compiler: it is
+  project-aware and Razor-compiling, claiming `.cs`/`.csx`/`.cshtml`/`.razor`,
+  modelling each `.sln` and project as a module, resolving restored references
+  offline and qualifying cross-project duplicate types (`CollisionQualifier`),
+  Python: `src/pylib` — a
   standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, COBOL:
   `src/cobollib` — a standalone `cobolfrontend` binary with a hand-written
   COBOL parser, the bundled
@@ -21,7 +25,9 @@ files — the system of record at rest).
   that graphs every tracked text/config/packaging file the code frontends don't
   claim, serving the Markdown stream (absorbing the retired `src/mdlib`
   Markdown frontend) plus the per-format structural streams — shell, YAML, JSON,
-  TOML, XML, Dockerfile, Makefile, INI — and residual `misc`, and the agent
+  TOML, XML (also claiming the MSBuild/.NET `.csproj`/`.vbproj`/`.vcxproj`/
+  `.sqlproj`/`.props`/`.targets`/`.config`/`.resx` files), Dockerfile, Makefile,
+  INI, the `.sln` solution-file stream `sln` — and residual `misc`, and the agent
   frontend: `src/agentlib` — a standalone `agentfrontend` binary that graphs the
   `.opencode/agents/` definition files (the distributed agents are `*.md`) as one
   `Agent` node per file, keyed by the extension-stripped file stem) parses a
@@ -68,7 +74,23 @@ files — the system of record at rest).
   rust-analyzer tag `2026-08-17` (0.0.348); TypeScript builds with `node` +
   `npm ci`, needs `node`, and is bounded by `typescript 5.9.3`; C# builds with a
   .NET SDK (`net9.0`) + NuGet, is self-contained at scan time, and is bounded by
-  Roslyn `4.12.0`; Python builds with stable Rust + network (git-pinned Ruff/ty
+  Roslyn `4.12.0` beside Razor `6.0.36` (`Microsoft.AspNetCore.Mvc.Razor.Extensions`,
+  `Microsoft.AspNetCore.Razor.Language`, `Microsoft.CodeAnalysis.Razor`) — the
+  Razor 6.0 language ceiling, with MVC5 `.cshtml` views compiled under the
+  ASP.NET Core MVC configuration; it needs no tool at scan time and never runs
+  MSBuild, `dotnet` or NuGet, reading restored references offline in order —
+  `obj/project.assets.json`, then `HintPath` / the solution `packages/` folder,
+  then the NuGet global packages folder — and framework packs from the dotnet
+  root with the embedded net9 reference assemblies as fallback. Two variables
+  override the framework roots: `APG_CSHARP_DOTNET_ROOT` (the dotnet root for
+  framework packs) and `APG_CSHARP_REFASM_ROOT` (the .NET Framework Reference
+  Assemblies root). Set non-empty, only the named root is read for that root
+  lookup — no fallback to `DOTNET_ROOT`, `~/.dotnet`, the platform dotnet dirs
+  or the Reference Assemblies dirs (a .NET Framework version missing under the
+  named Reference Assemblies root still falls back to the
+  `microsoft.netframework.referenceassemblies` package in the NuGet global
+  packages folder, then the embedded reference assemblies); unset or empty keeps
+  the default lookup (precedence: env var > default lookup); Python builds with stable Rust + network (git-pinned Ruff/ty
   crates) and needs no runtime at scan time, bounded by Ruff/ty tag `0.16.6`
   (`salsa 0.27`); COBOL (`src/cobollib`) builds with stable Rust + crates.io
   (`serde`/`serde_json`), needs nothing at scan time (a self-contained binary
@@ -173,8 +195,8 @@ The project builds a single `apg` binary (package `apg`):
   (skip cargo build scripts and the proc-macro server); the Rust frontend
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
-  is always skipped; COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources
-  in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
+  is always skipped; C# claims `.cs`, `.csx`, `.cshtml` and `.razor` sources;
+  COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
   `cobol2002`, `cobol2014` or `ibm` (overrides `cobol.dialect` in
   `apg/config.json`; `cobol2023` is refused); `--copy-path <dir>` is a COBOL
   copybook search directory (repeatable). `--force` is a true rebuild: it discards `db.lbug` (with
@@ -694,19 +716,20 @@ Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
 declared id verbatim: the code frontends' `go`/`java`/`cpp`/`rust`/`ts`/`js`/
 `csharp`/`py`/`cobol`, the agent frontend's `agent`, and the bundled structural
 scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
-`misc` — the twenty ids `layers::LANGUAGE_ROOTS` names (see
+`sln`/`misc` — the twenty-one ids `layers::LANGUAGE_ROOTS` names (see
 `src/layers/code_refs.rs`, mirrored by `src/ingest/` and
 `src/incremental/language.rs`).
 
 | kind | FQN |
 |---|---|
-| language root | `<language-id>` — the bare `lang_switch` id (e.g. `rust`); `Language —Contains→ Module` |
+| language root | `<language-id>` — the bare `lang_switch` id (e.g. `rust`); `Language —Contains→ Module`, plus `Language —Contains→ File` for a namespace-less C# file |
 | module | `<language-id>.<module-identity>` — the frontend emits the identity verbatim, the ingestor roots it (`rust.apg`, `py.pkg.sub`, `ts.@co/ui`, `md.<repo-relative-dir>`; a path identity is rendered repo-relative to the git toplevel / scan root) |
 | struct | `parent.name` — `parent` is the rooted module/scope FQN |
 | function (unique in scope) | `parent.name` |
 | function (overloaded) | `parent.name(T1,T2,...)` — erased, comma-separated params |
 | Go `init` | `parent.init#<file-basename>` |
 | TypeScript | `<language-id>.<pkg.relpath.name>` — the rooted npm package + dot-path prefix per ES-module file (`ts.@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
+| C# | solution module `csharp.<repo-relative .sln path>`; project module `csharp.<repo-relative project path>` (path kept whole, contained by every listing solution; an unlisted project sits at the `csharp` root); declarations keep namespace-based FQNs, a cross-project duplicate only taking the collision-qualified `csharp.<project path>.<Namespace>.<Type>`; a global-namespace type is `csharp.<Type>` (members `csharp.<Type>.<member>`), and one declared in more than one compilation is qualified directly under its project module as `csharp.<repo-relative project path>.<Type>`, no namespace segment (projectless members keep `csharp.<Type>`); a file several projects compile is emitted once under one owning project; a namespace-less C# file (declaring no namespace, owned by no project module) is contained directly by the `csharp` Language root; the first listed target framework is compiled |
 | agent | `agent.<file-stem>` — one per `.opencode/agents/` definition file, at its repo-relative path and line span |
 
 A `File` FQN is its repo-relative path (relative to the git toplevel, or the
@@ -793,7 +816,7 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   - `Agent` — properties: `fqn`, `path`, `start_line`, `end_line`, `code_type` — one per definition file under `.opencode/agents/`, with the FQN `agent.<file-stem>` (the extension-stripped file name, e.g. `agent.go-frontend-implementer`) located at that definition file's path and line span; this identity is what a task's `assigned-to` edge names
   - `UnresolvedTarget` — properties: `fqn`, `category` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
 - 5 code edge types:
-  - `Contains` — Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
+  - `Contains` — Language→Module, Language→File (namespace-less C# files only), Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
   - `Uses` — Function→Struct, Struct→Struct, Struct→File. Rust `impl X for Y` is a `Uses`
     edge `Y → X` (the type implements the trait); a foreign trait lands as an
@@ -1022,8 +1045,10 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
 - **The scanner never guesses**: if a call/type can't be resolved to a project symbol, it becomes an `UnresolvedTarget` edge, never a fabricated FQN.
 - **All code is included** — tests, generated, and vendored code are scanned like everything else (the only exclusions are user `--exclude-path` patterns, `node_modules`, and files the compiler/frontend can't process). Filter by `code_type` instead.
 - **Multi-module repos**: Go workspaces (`go.work`), C++ monorepos, Cargo
-  workspaces, and npm workspaces are supported. Each module is a top-level
-  `Module` node; FQNs are module-prefixed so they stay unique across modules.
+  workspaces, npm workspaces, and C# solutions/projects are supported. Each
+  module is a top-level `Module` node, except that a C# project module nests
+  under each solution module listing it; FQNs are module-prefixed so they stay unique
+  across modules.
   Pass `modules: "dir1,dir2"` to `apg_scan` to restrict scanning to specific
   modules (Go/C++/Rust/TS/C#).
 - **Multi-language repos** (a Go backend + TS frontend, say): `apg scan`
@@ -1045,7 +1070,9 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
 - **In the graph:** the tracked source every code frontend claims, and now also
   the tracked text/config/packaging files the bundled structural scanner claims
   (`Cargo.toml`, `install.sh`, `.github/workflows/release.yml`, Markdown,
-  shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI and residual `misc`) plus the
+  shell/YAML/JSON/TOML/XML — MSBuild `.csproj`/`.vbproj`/`.vcxproj`/`.sqlproj`/
+  `.props`/`.targets`/`.config`/`.resx` included — Dockerfile/Makefile/INI, the
+  `sln` solution-file stream and residual `misc`) plus the
   `.opencode/agents/` definition files the agent frontend claims as `Agent`
   nodes (the structural scanner leaves that tree to it).
   **Not in the graph (no symbols, not no node):** Ruby sources (no frontend yet
