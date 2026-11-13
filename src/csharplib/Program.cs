@@ -13,9 +13,10 @@ public static class Program
 {
     public static int Main(string[] args)
     {
+        const string usage = "Usage: csharpfrontend <project_dir> [--module <dir>]... [--id-prefix <p>] [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude_globs...]";
         if (args.Length == 0 || args[0] == "-h" || args[0] == "--help")
         {
-            Console.Error.WriteLine("Usage: csharpfrontend <project_dir> [--module <dir>]... [--id-prefix <p>] [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude_globs...]");
+            Console.Error.WriteLine(usage);
             return 1;
         }
 
@@ -75,6 +76,13 @@ public static class Program
                 {
                     cacheKey = args[i];
                 }
+            }
+            else if (args[i].StartsWith("--", StringComparison.Ordinal))
+            {
+                // A misspelled flag must fail loudly, never become an exclude pattern.
+                Console.Error.WriteLine(usage);
+                Console.Error.WriteLine($"unknown option {args[i]}");
+                return 1;
             }
             else
             {
