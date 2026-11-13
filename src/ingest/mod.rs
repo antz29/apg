@@ -318,7 +318,14 @@ pub fn ingest_delta(
 /// placeholder — the plan store's placeholder never masks the real declaration
 /// the cache still holds, exactly as a scanned declaration supersedes one in
 /// [`insert_node`]; a cached Struct/Function shadows a fresh Module at its FQN
-/// (Pass B2's "type beats module"). Cached edges are added only when both
+/// (Pass B2's "type beats module"); and a Struct beats a Function at the same
+/// FQN whichever side is cached (Pass B's "struct beats function"): a cached
+/// Struct replaces a present Function and drops that Function's own edges
+/// (sourced at it, plus the contains into it), a cached Function never
+/// displaces a Struct, and pass 3 skips the edges a unit sources at (or
+/// contains into) an FQN it declared as a Function that a Struct now holds —
+/// incoming uses stay on the Struct, incoming calls fall to
+/// [`finalize_graph`]'s Function-target check. Cached edges are added only when both
 /// endpoints exist after the merge (the same dangling-edge rule the ingestor
 /// applies), and a cached edge already present is a no-op.
 ///
@@ -378,6 +385,20 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
                         && matches!(kind, NodeKind::Struct | NodeKind::Function) =>
                 {
                     graph.contains.retain(|(a, b)| *a != fqn && *b != fqn);
+                    graph.nodes.insert(fqn, node);
+                }
+                // Struct beats function, exactly as Pass B on a full scan: the
+                // shadowed Function loses its own edges (sourced at it, and the
+                // contains into it); incoming uses stay with the Struct, and
+                // incoming calls fall to finalize_graph's Function-target check.
+                Some(existing)
+                    if existing.kind == NodeKind::Function && kind == NodeKind::Struct =>
+                {
+                    graph.contains.retain(|(a, b)| *a != fqn && *b != fqn);
+                    graph.calls.retain(|(a, _)| *a != fqn);
+                    graph.uses.retain(|(a, _)| *a != fqn);
+                    graph.unresolved_calls.retain(|(a, _, _)| *a != fqn);
+                    graph.unresolved_uses.retain(|(a, _)| *a != fqn);
                     graph.nodes.insert(fqn, node);
                 }
                 Some(_) => {
@@ -475,8 +496,24 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
 
     // Pass 3: every unit's edges, now that ALL endpoints exist.
     for (frag, stored_root, _) in &loaded {
-        let (_, _, edges) = frag.project(stored_root, &reuse.reader_root);
+        let (_, nodes, edges) = frag.project(stored_root, &reuse.reader_root);
+        // FQNs this unit declared as a Function that a Struct holds: the
+        // shadowed function's own edges never land (struct beats function).
+        let shadowed: HashSet<String> = nodes
+            .into_iter()
+            .filter(|(fqn, n)| {
+                n.kind == NodeKind::Function
+                    && graph
+                        .nodes
+                        .get(fqn)
+                        .is_some_and(|g| g.kind == NodeKind::Struct)
+            })
+            .map(|(fqn, _)| fqn)
+            .collect();
         for e in edges {
+            if shadowed.contains(&e.from) || (e.kind == "contains" && shadowed.contains(&e.to)) {
+                continue;
+            }
             // A cached Language→File edge (a namespace-less unit) carries its
             // language root, which no Module record reintroduces; create the
             // root exactly as pass 2b does before applying the edge.
