@@ -1293,7 +1293,7 @@ public static class TestMain
         // Framework-style projects carry no TargetFramework, so the netstandard folder is the compatible one.
         PutStub(Path.Combine(root, "packages", "Stub.Legacy.1.0.0", "lib", "netstandard2.0", "Stub.Legacy.dll"), StubAssembly("Stub.Legacy", "StubLegacy"));
         var core = WriteSource(legacyDir, "Core.cs",
-            "namespace Legacy\n{\n    public static class Core\n    {\n        public static void Run() { StubLegacy.T.Hit(); }\n    }\n}\n");
+            "namespace Legacy\n{\n    public static class Core\n    {\n        public static void Run() { StubLegacy.T.Hit(); System.Console.Clear(); }\n    }\n}\n");
         WriteSource(Path.Combine(legacyDir, "Views"), "_ViewImports.cshtml", "@using Legacy\n");
         var view = WriteSource(Path.Combine(legacyDir, "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n@functions {\n    void Go() { Core.Run(); }\n}\n");
 
@@ -1398,6 +1398,9 @@ public static class TestMain
             && Category("StubAssets.T") == "external", all);
         Check("solution fixture: Legacy's packages.config Stub.Legacy resolves (external)",
             Edge("unresolved_call", FuncId(fx.Core, "Run"), "StubLegacy.T.Hit") && Category("StubLegacy.T.Hit") == "external", all);
+        // Legacy has no target framework and the Reference Assemblies root is empty, so only the carried runtime can bind Console.Clear.
+        Check("solution fixture: packages.config Legacy with an empty Reference Assemblies root binds Console.Clear from the carried runtime (stdlib)",
+            Edge("unresolved_call", FuncId(fx.Core, "Run"), "System.Console.Clear") && Category("System.Console.Clear") == "stdlib", all);
         Check("solution fixture: unrestored Stub.Missing is an as-written unknown target",
             Edge("unresolved_call", FuncId(fx.Caller, "Go"), "StubMissing.T.Hit") && Category("StubMissing.T.Hit") == "unknown", all);
         Check("solution fixture: multi-targeted Web compiled once (one Caller struct, one Go)",
