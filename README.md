@@ -83,9 +83,14 @@ restored locally becomes an unresolved target named as written in source, with
 category `unknown`. Two variables override the framework roots:
 `APG_CSHARP_DOTNET_ROOT` (the dotnet root for framework packs) and
 `APG_CSHARP_REFASM_ROOT` (the .NET Framework Reference Assemblies root). Set
-non-empty, only the named root is read for that lookup — no fallback to
+non-empty, the variable replaces only that root lookup — no fallback to
 `DOTNET_ROOT`, `~/.dotnet`, the platform dotnet dirs or the Reference
-Assemblies dirs; unset or empty keeps the default lookup. The Python
+Assemblies dirs — while the later fallbacks remain: a .NET Framework version
+missing under the named root falls back to the
+`microsoft.netframework.referenceassemblies` package in the NuGet global
+packages folder, then the embedded net9 reference assemblies, and a named
+dotnet root lacking a matching `Microsoft.NETCore.App` pack falls back to the
+embedded set; unset or empty keeps the default lookup. The Python
 (`apg-py`) frontend resolves from filesystem markers and never shells out, and
 the COBOL frontend (`apg-cobol`) is a self-contained binary that never shells
 out. The
@@ -108,7 +113,7 @@ ceiling.
 | C++ (`apg-cpp`) | `gcc` (`-std=c11`) + `g++` (`-std=c++17`); vendored tree-sitter | none (native) | vendored tree-sitter language ABI v15 + vendored tree-sitter-cpp grammar content |
 | Rust (`apg-rust`) | stable Rust + network (git-pinned rust-analyzer crates) | `cargo` + `rustc` | rust-analyzer tag `2026-08-17` (0.0.348) |
 | TypeScript (`apg-ts`) | `node` + `npm ci` | `node` on `PATH`, spawned `node <dir>/scanner.mjs` | `typescript 5.9.3` |
-| C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file; reads restored references offline — `obj/project.assets.json`, then `HintPath` / the solution `packages/` folder, then the NuGet global packages folder; framework packs from the dotnet root, else the embedded net9 reference assemblies; `APG_CSHARP_DOTNET_ROOT` / `APG_CSHARP_REFASM_ROOT`, when non-empty, are the only dotnet / Reference Assemblies root read; a reference not restored locally becomes an unresolved target named as written, category `unknown`) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` + Razor `6.0.36` (`Microsoft.AspNetCore.Mvc.Razor.Extensions`, `Microsoft.AspNetCore.Razor.Language`, `Microsoft.CodeAnalysis.Razor`); ceiling = Razor 6.0 (MVC5 `.cshtml` views compile under the ASP.NET Core MVC configuration) |
+| C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file; reads restored references offline — `obj/project.assets.json`, then `HintPath` / the solution `packages/` folder, then the NuGet global packages folder; framework packs from the dotnet root, else the embedded net9 reference assemblies; `APG_CSHARP_DOTNET_ROOT` / `APG_CSHARP_REFASM_ROOT`, when non-empty, replace only the dotnet / Reference Assemblies root lookup (no `DOTNET_ROOT`, `~/.dotnet`, platform dotnet dirs or Reference Assemblies dirs) — a .NET Framework version missing there still falls back to the NuGet `microsoft.netframework.referenceassemblies` package, then the embedded net9 assemblies, and a missing `Microsoft.NETCore.App` pack to the embedded set; a reference not restored locally becomes an unresolved target named as written, category `unknown`) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` + Razor `6.0.36` (`Microsoft.AspNetCore.Mvc.Razor.Extensions`, `Microsoft.AspNetCore.Razor.Language`, `Microsoft.CodeAnalysis.Razor`); ceiling = Razor 6.0 (MVC5 `.cshtml` views compile under the ASP.NET Core MVC configuration) |
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
 | COBOL (`apg-cobol`) | stable Rust `1.98.1` + crates.io (`serde`, `serde_json`) | none (self-contained binary, never shells out) | no engine pin (hand-written parser); ceiling = the dialect table: `cobol85` (default), `cobol2002`, `cobol2014`, `ibm` (`cobol2023` is refused) |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
