@@ -70,6 +70,7 @@ public static class TestMain
             TestRazorImports(baseDir);
             TestRazorRootNamespace(baseDir);
             TestRazorComponentBinding(baseDir);
+            TestRazorUnboundAspNetCore(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -1009,6 +1010,63 @@ public static class TestMain
         Check("razor components: a child tag declared in a referenced project binds to its generated type",
             Bound(shared, "Shared") && !Unbound("Lib.Shared"), all);
     }
+
+    /// <summary>
+    /// ASP.NET Core types unbindable against the carried runtime: a projectless .cshtml/.razor pair, then the same
+    /// pair in a Microsoft.NET.Sdk.Razor project with no AspNetCore.App FrameworkReference. Each scan completes with
+    /// every File record and declaration emitted, and RazorPage&lt;TModel&gt;, the Razor attributes, @Html, ComponentBase
+    /// and RenderTreeBuilder are unresolved targets named as written, category unknown. Runs under Isolated.
+    /// </summary>
+    private static void TestRazorUnboundAspNetCore(string baseDir)
+    {
+        var root = Path.GetFullPath(Path.Combine(baseDir, "razor-unbound"));
+        const string razorSdk = "<Project Sdk=\"Microsoft.NET.Sdk.Razor\">\n  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n</Project>\n";
+        const string hosting = "global::Microsoft.AspNetCore.Razor.Hosting.";
+        foreach (var (name, csproj) in new (string, string?)[] { ("projectless", null), ("razor-sdk", razorSdk) })
+        {
+            var dir = Path.Combine(root, name);
+            var scan = Path.Combine(dir, "scan");
+            if (csproj != null) WriteSource(scan, "Web.csproj", csproj);
+            var view = WriteSource(Path.Combine(scan, "Views", "Home"), "Index.cshtml", "@functions {\n    void Go() { }\n}\n<h1>@Html.Raw(\"x\")</h1>\n");
+            var comp = WriteSource(Path.Combine(scan, "Pages"), "Counter.razor", "<p>c</p>\n@code {\n    void Go() { }\n}\n");
+            var (g, all) = Isolated(dir, Path.Combine(dir, "nuget"), () => ScanUnique($"razor unbound ({name})", scan));
+            var label = $"razor unbound ({name})";
+            Check(label + ": no exception reported", !all.Contains("Exception", StringComparison.Ordinal), all);
+
+            var files = g.Files.Select(f => f.Split('|')).ToList();
+            foreach (var f in new[] { view, comp })
+                Check($"{label}: exactly one File record for {Path.GetFileName(f)}", files.Count(x => x[0] == f) == 1, all);
+            Check(label + ": declarations emitted, none dropped",
+                g.Structs.Any(s => s.Path == view && s.Name == "Views_Home_Index") && HasFuncIn(g, view, "ExecuteAsync") && HasFuncIn(g, view, "Go")
+                && g.Structs.Any(s => s.Path == comp && s.Name == "Counter") && HasFuncIn(g, comp, "BuildRenderTree") && HasFuncIn(g, comp, "Go"), all);
+            if (csproj == null)
+            {
+                Check(label + ": .razor File parent is its first namespace's module identity (Pages)",
+                    files.Any(x => x[0] == comp && x[1] == "Pages") && g.Modules.Contains("Pages"), all);
+                Check(label + ": namespace-less .cshtml File record has an empty parent", files.Any(x => x[0] == view && x[1] == ""), all);
+            }
+
+            var wanted = new List<(string File, string Edge, string Fqn)>
+            {
+                (view, "unresolved_use", "global::Microsoft.AspNetCore.Mvc.Razor.RazorPage<dynamic>"),
+                (view, "unresolved_use", hosting + "RazorCompiledItemMetadataAttribute"),
+                (view, "unresolved_call", "Html.Raw"),
+                (comp, "unresolved_use", "Microsoft.AspNetCore.Components.ComponentBase"),
+                (comp, "unresolved_use", "Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder"),
+            };
+            if (csproj != null) wanted.Add((view, "unresolved_use", hosting + "RazorSourceChecksumAttribute"));
+            foreach (var (file, edge, fqn) in wanted)
+            {
+                var from = new HashSet<string>(g.Structs.Where(s => s.Path == file).Select(s => s.Id)
+                    .Concat(g.Funcs.Where(f => f.File == file).Select(f => f.Id)), StringComparer.Ordinal);
+                Check($"{label}: {fqn} is an {edge} from {Path.GetFileName(file)} to an unknown target named as written",
+                    g.Unres.Count(u => u.Fqn == fqn) == 1 && g.Unres.Single(u => u.Fqn == fqn).Category == "unknown"
+                    && g.Edges.Any(e => e.Type == edge && e.To == fqn && from.Contains(e.From)), all);
+            }
+        }
+    }
+
+    private static bool HasFuncIn(RawGraph g, string path, string name) => g.Funcs.Any(f => f.File == path && f.Name == name);
 
     // ------------------------------------------------------------------
     // SolutionReader: static .sln reading (internal, reached by reflection)
