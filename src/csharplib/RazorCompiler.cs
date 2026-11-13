@@ -215,30 +215,4 @@ internal static class RazorCompiler
     /// <summary>A line-leading <c>@namespace</c> directive and its namespace.</summary>
     private static readonly System.Text.RegularExpressions.Regex NamespaceDirectivePattern =
         new(@"^[ \t]*@namespace[ \t]+([^\s;]+)", System.Text.RegularExpressions.RegexOptions.Multiline);
-
-    /// <summary>
-    /// An empty project file system, so the engine never reads the disk;
-    /// sources are handed to it directly.
-    /// </summary>
-    private sealed class InMemoryFileSystem : RazorProjectFileSystem
-    {
-        public override IEnumerable<RazorProjectItem> EnumerateItems(string basePath) => Array.Empty<RazorProjectItem>();
-        public override RazorProjectItem GetItem(string path) => new NotFoundItem(path, null);
-        public override RazorProjectItem GetItem(string path, string? fileKind) => new NotFoundItem(path, fileKind);
-    }
-
-    /// <summary>
-    /// A missing project item — stands in for Razor 6.0's internal
-    /// NotFoundProjectItem, which is not reachable from outside the assembly.
-    /// </summary>
-    private sealed class NotFoundItem(string path, string? fileKind) : RazorProjectItem
-    {
-        public override string BasePath => string.Empty;
-        public override string FilePath => path;
-        public override string? PhysicalPath => null;
-        public override string? RelativePhysicalPath => null;
-        public override string FileKind => fileKind ?? FileKinds.GetFileKindFromFilePath(path);
-        public override bool Exists => false;
-        public override Stream Read() => throw new InvalidOperationException($"Razor project item not found: {path}");
-    }
 }
