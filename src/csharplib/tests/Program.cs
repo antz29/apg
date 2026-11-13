@@ -67,6 +67,7 @@ public static class TestMain
             TestProjectSdkElementNoDefaultItems(baseDir);
             TestProjectFrameworkStyle(baseDir);
             TestProjectRazorMembership(baseDir);
+            TestRazorImports(baseDir);
             TestSolutionReader(baseDir);
             TestPerProjectScan(baseDir);
             TestZeroProjectTree(baseDir);
@@ -810,6 +811,54 @@ public static class TestMain
         var owners = (System.Collections.IDictionary)FrontendType("SourceOwnership").GetMethod("AssignOwners")!.Invoke(null, new object[] { arr })!;
         var owner = owners.Contains(index) ? Prop<string>(owners[index]!, "Path") : "<none>";
         Check("Razor file claimed by two projects: owned by the containing project", owner == Prop<string>(sdk, "Path"), owner);
+    }
+
+    /// <summary>
+    /// Razor imports over full scans: a .cshtml binds Lib.Widget through an ancestor _ViewImports.cshtml and a
+    /// .razor through an ancestor _Imports.razor; imports above the owning project's directory are not applied;
+    /// a projectless Razor file applies imports up to the scan root.
+    /// </summary>
+    private static void TestRazorImports(string baseDir)
+    {
+        const string widget = "namespace Lib;\n\npublic static class Widget\n{\n    public static void Hit() { }\n}\n";
+        const string gadget = "namespace Other;\n\npublic static class Gadget\n{\n    public static void Ping() { }\n}\n";
+        const string body = "\n    void Go() { Widget.Hit(); }\n    void Far() { Gadget.Ping(); }\n}\n";
+        // `caller` in `file` has a calls edge to `callee` (a bound project symbol).
+        bool Binds(RawGraph g, string file, string caller, string callee) => g.Edges.Any(e => e.Type == "calls"
+            && g.Funcs.Any(f => f.Id == e.From && f.File == file && f.Name == caller)
+            && g.Funcs.Any(f => f.Id == e.To && f.Name == callee));
+        bool Unbound(RawGraph g, string file, string caller) => g.Edges.Any(e => e.Type == "unresolved_call"
+            && g.Funcs.Any(f => f.Id == e.From && f.File == file && f.Name == caller));
+
+        // Project: imports inside Web/ apply; root-level imports (above Web/) naming Other do not.
+        var root = Path.GetFullPath(Path.Combine(baseDir, "razor-imports"));
+        var web = Path.Combine(root, "Web");
+        WriteSource(web, "Web.csproj", SdkProject);
+        WriteSource(Path.Combine(web, "Lib"), "Widget.cs", widget);
+        WriteSource(Path.Combine(web, "Other"), "Gadget.cs", gadget);
+        WriteSource(Path.Combine(web, "Views"), "_ViewImports.cshtml", "@using Lib\n");
+        WriteSource(web, "_Imports.razor", "@using Lib\n");
+        WriteSource(root, "_ViewImports.cshtml", "@using Other\n");
+        WriteSource(root, "_Imports.razor", "@using Other\n");
+        var view = WriteSource(Path.Combine(web, "Views", "Home"), "Index.cshtml", "<h1>i</h1>\n@functions {" + body);
+        var comp = WriteSource(Path.Combine(web, "Components"), "Counter.razor", "<p>c</p>\n@code {" + body);
+        var (g, all) = ScanUnique("razor imports (project)", root);
+        Check("razor imports: .cshtml binds Widget through an ancestor _ViewImports.cshtml", Binds(g, view, "Go", "Hit"), all);
+        Check("razor imports: .razor binds Widget through an ancestor _Imports.razor", Binds(g, comp, "Go", "Hit"), all);
+        foreach (var f in new[] { view, comp })
+            Check($"razor imports: import above the project directory not applied ({Path.GetFileName(f)})",
+                !Binds(g, f, "Far", "Ping") && Unbound(g, f, "Far"), all);
+
+        // Projectless: imports at the scan root apply to Razor files below it.
+        var loose = Path.GetFullPath(Path.Combine(baseDir, "razor-imports-loose"));
+        WriteSource(Path.Combine(loose, "Lib"), "Widget.cs", widget);
+        WriteSource(loose, "_ViewImports.cshtml", "@using Lib\n");
+        WriteSource(loose, "_Imports.razor", "@using Lib\n");
+        var lview = WriteSource(Path.Combine(loose, "Sub", "Deep"), "Page.cshtml", "<h1>p</h1>\n@functions {\n    void Go() { Widget.Hit(); }\n}\n");
+        var lcomp = WriteSource(Path.Combine(loose, "Sub", "Deep"), "Part.razor", "<p>p</p>\n@code {\n    void Go() { Widget.Hit(); }\n}\n");
+        (g, all) = ScanUnique("razor imports (projectless)", loose);
+        Check("razor imports: projectless .cshtml applies the scan-root _ViewImports.cshtml", Binds(g, lview, "Go", "Hit"), all);
+        Check("razor imports: projectless .razor applies the scan-root _Imports.razor", Binds(g, lcomp, "Go", "Hit"), all);
     }
 
     // ------------------------------------------------------------------
