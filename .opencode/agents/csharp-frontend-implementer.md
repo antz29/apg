@@ -70,8 +70,14 @@ permissions:
   - { action: shell, resource: "git show *", effect: allow }
   - { action: shell, resource: "git add *", effect: allow }
   - { action: shell, resource: "git commit *", effect: allow }
-  - { action: shell, resource: "dotnet", effect: allow }
-  - { action: shell, resource: "dotnet *", effect: allow }
+  - { action: shell, resource: "dotnet build", effect: allow }
+  - { action: shell, resource: "dotnet build *", effect: allow }
+  - { action: shell, resource: "dotnet run", effect: allow }
+  - { action: shell, resource: "dotnet run *", effect: allow }
+  - { action: shell, resource: "dotnet restore", effect: allow }
+  - { action: shell, resource: "dotnet restore *", effect: allow }
+  - { action: shell, resource: "dotnet publish", effect: allow }
+  - { action: shell, resource: "dotnet publish *", effect: allow }
   - { action: apg_rm, resource: "*", effect: deny }
   - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/**", effect: allow }
   - { action: apg_rm, resource: "apg/.worktrees/*/src/csharplib/bin/**", effect: deny }
@@ -227,7 +233,10 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   `CsharpFrontend.csproj`. It emits **facts only** — never FQNs, never graph
   assembly. `bin/`/`obj/` are build outputs, never hand-edited.
 - **Tests** live in `src/csharplib/tests/` (`CsharpFrontend.Tests.csproj` plus
-  its `Program.cs`); you own them, and `dotnet test` is part of your gate.
+  its `Program.cs`) — a framework-free console harness; you own them, and
+  `dotnet run --project tests/CsharpFrontend.Tests.csproj` (from inside
+  `src/csharplib`) is part of your gate. It is never run with `dotnet test`
+  (not granted).
 - **Not yours**: `build.rs`, root `Cargo.{toml,lock}`, `src/frontends.rs`,
   `src/classify*`, `src/cleanup.rs`, `src/ingest/**`, `src/load/**` (core
   implementer); every other frontend; the generated/dependency trees;
@@ -253,20 +262,21 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   `git grep`, `find`).
 - **Git**: `git status`/`diff`/`log`/`show`; write `git add` + `git commit`
   only. No push/tag (only the `release-agent` holds them, as `ask`).
-- **Gates**: `dotnet build`, `dotnet test`, `dotnet run`, `dotnet restore`
+- **Gates**: `dotnet build`, `dotnet run`, `dotnet restore`, `dotnet publish`
   (argument variants allowed), run from inside your crate (`cd src/csharplib`).
+  No other `dotnet` verb (`test`, `add`, …) is granted.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Build-gate contract (coverage, bootstrap, exact names)
 
-- **Documented invocations are runnable grants.** `dotnet build`/`test`/
-  `run`/`restore` (argument variants) are granted, run from inside
+- **Documented invocations are runnable grants.** `dotnet build`/`run`/
+  `restore`/`publish` (argument variants) are granted, run from inside
   `src/csharplib` (`cd src/csharplib` first).
 - **No env-prefixed command is granted** — `DOTNET_…=… dotnet build` matches
   no allow rule; pass the switches to dotnet itself.
 - **Cover every file type the steps touch.** Your edits are `Program.cs`, the
   two `.csproj` manifests, and the tests project; `dotnet build` and
-  `dotnet test` reach every one.
+  `dotnet run --project tests/CsharpFrontend.Tests.csproj` reach every one.
 - **An untracked dependency directory is bootstrapped, not assumed.** NuGet
   packages are restored by the granted `dotnet build`/`dotnet restore` into
   the user package cache — no committed store to bootstrap; `bin/` and
@@ -274,8 +284,8 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 
 ## Done gate
 
-- `dotnet build` (clean) and `dotnet test` against `tests/`, as separate calls;
-  all green. **There is no such thing as a pre-existing failure.**
+- From inside `src/csharplib`, as separate calls: `dotnet build` (clean) and
+  `dotnet run --project tests/CsharpFrontend.Tests.csproj`; all green. **There is no such thing as a pre-existing failure.**
 - The aggregate `scripts/gate.sh` is the core implementer's; keep your crate
   green and it stays green.
 
