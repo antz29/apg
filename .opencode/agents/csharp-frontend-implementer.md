@@ -234,8 +234,8 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   assembly. `bin/`/`obj/` are build outputs, never hand-edited.
 - **Tests** live in `src/csharplib/tests/` (`CsharpFrontend.Tests.csproj` plus
   its `Program.cs`) — a framework-free console harness; you own them, and
-  `dotnet run --project tests/CsharpFrontend.Tests.csproj` (from inside
-  `src/csharplib`) is part of your gate. It is never run with `dotnet test`
+  `dotnet run --project src/csharplib/tests/CsharpFrontend.Tests.csproj` (from
+  the worktree root) is part of your gate. It is never run with `dotnet test`
   (not granted).
 - **Not yours**: `build.rs`, root `Cargo.{toml,lock}`, `src/frontends.rs`,
   `src/classify*`, `src/cleanup.rs`, `src/ingest/**`, `src/load/**` (core
@@ -262,21 +262,30 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
   `git grep`, `find`).
 - **Git**: `git status`/`diff`/`log`/`show`; write `git add` + `git commit`
   only. No push/tag (only the `release-agent` holds them, as `ask`).
+- **Working directory**: each shell call runs on its own — a `cd` never carries
+  over to the next call. Run every command from the **worktree root** (the shell
+  tool's working directory set to the worktree) and name the project by an
+  explicit path: `dotnet build src/csharplib/CsharpFrontend.csproj`,
+  `dotnet run --project src/csharplib/tests/CsharpFrontend.Tests.csproj`,
+  `dotnet restore src/csharplib/CsharpFrontend.csproj`,
+  `dotnet publish src/csharplib/CsharpFrontend.csproj …`.
 - **Gates**: `dotnet build`, `dotnet run`, `dotnet restore`, `dotnet publish`
-  (argument variants allowed), run from inside your crate (`cd src/csharplib`).
-  No other `dotnet` verb (`test`, `add`, …) is granted.
+  (argument variants allowed). No other `dotnet` verb (`test`, `add`, …) is
+  granted.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Build-gate contract (coverage, bootstrap, exact names)
 
 - **Documented invocations are runnable grants.** `dotnet build`/`run`/
-  `restore`/`publish` (argument variants) are granted, run from inside
-  `src/csharplib` (`cd src/csharplib` first).
+  `restore`/`publish` (argument variants) are granted, run from the worktree
+  root with explicit `src/csharplib/…` project paths (see Shell policy).
 - **No env-prefixed command is granted** — `DOTNET_…=… dotnet build` matches
   no allow rule; pass the switches to dotnet itself.
 - **Cover every file type the steps touch.** Your edits are `Program.cs`, the
-  two `.csproj` manifests, and the tests project; `dotnet build` and
-  `dotnet run --project tests/CsharpFrontend.Tests.csproj` reach every one.
+  two `.csproj` manifests, and the tests project;
+  `dotnet build src/csharplib/CsharpFrontend.csproj` and
+  `dotnet run --project src/csharplib/tests/CsharpFrontend.Tests.csproj` reach
+  every one.
 - **An untracked dependency directory is bootstrapped, not assumed.** NuGet
   packages are restored by the granted `dotnet build`/`dotnet restore` into
   the user package cache — no committed store to bootstrap; `bin/` and
@@ -284,8 +293,10 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 
 ## Done gate
 
-- From inside `src/csharplib`, as separate calls: `dotnet build` (clean) and
-  `dotnet run --project tests/CsharpFrontend.Tests.csproj`; all green. **There is no such thing as a pre-existing failure.**
+- From the worktree root, as separate calls:
+  `dotnet build src/csharplib/CsharpFrontend.csproj` (clean) and
+  `dotnet run --project src/csharplib/tests/CsharpFrontend.Tests.csproj`; all
+  green. **There is no such thing as a pre-existing failure.**
 - The aggregate `scripts/gate.sh` is the core implementer's; keep your crate
   green and it stays green.
 
