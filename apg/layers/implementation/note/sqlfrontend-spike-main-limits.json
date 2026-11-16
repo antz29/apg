@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "sqlfrontend-spike-main-limits",
-  "body": "The spike Program.Main reports only plain CREATE statements (ScriptDom models CREATE OR ALTER and ALTER as separate statement classes, which it skips) and blanks SQLCMD ':' lines to empty lines, so the line count holds but columns on those lines do not. Upgrade when Main is rewired onto SqlSourceReader (same-length neutralisation) and SchemaEmitter (CREATE OR ALTER / ALTER declarations).",
+  "body": "Program.Main reads each .sql file through SqlSourceReader and reports only plain CREATE declarations (ScriptDom models CREATE OR ALTER and ALTER as separate statement classes, which it skips), printing a file's diagnostics before its declarations rather than interleaved in batch order. Upgrade when Main is rewired onto SchemaEmitter, which declares CREATE OR ALTER and ALTER of views, procedures, functions and triggers.",
   "properties": {},
   "out": [
     {
