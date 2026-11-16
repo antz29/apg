@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-builtin-cmdlet-call",
-  "body": "An unmatched command naming a cmdlet or default alias of PowerShell's built-in Microsoft.PowerShell modules is an unresolved call of category stdlib named by the command.",
+  "body": "An unmatched command naming, case-insensitively, a cmdlet of PowerShell 7.6's in-box Microsoft.PowerShell.* modules or a PowerShell 7.6 default alias of any platform is an unresolved call of category stdlib named by the command.",
   "properties": {
     "feature": "ps-frontend"
   },

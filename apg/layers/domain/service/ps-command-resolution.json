@@ -127,6 +127,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-system-type",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-this-method-call",
       "properties": {}
     },

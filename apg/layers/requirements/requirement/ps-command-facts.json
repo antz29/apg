@@ -64,6 +64,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-system-type",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-this-method-call",
       "properties": {}
     },

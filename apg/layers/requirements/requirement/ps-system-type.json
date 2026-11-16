@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-system-type",
+  "body": "A type name is a System type when, case-insensitively, it is System, begins with System., or names a PowerShell 7.6 type accelerator whose full type name begins with System., and every other type name is not a System type.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-command-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ]
+}
