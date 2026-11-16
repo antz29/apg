@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-project-model",
-  "body": "Each SQL Server database project file is read statically for its member .sql files and its default schema, and every .sql file belongs to exactly one database scope.",
+  "body": "Each SQL Server database project file is read statically for its member .sql files and its default schema, and every tracked .sql file belongs to exactly one database scope.",
   "properties": {
     "feature": "sql-frontend"
   },

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-schema-facts",
-  "body": "The tables, views, procedures, functions, triggers, user-defined types, sequences and synonyms of each .sql file, with their columns, are graph units located in that file.",
+  "body": "The tables, views, procedures, functions, triggers, user-defined types, sequences and synonyms of each tracked .sql file, with their columns, are graph units located in that file.",
   "properties": {
     "feature": "sql-frontend"
   },

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-source-claim",
-  "body": "The SQL frontend claims every .sql file in any letter case, and detection, the incremental language map and the structural code-extension set agree on that claim, so a .sql file sits outside the structural misc stream.",
+  "body": "The SQL frontend claims every tracked .sql file in any letter case, and detection, the incremental language map and the structural code-extension set agree on that claim, so a .sql file sits outside the structural misc stream.",
   "properties": {
     "feature": "sql-frontend"
   },

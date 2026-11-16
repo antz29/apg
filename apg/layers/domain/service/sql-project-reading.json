@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "sql-project-reading",
-  "body": "The capability that reads each database project statically into its member files and default schema, and assigns every .sql file to exactly one database scope.",
+  "body": "The capability that reads each database project statically into its member files and default schema, and assigns every tracked .sql file to exactly one database scope.",
   "properties": {},
   "out": [
     {
