@@ -6,6 +6,16 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "csharp.SqlFrontend.Tests",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.sql_scan_e2e",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

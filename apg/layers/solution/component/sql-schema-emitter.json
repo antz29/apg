@@ -6,6 +6,21 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.Program",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}
