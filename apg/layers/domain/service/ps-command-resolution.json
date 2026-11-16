@@ -114,6 +114,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.ps-this-method-call",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-type-name-resolution",
+      "properties": {}
     }
   ],
   "in": [

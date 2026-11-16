@@ -56,6 +56,11 @@
       "kind": "contains",
       "target": "requirements.requirement.ps-this-method-call",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-type-name-resolution",
+      "properties": {}
     }
   ],
   "in": [

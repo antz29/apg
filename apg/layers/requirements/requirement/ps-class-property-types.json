@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-class-property-types",
-  "body": "A class property whose declared type names a class or enum in the scan is a uses edge from the owning class Struct to that type's Struct.",
+  "body": "A class property whose declared type name resolves to one class or enum in the scan is a uses edge from the owning class Struct to that type's Struct.",
   "properties": {
     "feature": "ps-frontend"
   },
