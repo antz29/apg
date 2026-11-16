@@ -97,6 +97,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-module-qualified-command",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-path-command-call",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-path-match",
       "properties": {}
     },

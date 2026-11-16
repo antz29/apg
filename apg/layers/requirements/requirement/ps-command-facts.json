@@ -49,6 +49,16 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-module-qualified-command",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-path-command-call",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-resolved-call",
       "properties": {}
     },
