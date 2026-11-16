@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-system-type",
-  "body": "A type name is a System type when, case-insensitively, it is System, begins with System., or names a PowerShell 7.6 type accelerator whose full type name begins with System., and every other type name is not a System type.",
+  "body": "A type name is a System type exactly when, case-insensitively, it is System, begins with System., or names a PowerShell 7.6 type accelerator whose full type name begins with System.",
   "properties": {
     "feature": "ps-frontend"
   },
