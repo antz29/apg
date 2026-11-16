@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "ps-driver",
-  "body": "The apg scan driver's PowerShell arm: the ps language id and stream prefix, the frontend command, the zero-tool preflight entry and the ingestor's PowerShell file-edge kinds.",
+  "body": "The apg scan driver's PowerShell arm: the ps language id and stream prefix, frontend command, zero-tool preflight entry, ingestor PowerShell file-edge kinds and the incremental widening of a ps re-emission set to every manifest ps file.",
   "properties": {},
   "out": [
     {
