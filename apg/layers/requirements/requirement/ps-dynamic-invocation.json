@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-dynamic-invocation",
-  "body": "A & whose operand is a script block, variable or other computed expression, or a . whose operand is a script block, is an unresolved call of category func-value keyed by the <nameless@repo-relative:offset> sentinel of its site.",
+  "body": "A & whose operand is a script block, variable or other computed expression, or a . whose operand is a script block, is an unresolved call of category func-value keyed <nameless@repo-relative:offset> at its site's raw on-disk byte offset.",
   "properties": {
     "feature": "ps-frontend"
   },
