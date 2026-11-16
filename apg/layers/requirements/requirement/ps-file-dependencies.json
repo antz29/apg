@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-file-dependencies",
-  "body": "A script's dot-sources of a scanned File and Import-Modules resolving to a scanned .psm1 or .psd1 are file dependencies, each File reached by one uses edge from the script Struct carrying a kind, through which its change reaches the script.",
+  "body": "A script's dot-sources resolving to a scanned File and Import-Modules resolving to a scanned .psm1 or .psd1 are file dependencies, each File reached by one uses edge with a kind from the script Struct, so that File's change reaches the script.",
   "properties": {
     "feature": "ps-frontend"
   },
