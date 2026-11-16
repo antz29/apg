@@ -6,6 +6,16 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.parse",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.source",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

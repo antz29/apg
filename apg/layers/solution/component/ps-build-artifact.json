@@ -6,6 +6,26 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "Formula/apg-ps.rb",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.build_script_build.stage_ps",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "src/pslib/Cargo.lock",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "src/pslib/Cargo.toml",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.pipeline-module",
       "properties": {}

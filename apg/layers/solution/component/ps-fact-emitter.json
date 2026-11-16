@@ -6,6 +6,26 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend-bin",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.diag",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.scan",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

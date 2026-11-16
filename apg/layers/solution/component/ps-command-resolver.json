@@ -6,6 +6,21 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.builtins",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.paths",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.resolve",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

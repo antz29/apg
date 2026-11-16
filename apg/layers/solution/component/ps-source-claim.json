@@ -6,6 +6,11 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.apg.classify.ps_code_type",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}

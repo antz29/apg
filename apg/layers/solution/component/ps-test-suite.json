@@ -6,6 +6,26 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.tests",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.tests.int",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.tests.unit",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.pslib_e2e",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

@@ -6,6 +6,16 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.apg.ps",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.ps_scan_e2e",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}
