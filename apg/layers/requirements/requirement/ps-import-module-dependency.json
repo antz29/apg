@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-import-module-dependency",
-  "body": "An Import-Module module name equal to exactly one scanned manifest's case-insensitive .psd1 stem, or path resolving statically to a scanned .psm1 or .psd1, is a script-Struct-to-File uses edge with properties {\"kind\":\"import-module\"}.",
+  "body": "An Import-Module module name equal to exactly one scanned manifest's case-insensitive .psd1 stem, or path resolving statically to a scanned .psm1 or .psd1, is a uses edge from its script Struct to that File.",
   "properties": {
     "feature": "ps-frontend"
   },
