@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlfrontend-csproj-publish-subset",
+  "body": "SqlFrontend.csproj carries only the PublishSingleFile, SelfContained and IncludeNativeLibrariesForSelfExtract publish settings of src/csharplib/CsharpFrontend.csproj; it omits PublishReadyToRun, ImplicitUsings, Nullable and the EmbedCarriedRuntimeReferences target. Add ImplicitUsings/Nullable when Program.cs or a later source file relies on them, and PublishReadyToRun when the published sqlfrontend should match the C# frontend's startup profile.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/sqllib/SqlFrontend.csproj",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
