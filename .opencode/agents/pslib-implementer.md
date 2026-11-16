@@ -64,10 +64,8 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/src/*/target/**", effect: deny }
   - { action: edit, resource: ".opencode/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/.opencode/**", effect: deny }
-  - { action: edit, resource: "apg/.worktrees/*/src/pslib/Cargo.toml", effect: allow }
-  - { action: edit, resource: "apg/.worktrees/*/src/pslib/Cargo.lock", effect: allow }
-  - { action: edit, resource: "apg/.worktrees/*/src/pslib/build.rs", effect: allow }
-  - { action: edit, resource: "apg/.worktrees/*/src/pslib/README.md", effect: allow }
+  - { action: edit, resource: "apg/.worktrees/*/src/pslib/**", effect: allow }
+  - { action: edit, resource: "apg/.worktrees/*/src/pslib/target/**", effect: deny }
   - { action: external_directory, resource: "*", effect: deny }
   - { action: external_directory, resource: "/tmp/**", effect: allow }
   - { action: shell, resource: "*", effect: deny }

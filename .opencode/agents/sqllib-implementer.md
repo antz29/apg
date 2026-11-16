@@ -68,7 +68,11 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/src/*/target/**", effect: deny }
   - { action: edit, resource: ".opencode/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/.opencode/**", effect: deny }
-  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/README.md", effect: allow }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/**", effect: allow }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/bin/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/obj/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/tests/bin/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/tests/obj/**", effect: deny }
   - { action: external_directory, resource: "*", effect: deny }
   - { action: external_directory, resource: "/tmp/**", effect: allow }
   - { action: shell, resource: "*", effect: deny }
