@@ -12,6 +12,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-ambiguous-type",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-builtin-cmdlet-call",
       "properties": {}
     },
