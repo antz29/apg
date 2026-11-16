@@ -27,6 +27,14 @@ namespace SqlFrontend.Tests
                 ("MySqlDialectRejected", TestMySqlDialectRejected),
                 ("PostgresSerialParses", TestPostgresSerialParses),
                 ("FormatDiagnostic", TestFormatDiagnostic),
+                ("ProjectStyle", TestProjectStyle),
+                ("ProjectDefaultSchema", TestProjectDefaultSchema),
+                ("LegacyMembership", TestLegacyMembership),
+                ("SdkMembership", TestSdkMembership),
+                ("DeployScriptsAreLoose", TestDeployScriptsAreLoose),
+                ("SharedFileOrdinalFirstProject", TestSharedFileOrdinalFirstProject),
+                ("LooseScopeIdentity", TestLooseScopeIdentity),
+                ("ScopesPartitionInput", TestScopesPartitionInput),
             };
             foreach (var (name, test) in tests)
             {
@@ -176,6 +184,153 @@ namespace SqlFrontend.Tests
         {
             Eq("sql: db/a.sql:3:7: Incorrect syntax", SqlSourceReader.FormatDiagnostic("db/a.sql", 3, 7, "Incorrect syntax"), "format");
             Eq("sql: x.sql:1:2: m", new SqlSourceReader.Diagnostic("x.sql", 1, 2, "m").ToString(), "Diagnostic.ToString");
+        }
+
+        const string LegacyHead =
+            "<Project DefaultTargets=\"Build\" ToolsVersion=\"4.0\" xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">\n" +
+            "  <Import Project=\"$(SQLDBExtensionsRefPath)\\Microsoft.Data.Tools.Schema.SqlTasks.targets\" />\n";
+
+        static SqlProjectReader.Project Legacy(string path, string body) =>
+            SqlProjectReader.ParseProject(path, LegacyHead + body + "</Project>");
+
+        static SqlProjectReader.Project Sdk(string path, string body) =>
+            SqlProjectReader.ParseProject(path, "<Project Sdk=\"Microsoft.Build.Sql/0.2.0-preview\">\n" + body + "</Project>");
+
+        // The ModuleIdentity of every scope holding the file, joined (one entry when the file is scoped once).
+        static string Owner(List<SqlProjectReader.Scope> scopes, string file) =>
+            string.Join("|", scopes.Where(s => s.Files.Contains(file)).Select(s => s.ModuleIdentity));
+
+        static void TestProjectStyle()
+        {
+            Eq(true, SqlProjectReader.ParseProject("a.sqlproj", "<Project Sdk=\"Microsoft.Build.Sql\" />").SdkStyle, "Sdk attribute");
+            Eq(true, SqlProjectReader.ParseProject("a.sqlproj",
+                "<Project><Sdk Name=\"Microsoft.Build.Sql\" Version=\"0.2.0-preview\" /></Project>").SdkStyle, "Sdk child element");
+            Eq(true, SqlProjectReader.ParseProject("a.sqlproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />").SdkStyle, "non-SQL SDK name");
+            Eq(false, Legacy("a.sqlproj", "").SdkStyle, "SSDT ToolsVersion + Import is legacy");
+        }
+
+        static void TestProjectDefaultSchema()
+        {
+            Eq("sales", Sdk("a.sqlproj", "<PropertyGroup><DefaultSchema>sales</DefaultSchema></PropertyGroup>").DefaultSchema, "taken");
+            Eq("dbo", Legacy("a.sqlproj", "<PropertyGroup><Name>Db</Name></PropertyGroup>").DefaultSchema, "absent");
+            Eq("dbo", Legacy("a.sqlproj",
+                "<PropertyGroup Condition=\" '$(Configuration)' == 'Debug' \"><DefaultSchema>dev</DefaultSchema></PropertyGroup>").DefaultSchema,
+                "Condition-guarded PropertyGroup ignored");
+            Eq("dbo", Legacy("a.sqlproj",
+                "<PropertyGroup><DefaultSchema Condition=\"'$(X)' == '1'\">dev</DefaultSchema></PropertyGroup>").DefaultSchema,
+                "Condition-guarded property ignored");
+        }
+
+        static void TestLegacyMembership()
+        {
+            var lit = Legacy("lit/Lit.sqlproj", "<ItemGroup><Build Include=\"Tables\\Orders.sql\" /></ItemGroup>");
+            var star = Legacy("star/Star.sqlproj",
+                "<ItemGroup><Build Include=\"Tables\\*.sql\" /><Build Remove=\"Tables\\Old.sql\" /></ItemGroup>");
+            var deep = Legacy("deep/Deep.sqlproj", "<ItemGroup><Build Include=\"**\\*.sql\" /></ItemGroup>");
+            var cond = Legacy("cond/Cond.sqlproj",
+                "<ItemGroup Condition=\"'$(X)' == '1'\"><Build Include=\"a.sql\" /></ItemGroup>");
+            var scopes = SqlProjectReader.BuildScopes(new[] { lit, star, deep, cond }, new[]
+            {
+                "lit/Tables/Orders.sql", "lit/Tables/Unnamed.sql",
+                "star/Tables/A.sql", "star/Tables/Old.sql", "star/Tables/Sub/B.sql",
+                "deep/x.sql", "deep/Tables/Sub/y.sql",
+                "cond/a.sql",
+            });
+            Eq("lit/Lit.sqlproj", Owner(scopes, "lit/Tables/Orders.sql"), "literal backslash include");
+            Eq("lit/Tables", Owner(scopes, "lit/Tables/Unnamed.sql"), "unnamed file is loose");
+            Eq("star/Star.sqlproj", Owner(scopes, "star/Tables/A.sql"), "Tables\\*.sql");
+            Eq("star/Tables", Owner(scopes, "star/Tables/Old.sql"), "Build Remove subtracts");
+            Eq("star/Tables/Sub", Owner(scopes, "star/Tables/Sub/B.sql"), "* does not cross directories");
+            Eq("deep/Deep.sqlproj", Owner(scopes, "deep/x.sql"), "**\\*.sql top level");
+            Eq("deep/Deep.sqlproj", Owner(scopes, "deep/Tables/Sub/y.sql"), "**\\*.sql nested");
+            Eq("cond", Owner(scopes, "cond/a.sql"), "Condition-guarded ItemGroup adds nothing");
+        }
+
+        static void TestSdkMembership()
+        {
+            var p = Sdk("sdk/Db.sqlproj",
+                "<ItemGroup>\n" +
+                "  <Build Include=\"..\\Shared\\s.sql\" />\n" +
+                "  <Build Remove=\"Old\\r.sql\" />\n" +
+                "  <None Include=\"Notes\\n.sql\" />\n" +
+                "  <PreDeploy Include=\"Scripts\\Pre.sql\" />\n" +
+                "  <PostDeploy Include=\"Scripts\\Post.sql\" />\n" +
+                "</ItemGroup>\n");
+            var scopes = SqlProjectReader.BuildScopes(new[] { p }, new[]
+            {
+                "sdk/a.sql", "sdk/x/b.sql", "sdk/bin/c.sql", "sdk/obj/Debug/d.sql", "Shared/s.sql", "Shared/t.sql",
+                "sdk/Old/r.sql", "sdk/Notes/n.sql", "sdk/Scripts/Pre.sql", "sdk/Scripts/Post.sql", "other/o.sql",
+            });
+            Eq("sdk/Db.sqlproj", Owner(scopes, "sdk/a.sql"), "top-level file");
+            Eq("sdk/Db.sqlproj", Owner(scopes, "sdk/x/b.sql"), "nested file");
+            Eq("sdk/bin", Owner(scopes, "sdk/bin/c.sql"), "bin/ excluded");
+            Eq("sdk/obj/Debug", Owner(scopes, "sdk/obj/Debug/d.sql"), "obj/ excluded");
+            Eq("sdk/Db.sqlproj", Owner(scopes, "Shared/s.sql"), "..\\Shared Build Include added");
+            Eq("Shared", Owner(scopes, "Shared/t.sql"), "unnamed outside file stays loose");
+            Eq("sdk/Old", Owner(scopes, "sdk/Old/r.sql"), "Build Remove subtracted");
+            Eq("sdk/Notes", Owner(scopes, "sdk/Notes/n.sql"), "None subtracted");
+            Eq("sdk/Scripts", Owner(scopes, "sdk/Scripts/Pre.sql"), "PreDeploy subtracted");
+            Eq("sdk/Scripts", Owner(scopes, "sdk/Scripts/Post.sql"), "PostDeploy subtracted");
+            Eq("other", Owner(scopes, "other/o.sql"), "outside the project directory");
+        }
+
+        static void TestDeployScriptsAreLoose()
+        {
+            // The SSDT way: a deploy script is a PreDeploy/PostDeploy item, not also a Build item.
+            var legacy = Legacy("leg/Leg.sqlproj",
+                "<ItemGroup><Build Include=\"T.sql\" /><PreDeploy Include=\"Scripts\\Pre.sql\" />" +
+                "<PostDeploy Include=\"Scripts\\Post.sql\" /></ItemGroup>");
+            var sdk = Sdk("sdk/Sdk.sqlproj",
+                "<ItemGroup><PreDeploy Include=\"Scripts\\Pre.sql\" /><PostDeploy Include=\"Scripts\\Post.sql\" /></ItemGroup>");
+            Eq("Scripts/Pre.sql", string.Join(",", legacy.PreDeploys), "legacy PreDeploy parsed");
+            Eq("Scripts/Post.sql", string.Join(",", sdk.PostDeploys), "SDK PostDeploy parsed");
+            var scopes = SqlProjectReader.BuildScopes(new[] { legacy, sdk }, new[]
+            {
+                "leg/T.sql", "leg/Scripts/Pre.sql", "leg/Scripts/Post.sql",
+                "sdk/T.sql", "sdk/Scripts/Pre.sql", "sdk/Scripts/Post.sql",
+            });
+            Eq("leg/Leg.sqlproj", Owner(scopes, "leg/T.sql"), "legacy build member");
+            Eq("leg/Scripts", Owner(scopes, "leg/Scripts/Pre.sql"), "legacy PreDeploy loose");
+            Eq("leg/Scripts", Owner(scopes, "leg/Scripts/Post.sql"), "legacy PostDeploy loose");
+            Eq("sdk/Sdk.sqlproj", Owner(scopes, "sdk/T.sql"), "SDK build member");
+            Eq("sdk/Scripts", Owner(scopes, "sdk/Scripts/Pre.sql"), "SDK PreDeploy loose");
+            Eq("sdk/Scripts", Owner(scopes, "sdk/Scripts/Post.sql"), "SDK PostDeploy loose");
+        }
+
+        static void TestSharedFileOrdinalFirstProject()
+        {
+            var a = Legacy("a/A.sqlproj", "<ItemGroup><Build Include=\"..\\Shared\\x.sql\" /></ItemGroup>");
+            var b = Legacy("b/B.sqlproj", "<ItemGroup><Build Include=\"..\\Shared\\x.sql\" /></ItemGroup>");
+            var files = new[] { "Shared/x.sql" };
+            Eq("a/A.sqlproj", Owner(SqlProjectReader.BuildScopes(new[] { b, a }, files), "Shared/x.sql"), "input order B,A");
+            Eq("a/A.sqlproj", Owner(SqlProjectReader.BuildScopes(new[] { a, b }, files), "Shared/x.sql"), "input order A,B");
+        }
+
+        static void TestLooseScopeIdentity()
+        {
+            var scopes = SqlProjectReader.BuildScopes(new SqlProjectReader.Project[0],
+                new[] { "db/x/y.sql", "root.sql", "db/x/U.SQL" });
+            var nested = scopes.Single(s => s.ModuleIdentity == "db/x");
+            Eq(("dbo", false), (nested.DefaultSchema, nested.IsProject), "nested loose scope schema/kind");
+            Eq("db/x/U.SQL,db/x/y.sql", string.Join(",", nested.Files), "upper-case .SQL scoped");
+            var root = scopes.Single(s => s.ModuleIdentity == "");
+            Eq(("dbo", false, "root.sql"), (root.DefaultSchema, root.IsProject, string.Join(",", root.Files)), "scan-root loose scope");
+        }
+
+        static void TestScopesPartitionInput()
+        {
+            var p = Sdk("db/Db.sqlproj", "<PropertyGroup><DefaultSchema>app</DefaultSchema></PropertyGroup>");
+            var q = Legacy("old/Old.sqlproj", "<ItemGroup><Build Include=\"t.sql\" /></ItemGroup>");
+            var sql = new[] { "db/a.sql", "db/B.SQL", "db/bin/c.sql", "old/t.sql", "old/u.sql", "z.sql" };
+            var input = sql.Concat(new[] { "db/Db.sqlproj", "old/Old.sqlproj" }).ToList();
+            var scopes = SqlProjectReader.BuildScopes(new[] { q, p }, input);
+            foreach (var f in sql)
+                Eq(1, scopes.Count(s => s.Files.Contains(f)), $"{f} in exactly one scope");
+            Eq(sql.Length, scopes.Sum(s => s.Files.Count), "no extra scoped files");
+            Eq(false, scopes.Any(s => s.Files.Any(f => f.EndsWith(".sqlproj"))), "no .sqlproj scoped");
+            var proj = scopes.Single(s => s.IsProject && s.Files.Contains("db/a.sql"));
+            Eq(("db/Db.sqlproj", "app"), (proj.ModuleIdentity, proj.DefaultSchema), "project scope identity/schema");
+            Eq("db/Db.sqlproj", Owner(scopes, "db/B.SQL"), "upper-case .SQL project member");
         }
     }
 }
