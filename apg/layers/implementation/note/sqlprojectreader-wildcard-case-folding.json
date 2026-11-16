@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlprojectreader-wildcard-case-folding",
+  "body": "Pattern compiles a wildcard item spec into a case-insensitive, culture-invariant regular expression, while literal specs compare ordinal-ignore-case, so the two can disagree only on unusual non-ASCII letter casing. Upgrade to a hand-rolled ordinal-ignore-case wildcard matcher if a project path ever needs exact ordinal behaviour for wildcards.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SqlProjectReader.Pattern",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
