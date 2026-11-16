@@ -91,6 +91,11 @@
       "kind": "realises",
       "source": "solution.component.sql-source-claim",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-claiming",
+      "properties": {}
     }
   ]
 }
