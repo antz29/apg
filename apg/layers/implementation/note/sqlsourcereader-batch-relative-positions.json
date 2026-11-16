@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlsourcereader-batch-relative-positions",
+  "body": "Read parses each batch on its own text, so every TSqlFragment position is batch-relative: a file line is Batch.StartLine + fragment line - 1, and a file offset is Batch.StartOffset + fragment offset, where StartOffset is a .NET UTF-16 character index, not a UTF-8 byte offset. Callers that emit file spans convert to UTF-8 bytes themselves. Upgrade to file-relative fragments (e.g. padding each batch with the preceding text) only if the callers' offset arithmetic proves error-prone; the padding costs time quadratic in the batch count.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SqlSourceReader.Read",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
