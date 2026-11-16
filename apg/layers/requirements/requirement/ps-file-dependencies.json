@@ -24,6 +24,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-file-dependency-kind-precedence",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-import-module-ambiguous",
       "properties": {}
     },

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-file-dependency-kind-precedence",
+  "body": "A script holds at most one uses edge to a File, of kind dot-source when any of its sites dot-sources that File and of kind import-module otherwise, whatever the order and count of its sites.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-file-dependencies",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ]
+}

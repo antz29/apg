@@ -72,6 +72,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-file-dependency-kind-precedence",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-import-module-ambiguous",
       "properties": {}
     },
