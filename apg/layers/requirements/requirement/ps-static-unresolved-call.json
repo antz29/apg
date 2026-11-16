@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-static-unresolved-call",
-  "body": "A static call [T]::M() whose T resolves to one scanned enum is an unresolved call of category unknown, and one whose T resolves outside the scan is an unresolved call, stdlib for a System type and external otherwise.",
+  "body": "A static call [T]::M() or [T]::new() whose T resolves to one scanned enum is an unresolved call of category unknown, and one whose T resolves outside the scan is an unresolved call, stdlib for a System type and external otherwise.",
   "properties": {
     "feature": "ps-frontend"
   },
