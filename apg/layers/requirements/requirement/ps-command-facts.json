@@ -76,6 +76,11 @@
       "kind": "contains",
       "target": "requirements.requirement.ps-type-name-resolution",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-unresolved-category-precedence",
+      "properties": {}
     }
   ],
   "in": [

@@ -139,6 +139,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.ps-type-name-resolution",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-unresolved-category-precedence",
+      "properties": {}
     }
   ],
   "in": [
