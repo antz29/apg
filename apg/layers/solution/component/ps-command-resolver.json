@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "ps-command-resolver",
-  "body": "The PowerShell command resolver: the ordered command lookup, the built-in cmdlet table, static and $this method calls, static path resolution, and the dot-source and Import-Module file edges.",
+  "body": "The PowerShell command resolver: the ordered command lookup, the built-in command and alias table, static and $this method calls, static path resolution, and the dot-source and Import-Module file edges.",
   "properties": {},
   "out": [
     {
