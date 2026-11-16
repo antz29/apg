@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-static-method-call",
-  "body": "A static call [T]::M() or [T]::new() whose T resolves to one class in the scan is a calls edge to its method or constructor, and one whose T matches no scanned class an unresolved call, stdlib for a System type and external otherwise.",
+  "body": "A static call [T]::M() or [T]::new() whose T resolves to one class in the scan is a calls edge to its method or constructor, and one whose T resolves outside the scan an unresolved call, stdlib for a System type and external otherwise.",
   "properties": {
     "feature": "ps-frontend"
   },
