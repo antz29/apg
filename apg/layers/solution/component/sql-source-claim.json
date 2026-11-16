@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "sql-source-claim",
-  "body": "The SQL claim and classification arms: the .sql claim, the sqlfrontend spawn and frontend-listing arms, and the test, generated (obj included) and external code-type segment rules.",
+  "body": "The SQL code-type classification arm: the test, generated (obj included) and external path-segment rules that assign each .sql file its code type.",
   "properties": {},
   "out": [
     {
