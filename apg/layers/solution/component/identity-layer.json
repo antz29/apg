@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "identity-layer",
-  "body": "The ingestor identity layer renders file, language-root and module identities from the repo-relative base, roots namespace-less C# files and global-namespace C# types at the csharp root, and keeps absolute paths for the tool boundary.",
+  "body": "The ingestor identity layer renders file, language-root and module identities repo-relative, cobol and ps repo-root scopes as <lang>..name, and C# global-namespace types and namespace-less files at csharp, keeping absolute paths for tools.",
   "properties": {},
   "out": [
     {
