@@ -14,11 +14,6 @@
       "kind": "realises",
       "target": "domain.service.ps-language-integration",
       "properties": {}
-    },
-    {
-      "kind": "realises",
-      "target": "domain.service.ps-source-classification",
-      "properties": {}
     }
   ],
   "in": [

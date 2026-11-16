@@ -34,12 +34,17 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.ps-driver",
+      "source": "solution.component.language-claim-map",
       "properties": {}
     },
     {
       "kind": "realises",
       "source": "solution.component.ps-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-claiming",
       "properties": {}
     }
   ]

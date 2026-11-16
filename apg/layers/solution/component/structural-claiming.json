@@ -42,7 +42,11 @@
     },
     {
       "kind": "realises",
+<<<<<<< HEAD
       "target": "domain.service.sql-language-integration",
+=======
+      "target": "domain.service.ps-source-classification",
+>>>>>>> 2049f3d3 (apg: graph mutation (apg/layers/domain/service/ps-source-classification.json, apg/layers/solution/component/language-claim-map.json, apg/layers/solution/component/ps-driver.json, apg/layers/solution/component/structural-claiming.json))
       "properties": {}
     },
     {
