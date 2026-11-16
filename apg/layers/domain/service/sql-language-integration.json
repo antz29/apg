@@ -74,6 +74,11 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.language-claim-map",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.language-registry",
       "properties": {}
     },
