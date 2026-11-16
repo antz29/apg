@@ -89,6 +89,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-unmatched-qualified-command",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-unresolved-category-precedence",
       "properties": {}
     }

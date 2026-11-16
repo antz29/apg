@@ -152,6 +152,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-unmatched-qualified-command",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.ps-unresolved-category-precedence",
       "properties": {}
     }

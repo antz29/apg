@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-unmatched-qualified-command",
+  "body": "An unmatched module-qualified command M\\N is an unresolved call named M\\N, of category stdlib when M is, case-insensitively, a PowerShell 7.6 in-box Microsoft.PowerShell.* module exporting N whatever manifests are scanned, else external.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-command-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ]
+}
