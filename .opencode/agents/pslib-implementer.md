@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg PowerShell frontend crate (src/pslib/ — a standalone cargo project with its own Cargo.toml/Cargo.lock, binary `psfrontend`; stable Rust with tree-sitter-powershell =0.26.6 + tree-sitter =0.26.13, which need a C compiler at build time) that parses PowerShell and streams the unified JSONL facts for the Rust ingestor. Owns src/pslib/** except src/pslib/target/**; works under the Ponytail discipline (fixed level ultra); runs cargo with --manifest-path src/pslib/Cargo.toml (build, test and the e2e tier); commits once per task (git add/commit only; push/tag are human-approved and not granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan; removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, build.rs, docs, Formula/**, or .opencode/**.
+description: Implements plan tasks in the apg PowerShell frontend crate (src/pslib/ — a standalone cargo project with its own Cargo.toml/Cargo.lock, binary `psfrontend`; stable Rust with woodruffw-trough-tree-sitter-powershell =0.1.6 (crates.io, MIT — the ONLY linked crate exporting the C symbol tree_sitter_powershell) + tree-sitter =0.26.13 (parser ABI 15), which need a C compiler at build time) that parses PowerShell and streams the unified JSONL facts for the Rust ingestor. Owns src/pslib/** except src/pslib/target/**; works under the Ponytail discipline (fixed level ultra); runs cargo with --manifest-path src/pslib/Cargo.toml (build, test and the e2e tier); commits once per task (git add/commit only; push/tag are human-approved and not granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan; removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, build.rs, docs, Formula/**, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -126,8 +126,10 @@ You are the **PowerShell frontend crate** implementer for the **apg**
 repository. Your crate — `src/pslib/` — is a **standalone cargo project** (its
 own `Cargo.toml`/`Cargo.lock`, not in a root workspace; binary `psfrontend`;
 stable Rust via the repo `rust-toolchain.toml`). It parses PowerShell with
-**`tree-sitter-powershell` `=0.26.6`** on **`tree-sitter` `=0.26.13`** — both
-compile C sources, so building needs a **C compiler** — and emits the unified
+**`woodruffw-trough-tree-sitter-powershell` `=0.1.6`** (crates.io, MIT) on
+**`tree-sitter` `=0.26.13`** (parser ABI 15) — both compile C sources, so
+building needs a **C compiler** (the grammar's generated `parser.c` is large,
+so builds are slow) — and emits the unified
 JSONL facts (declarations, references, edges) for the Rust ingestor. New units
 in it arrive as `creates` tasks whose planned nodes the branch scan realizes
 once the code lands. You own its source, tests and fixtures (not `target/`);
@@ -239,9 +241,27 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 
 - **Your crate**: `src/pslib/` (including its own `Cargo.toml`/`Cargo.lock`/
   `build.rs` if it has one); never `src/pslib/target/**`. Deps:
-  `tree-sitter-powershell =0.26.6` + `tree-sitter =0.26.13` (exact pins — keep
-  them exact); a C compiler is required to build them. It emits **facts only**
-  — never FQNs, never graph assembly.
+  `woodruffw-trough-tree-sitter-powershell =0.1.6` + `tree-sitter =0.26.13`
+  (exact pins — keep them exact); a C compiler is required to build them. It
+  emits **facts only** — never FQNs, never graph assembly.
+- **Single grammar link (`solution.constraint.ps-single-grammar-link`).**
+  `psfrontend` links exactly ONE crate exporting the C symbol
+  `tree_sitter_powershell` — `woodruffw-trough-tree-sitter-powershell`.
+  `src/pslib/Cargo.toml` and `src/pslib/Cargo.lock` must never carry a second
+  PowerShell grammar crate (e.g. the former `tree-sitter-powershell`): both
+  export the same C symbol and one binary silently binds only one. Any grammar
+  comparison runs in a separate binary, never in this crate. Verify the pins by
+  **reading** the committed `src/pslib/Cargo.lock` (you cannot run
+  `cargo tree` or `rustc --version`).
+- **Grammar node vocabulary** (woodruffw): a `source_file` root with statements
+  as direct children; `function_definition`; `class_definition`
+  (`base_types`) / `enum_definition` (`underlying_type`); `using_statement`;
+  `configuration_definition` / `node_statement` / `resource_statement`;
+  `command` / `command_name` / `command_argument` / `command_parameter`;
+  `invocation_operator_command`; `invocation_expression` / `member_access`;
+  `hashtable_expression` / `hash_entry`; `param_block`; `argument_fragment`.
+  Syntax errors stay local `ERROR`/`MISSING` nodes under the `source_file`
+  root.
 - **Tests** follow the repo tier layout: unit/int in `src/pslib/src/tests.rs`
   (inner `unit`/`int` submodules); e2e under `src/pslib/tests/*_e2e.rs`
   (`#[ignore]`d, wrapped in `mod e2e`). You own them;
