@@ -147,6 +147,9 @@ fn main() {
     if enabled(&frontends, "csharp") {
         languages.extend(stage_csharp(&out_dir, &stage_dir));
     }
+    if enabled(&frontends, "sql") {
+        languages.extend(stage_sql(&out_dir, &stage_dir));
+    }
     if enabled(&frontends, "agent") {
         // Agent frontend (standalone Rust crate, compiled in isolation). Fail-closed
         // unlike the others: the root gate's `cargo build` is this staging's only
@@ -680,6 +683,44 @@ fn stage_csharp(out_dir: &str, stage_dir: &Path) -> Vec<String> {
         );
         let _ = std::fs::copy(&csharpfrontend, stage_dir.join(exe_name));
         return vec!["csharp".into()];
+    }
+
+    Vec::new()
+}
+
+/// T-SQL frontend (ScriptDom, published as self-contained single-file, untrimmed).
+fn stage_sql(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    let rid = csharp_rid();
+
+    let sql_dist = Path::new(out_dir).join("sql-dist");
+    let mut cmd = Command::new("dotnet");
+    cmd.arg("publish")
+        .arg("src/sqllib/SqlFrontend.csproj")
+        .arg("-c")
+        .arg("Release")
+        .arg("-r")
+        .arg(rid)
+        .arg("--self-contained")
+        .arg("true")
+        .arg("-p:PublishSingleFile=true")
+        .arg("-p:PublishReadyToRun=true")
+        .arg("-o")
+        .arg(sql_dist.to_str().unwrap());
+
+    let exe_name = if target_os == "windows" {
+        "sqlfrontend.exe"
+    } else {
+        "sqlfrontend"
+    };
+    let sqlfrontend = sql_dist.join(exe_name);
+
+    let sql_ok = cmd.status().is_ok_and(|s| s.success()) && sqlfrontend.exists();
+    if sql_ok {
+        println!("cargo:rustc-env=APG_FRONTEND_SQL={}", sqlfrontend.display());
+        let _ = std::fs::copy(&sqlfrontend, stage_dir.join(exe_name));
+        return vec!["sql".into()];
     }
 
     Vec::new()
