@@ -117,6 +117,26 @@ mod unit {
         assert!(!ext_matches("JAVA", &java, false));
     }
 
+    /// sql-frontend phase-06 task-19: `sql` is a language root whose `sq`
+    /// opaque-id prefix collides with no other root's nor the `x` fallback, it
+    /// needs no scan-time tool on PATH, and `.sql` matches in any letter case
+    /// only when the candidate asks for it.
+    #[test]
+    fn sql_registration_is_distinct_tool_less_and_case_insensitive() {
+        let roots = crate::layers::LANGUAGE_ROOTS;
+        assert!(roots.contains(&"sql"), "sql is not a language root");
+        let prefix = id_prefix_for("sql");
+        assert_eq!(prefix, "sq");
+        assert_ne!(prefix, id_prefix_for("not-a-language"), "sql vs fallback");
+        for language in roots.iter().filter(|l| **l != "sql") {
+            assert_ne!(prefix, id_prefix_for(language), "sql vs {language}");
+        }
+        assert!(scan_time_tools("sql").is_empty());
+        assert!(ext_matches("SQL", &[".sql"], true));
+        assert!(ext_matches("Sql", &[".sql"], true));
+        assert!(!ext_matches("SQL", &[".sql"], false));
+    }
+
     /// schema-alignment phase-02 task-17: the agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural
