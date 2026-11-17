@@ -194,6 +194,39 @@ mod unit {
         }
     }
 
+    /// sql-frontend phase-06 task-29: the sqlfrontend `--targets` universe is
+    /// every manifest `.sql`/`.sqlproj` path (any case), absolute and sorted;
+    /// non-sql keys contribute nothing.
+    #[test]
+    fn sql_stream_targets_list_every_tracked_sql_file() {
+        use std::collections::BTreeSet;
+        let set =
+            |paths: &[&str]| -> BTreeSet<String> { paths.iter().map(|p| p.to_string()).collect() };
+        let root = Path::new("/root");
+        let keys = set(&[
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "scripts/c.Sql",
+            "Db/Db.sqlproj",
+            "Legacy/L.SQLPROJ",
+            "main.go",
+            "Db/x.xml",
+        ]);
+        let expected: Vec<String> = [
+            "Db/Db.sqlproj",
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "Legacy/L.SQLPROJ",
+            "scripts/c.Sql",
+        ]
+        .iter()
+        .map(|rel| root.join(rel).to_string_lossy().into_owned())
+        .collect();
+        assert_eq!(sql_stream_targets(keys.iter(), root), expected);
+        assert!(sql_stream_targets(set(&[]).iter(), root).is_empty());
+        assert!(sql_stream_targets(set(&["main.go", "Db/x.xml"]).iter(), root).is_empty());
+    }
+
     /// schema-alignment phase-02 task-17: the agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural
