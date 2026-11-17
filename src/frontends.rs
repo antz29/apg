@@ -225,6 +225,9 @@ const PY_DETECTOR_SKIP: &[&str] = &[
 
 /// True when extension `ext` (no leading dot) is one of `exts` (each with its
 /// leading dot). `case_insensitive` ignores letter case; otherwise it is exact.
+/// Only the C#, COBOL and SQL candidates pass `case_insensitive = true` (SQL:
+/// `.sql` in any letter case, like sqlfrontend's own discovery and
+/// `language_of`); every other language matches exact-case.
 fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
     let dotted = format!(".{ext}");
     exts.iter().any(|x| {
