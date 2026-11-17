@@ -49,6 +49,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ps-generic-type-name",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ps-module-qualified-command",
       "properties": {}
     },

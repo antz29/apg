@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ps-generic-type-name",
+  "body": "A generic type such as List[int] is its type name without type arguments for resolution, System-type classification and unresolved-target naming, so all its instantiations share one unresolved target.",
+  "properties": {
+    "feature": "ps-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.ps-command-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.ps-command-resolution",
+      "properties": {}
+    }
+  ]
+}
