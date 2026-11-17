@@ -589,6 +589,30 @@ pub fn whole_language_targets<'a>(
         .collect()
 }
 
+/// sqlfrontend's `--targets` universe on every spawn (full, incremental phase 1
+/// and phase 2 alike): sorted absolute paths (the `targets_for_language` form)
+/// of every manifest path whose `language_of` is `"sql"` or whose extension is
+/// `sqlproj` in any letter case. The git-based `Manifest::build` lists only
+/// git-visible paths (tracked, or untracked and not ignored), so a gitignored
+/// file such as `bin/Debug/<Db>.publish.sql` is never in it. Pure — no I/O.
+pub fn sql_stream_targets<'a>(
+    manifest_rel: impl IntoIterator<Item = &'a String>,
+    scan_root: &Path,
+) -> Vec<String> {
+    let mut out: Vec<String> = manifest_rel
+        .into_iter()
+        .filter(|rel| {
+            incremental::language_of(rel) == "sql"
+                || Path::new(rel.as_str())
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("sqlproj"))
+        })
+        .map(|rel| scan_root.join(rel).to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    out
+}
+
 /// The win-C per-language frontend spawn verdict (phase-03 task-5).
 ///
 /// On the win-B incremental path (`full_scan == false`):
