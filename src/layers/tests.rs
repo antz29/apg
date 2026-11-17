@@ -895,7 +895,7 @@ mod unit {
     /// implementation constraint to a scan Language identity is accepted (a
     /// structural-stream id such as `sh` included), while a non-implementation
     /// source, an authored-node target or another code FQN is refused (every
-    /// target must be one of the twenty-one `LANGUAGE_ROOTS`).
+    /// target must be one of the twenty-two `LANGUAGE_ROOTS`).
     #[test]
     fn edge_kind_matrix_is_complete_and_consistent() {
         let exempt = ["implemented-by", "details", "applies-to"];
