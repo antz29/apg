@@ -3,14 +3,14 @@ use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
-/// `struct`, `py`, `agent`, `cobol`); `0`/`none`/empty skips all.
+/// `struct`, `py`, `agent`, `cobol`, `sql`); `0`/`none`/empty skips all.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
 /// `agent` is the standalone `agentfrontend` binary serving the
 /// `.opencode/agents/` definition stream.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-cobol` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-cobol`/`apg-sql` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
@@ -28,6 +28,7 @@ fn build_frontends() -> Vec<String> {
             "py".into(),
             "agent".into(),
             "cobol".into(),
+            "sql".into(),
         ],
     }
 }
