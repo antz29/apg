@@ -5,8 +5,10 @@
 
 mod common;
 
-use common::{ApgCommand, Repo, apg_bin};
-use std::path::PathBuf;
+use apg::layers::{properties_from_json, properties_json};
+use common::{ApgCommand, Repo, apg_bin, git2_repo};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 
 /// A legacy SSDT project: default schema `app`, an Import of a targets file
@@ -137,6 +139,85 @@ fn column(rows: &[serde_json::Value], col: &str) -> Vec<String> {
     rows.iter()
         .map(|r| r[col].as_str().unwrap_or_default().to_string())
         .collect()
+}
+
+/// The sorted SQL fact set: sql.-rooted modules, the files they contain, the
+/// sql. declarations with lines and code_type, every Contains/Calls/Uses edge
+/// with a sql endpoint and every unresolved edge out of a sql node.
+fn sql_facts(repo: &Repo) -> BTreeSet<String> {
+    const SQL: &str = "(a.fqn = 'sql' OR a.fqn STARTS WITH 'sql.' OR b.fqn STARTS WITH 'sql.')";
+    let mut queries = vec![
+        "MATCH (m:Module) WHERE m.fqn STARTS WITH 'sql.' RETURN m.fqn".to_string(),
+        "MATCH (m:Module)-[:Contains]->(f:File) WHERE m.fqn STARTS WITH 'sql.' RETURN f.fqn, f.start_line, f.end_line, f.code_type".to_string(),
+    ];
+    for label in ["Struct", "Function"] {
+        queries.push(format!(
+            "MATCH (n:{label}) WHERE n.fqn STARTS WITH 'sql.' RETURN label(n) AS l, n.fqn, n.start_line, n.end_line, n.code_type"
+        ));
+    }
+    for rel in ["Contains", "Calls", "Uses"] {
+        queries.push(format!(
+            "MATCH (a)-[r:{rel}]->(b) WHERE {SQL} RETURN '{rel}' AS k, a.fqn, b.fqn, r.properties"
+        ));
+    }
+    for rel in ["UnresolvedCall", "UnresolvedUse"] {
+        queries.push(format!(
+            "MATCH (a)-[:{rel}]->(u:UnresolvedTarget) WHERE a.fqn STARTS WITH 'sql.' RETURN '{rel}' AS k, a.fqn, u.fqn, u.category"
+        ));
+    }
+    queries
+        .iter()
+        .flat_map(|q| query_rows(repo, q))
+        .map(|mut row| {
+            // A full load writes `{}` where the splice leaves the column unset;
+            // both decode to the empty map, so compare the canonical encoding.
+            if let Some(p) = row.get_mut("r.properties") {
+                let raw = p.as_str().or(p.is_null().then_some("")).expect("string");
+                *p = properties_json(&properties_from_json(raw).expect("properties")).into();
+            }
+            row.to_string()
+        })
+        .collect()
+}
+
+/// Asserts two fact sets are equal, printing their symmetric difference.
+fn assert_facts_eq(got: &BTreeSet<String>, want: &BTreeSet<String>, ctx: &str) {
+    let only_got: Vec<_> = got.difference(want).collect();
+    let only_want: Vec<_> = want.difference(got).collect();
+    assert!(
+        only_got.is_empty() && only_want.is_empty(),
+        "{ctx}: facts differ\nincremental only: {only_got:#?}\nfull only: {only_want:#?}"
+    );
+}
+
+/// A plain incremental `--language sql` scan (asserting the delta path, no
+/// sql failure and — when `sql_runs` — the sql frontend re-run) followed by a
+/// `--force` full scan; returns both fact sets.
+fn incremental_then_full(repo: &Repo, sql_runs: bool) -> (BTreeSet<String>, BTreeSet<String>) {
+    let (out, log) = scan(repo, &["--language", "sql"]);
+    assert!(out.status.success(), "incremental scan: {log}");
+    assert!(log.contains("[scan] incremental:"), "{log}");
+    assert!(!log.contains("sql frontend failed"), "{log}");
+    if sql_runs {
+        assert!(log.contains("running sql frontend"), "{log}");
+    }
+    let inc = sql_facts(repo);
+    let (out, log) = scan(repo, &["--language", "sql", "--force"]);
+    assert!(out.status.success(), "full scan: {log}");
+    assert!(!log.contains("sql frontend failed"), "{log}");
+    (inc, sql_facts(repo))
+}
+
+/// The File/Struct/Function fqns graphed at `path`.
+fn graphed_at(repo: &Repo, path: &str) -> Vec<String> {
+    [
+        format!("MATCH (n:File) WHERE n.fqn = '{path}' RETURN n.fqn"),
+        format!("MATCH (n:Struct) WHERE n.path = '{path}' RETURN n.fqn"),
+        format!("MATCH (n:Function) WHERE n.path = '{path}' RETURN n.fqn"),
+    ]
+    .iter()
+    .flat_map(|q| column(&query_rows(repo, q), "n.fqn"))
+    .collect()
 }
 
 mod e2e {
@@ -417,5 +498,162 @@ mod e2e {
         let col: usize = pos.next().unwrap().parse().expect("diagnostic column");
         assert_eq!(line, 3, "diagnostic on the broken batch: {diag}");
         assert!(col >= 1, "{diag}");
+    }
+
+    /// Each incremental scan — a line-shifting body edit, a new declaration
+    /// in another file, a `.sqlproj`-only change — yields the same SQL facts
+    /// as a `--force` full scan of the same tree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg); run via cargo test-e2e"]
+    fn incremental_scan_equals_full_scan() {
+        sql_frontend_bin();
+        let repo = sql_repo("sql-incremental");
+        let (out, log) = scan(&repo, &["--language", "sql"]);
+        assert!(out.status.success(), "scan: {log}");
+        let mut prev = sql_facts(&repo);
+
+        let steps: [(&str, &str, &str); 3] = [
+            (
+                "Legacy/Procs/GetOrders.sql",
+                &GET_ORDERS_SQL.replacen("BEGIN\n", "BEGIN\n    SELECT 0\n\n", 1),
+                "(1) body edit",
+            ),
+            (
+                "Legacy/Procs/Missing.sql",
+                "CREATE PROCEDURE dbo.Missing\nAS\n    SELECT 2\nGO\n",
+                "(2) new declaration in another file",
+            ),
+            (
+                "Legacy/Legacy.sqlproj",
+                &LEGACY_SQLPROJ.replace(
+                    "<DefaultSchema>app</DefaultSchema>",
+                    "<DefaultSchema>sales</DefaultSchema>",
+                ),
+                "(3) .sqlproj-only change",
+            ),
+        ];
+        for (path, content, step) in steps {
+            repo.write(path, content);
+            repo.commit_all(step);
+            let (inc, full) = incremental_then_full(&repo, true);
+            assert_facts_eq(&inc, &full, step);
+            assert_ne!(inc, prev, "{step}: the edit must be observed");
+            prev = full;
+        }
+
+        let legacy = "sql.Legacy/Legacy.sqlproj";
+        let calls = column(
+            &query_rows(
+                &repo,
+                &format!(
+                    "MATCH (a:Function)-[:Calls]->(b:Function) WHERE a.fqn = '{legacy}.app.GetOrders' RETURN b.fqn ORDER BY b.fqn"
+                ),
+            ),
+            "b.fqn",
+        );
+        assert!(
+            calls.contains(&format!("{legacy}.dbo.Missing")),
+            "dbo.Missing must resolve: {calls:?}"
+        );
+        assert!(
+            prev.iter()
+                .any(|f| f.contains(&format!("{legacy}.sales.Orders"))),
+            "Orders re-scoped to sales: {prev:#?}"
+        );
+    }
+
+    /// Only tracked `.sql` files are graphed (a gitignored generated publish
+    /// script never is), and a non-sql change and a deletion each scan
+    /// incrementally to the facts of a `--force` full scan.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg); run via cargo test-e2e"]
+    fn tracked_sql_only_and_deletion_equal_full_scan() {
+        sql_frontend_bin();
+        let repo = sql_repo("sql-tracked");
+        repo.write(
+            ".gitignore",
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\nbin/\n",
+        );
+        repo.commit_all("ignore bin/");
+        let publish = "Sdk/bin/Debug/Db.publish.sql";
+        repo.write(
+            publish,
+            ":setvar DatabaseName \"Db\"\nGO\nCREATE TABLE dbo.PublishOnly (Id INT)\nGO\n",
+        );
+        assert!(
+            git2_repo(&repo)
+                .is_path_ignored(Path::new(publish))
+                .expect("check-ignore"),
+            "{publish} must be gitignored"
+        );
+        let no_publish = |facts: &BTreeSet<String>, ctx: &str| {
+            let leaked: Vec<_> = facts
+                .iter()
+                .filter(|f| f.contains("Db.publish.sql") || f.contains("PublishOnly"))
+                .collect();
+            assert!(
+                leaked.is_empty(),
+                "{ctx}: ignored script graphed: {leaked:#?}"
+            );
+        };
+
+        // (i) a full scan graphs nothing from the ignored script.
+        let (out, log) = scan(&repo, &["--language", "sql"]);
+        assert!(out.status.success(), "scan: {log}");
+        assert!(
+            graphed_at(&repo, publish).is_empty(),
+            "(i) {publish} graphed"
+        );
+        let publish_only = column(
+            &query_rows(
+                &repo,
+                "MATCH (n:Struct) WHERE n.fqn STARTS WITH 'sql.' AND n.fqn ENDS WITH '.PublishOnly' RETURN n.fqn",
+            ),
+            "n.fqn",
+        );
+        assert!(publish_only.is_empty(), "(i) PublishOnly: {publish_only:?}");
+        assert!(
+            !graphed_at(&repo, "Sdk/dbo/Customers.sql").is_empty(),
+            "(i) Customers.sql must still be graphed"
+        );
+
+        // (ii) a README-only change.
+        repo.write("README.md", "# scratch\n\nedited\n");
+        repo.commit_all("readme");
+        let (inc, full) = incremental_then_full(&repo, false);
+        assert_facts_eq(&inc, &full, "(ii) README-only change");
+        no_publish(&inc, "(ii) incremental");
+        no_publish(&full, "(ii) full");
+        let before = full;
+
+        // (iii) delete a tracked .sql file.
+        let helper = "Legacy/Procs/Helper.sql";
+        std::fs::remove_file(repo.root.join(helper)).expect("delete Helper.sql");
+        let git = git2_repo(&repo);
+        let mut index = git.index().expect("index");
+        index.update_all(["*"], None).expect("stage deletion");
+        index.write().expect("write index");
+        repo.commit_all("delete Helper.sql");
+        let (out, log) = scan(&repo, &["--language", "sql"]);
+        assert!(out.status.success(), "(iii) incremental scan: {log}");
+        assert!(log.contains("[scan] incremental:"), "{log}");
+        assert!(log.contains("running sql frontend"), "{log}");
+        assert!(!log.contains("sql frontend failed"), "{log}");
+        let left = graphed_at(&repo, helper);
+        assert!(left.is_empty(), "(iii) deleted file rows remain: {left:?}");
+        let unres = query_rows(
+            &repo,
+            "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) WHERE a.fqn = 'sql.Legacy/Legacy.sqlproj.app.GetOrders' AND u.fqn = 'app.Helper' RETURN u.category",
+        );
+        assert_eq!(
+            column(&unres, "u.category"),
+            vec!["external"],
+            "(iii) GetOrders -> app.Helper unresolved"
+        );
+        let inc = sql_facts(&repo);
+        assert_ne!(inc, before, "(iii) the deletion must be observed");
+        let (out, log) = scan(&repo, &["--language", "sql", "--force"]);
+        assert!(out.status.success(), "(iii) full scan: {log}");
+        assert_facts_eq(&inc, &sql_facts(&repo), "(iii) deletion");
     }
 }
