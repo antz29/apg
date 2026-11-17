@@ -253,6 +253,17 @@ namespace Apg.SqlFrontend
                 unit.Call(name, Functions, f, false);
             }
 
+            // ScriptDom parses LEFT(...) and RIGHT(...) into their own nodes, not FunctionCall; both are builtins too.
+            public override void Visit(LeftFunctionCall f)
+            {
+                if (collect && types) unit.Builtin("LEFT", f);
+            }
+
+            public override void Visit(RightFunctionCall f)
+            {
+                if (collect && types) unit.Builtin("RIGHT", f);
+            }
+
             public override void Visit(SchemaObjectFunctionTableReference n)
             {
                 if (collect && types) unit.Call(n.SchemaObject, Functions, n, false);

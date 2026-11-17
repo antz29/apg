@@ -380,6 +380,7 @@ namespace SqlFrontend.Tests
                 ("RefsSynonyms", TestRefsSynonyms),
                 ("RefsTopLevelOutsideUnits", TestRefsTopLevelOutsideUnits),
                 ("UnresolvedBuiltins", TestUnresolvedBuiltins),
+                ("UnresolvedBuiltinLeftRight", TestUnresolvedBuiltinLeftRight),
                 ("UnresolvedExternals", TestUnresolvedExternals),
                 ("UnresolvedTypes", TestUnresolvedTypes),
             };
@@ -1029,6 +1030,21 @@ namespace SqlFrontend.Tests
                     "EXEC @proc;",
                     "EXEC sp_executesql N'SELECT * FROM dbo.Missing';"))),
                 "dynamic EXEC gives nothing; sp_executesql one builtin call, its string unread");
+        }
+
+        // LEFT and RIGHT are their own ScriptDom nodes, yet builtins like SUBSTRING; a view still yields no call.
+        static void TestUnresolvedBuiltinLeftRight()
+        {
+            Eq(Sorted(
+                "unresolved LEFT builtin",
+                "unresolved RIGHT builtin",
+                "unresolved SUBSTRING builtin",
+                $"unresolved_call {D}Strs -> LEFT",
+                $"unresolved_call {D}Strs -> RIGHT",
+                $"unresolved_call {D}Strs -> SUBSTRING"),
+                Refs(EmitOne(Sql("CREATE PROCEDURE dbo.Strs AS SELECT LEFT('a', 1), right('b', 1), SUBSTRING('c', 1, 1), left('d', 1)"))),
+                "LEFT, RIGHT and SUBSTRING: one builtin record and one call each");
+            Eq("", Refs(EmitOne(Sql("CREATE VIEW dbo.VStrs AS SELECT LEFT('a', 1) AS x"))), "a view's LEFT gives no unresolved call");
         }
 
         static void TestUnresolvedExternals()
