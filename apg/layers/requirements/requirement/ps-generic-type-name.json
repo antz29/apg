@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-generic-type-name",
-  "body": "A generic type such as List[int] is its type name without type arguments for resolution, System-type classification and unresolved-target naming, so all its instantiations share one unresolved target.",
+  "body": "A generic type such as System.Collections.Generic.List[int] is named System.Collections.Generic.List for resolution, System-type classification and unresolved-target naming, one unresolved target per generic type.",
   "properties": {
     "feature": "ps-frontend"
   },
