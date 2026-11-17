@@ -90,27 +90,8 @@ fn dump(src: &str) -> String {
     let tree = parse(src);
     let mut out = String::new();
     render(tree.root_node(), None, src, &mut out);
-    ABBREVIATIONS
-        .iter()
-        .fold(out, |out, (chain, short)| out.replace(chain, short))
+    out
 }
-
-/// The grammar's single-child precedence chains, abbreviated in `dump` output
-/// in this order (exact substrings, so every kind stays pinned).
-const ABBREVIATIONS: &[(&str, &str)] = &[
-    (
-        "logical_expression>bitwise_expression>comparison_expression>additive_expression>multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression",
-        "<expr>",
-    ),
-    (
-        "logical_expression>bitwise_expression>comparison_expression>additive_expression>multiplicative_expression>format_expression>range_expression>array_literal_expression",
-        "<list>",
-    ),
-    (
-        "argument_expression>logical_argument_expression>bitwise_argument_expression>comparison_argument_expression>additive_argument_expression>multiplicative_argument_expression>format_argument_expression>range_argument_expression>unary_expression",
-        "<arg>",
-    ),
-];
 
 /// Asserts each `(source, expected dump)` pair, reporting every mismatch.
 fn check(cases: &[(&str, &str)]) {
@@ -135,19 +116,19 @@ mod unit {
         check(&[
             (
                 DOT_SOURCING,
-                "program>statement_list(pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>path_command_name(variable\"$PSScriptRoot\" path_command_name_token\"\\\\lib.ps1\")) pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>command_name\"./other.ps1\"))",
+                "source_file(pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\")))) pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>bare_word\"./other.ps1\"))))",
             ),
             (
                 USING_MODULE,
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"using\" command_elements:command_elements(command_argument_sep>' ' generic_token\"module\" command_argument_sep>' ' generic_token\"./Foo.psm1\"))",
+                "source_file>using_statement('using' kind:'module' value:command_argument>bare_word\"./Foo.psm1\")",
             ),
             (
                 DSC_CONFIG,
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"configuration\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Web\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Node\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'localhost'\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"File\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Site\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"DestinationPath\" command_elements:command_elements(command_argument_sep>' ' generic_token\"=\" command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'C:\\\\site'\"))))))))))))))",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"Web\" body:script_block>node_statement(keyword:'node' name:single_quoted_string\"'localhost'\" body:script_block>resource_statement(type:type_identifier\"File\" name:bare_word\"Site\" body:resource_body(properties:hash_entry(key:identifier\"DestinationPath\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'C:\\\\site'\")))))))",
             ),
             (
                 MANIFEST,
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"RootModule\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Foo.psm1'\") hash_entry(key_expression>simple_name\"NestedModules\" '=' pipeline>pipeline_chain><expr>>array_expression('@(' statements:statement_list>pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'lib\\\\Helpers.ps1'\")) hash_entry(key_expression>simple_name\"FunctionsToExport\" '=' pipeline>pipeline_chain><expr>>array_expression('@(' statements:statement_list>pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Get-Foo'\"))))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"RootModule\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Foo.psm1'\"))) hash_entry(key:identifier\"NestedModules\" '=' value:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:single_quoted_string\"'lib\\\\Helpers.ps1'\")))))) hash_entry(key:identifier\"FunctionsToExport\" '=' value:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:single_quoted_string\"'Get-Foo'\")))))))))",
             ),
         ]);
     }
@@ -156,7 +137,7 @@ mod unit {
     fn a_script_root() {
         check(&[(
             "param($a, [int]$b)\nGet-A\n$x = 1\n",
-            "program(param_block('param' parameter_list(script_parameter>variable\"$a\" ',' script_parameter(attribute_list>attribute>type_literal>type_spec>type_name>type_identifier\"int\" variable\"$b\"))) statement_list(pipeline>pipeline_chain>command(command_name:command_name\"Get-A\") pipeline>assignment_expression(left_assignment_expression><expr>>variable\"$x\" assignement_operator>'=' value:pipeline>pipeline_chain><expr>>integer_literal>decimal_integer_literal\"1\")))",
+            "source_file(param_block('param' parameters:parameter_list(parameter(name:variable\"$a\") ',' parameter(types:type_literal>type_name(name:type_identifier\"int\") name:variable\"$b\"))) pipeline(elements:command(name:command_name>bare_word\"Get-A\")) assignment_statement(left:variable\"$x\" operator:'=' right:pipeline(elements:command_expression(expression:integer_literal\"1\"))))",
         )]);
     }
 
@@ -165,31 +146,31 @@ mod unit {
         check(&[
             (
                 "function F($a) { Get-A }",
-                "program>statement_list>function_statement('function' function_name\"F\" function_parameter_declaration>parameter_list>script_parameter>variable\"$a\" script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-A\"))))",
+                "source_file>function_definition(keyword:'function' name:function_name\"F\" parameters:parameter_list>parameter(name:variable\"$a\") body:script_block>pipeline(elements:command(name:command_name>bare_word\"Get-A\")))",
             ),
             (
                 "function F { param($a) Get-A }",
-                "program>statement_list>function_statement('function' function_name\"F\" script_block(param_block('param' parameter_list>script_parameter>variable\"$a\") ERROR(simple_name\" Get\" '-' simple_name\"A\")))",
+                "source_file>function_definition(keyword:'function' name:function_name\"F\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"Get-A\"))))",
             ),
             (
                 "function F {\n  param($a)\n  Get-A\n}",
-                "program>statement_list>function_statement('function' function_name\"F\" script_block(param_block('param' parameter_list>script_parameter>variable\"$a\") script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-A\"))))",
+                "source_file>function_definition(keyword:'function' name:function_name\"F\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"Get-A\"))))",
             ),
             (
                 "filter Fl { $_ }",
-                "program>statement_list>function_statement('filter' function_name\"Fl\" script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain><expr>>variable>'$_')))",
+                "source_file>function_definition(keyword:'filter' name:function_name\"Fl\" body:script_block>pipeline(elements:command_expression(expression:variable\"$_\")))",
             ),
             (
                 "workflow W { param($a) Get-A }",
-                "program>statement_list>function_statement('workflow' function_name\"W\" script_block(param_block('param' parameter_list>script_parameter>variable\"$a\") ERROR(simple_name\" Get\" '-' simple_name\"A\")))",
+                "source_file>function_definition(keyword:'workflow' name:function_name\"W\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"Get-A\"))))",
             ),
             (
                 "workflow W {\n  param($a)\n  Get-A\n}",
-                "program>statement_list>function_statement('workflow' function_name\"W\" script_block(param_block('param' parameter_list>script_parameter>variable\"$a\") script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-A\"))))",
+                "source_file>function_definition(keyword:'workflow' name:function_name\"W\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"Get-A\"))))",
             ),
             (
                 "function Outer { function Inner { } Inner }",
-                "program>statement_list>function_statement('function' function_name\"Outer\" script_block(script_block_body:script_block_body(statement_list:statement_list(function_statement('function' function_name\"Inner\") pipeline>pipeline_chain>command(command_name:command_name\"Inner\")))))",
+                "source_file>function_definition(keyword:'function' name:function_name\"Outer\" body:script_block(function_definition(keyword:'function' name:function_name\"Inner\" body:script_block\"{ }\") pipeline(elements:command(name:command_name>bare_word\"Inner\"))))",
             ),
         ]);
     }
@@ -199,23 +180,23 @@ mod unit {
         check(&[
             (
                 "function global:Foo { }",
-                "program>statement_list>function_statement('function' function_name\"global:Foo\")",
+                "source_file>function_definition(keyword:'function' name:function_name\"global:Foo\" body:script_block\"{ }\")",
             ),
             (
                 "function script:Foo { }",
-                "program>statement_list>function_statement('function' function_name\"script:Foo\")",
+                "source_file>function_definition(keyword:'function' name:function_name\"script:Foo\" body:script_block\"{ }\")",
             ),
             (
                 "function local:Foo { }",
-                "program>statement_list>function_statement('function' function_name\"local:Foo\")",
+                "source_file>function_definition(keyword:'function' name:function_name\"local:Foo\" body:script_block\"{ }\")",
             ),
             (
                 "function private:Foo { }",
-                "program>statement_list>function_statement('function' function_name\"private:Foo\")",
+                "source_file>function_definition(keyword:'function' name:function_name\"private:Foo\" body:script_block\"{ }\")",
             ),
             (
                 "script:Foo -X 1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"script:Foo\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-X\" command_argument_sep>' ' array_literal_expression>unary_expression>integer_literal>decimal_integer_literal\"1\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"script:Foo\" command_parameter(name:command_parameter_name\"-X\") command_argument>integer_literal\"1\"))",
             ),
         ]);
     }
@@ -225,11 +206,11 @@ mod unit {
         check(&[
             (
                 "class C : B, I {\n  [Foo]$P\n  $U\n  C([int]$x, $y) { }\n  [void] M([int]$x, $y) { }\n  static [int] S() { return 1 }\n}",
-                "program>statement_list>class_statement(simple_name\"C\" ':' simple_name\"B\" ',' simple_name\"I\" class_property_definition(type_literal>type_spec>type_name>type_identifier\"Foo\" variable\"$P\") class_property_definition>variable\"$U\" class_method_definition(simple_name\"C\" class_method_parameter_list(class_method_parameter(type_literal>type_spec>type_name>type_identifier\"int\" variable\"$x\") ',' class_method_parameter>variable\"$y\")) class_method_definition(type_literal>type_spec>type_name>type_identifier\"void\" simple_name\"M\" class_method_parameter_list(class_method_parameter(type_literal>type_spec>type_name>type_identifier\"int\" variable\"$x\") ',' class_method_parameter>variable\"$y\")) class_method_definition(class_attribute\"static\" type_literal>type_spec>type_name>type_identifier\"int\" simple_name\"S\" script_block(script_block_body:script_block_body(statement_list:statement_list>flow_control_statement('return' pipeline>pipeline_chain><expr>>integer_literal>decimal_integer_literal\"1\")))))",
+                "source_file>class_definition('class' name:identifier\"C\" ':' base_types:type_name(name:type_identifier\"B\") ',' base_types:type_name(name:type_identifier\"I\") body:class_body(members:class_property(types:type_literal>type_name(name:type_identifier\"Foo\") name:variable\"$P\") members:class_property(name:variable\"$U\") members:class_method(name:identifier\"C\" parameters:parameter_list(parameter(types:type_literal>type_name(name:type_identifier\"int\") name:variable\"$x\") ',' parameter(name:variable\"$y\")) body:statement_block\"{ }\") members:class_method(return_type:type_literal>type_name(name:type_identifier\"void\") name:identifier\"M\" parameters:parameter_list(parameter(types:type_literal>type_name(name:type_identifier\"int\") name:variable\"$x\") ',' parameter(name:variable\"$y\")) body:statement_block\"{ }\") members:class_method(modifiers:'static' return_type:type_literal>type_name(name:type_identifier\"int\") name:identifier\"S\" parameters:parameter_list\"()\" body:statement_block>return_statement(keyword:'return' value:pipeline(elements:command_expression(expression:integer_literal\"1\"))))))",
             ),
             (
                 "enum E { A\n B = 2 }",
-                "program>statement_list>enum_statement(simple_name\"E\" enum_member>simple_name\"A\" enum_member(simple_name\"B\" '=' integer_literal>decimal_integer_literal\"2\"))",
+                "source_file>enum_definition('enum' name:identifier\"E\" body:enum_body(members:enum_member(name:identifier\"A\") members:enum_member(name:identifier\"B\" '=' value:integer_literal\"2\")))",
             ),
         ]);
     }
@@ -239,15 +220,15 @@ mod unit {
         check(&[
             (
                 "[T]::M($a)",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(type_literal>type_spec>type_name>type_identifier\"T\" '::' member_name>simple_name\"M\" argument_list(argument_expression_list:argument_expression_list><arg>>variable\"$a\"))",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"T\") operator:'::' member:identifier\"M\") arguments:argument_list>variable\"$a\")))",
             ),
             (
                 "[T]::new($a)",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(type_literal>type_spec>type_name>type_identifier\"T\" '::' member_name>simple_name\"new\" argument_list(argument_expression_list:argument_expression_list><arg>>variable\"$a\"))",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"T\") operator:'::' member:identifier\"new\") arguments:argument_list>variable\"$a\")))",
             ),
             (
                 "$this.M($a, $b)",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(variable\"$this\" '.' member_name>simple_name\"M\" argument_list(argument_expression_list:argument_expression_list(<arg>>variable\"$a\" ',' <arg>>variable\"$b\")))",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:variable\"$this\" operator:'.' member:identifier\"M\") arguments:argument_list(variable\"$a\" ',' variable\"$b\"))))",
             ),
         ]);
     }
@@ -257,35 +238,35 @@ mod unit {
         check(&[
             (
                 "& { Get-A }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-A\"))))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>script_block>pipeline(elements:command(name:command_name>bare_word\"Get-A\")))))",
             ),
             (
                 "& $sb",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>path_command_name>variable\"$sb\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>variable\"$sb\")))",
             ),
             (
                 "& ('a' + 'b')",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>parenthesized_expression>pipeline>pipeline_chain>logical_expression>bitwise_expression>comparison_expression>additive_expression(additive_expression>multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'a'\" '+' multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'b'\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>parenthesized_expression>pipeline(elements:command_expression(expression:binary_expression(left:single_quoted_string\"'a'\" operator:'+' right:single_quoted_string\"'b'\"))))))",
             ),
             (
                 "& 'C:\\x.ps1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>string_literal>verbatim_string_characters\"'C:\\\\x.ps1'\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>single_quoted_string\"'C:\\\\x.ps1'\")))",
             ),
             (
                 ". { Get-A }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-A\"))))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>script_block>pipeline(elements:command(name:command_name>bare_word\"Get-A\")))))",
             ),
             (
                 ". $sb",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>path_command_name>variable\"$sb\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>variable\"$sb\")))",
             ),
             (
                 ". ('a' + 'b')",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>parenthesized_expression>pipeline>pipeline_chain>logical_expression>bitwise_expression>comparison_expression>additive_expression(additive_expression>multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'a'\" '+' multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'b'\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>parenthesized_expression>pipeline(elements:command_expression(expression:binary_expression(left:single_quoted_string\"'a'\" operator:'+' right:single_quoted_string\"'b'\"))))))",
             ),
             (
                 ". 'lib.ps1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>verbatim_string_characters\"'lib.ps1'\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>single_quoted_string\"'lib.ps1'\")))",
             ),
         ]);
     }
@@ -295,63 +276,63 @@ mod unit {
         check(&[
             (
                 ". ./lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>command_name\"./lib.ps1\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>bare_word\"./lib.ps1\")))",
             ),
             (
                 ". './lib.ps1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>verbatim_string_characters\"'./lib.ps1'\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>single_quoted_string\"'./lib.ps1'\")))",
             ),
             (
                 ". \"./lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>expandable_string_literal\"\\\"./lib.ps1\\\"\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>expandable_string('\"' string_content\"./lib.ps1\" '\"'))))",
             ),
             (
                 ". $PSScriptRoot\\lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>path_command_name(variable\"$PSScriptRoot\" path_command_name_token\"\\\\lib.ps1\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\"))))",
             ),
             (
                 ". \"$PSScriptRoot/lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>expandable_string_literal>variable\"$PSScriptRoot\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>expandable_string('\"' variable\"$PSScriptRoot\" string_content\"/lib.ps1\" '\"'))))",
             ),
             (
                 "Import-Module ./lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"./lib.ps1\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"./lib.ps1\"))",
             ),
             (
                 "Import-Module './lib.ps1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'./lib.ps1'\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>single_quoted_string\"'./lib.ps1'\"))",
             ),
             (
                 "Import-Module \"./lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>expandable_string_literal\"\\\"./lib.ps1\\\"\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>expandable_string('\"' string_content\"./lib.ps1\" '\"')))",
             ),
             (
                 "Import-Module $PSScriptRoot\\lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>member_access(variable\"$PSScriptRoot\" ERROR('\\' simple_name\"lib\") '.' member_name>simple_name\"ps1\")))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\")))",
             ),
             (
                 "Import-Module \"$PSScriptRoot/lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>expandable_string_literal>variable\"$PSScriptRoot\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>expandable_string('\"' variable\"$PSScriptRoot\" string_content\"/lib.ps1\" '\"')))",
             ),
             (
                 "Import-Module -Name ./lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>' ' generic_token\"./lib.ps1\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\") command_argument>bare_word\"./lib.ps1\"))",
             ),
             (
                 "Import-Module -Name './lib.ps1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'./lib.ps1'\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\") command_argument>single_quoted_string\"'./lib.ps1'\"))",
             ),
             (
                 "Import-Module -Name \"./lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>expandable_string_literal\"\\\"./lib.ps1\\\"\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\") command_argument>expandable_string('\"' string_content\"./lib.ps1\" '\"')))",
             ),
             (
                 "Import-Module -Name $PSScriptRoot\\lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>' ' array_literal_expression>unary_expression>member_access(variable\"$PSScriptRoot\" ERROR('\\' simple_name\"lib\") '.' member_name>simple_name\"ps1\")))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\") command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\")))",
             ),
             (
                 "Import-Module -Name \"$PSScriptRoot/lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>expandable_string_literal>variable\"$PSScriptRoot\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\") command_argument>expandable_string('\"' variable\"$PSScriptRoot\" string_content\"/lib.ps1\" '\"')))",
             ),
         ]);
     }
@@ -361,23 +342,23 @@ mod unit {
         check(&[
             (
                 "Get-Foo -Name x 'y' $z",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-Foo\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>' ' generic_token\"x\" command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'y'\" command_argument_sep>' ' array_literal_expression>unary_expression>variable\"$z\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Get-Foo\" command_parameter(name:command_parameter_name\"-Name\") command_argument>bare_word\"x\" command_argument>single_quoted_string\"'y'\" command_argument>variable\"$z\"))",
             ),
             (
                 "using module Foo",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"using\" command_elements:command_elements(command_argument_sep>' ' generic_token\"module\" command_argument_sep>' ' generic_token\"Foo\"))",
+                "source_file>using_statement('using' kind:'module' value:command_argument>bare_word\"Foo\")",
             ),
             (
                 "using module 'Foo.psm1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"using\" command_elements:command_elements(command_argument_sep>' ' generic_token\"module\" command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'Foo.psm1'\"))",
+                "source_file>using_statement('using' kind:'module' value:single_quoted_string\"'Foo.psm1'\")",
             ),
             (
                 "configuration C { }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"configuration\" command_elements:command_elements(command_argument_sep>' ' generic_token\"C\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>empty_statement>MISSING ';'))))",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block\"{ }\")",
             ),
             (
                 "@{ A = 1; 'B' = 'x'; C = @('y') }",
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"A\" '=' pipeline>pipeline_chain><expr>>integer_literal>decimal_integer_literal\"1\") hash_entry(key_expression>unary_expression>string_literal>verbatim_string_characters\"'B'\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'x'\") hash_entry(key_expression>simple_name\"C\" '=' pipeline>pipeline_chain><expr>>array_expression('@(' statements:statement_list>pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'y'\"))))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"A\" '=' value:pipeline(elements:command_expression(expression:integer_literal\"1\"))) hash_entry(key:single_quoted_string\"'B'\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'x'\"))) hash_entry(key:identifier\"C\" '=' value:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:single_quoted_string\"'y'\")))))))))",
             ),
         ]);
     }
@@ -397,26 +378,24 @@ mod unit {
         assert_eq!(
             got,
             [
-                vec![
-                    "ERROR \"function F { Get-A\\n$x = (1 + \\n\"",
-                    "ERROR \"\\n\""
-                ],
-                vec!["MISSING }"],
-                vec!["ERROR \"(1 + 2\""],
-                vec!["ERROR \"$x = @(1\""],
+                vec!["ERROR \"function F { Get-A\\n$x = (1 + \\n\""],
+                vec!["ERROR \"function F {\""],
+                vec!["MISSING )"],
+                vec!["MISSING )"],
                 vec!["MISSING }"],
                 vec!["MISSING }"],
-                vec!["ERROR \"$x = \""],
+                vec!["ERROR \"=\""],
             ]
         );
+        // A file ending inside nested unclosed constructs is wholly one ERROR region.
         let dumps = [
-            "ERROR('function' function_name\"F\" pipeline>pipeline_chain>command(command_name:command_name\"Get-A\") left_assignment_expression><expr>>variable\"$x\" assignement_operator>'=' additive_expression>multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>integer_literal>decimal_integer_literal\"1\" '+' ERROR\"\\n\")",
-            "program>statement_list>function_statement('function' function_name\"F\" MISSING '}')",
-            "ERROR>bitwise_expression>comparison_expression>additive_expression(additive_expression>multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>integer_literal>decimal_integer_literal\"1\" '+' multiplicative_expression>format_expression>range_expression>array_literal_expression>unary_expression>integer_literal>decimal_integer_literal\"2\")",
-            "ERROR(left_assignment_expression><expr>>variable\"$x\" assignement_operator>'=' '@(' statement_list>pipeline>pipeline_chain><expr>>integer_literal>decimal_integer_literal\"1\")",
-            "program>statement_list>if_statement('if' condition:pipeline>pipeline_chain><expr>>variable\"$x\" statement_block>MISSING '}')",
-            "program>statement_list>class_statement(simple_name\"C\" MISSING '}')",
-            "ERROR(left_assignment_expression><expr>>variable\"$x\" assignement_operator>'=')",
+            "ERROR('function' function_name\"F\" pipeline(elements:command(name:command_name>bare_word\"Get-A\")) variable\"$x\" '=' integer_literal\"1\" '+')",
+            "source_file>ERROR('function' function_name\"F\")",
+            "source_file>pipeline(elements:command_expression(expression:parenthesized_expression(pipeline(elements:command_expression(expression:binary_expression(left:integer_literal\"1\" operator:'+' right:integer_literal\"2\"))) MISSING ')')))",
+            "source_file>assignment_statement(left:variable\"$x\" operator:'=' right:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:integer_literal\"1\")) MISSING ')'))))",
+            "source_file>if_statement('if' condition:condition>pipeline(elements:command_expression(expression:variable\"$x\")) body:statement_block>MISSING '}')",
+            "source_file>class_definition('class' name:identifier\"C\" body:class_body>MISSING '}')",
+            "source_file(pipeline(elements:command_expression(expression:variable\"$x\")) ERROR>'=')",
         ];
         check(&srcs.into_iter().zip(dumps).collect::<Vec<_>>());
     }
@@ -426,27 +405,27 @@ mod unit {
         check(&[
             (
                 "Import-Module Foo -Force:$true",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\" command_argument_sep>' ' command_parameter\"-Force\" command_argument_sep>':' array_literal_expression>unary_expression>variable\"$true\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"Foo\" command_parameter(name:command_parameter_name\"-Force\" ':' value:command_argument>variable\"$true\")))",
             ),
             (
                 "Import-Module Foo -Force:$false",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\" command_argument_sep>' ' command_parameter\"-Force\" command_argument_sep>':' array_literal_expression>unary_expression>variable\"$false\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"Foo\" command_parameter(name:command_parameter_name\"-Force\" ':' value:command_argument>variable\"$false\")))",
             ),
             (
                 "Import-Module Foo -Prefix:P",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\" command_argument_sep>' ' command_parameter\"-Prefix\" command_argument_sep>':' generic_token\"P\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"Foo\" command_parameter(name:command_parameter_name\"-Prefix\" ':' value:command_argument>bare_word\"P\")))",
             ),
             (
                 "Import-Module -Name:Foo",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>':' generic_token\"Foo\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\" ':' value:command_argument>bare_word\"Foo\")))",
             ),
             (
                 "Import-Module -name:'./x.psm1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-name\" command_argument_sep>':' array_literal_expression>unary_expression>string_literal>verbatim_string_characters\"'./x.psm1'\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-name\" ':' value:command_argument>single_quoted_string\"'./x.psm1'\")))",
             ),
             (
                 "Import-Module -Name:$m",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Name\" command_argument_sep>':' array_literal_expression>unary_expression>variable\"$m\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\" ':' value:command_argument>variable\"$m\")))",
             ),
         ]);
     }
@@ -456,11 +435,11 @@ mod unit {
         check(&[
             (
                 "Import-Module -FullyQualifiedName @{ModuleName='Foo'; ModuleVersion='1.0'}",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-FullyQualifiedName\" command_argument_sep>' ' array_literal_expression>unary_expression>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"ModuleName\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Foo'\") hash_entry(key_expression>simple_name\"ModuleVersion\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'1.0'\")))))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-FullyQualifiedName\") command_argument>hashtable_expression('@{' hash_entry(key:identifier\"ModuleName\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Foo'\"))) hash_entry(key:identifier\"ModuleVersion\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'1.0'\"))))))",
             ),
             (
                 "Import-Module -FullyQualifiedName:@{ModuleName='Foo'}",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-FullyQualifiedName\" command_argument_sep>':' array_literal_expression>unary_expression>hash_literal_expression('@{' hash_literal_body>hash_entry(key_expression>simple_name\"ModuleName\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Foo'\"))))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-FullyQualifiedName\" ':' value:command_argument>hashtable_expression('@{' hash_entry(key:identifier\"ModuleName\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Foo'\")))))))",
             ),
         ]);
     }
@@ -470,47 +449,47 @@ mod unit {
         check(&[
             (
                 "ipmo Foo",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"ipmo\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"ipmo\" command_argument>bare_word\"Foo\"))",
             ),
             (
                 "import-module Foo",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"import-module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"import-module\" command_argument>bare_word\"Foo\"))",
             ),
             (
                 "Microsoft.PowerShell.Core\\Import-Module Foo",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Microsoft.PowerShell.Core\\\\Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Microsoft.PowerShell.Core\\\\Import-Module\" command_argument>bare_word\"Foo\"))",
             ),
             (
                 "Import-Module Foo -Force -Global -PassThru -Verbose -Debug -WhatIf -Confirm -Na Bar",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\" command_argument_sep>' ' command_parameter\"-Force\" command_argument_sep>' ' command_parameter\"-Global\" command_argument_sep>' ' command_parameter\"-PassThru\" command_argument_sep>' ' command_parameter\"-Verbose\" command_argument_sep>' ' command_parameter\"-Debug\" command_argument_sep>' ' command_parameter\"-WhatIf\" command_argument_sep>' ' command_parameter\"-Confirm\" command_argument_sep>' ' command_parameter\"-Na\" command_argument_sep>' ' generic_token\"Bar\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"Foo\" command_parameter(name:command_parameter_name\"-Force\") command_parameter(name:command_parameter_name\"-Global\") command_parameter(name:command_parameter_name\"-PassThru\") command_parameter(name:command_parameter_name\"-Verbose\") command_parameter(name:command_parameter_name\"-Debug\") command_parameter(name:command_parameter_name\"-WhatIf\") command_parameter(name:command_parameter_name\"-Confirm\") command_parameter(name:command_parameter_name\"-Na\") command_argument>bare_word\"Bar\"))",
             ),
             (
                 "Import-Module Foo -Prefix P",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"Foo\" command_argument_sep>' ' command_parameter\"-Prefix\" command_argument_sep>' ' generic_token\"P\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"Foo\" command_parameter(name:command_parameter_name\"-Prefix\") command_argument>bare_word\"P\"))",
             ),
             (
                 "Import-Module -ModuleInfo $mi",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-ModuleInfo\" command_argument_sep>' ' array_literal_expression>unary_expression>variable\"$mi\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-ModuleInfo\") command_argument>variable\"$mi\"))",
             ),
             (
                 "Import-Module A, B",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"A\" ',' generic_token\"B\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>array_literal_expression(command_argument>bare_word\"A\" ',' command_argument>bare_word\"B\")))",
             ),
             (
                 "Import-Module $m",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>variable\"$m\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>variable\"$m\"))",
             ),
             (
                 "Import-Module \"$x\\Foo.psm1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>string_literal>expandable_string_literal>variable\"$x\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>expandable_string('\"' variable\"$x\" string_content\"\\\\Foo.psm1\" '\"')))",
             ),
             (
                 "Import-Module (Join-Path $PSScriptRoot x.ps1)",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>parenthesized_expression>pipeline>pipeline_chain>command(command_name:command_name\"Join-Path\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>variable\"$PSScriptRoot\" command_argument_sep>' ' generic_token\"x.ps1\"))))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>parenthesized_expression>pipeline(elements:command(name:command_name>bare_word\"Join-Path\" command_argument>variable\"$PSScriptRoot\" command_argument>bare_word\"x.ps1\"))))",
             ),
             (
                 "Import-Module -Force",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-Force\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Force\")))",
             ),
         ]);
     }
@@ -520,23 +499,23 @@ mod unit {
         check(&[
             (
                 ". \"$psscriptroot\\lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>expandable_string_literal>variable\"$psscriptroot\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>expandable_string('\"' variable\"$psscriptroot\" string_content\"\\\\lib.ps1\" '\"'))))",
             ),
             (
                 ". \"$env:X\\lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>expandable_string_literal>variable\"$env:X\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>expandable_string('\"' variable\"$env:X\" string_content\"\\\\lib.ps1\" '\"'))))",
             ),
             (
                 ". \"$PSScriptRoot$x.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>expandable_string_literal(variable\"$PSScriptRoot\" variable\"$x\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>expandable_string('\"' variable\"$PSScriptRoot\" variable\"$x\" string_content\".ps1\" '\"'))))",
             ),
             (
                 ". \"$($x)\\lib.ps1\"",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>expandable_string_literal>sub_expression('$(' statements:statement_list>pipeline>pipeline_chain><expr>>variable\"$x\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>expandable_string('\"' interpolation(expression:sub_expression('$(' pipeline(elements:command_expression(expression:variable\"$x\")))) string_content\"\\\\lib.ps1\" '\"'))))",
             ),
             (
                 ". '$PSScriptRoot\\lib.ps1'",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>string_literal>verbatim_string_characters\"'$PSScriptRoot\\\\lib.ps1'\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>single_quoted_string\"'$PSScriptRoot\\\\lib.ps1'\")))",
             ),
         ]);
     }
@@ -546,27 +525,27 @@ mod unit {
         check(&[
             (
                 "# manifest\n@{ RootModule = 'Foo.psm1' }\n",
-                "program(comment\"# manifest\" statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body>hash_entry(key_expression>simple_name\"RootModule\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Foo.psm1'\")))",
+                "source_file(comment\"# manifest\" pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"RootModule\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Foo.psm1'\")))))))",
             ),
             (
                 "@{ 'RootModule' = 'Foo.psm1'; rootmodule = 'x' }",
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>unary_expression>string_literal>verbatim_string_characters\"'RootModule'\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Foo.psm1'\") hash_entry(key_expression>simple_name\"rootmodule\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'x'\")))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:single_quoted_string\"'RootModule'\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Foo.psm1'\"))) hash_entry(key:identifier\"rootmodule\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'x'\"))))))",
             ),
             (
                 "@{ NestedModules = 'a.ps1'; FunctionsToExport = 'Get-A' }",
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"NestedModules\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'a.ps1'\") hash_entry(key_expression>simple_name\"FunctionsToExport\" '=' pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Get-A'\")))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"NestedModules\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'a.ps1'\"))) hash_entry(key:identifier\"FunctionsToExport\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Get-A'\"))))))",
             ),
             (
                 "@{ NestedModules = @('a.ps1', 'b.ps1'); FunctionsToExport = @('Get-A') }",
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"NestedModules\" '=' pipeline>pipeline_chain><expr>>array_expression('@(' statements:statement_list>pipeline>pipeline_chain><list>(unary_expression>string_literal>verbatim_string_characters\"'a.ps1'\" ',' unary_expression>string_literal>verbatim_string_characters\"'b.ps1'\"))) hash_entry(key_expression>simple_name\"FunctionsToExport\" '=' pipeline>pipeline_chain><expr>>array_expression('@(' statements:statement_list>pipeline>pipeline_chain><expr>>string_literal>verbatim_string_characters\"'Get-A'\"))))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"NestedModules\" '=' value:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:array_literal_expression(single_quoted_string\"'a.ps1'\" ',' single_quoted_string\"'b.ps1'\"))))))) hash_entry(key:identifier\"FunctionsToExport\" '=' value:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:single_quoted_string\"'Get-A'\")))))))))",
             ),
             (
                 "@{ NestedModules = 'a.ps1', 'b.ps1'; FunctionsToExport = 'A', 'B' }",
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"NestedModules\" '=' pipeline>pipeline_chain><list>(unary_expression>string_literal>verbatim_string_characters\"'a.ps1'\" ',' unary_expression>string_literal>verbatim_string_characters\"'b.ps1'\")) hash_entry(key_expression>simple_name\"FunctionsToExport\" '=' pipeline>pipeline_chain><list>(unary_expression>string_literal>verbatim_string_characters\"'A'\" ',' unary_expression>string_literal>verbatim_string_characters\"'B'\"))))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"NestedModules\" '=' value:pipeline(elements:command_expression(expression:array_literal_expression(single_quoted_string\"'a.ps1'\" ',' single_quoted_string\"'b.ps1'\")))) hash_entry(key:identifier\"FunctionsToExport\" '=' value:pipeline(elements:command_expression(expression:array_literal_expression(single_quoted_string\"'A'\" ',' single_quoted_string\"'B'\")))))))",
             ),
             (
                 "@{ NestedModules = @(); FunctionsToExport = @() }",
-                "program>statement_list>pipeline>pipeline_chain><expr>>hash_literal_expression('@{' hash_literal_body(hash_entry(key_expression>simple_name\"NestedModules\" '=' pipeline>pipeline_chain><expr>>array_expression>'@(') hash_entry(key_expression>simple_name\"FunctionsToExport\" '=' pipeline>pipeline_chain><expr>>array_expression>'@(')))",
+                "source_file>pipeline(elements:command_expression(expression:hashtable_expression('@{' hash_entry(key:identifier\"NestedModules\" '=' value:pipeline(elements:command_expression(expression:array_expression>'@('))) hash_entry(key:identifier\"FunctionsToExport\" '=' value:pipeline(elements:command_expression(expression:array_expression>'@('))))))",
             ),
         ]);
     }
@@ -576,15 +555,15 @@ mod unit {
         check(&[
             (
                 "function C.M { }",
-                "program>statement_list>function_statement('function' function_name\"C.M\")",
+                "source_file>function_definition(keyword:'function' name:function_name\"C.M\" body:script_block\"{ }\")",
             ),
             (
                 "class C { [D[]]$Q }",
-                "program>statement_list>class_statement(simple_name\"C\" class_property_definition(type_literal>type_spec>array_type_name>type_name>type_identifier\"D\" variable\"$Q\"))",
+                "source_file>class_definition('class' name:identifier\"C\" body:class_body(members:class_property(types:type_literal>type_name(name:type_identifier\"D\") name:variable\"$Q\")))",
             ),
             (
                 "class C { M([System.Collections.Generic.List[string]]$l) { } }",
-                "program>statement_list>class_statement(simple_name\"C\" class_method_definition(simple_name\"M\" class_method_parameter_list>class_method_parameter(type_literal>type_spec(generic_type_name>type_name(type_name(type_name(type_name>type_identifier\"System\" '.' type_identifier\"Collections\") '.' type_identifier\"Generic\") '.' type_identifier\"List\") generic_type_arguments>type_spec>type_name>type_identifier\"string\") variable\"$l\")))",
+                "source_file>class_definition('class' name:identifier\"C\" body:class_body(members:class_method(name:identifier\"M\" parameters:parameter_list>parameter(types:type_literal>type_name(name:type_identifier\"System.Collections.Generic.List\" type_name(name:type_identifier\"string\")) name:variable\"$l\") body:statement_block\"{ }\")))",
             ),
         ]);
     }
@@ -594,19 +573,19 @@ mod unit {
         check(&[
             (
                 "function F { . ./a.ps1; Import-Module B }",
-                "program>statement_list>function_statement('function' function_name\"F\" script_block(script_block_body:script_block_body(statement_list:statement_list(pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>command_name\"./a.ps1\") empty_statement\";\" pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"B\"))))))",
+                "source_file>function_definition(keyword:'function' name:function_name\"F\" body:script_block(pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>bare_word\"./a.ps1\"))) pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"B\"))))",
             ),
             (
                 "class C { M() { . ./a.ps1; Import-Module B } }",
-                "program>statement_list>class_statement(simple_name\"C\" class_method_definition(simple_name\"M\" script_block(script_block_body:script_block_body(statement_list:statement_list(pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>command_name\"./a.ps1\") empty_statement\";\" pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"B\")))))))",
+                "source_file>class_definition('class' name:identifier\"C\" body:class_body(members:class_method(name:identifier\"M\" parameters:parameter_list\"()\" body:statement_block(pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>bare_word\"./a.ps1\"))) pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"B\"))))))",
             ),
             (
                 "$s = { . ./a.ps1; Import-Module B }",
-                "program>statement_list>pipeline>assignment_expression(left_assignment_expression><expr>>variable\"$s\" assignement_operator>'=' value:pipeline>pipeline_chain><expr>>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list(pipeline>pipeline_chain>command(command_invokation_operator>'.' command_name:command_name_expr>command_name\"./a.ps1\") empty_statement\";\" pipeline>pipeline_chain>command(command_name:command_name\"Import-Module\" command_elements:command_elements(command_argument_sep>' ' generic_token\"B\"))))))",
+                "source_file>assignment_statement(left:variable\"$s\" operator:'=' right:pipeline(elements:command_expression(expression:script_block(pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>bare_word\"./a.ps1\"))) pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"B\"))))))",
             ),
             (
                 "configuration C { Import-DscResource -ModuleName PSDesiredStateConfiguration }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"configuration\" command_elements:command_elements(command_argument_sep>' ' generic_token\"C\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Import-DscResource\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-ModuleName\" command_argument_sep>' ' generic_token\"PSDesiredStateConfiguration\"))))))",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block>import_dsc_resource_statement(keyword:'Import-DscResource' elements:command_parameter(name:command_parameter_name\"-ModuleName\") elements:command_argument>bare_word\"PSDesiredStateConfiguration\"))",
             ),
         ]);
     }
@@ -616,27 +595,27 @@ mod unit {
         check(&[
             (
                 "% { $_ }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"%\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain><expr>>variable>'$_'))))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"%\" command_argument>script_block>pipeline(elements:command_expression(expression:variable\"$_\"))))",
             ),
             (
                 "? { $_ }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"?\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain><expr>>variable>'$_'))))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"?\" command_argument>script_block>pipeline(elements:command_expression(expression:variable\"$_\"))))",
             ),
             (
                 "ls",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"ls\")",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"ls\"))",
             ),
             (
                 "Microsoft.PowerShell.Utility\\Write-Output x",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Microsoft.PowerShell.Utility\\\\Write-Output\" command_elements:command_elements(command_argument_sep>' ' generic_token\"x\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Microsoft.PowerShell.Utility\\\\Write-Output\" command_argument>bare_word\"x\"))",
             ),
             (
                 "./x.ps1 a",
-                "ERROR(command_invokation_operator>'.' '/' simple_name\"x\" '.' simple_name\"ps1\" simple_name\" a\")",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"./x.ps1\" command_argument>bare_word\"a\"))",
             ),
             (
                 "git.exe status",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"git.exe\" command_elements:command_elements(command_argument_sep>' ' generic_token\"status\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"git.exe\" command_argument>bare_word\"status\"))",
             ),
         ]);
     }
@@ -646,19 +625,19 @@ mod unit {
         check(&[
             (
                 "& Get-Foo -X 1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>path_command_name>path_command_name_token\"Get-Foo\" command_elements:command_elements(command_argument_sep>' ' command_parameter\"-X\" command_argument_sep>' ' array_literal_expression>unary_expression>integer_literal>decimal_integer_literal\"1\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>bare_word\"Get-Foo\") command_parameter(name:command_parameter_name\"-X\") command_argument>integer_literal\"1\"))",
             ),
             (
                 "& $PSScriptRoot\\lib.ps1",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>path_command_name(variable\"$PSScriptRoot\" path_command_name_token\"\\\\lib.ps1\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\"))))",
             ),
             (
                 "& $function:Foo",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>path_command_name>variable\"$function:Foo\")",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>variable\"$function:Foo\")))",
             ),
             (
                 "& (Get-X)",
-                "program>statement_list>pipeline>pipeline_chain>command(command_invokation_operator>'&' command_name:command_name_expr>parenthesized_expression>pipeline>pipeline_chain>command(command_name:command_name\"Get-X\"))",
+                "source_file>pipeline(elements:command(name:invocation_operator_command(operator:'&' command:command_argument>parenthesized_expression>pipeline(elements:command(name:command_name>bare_word\"Get-X\")))))",
             ),
         ]);
     }
@@ -668,11 +647,11 @@ mod unit {
         check(&[
             (
                 "Get-A | Get-B | Get-C",
-                "program>statement_list>pipeline>pipeline_chain(command(command_name:command_name\"Get-A\" command_elements:command_elements>command_argument_sep>' ') '|' command(command_name:command_name\"Get-B\" command_elements:command_elements>command_argument_sep>' ') '|' command(command_name:command_name\"Get-C\"))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Get-A\") '|' elements:command(name:command_name>bare_word\"Get-B\") '|' elements:command(name:command_name>bare_word\"Get-C\"))",
             ),
             (
                 "Get-A { Get-B }",
-                "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-A\" command_elements:command_elements(command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Get-B\")))))",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Get-A\" command_argument>script_block>pipeline(elements:command(name:command_name>bare_word\"Get-B\"))))",
             ),
         ]);
     }
@@ -682,15 +661,15 @@ mod unit {
         check(&[
             (
                 "$this.M()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(variable\"$this\" '.' member_name>simple_name\"M\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:variable\"$this\" operator:'.' member:identifier\"M\") arguments:argument_list\"()\")))",
             ),
             (
                 "$this.M(@(1, 2), [Foo]::N(3, 4))",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(variable\"$this\" '.' member_name>simple_name\"M\" argument_list(argument_expression_list:argument_expression_list(<arg>>array_expression('@(' statements:statement_list>pipeline>pipeline_chain><list>(unary_expression>integer_literal>decimal_integer_literal\"1\" ',' unary_expression>integer_literal>decimal_integer_literal\"2\")) ',' <arg>>invokation_expression(type_literal>type_spec>type_name>type_identifier\"Foo\" '::' member_name>simple_name\"N\" argument_list(argument_expression_list:argument_expression_list(<arg>>integer_literal>decimal_integer_literal\"3\" ',' <arg>>integer_literal>decimal_integer_literal\"4\"))))))",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:variable\"$this\" operator:'.' member:identifier\"M\") arguments:argument_list(array_expression('@(' pipeline(elements:command_expression(expression:array_literal_expression(integer_literal\"1\" ',' integer_literal\"2\")))) ',' invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"Foo\") operator:'::' member:identifier\"N\") arguments:argument_list(integer_literal\"3\" ',' integer_literal\"4\"))))))",
             ),
             (
                 "$THIS.m(1)",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(variable\"$THIS\" '.' member_name>simple_name\"m\" argument_list(argument_expression_list:argument_expression_list><arg>>integer_literal>decimal_integer_literal\"1\"))",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:variable\"$THIS\" operator:'.' member:identifier\"m\") arguments:argument_list>integer_literal\"1\")))",
             ),
         ]);
     }
@@ -700,23 +679,23 @@ mod unit {
         check(&[
             (
                 "[T]::new()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(type_literal>type_spec>type_name>type_identifier\"T\" '::' member_name>simple_name\"new\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"T\") operator:'::' member:identifier\"new\") arguments:argument_list\"()\")))",
             ),
             (
                 "[T]::M()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(type_literal>type_spec>type_name>type_identifier\"T\" '::' member_name>simple_name\"M\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"T\") operator:'::' member:identifier\"M\") arguments:argument_list\"()\")))",
             ),
             (
                 "[T]::M(1, 2, 3)",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(type_literal>type_spec>type_name>type_identifier\"T\" '::' member_name>simple_name\"M\" argument_list(argument_expression_list:argument_expression_list(<arg>>integer_literal>decimal_integer_literal\"1\" ',' <arg>>integer_literal>decimal_integer_literal\"2\" ',' <arg>>integer_literal>decimal_integer_literal\"3\")))",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"T\") operator:'::' member:identifier\"M\") arguments:argument_list(integer_literal\"1\" ',' integer_literal\"2\" ',' integer_literal\"3\"))))",
             ),
             (
                 "[T]::P",
-                "program>statement_list>pipeline>pipeline_chain><expr>>member_access(type_literal>type_spec>type_name>type_identifier\"T\" '::' member_name>simple_name\"P\")",
+                "source_file>pipeline(elements:command_expression(expression:member_access(object:type_literal>type_name(name:type_identifier\"T\") operator:'::' member:identifier\"P\")))",
             ),
             (
                 "[System.Collections.Generic.List[int]]::new()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(type_literal>type_spec(generic_type_name>type_name(type_name(type_name(type_name>type_identifier\"System\" '.' type_identifier\"Collections\") '.' type_identifier\"Generic\") '.' type_identifier\"List\") generic_type_arguments>type_spec>type_name>type_identifier\"int\") '::' member_name>simple_name\"new\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:type_literal>type_name(name:type_identifier\"System.Collections.Generic.List\" type_name(name:type_identifier\"int\")) operator:'::' member:identifier\"new\") arguments:argument_list\"()\")))",
             ),
         ]);
     }
@@ -726,19 +705,19 @@ mod unit {
         check(&[
             (
                 "$x.M()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(variable\"$x\" '.' member_name>simple_name\"M\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:variable\"$x\" operator:'.' member:identifier\"M\") arguments:argument_list\"()\")))",
             ),
             (
                 "(Get-X).M()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(parenthesized_expression>pipeline>pipeline_chain>command(command_name:command_name\"Get-X\") '.' member_name>simple_name\"M\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:parenthesized_expression>pipeline(elements:command(name:command_name>bare_word\"Get-X\")) operator:'.' member:identifier\"M\") arguments:argument_list\"()\")))",
             ),
             (
                 "$this.P.Q()",
-                "program>statement_list>pipeline>pipeline_chain><expr>>invokation_expression(member_access(variable\"$this\" '.' member_name>simple_name\"P\") '.' member_name>simple_name\"Q\" argument_list\"()\")",
+                "source_file>pipeline(elements:command_expression(expression:invocation_expression(function:member_access(object:member_access(object:variable\"$this\" operator:'.' member:identifier\"P\") operator:'.' member:identifier\"Q\") arguments:argument_list\"()\")))",
             ),
             (
                 "$x.P",
-                "program>statement_list>pipeline>pipeline_chain><expr>>member_access(variable\"$x\" '.' member_name>simple_name\"P\")",
+                "source_file>pipeline(elements:command_expression(expression:member_access(object:variable\"$x\" operator:'.' member:identifier\"P\")))",
             ),
         ]);
     }
@@ -748,15 +727,15 @@ mod unit {
         check(&[
             (
                 "class C : System.Collections.Generic.List[int] { }",
-                "program>statement_list>class_statement(simple_name\"C\" ':' ERROR(simple_name\"System\" '.' simple_name\"Collections\" '.' simple_name\"Generic\" '.' simple_name\"List\") simple_name\"int\" ERROR\"]\")",
+                "source_file>class_definition('class' name:identifier\"C\" ':' base_types:type_name(name:type_identifier\"System.Collections.Generic.List\" type_name(name:type_identifier\"int\")) body:class_body\"{ }\")",
             ),
             (
                 "enum E : byte { A }",
-                "program>statement_list>enum_statement(ERROR(simple_name\"E\" ':') simple_name\" byte\" enum_member>simple_name\"A\")",
+                "source_file>enum_definition('enum' name:identifier\"E\" ':' underlying_type:type_name(name:type_identifier\"byte\") body:enum_body(members:enum_member(name:identifier\"A\")))",
             ),
             (
                 "class C { [int]$P = (Get-Count) }",
-                "program>statement_list>class_statement(simple_name\"C\" class_property_definition(type_literal>type_spec>type_name>type_identifier\"int\" variable\"$P\" '=' <expr>>parenthesized_expression>pipeline>pipeline_chain>command(command_name:command_name\"Get-Count\")))",
+                "source_file>class_definition('class' name:identifier\"C\" body:class_body(members:class_property(types:type_literal>type_name(name:type_identifier\"int\") name:variable\"$P\" '=' value:parenthesized_expression>pipeline(elements:command(name:command_name>bare_word\"Get-Count\")))))",
             ),
         ]);
     }
@@ -764,11 +743,10 @@ mod unit {
     #[test]
     fn x_dsc_resource_blocks() {
         let src = "configuration C { Node x { File f { } } }";
-        // An empty `{ }` script-block argument recovers with a MISSING `;`.
-        assert_eq!(errors(src), ["MISSING ;"]);
+        assert_eq!(errors(src), Vec::<String>::new());
         check(&[(
             src,
-            "program>statement_list>pipeline>pipeline_chain>command(command_name:command_name\"configuration\" command_elements:command_elements(command_argument_sep>' ' generic_token\"C\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"Node\" command_elements:command_elements(command_argument_sep>' ' generic_token\"x\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>pipeline>pipeline_chain>command(command_name:command_name\"File\" command_elements:command_elements(command_argument_sep>' ' generic_token\"f\" command_argument_sep>' ' array_literal_expression>unary_expression>script_block_expression>script_block(script_block_body:script_block_body(statement_list:statement_list>empty_statement>MISSING ';'))))))))))))",
+            "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block>node_statement(keyword:'node' name:bare_word\"x\" body:script_block>resource_statement(type:type_identifier\"File\" name:bare_word\"f\" body:resource_body\"{ }\")))",
         )]);
     }
 }

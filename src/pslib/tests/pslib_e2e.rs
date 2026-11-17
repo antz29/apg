@@ -106,11 +106,11 @@ mod e2e {
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
         assert_eq!(
-            texts(&tree, &src, "command_invokation_operator"),
-            [".", "."]
+            texts(&tree, &src, "invocation_operator_command"),
+            [". $PSScriptRoot\\lib.ps1", ". ./other.ps1"]
         );
         assert_eq!(
-            texts(&tree, &src, "command_name_expr"),
+            texts(&tree, &src, "command_argument"),
             ["$PSScriptRoot\\lib.ps1", "./other.ps1"]
         );
     }
@@ -122,29 +122,28 @@ mod e2e {
         let path = dir.write("Mod.psm1", b"using module ./Foo.psm1\n");
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
-        assert_eq!(texts(&tree, &src, "command_name"), ["using"]);
         assert_eq!(
-            texts(&tree, &src, "generic_token"),
-            ["module", "./Foo.psm1"]
+            texts(&tree, &src, "using_statement"),
+            ["using module ./Foo.psm1"]
         );
+        assert_eq!(texts(&tree, &src, "command_argument"), ["./Foo.psm1"]);
     }
 
     #[test]
     #[ignore = "e2e tier: real filesystem; run via cargo test e2e:: -- --ignored"]
     fn dsc_configuration_ps1() {
         let dir = Scratch::new("dsc");
-        // Non-empty resource body: an empty `{ }` argument yields a MISSING `;`.
         let path = dir.write(
             "web.ps1",
             b"configuration Web {\n    Node 'localhost' {\n        File Site {\n            DestinationPath = 'C:\\site'\n        }\n    }\n}\n",
         );
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
-        assert_eq!(
-            texts(&tree, &src, "command_name"),
-            ["configuration", "Node", "File", "DestinationPath"]
-        );
-        assert_eq!(texts(&tree, &src, "script_block").len(), 3);
+        assert_eq!(texts(&tree, &src, "configuration_definition").len(), 1);
+        assert_eq!(texts(&tree, &src, "node_statement").len(), 1);
+        assert_eq!(texts(&tree, &src, "type_identifier"), ["File"]);
+        assert_eq!(texts(&tree, &src, "resource_statement").len(), 1);
+        assert_eq!(texts(&tree, &src, "identifier"), ["DestinationPath"]);
     }
 
     #[test]
@@ -157,14 +156,22 @@ mod e2e {
         );
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
-        let first = &texts(&tree, &src, "statement_list")[0];
-        assert!(first.starts_with("@{"), "{first:?}");
+        let root = tree.root_node();
+        let pipeline = root.named_child(0).expect("pipeline");
+        let expr = pipeline.named_child(0).expect("command_expression");
+        let hash = expr.named_child(0).expect("hashtable_expression");
         assert_eq!(
-            texts(&tree, &src, "hash_literal_expression"),
-            [src.trim_end()]
+            [root.kind(), pipeline.kind(), expr.kind(), hash.kind()],
+            [
+                "source_file",
+                "pipeline",
+                "command_expression",
+                "hashtable_expression"
+            ]
         );
+        assert_eq!(texts(&tree, &src, "hashtable_expression"), [src.trim_end()]);
         assert_eq!(
-            texts(&tree, &src, "key_expression"),
+            texts(&tree, &src, "identifier"),
             ["RootModule", "NestedModules", "FunctionsToExport"]
         );
     }
@@ -179,9 +186,10 @@ mod e2e {
         assert_eq!(utf16, utf8);
         let (t8, t16) = (parse_clean(&utf8), parse_clean(&utf16));
         assert_eq!(t16.root_node().to_sexp(), t8.root_node().to_sexp());
+        assert_eq!(texts(&t16, &utf16, "command_name"), ["Write-Output"]);
         assert_eq!(
-            texts(&t16, &utf16, "command_name"),
-            ["Write-Output", "./lib.ps1"]
+            texts(&t16, &utf16, "invocation_operator_command"),
+            [". ./lib.ps1"]
         );
     }
 }

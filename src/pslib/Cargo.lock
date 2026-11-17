@@ -81,7 +81,7 @@ name = "psfrontend"
 version = "0.0.0"
 dependencies = [
  "tree-sitter",
- "tree-sitter-powershell",
+ "woodruffw-trough-tree-sitter-powershell",
 ]
 
 [[package]]
@@ -210,20 +210,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0af592be68c579aa78a16846bd19422978c3c52e438523d45ff5d1bff1f9d4a"
 
 [[package]]
-name = "tree-sitter-powershell"
-version = "0.26.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa49d15e5b291030a548447445e0547992eff1438e7cd9133bfec99a9ba962a9"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "woodruffw-trough-tree-sitter-powershell"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5904ee65902fd293f2e7ce1ff4ddc73e1a4e1711318468f57ee0d3cb7d357f10"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "zmij"

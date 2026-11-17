@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 tree-sitter = "=0.26.13"
-tree-sitter-powershell = "=0.26.6"
+woodruffw-trough-tree-sitter-powershell = "=0.1.6"
