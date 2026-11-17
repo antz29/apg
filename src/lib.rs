@@ -135,9 +135,9 @@ USAGE:
 
 SCAN OPTIONS:
   --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
-                               csharp, py, cobol (comma-separated or repeated;
-                               auto-detected for every language present if
-                               omitted)
+                               csharp, py, cobol, sql (comma-separated or
+                               repeated; auto-detected for every language
+                               present if omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
   --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
                                repeatable)
