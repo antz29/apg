@@ -10,86 +10,166 @@ namespace Apg.SqlFrontend
     // Pure unified-JSONL emitter over database scopes and in-memory .sql texts. No I/O.
     public static class SchemaEmitter
     {
+        // One emitted object of a scope: canonical spelling Schema.Name, its id and Function (true) or Struct kind.
+        public sealed record Declaration(string Schema, string Name, string Id, bool IsFunction);
+
         // rootDir: absolute, '/'-separated, no trailing separator. sources: repo-relative .sql path -> text.
-        public static void Emit(string rootDir, List<SqlProjectReader.Scope> scopes,
-            IReadOnlyDictionary<string, string> sources, string idPrefix, TextWriter stdout, TextWriter stderr)
+        // Returns each scope's declaration index: Schema.Name (ordinal-ignore-case) -> emitted declaration.
+        public static Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>> Emit(string rootDir,
+            List<SqlProjectReader.Scope> scopes, IReadOnlyDictionary<string, string> sources, string idPrefix,
+            TextWriter stdout, TextWriter stderr)
         {
-            new Run(rootDir, idPrefix, stdout).All(scopes, sources, stderr);
+            var run = new Run(rootDir, idPrefix, stdout, stderr);
+            run.All(scopes, sources);
+            return run.Index;
         }
 
         sealed class Run
         {
             readonly string root, prefix;
-            readonly TextWriter output;
-            readonly HashSet<string> modules = new HashSet<string>(StringComparer.Ordinal);
+            readonly TextWriter output, errors;
+            readonly HashSet<string> written = new HashSet<string>(StringComparer.Ordinal);
+            // Repo-relative module identity (ignore-case) -> first spelling and its (path, offset) declaration point.
+            readonly Dictionary<string, (string Fqn, string Path, int Offset)> modules =
+                new Dictionary<string, (string, string, int)>(StringComparer.OrdinalIgnoreCase);
+            // Repo-relative rendered FQN (ignore-case) -> what claimed it, for collision reports.
+            readonly Dictionary<string, string> claimed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            readonly Dictionary<SqlProjectReader.Scope, Dictionary<string, string>> firsts =
+                new Dictionary<SqlProjectReader.Scope, Dictionary<string, string>>();
+            public readonly Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>> Index =
+                new Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>>();
             int next;
 
-            public Run(string rootDir, string idPrefix, TextWriter stdout)
+            public Run(string rootDir, string idPrefix, TextWriter stdout, TextWriter stderr)
             {
-                root = rootDir; prefix = idPrefix; output = stdout;
+                root = rootDir; prefix = idPrefix; output = stdout; errors = stderr;
             }
 
             void Write(object record) => output.WriteLine(JsonSerializer.Serialize(record));
 
-            bool Module(string fqn)
+            string Rel(string identity) =>
+                identity == root ? "" : identity.StartsWith(root + "/", StringComparison.Ordinal) ? identity.Substring(root.Length + 1) : identity;
+
+            void Candidate(string fqn, string path, int offset)
             {
-                if (!modules.Add(fqn)) return false;
-                Write(new { type = "module", fqn });
-                return true;
+                string key = Rel(fqn);
+                if (modules.TryGetValue(key, out var first))
+                {
+                    int cmp = string.CompareOrdinal(path, first.Path);
+                    if (cmp > 0 || (cmp == 0 && offset >= first.Offset)) return;
+                }
+                modules[key] = (fqn, path, offset);
+            }
+
+            string Canonical(string fqn) => modules[Rel(fqn)].Fqn;
+
+            void Module(string fqn)
+            {
+                if (written.Add("module\n" + fqn)) Write(new { type = "module", fqn });
             }
 
             string ScopeModule(SqlProjectReader.Scope s) =>
                 s.ModuleIdentity.Length == 0 ? root : root + "/" + s.ModuleIdentity;
 
-            public void All(List<SqlProjectReader.Scope> scopes, IReadOnlyDictionary<string, string> sources, TextWriter stderr)
+            string Declared(SqlProjectReader.Scope s, string schema) => s.IsProject ? ScopeModule(s) + "." + schema : schema;
+
+            void Report(string rel, SqlSourceReader.Batch batch, TSqlFragment at, string message) =>
+                errors.WriteLine(SqlSourceReader.FormatDiagnostic(rel, batch.StartLine + at.StartLine - 1,
+                    at.StartLine == 1 ? batch.StartColumn + at.StartColumn - 1 : at.StartColumn, message));
+
+            public void All(List<SqlProjectReader.Scope> scopes, IReadOnlyDictionary<string, string> sources)
             {
                 var owner = new Dictionary<string, SqlProjectReader.Scope>(StringComparer.Ordinal);
                 foreach (var s in scopes)
                 {
-                    Module(ScopeModule(s));
+                    Candidate(ScopeModule(s), s.ModuleIdentity, -1);
                     foreach (var f in s.Files) owner[f] = s;
                 }
+                // First pass: parse every file and pick each module's first spelling before anything is emitted.
+                var files = new List<(string Path, string Text, SqlSourceReader.Result Result,
+                    List<(SqlSourceReader.Batch, TSqlStatement, (string, string, bool, List<(string, TSqlFragment)>))> Decls)>();
                 foreach (var path in owner.Keys.OrderBy(p => p, StringComparer.Ordinal))
                 {
                     if (!sources.TryGetValue(path, out var text)) continue;
                     var result = SqlSourceReader.Read(path, text);
-                    foreach (var d in result.Diagnostics) stderr.WriteLine(d);
-                    EmitFile(owner[path], path, text, result.Batches);
+                    var decls = new List<(SqlSourceReader.Batch, TSqlStatement, (string, string, bool, List<(string, TSqlFragment)>))>();
+                    foreach (var pb in result.Batches)
+                    {
+                        if (pb.Fragment is not TSqlScript script) continue;
+                        foreach (var stmt in script.Batches.SelectMany(b => b.Statements))
+                        {
+                            var decl = Declare(stmt, owner[path].DefaultSchema);
+                            if (decl == null) continue;
+                            decls.Add((pb.Batch, stmt, decl.Value));
+                            Candidate(Declared(owner[path], decl.Value.Item1), path, pb.Batch.StartOffset + stmt.StartOffset);
+                        }
+                    }
+                    files.Add((path, text, result, decls));
+                }
+                foreach (var m in modules) claimed[m.Key] = "module " + m.Value.Fqn;
+                foreach (var s in scopes)
+                {
+                    Module(Canonical(ScopeModule(s)));
+                    firsts[s] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    Index[s] = new Dictionary<string, Declaration>(StringComparer.OrdinalIgnoreCase);
+                }
+                foreach (var f in files)
+                {
+                    foreach (var d in f.Result.Diagnostics) errors.WriteLine(d);
+                    EmitFile(owner[f.Path], f.Path, f.Text, f.Decls);
                 }
             }
 
-            void EmitFile(SqlProjectReader.Scope scope, string rel, string text, List<SqlSourceReader.ParsedBatch> batches)
+            void EmitFile(SqlProjectReader.Scope scope, string rel, string text,
+                List<(SqlSourceReader.Batch, TSqlStatement, (string, string, bool, List<(string, TSqlFragment)>))> decls)
             {
-                string abs = root + "/" + rel, scopeModule = ScopeModule(scope);
+                string abs = root + "/" + rel, scopeModule = Canonical(ScopeModule(scope));
                 var map = new Positions(text);
                 Write(new { type = "file", path = abs, parent = scopeModule, start_line = 1, end_line = map.LineCount });
-                foreach (var pb in batches)
+                foreach (var (batch, stmt, (schema, name, isFunction, columns)) in decls)
                 {
-                    if (pb.Fragment is not TSqlScript script) continue;
-                    foreach (var stmt in script.Batches.SelectMany(b => b.Statements))
+                    string parent = Canonical(Declared(scope, schema));
+                    string spelled = parent.Substring(parent.Length - schema.Length);
+                    string identity = spelled + "." + name;
+                    var (start, end, sl, el) = map.Span(batch, stmt);
+                    if (firsts[scope].TryGetValue(identity, out var first))
                     {
-                        var decl = Declare(stmt, scope.DefaultSchema);
-                        if (decl == null) continue;
-                        var (schema, name, isFunction, columns) = decl.Value;
-                        string parent = scope.IsProject ? scopeModule + "." + schema : schema;
-                        if (Module(parent) && scope.IsProject)
-                            Write(new { type = "contains", from = scopeModule, to = parent });
-                        string id = prefix + (++next);
-                        var (start, end, sl, el) = map.Span(pb.Batch, stmt);
-                        if (isFunction)
-                            Write(new { type = "function", id, parent, name, @params = new string[0], file = abs, path = abs,
-                                start, end, start_line = sl, end_line = el });
-                        else
-                            Write(new { type = "struct", id, parent, name, path = abs, start, end, start_line = sl, end_line = el });
-                        foreach (var (column, fragment) in columns)
-                        {
-                            string cid = prefix + (++next);
-                            var (cs, ce, csl, cel) = map.Span(pb.Batch, fragment);
-                            Write(new { type = "struct", id = cid, parent = parent + "." + name, name = column, path = abs,
-                                start = cs, end = ce, start_line = csl, end_line = cel });
-                            Write(new { type = "contains", from = id, to = cid });
-                        }
+                        Report(rel, batch, stmt, $"repeated declaration of {first}");
+                        continue;
                     }
+                    firsts[scope][identity] = $"{identity}, first declared at {rel}:{sl}";
+                    string fqn = Rel(parent) + "." + name;
+                    if (claimed.TryGetValue(fqn, out var by))
+                    {
+                        Report(rel, batch, stmt, $"{identity} renders sql.{fqn}, already taken by {by}");
+                        continue;
+                    }
+                    claimed[fqn] = $"{identity} at {rel}:{sl}";
+                    Module(parent);
+                    if (scope.IsProject && written.Add("contains\n" + scopeModule + "\n" + parent))
+                        Write(new { type = "contains", from = scopeModule, to = parent });
+                    string id = prefix + (++next);
+                    if (isFunction)
+                        Write(new { type = "function", id, parent, name, @params = new string[0], file = abs, path = abs,
+                            start, end, start_line = sl, end_line = el });
+                    else
+                        Write(new { type = "struct", id, parent, name, path = abs, start, end, start_line = sl, end_line = el });
+                    foreach (var (column, fragment) in columns)
+                    {
+                        var (cs, ce, csl, cel) = map.Span(batch, fragment);
+                        string cfqn = fqn + "." + column;
+                        if (claimed.TryGetValue(cfqn, out var cby))
+                        {
+                            Report(rel, batch, fragment, $"{identity}.{column} renders sql.{cfqn}, already taken by {cby}");
+                            continue;
+                        }
+                        claimed[cfqn] = $"{identity}.{column} at {rel}:{csl}";
+                        string cid = prefix + (++next);
+                        Write(new { type = "struct", id = cid, parent = parent + "." + name, name = column, path = abs,
+                            start = cs, end = ce, start_line = csl, end_line = cel });
+                        Write(new { type = "contains", from = id, to = cid });
+                    }
+                    Index[scope][identity] = new Declaration(spelled, name, id, isFunction);
                 }
             }
         }
