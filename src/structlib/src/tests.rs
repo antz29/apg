@@ -459,7 +459,8 @@ mod unit {
         let code = [
             "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
             "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor",
-            "py", "pyi", "cob", "cbl", "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy",
+            "py", "pyi", "cob", "cbl", "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy", "sql", "SQL",
+            "Sql",
         ];
         for ext in code {
             assert_eq!(
@@ -491,6 +492,7 @@ mod unit {
             ("App.config", Some("xml")),
             ("a.resx", Some("xml")),
             ("X.CSPROJ", Some("xml")),
+            ("X.SQLPROJ", Some("xml")),
             ("a.sln", Some("sln")),
             ("X.SLN", Some("sln")),
             ("Dockerfile", Some("dockerfile")),
