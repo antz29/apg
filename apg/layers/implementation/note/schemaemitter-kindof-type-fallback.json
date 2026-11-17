@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schemaemitter-kindof-type-fallback",
+  "body": "KindOf classifies a declaring statement into the resolver's Kind by the same statement classes Declare accepts, checking table types before alias/CLR types, and maps any statement it does not recognise to Type; this holds because Declare admits only the nine declaring statement kinds. Upgrade KindOf alongside Declare whenever a new declaring statement kind is admitted, so it never silently becomes a Type.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.KindOf",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
