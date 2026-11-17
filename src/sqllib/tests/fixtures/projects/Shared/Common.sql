@@ -1,0 +1,1 @@
+CREATE TABLE Common (id INT)

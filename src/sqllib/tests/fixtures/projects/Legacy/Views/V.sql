@@ -1,0 +1,1 @@
+CREATE VIEW V AS SELECT id FROM Orders

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Apg.SqlFrontend;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
@@ -8,15 +9,45 @@ namespace SqlFrontend.Tests
 {
     /// Framework-free gate tests for the SQL frontend, run with `dotnet run` and this
     /// project's path (src/sqllib/tests/SqlFrontend.Tests.csproj). Prints FAIL lines and
-    /// exits non-zero on any failure. Every test here is pure in-memory.
+    /// exits non-zero on any failure. An optional argument selects one tier (unit, int or e2e;
+    /// none runs all three): unit and int are pure in-memory, e2e reads the committed fixtures.
     public static class TestMain
     {
         static int _failures;
         static int _checks;
 
-        public static int Main()
+        public static int Main(string[] args)
         {
-            var tests = new List<(string, Action)>
+            var tiers = new Dictionary<string, List<(string, Action)>>
+            {
+                ["unit"] = UnitTests(),
+                ["int"] = new List<(string, Action)>(),
+                ["e2e"] = new List<(string, Action)> { ("ProjectFixtureScopes", TestProjectFixtureScopes) },
+            };
+            if (args.Length > 1 || (args.Length == 1 && !tiers.ContainsKey(args[0])))
+            {
+                Console.WriteLine($"usage: SqlFrontend.Tests [unit|int|e2e] (got: {string.Join(" ", args)})");
+                return 2;
+            }
+            var tests = args.Length == 1 ? tiers[args[0]] : tiers.Values.SelectMany(t => t).ToList();
+            foreach (var (name, test) in tests)
+            {
+                int before = _failures;
+                try { test(); }
+                catch (Exception ex) { Fail($"{name}: unhandled exception {ex}"); }
+                Console.WriteLine($"{(_failures == before ? "ok  " : "FAIL")} {name}");
+            }
+            if (_failures == 0)
+            {
+                Console.WriteLine($"ALL TESTS PASSED ({tests.Count} tests, {_checks} checks)");
+                return 0;
+            }
+            Console.WriteLine($"{_failures} CHECK(S) FAILED");
+            return 1;
+        }
+
+        static List<(string, Action)> UnitTests() =>
+            new List<(string, Action)>
             {
                 ("NeutraliseSqlcmdLinesKeepsPositions", TestNeutraliseSqlcmdLinesKeepsPositions),
                 ("NeutraliseVariablesSameLength", TestNeutraliseVariablesSameLength),
@@ -36,21 +67,6 @@ namespace SqlFrontend.Tests
                 ("LooseScopeIdentity", TestLooseScopeIdentity),
                 ("ScopesPartitionInput", TestScopesPartitionInput),
             };
-            foreach (var (name, test) in tests)
-            {
-                int before = _failures;
-                try { test(); }
-                catch (Exception ex) { Fail($"{name}: unhandled exception {ex}"); }
-                Console.WriteLine($"{(_failures == before ? "ok  " : "FAIL")} {name}");
-            }
-            if (_failures == 0)
-            {
-                Console.WriteLine($"ALL TESTS PASSED ({tests.Count} tests, {_checks} checks)");
-                return 0;
-            }
-            Console.WriteLine($"{_failures} CHECK(S) FAILED");
-            return 1;
-        }
 
         static void Fail(string msg) { _failures++; Console.WriteLine("FAIL: " + msg); }
 
@@ -331,6 +347,55 @@ namespace SqlFrontend.Tests
             var proj = scopes.Single(s => s.IsProject && s.Files.Contains("db/a.sql"));
             Eq(("db/Db.sqlproj", "app"), (proj.ModuleIdentity, proj.DefaultSchema), "project scope identity/schema");
             Eq("db/Db.sqlproj", Owner(scopes, "db/B.SQL"), "upper-case .SQL project member");
+        }
+
+        // e2e: the committed tests/fixtures/projects tree, located from the test binary.
+        static string FixtureRoot(string name)
+        {
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, "SqlFrontend.Tests.csproj")))
+                    return Path.Combine(dir.FullName, "fixtures", name);
+            throw new InvalidOperationException("SqlFrontend.Tests.csproj not found above " + AppContext.BaseDirectory);
+        }
+
+        static void TestProjectFixtureScopes()
+        {
+            string root = FixtureRoot("projects");
+            var all = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Select(p => Path.GetRelativePath(root, p).Replace('\\', '/')).ToList();
+            var projs = all.Where(p => p.EndsWith(".sqlproj", StringComparison.OrdinalIgnoreCase)).ToList();
+            var sql = all.Where(p => p.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)).ToList();
+            var scopes = SqlProjectReader.Read(root, projs, sql);
+            // file -> (module identity, default schema, is project)
+            var expected = new Dictionary<string, (string, string, bool)>
+            {
+                ["Legacy/Tables/Orders.sql"] = ("Legacy/Legacy.sqlproj", "app", true),
+                ["Shared/Common.sql"] = ("Legacy/Legacy.sqlproj", "app", true),
+                ["Legacy/Tables/Old.sql"] = ("Legacy/Tables", "dbo", false),
+                ["Legacy/Views/V.sql"] = ("Legacy/Views", "dbo", false),
+                ["Legacy/Scripts/Pre.sql"] = ("Legacy/Scripts", "dbo", false),
+                ["Legacy/Scripts/Post.sql"] = ("Legacy/Scripts", "dbo", false),
+                ["Sdk/Tables/Customers.sql"] = ("Sdk/Sdk.sqlproj", "dbo", true),
+                ["Shared/Extra.sql"] = ("Sdk/Sdk.sqlproj", "dbo", true),
+                ["Sdk/Notes/Readme.sql"] = ("Sdk/Notes", "dbo", false),
+                ["Sdk/bin/Debug/Sdk.publish.sql"] = ("Sdk/bin/Debug", "dbo", false),
+                ["Sdk/obj/Debug/Generated.sql"] = ("Sdk/obj/Debug", "dbo", false),
+                ["Shared/Unlisted.sql"] = ("Shared", "dbo", false),
+                ["Other/Procs/GetAll.sql"] = ("Other/Other.sqlproj", "dbo", true),
+                ["scripts/seed.sql"] = ("scripts", "dbo", false),
+            };
+            Eq("Legacy/Legacy.sqlproj,Other/Other.sqlproj,Sdk/Sdk.sqlproj",
+                string.Join(",", projs.OrderBy(p => p, StringComparer.Ordinal)), "fixture projects");
+            Eq(string.Join(",", expected.Keys.OrderBy(p => p, StringComparer.Ordinal)),
+                string.Join(",", sql.OrderBy(p => p, StringComparer.Ordinal)), "fixture .sql files");
+            foreach (var (file, want) in expected)
+            {
+                var owners = scopes.Where(s => s.Files.Contains(file)).ToList();
+                Eq(1, owners.Count, $"{file} scoped once");
+                if (owners.Count == 1)
+                    Eq(want, (owners[0].ModuleIdentity, owners[0].DefaultSchema, owners[0].IsProject), $"{file} scope");
+            }
+            Eq(expected.Count, scopes.Sum(s => s.Files.Count), "no extra scoped files");
         }
     }
 }
