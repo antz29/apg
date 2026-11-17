@@ -377,6 +377,9 @@ namespace SqlFrontend.Tests
                 ("RefsCalls", TestRefsCalls),
                 ("RefsSynonyms", TestRefsSynonyms),
                 ("RefsTopLevelOutsideUnits", TestRefsTopLevelOutsideUnits),
+                ("UnresolvedBuiltins", TestUnresolvedBuiltins),
+                ("UnresolvedExternals", TestUnresolvedExternals),
+                ("UnresolvedTypes", TestUnresolvedTypes),
             };
 
         const string Root = "/repo";
@@ -702,11 +705,12 @@ namespace SqlFrontend.Tests
         static string Sorted(params string[] lines) => string.Join("\n", lines.OrderBy(l => l, StringComparer.Ordinal));
 
         // Every uses/calls edge after the records of both endpoints and every uses edge carrying properties.kind;
-        // every unresolved edge after its source record and an unresolved record naming its target.
+        // every unresolved edge after its source record and an unresolved record naming its target; one record per name.
         static void RefShape(List<JsonElement> recs)
         {
             var ids = new HashSet<string>(StringComparer.Ordinal);
             var unresolved = new HashSet<string>(StringComparer.Ordinal);
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var r in recs)
             {
                 string type = S(r, "type"), from = S(r, "from"), to = S(r, "to");
@@ -718,22 +722,33 @@ namespace SqlFrontend.Tests
                 }
                 else if (type == "unresolved_use" || type == "unresolved_call")
                     Eq(true, ids.Contains(from) && unresolved.Contains(to), $"{type} {from}->{to} follows its endpoints");
-                else if (type == "unresolved") unresolved.Add(S(r, "fqn"));
+                else if (type == "unresolved")
+                {
+                    unresolved.Add(S(r, "fqn"));
+                    Eq(true, names.Add(S(r, "fqn")), $"unresolved {S(r, "fqn")} appears once per name");
+                }
                 else if (S(r, "id") != null) ids.Add(S(r, "id"));
             }
         }
 
         const string D = "d/D.sqlproj.dbo.";
+        const string DA = "d/D.sqlproj.app.";
+        const string AppSchema = "<PropertyGroup><DefaultSchema>app</DefaultSchema></PropertyGroup>\n";
 
-        // One SDK-style project d/D.sqlproj (default schema dbo) holding one file; parse-clean, stream-shaped.
-        static List<JsonElement> EmitOne(string sql)
+        static string Sql(params string[] lines) => string.Join("\n", lines) + "\n";
+
+        // One SDK-style project d/D.sqlproj with the given body holding the given files; parse-clean, stream-shaped.
+        static List<JsonElement> EmitIn(string projectBody, Dictionary<string, string> sources)
         {
-            var (recs, err) = RunEmit(new[] { Sdk("d/D.sqlproj", "") }, new Dictionary<string, string> { ["d/a.sql"] = sql });
+            var (recs, err) = RunEmit(new[] { Sdk("d/D.sqlproj", projectBody) }, sources);
             Eq("", string.Join("\n", err), "diagnostics");
             StreamShape(recs);
             RefShape(recs);
             return recs;
         }
+
+        // One SDK-style project d/D.sqlproj (default schema dbo) holding one file.
+        static List<JsonElement> EmitOne(string sql) => EmitIn("", new Dictionary<string, string> { ["d/a.sql"] = sql });
 
         static void TestRefsReadsWritesTriggers()
         {
@@ -951,6 +966,163 @@ namespace SqlFrontend.Tests
                 "INSERT INTO dbo.Orders (id) VALUES (1)",
                 "SELECT id FROM dbo.Orders") + "\n");
             Eq("", Refs(recs), "no reference record outside every unit");
+        }
+
+        static void TestUnresolvedBuiltins()
+        {
+            var recs = EmitOne(Sql(
+                "CREATE PROCEDURE dbo.Clock AS SELECT GETDATE(), getdate()",
+                "GO",
+                "CREATE PROCEDURE dbo.SysProcs AS",
+                "EXEC sp_help;",
+                "EXEC xp_cmdshell 'dir';",
+                "EXEC sys.sp_who;",
+                "GO",
+                "CREATE PROCEDURE dbo.Catalog AS",
+                "SELECT name FROM sys.objects;",
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES;",
+                "GO",
+                "CREATE VIEW dbo.VCatalog AS SELECT o.name FROM sys.objects o JOIN INFORMATION_SCHEMA.TABLES t ON 1 = 1"));
+            Eq(Sorted(
+                "unresolved GETDATE builtin",
+                "unresolved SYS.SP_HELP builtin",
+                "unresolved SYS.XP_CMDSHELL builtin",
+                "unresolved SYS.SP_WHO builtin",
+                "unresolved SYS.OBJECTS builtin",
+                "unresolved INFORMATION_SCHEMA.TABLES builtin",
+                $"unresolved_call {D}Clock -> GETDATE",
+                $"unresolved_call {D}SysProcs -> SYS.SP_HELP",
+                $"unresolved_call {D}SysProcs -> SYS.XP_CMDSHELL",
+                $"unresolved_call {D}SysProcs -> SYS.SP_WHO",
+                $"unresolved_use {D}Catalog -> SYS.OBJECTS",
+                $"unresolved_use {D}Catalog -> INFORMATION_SCHEMA.TABLES",
+                $"unresolved_use {D}VCatalog -> SYS.OBJECTS",
+                $"unresolved_use {D}VCatalog -> INFORMATION_SCHEMA.TABLES"), Refs(recs), "builtin targets");
+
+            Eq(Sorted(
+                "unresolved master.sys.sp_who external",
+                $"unresolved_call {D}Remote -> master.sys.sp_who"),
+                Refs(EmitOne(Sql("CREATE PROCEDURE dbo.Remote AS EXEC master.sys.sp_who"))),
+                "a three-part sys EXEC is external, no SYS.SP_WHO");
+
+            Eq(Sorted(
+                "unresolved master.sys.objects external",
+                "unresolved Srv.master.INFORMATION_SCHEMA.TABLES external",
+                $"unresolved_use {D}RemoteCat -> master.sys.objects",
+                $"unresolved_use {D}RemoteCat -> Srv.master.INFORMATION_SCHEMA.TABLES"),
+                Refs(EmitOne(Sql(
+                    "CREATE PROCEDURE dbo.RemoteCat AS",
+                    "SELECT name FROM master.sys.objects;",
+                    "SELECT TABLE_NAME FROM Srv.master.INFORMATION_SCHEMA.TABLES;"))),
+                "three- and four-part catalog names are external, no builtin record");
+
+            Eq(Sorted(
+                "unresolved SYS.SP_EXECUTESQL builtin",
+                $"unresolved_call {D}Dyn -> SYS.SP_EXECUTESQL"),
+                Refs(EmitOne(Sql(
+                    "CREATE PROCEDURE dbo.Dyn AS",
+                    "DECLARE @sql NVARCHAR(100) = N'SELECT 1', @proc NVARCHAR(100) = N'dbo.X';",
+                    "EXEC('SELECT 1');",
+                    "EXEC (@sql);",
+                    "EXEC @proc;",
+                    "EXEC sp_executesql N'SELECT * FROM dbo.Missing';"))),
+                "dynamic EXEC gives nothing; sp_executesql one builtin call, its string unread");
+        }
+
+        static void TestUnresolvedExternals()
+        {
+            Eq(Sorted(
+                "unresolved dbo.AbsentType external",
+                "unresolved dbo.Missing external",
+                "unresolved dbo.MissingProc external",
+                $"unresolved_use {D}Abs -> dbo.AbsentType",
+                $"unresolved_use {D}Abs -> dbo.Missing",
+                $"unresolved_call {D}Abs -> dbo.MissingProc"),
+                Refs(EmitOne(Sql(
+                    "CREATE PROCEDURE dbo.Abs @p dbo.AbsentType AS",
+                    "SELECT id FROM dbo.Missing;",
+                    "EXEC dbo.MissingProc;"))),
+                "absent table, procedure and parameter type are external");
+
+            Eq(Sorted(
+                "unresolved Other.dbo.T external",
+                "unresolved Srv.Other.dbo.T external",
+                $"unresolved_use {D}Far -> Other.dbo.T",
+                $"unresolved_use {D}Far -> Srv.Other.dbo.T"),
+                Refs(EmitOne(Sql(
+                    "CREATE TABLE dbo.T (id INT)",
+                    "GO",
+                    "CREATE PROCEDURE dbo.Far AS",
+                    "SELECT id FROM Other.dbo.T;",
+                    "SELECT id FROM Srv.Other.dbo.T;"))),
+                "three- and four-part names stay external though dbo.T is declared");
+
+            Eq(Sorted(
+                "unresolved app.Missing external",
+                $"unresolved_use {DA}One -> app.Missing"),
+                Refs(EmitIn(AppSchema, new Dictionary<string, string>
+                {
+                    ["d/a.sql"] = Sql("CREATE PROCEDURE One AS SELECT id FROM [Missing]"),
+                })),
+                "a one-part absent name takes the default schema");
+
+            Eq(Sorted(
+                "unresolved app.Missing external",
+                $"unresolved_use {DA}Earlier -> app.Missing",
+                $"unresolved_use {DA}Later -> app.Missing"),
+                Refs(EmitIn(AppSchema, new Dictionary<string, string>
+                {
+                    ["d/b.sql"] = Sql("CREATE PROCEDURE app.Later AS SELECT id FROM app.MISSING"),
+                    ["d/a.sql"] = Sql("", "", "CREATE PROCEDURE app.Earlier AS SELECT id FROM app.Missing"),
+                })),
+                "letter cases share the earlier-path spelling");
+
+            Eq(Sorted(
+                "unresolved Other.dbo.T external",
+                "unresolved dbo.MissingProc external",
+                $"unresolved_use {D}SynFar -> Other.dbo.T",
+                $"unresolved_use {D}SynGone -> dbo.MissingProc",
+                $"unresolved_call {D}UseSyn -> dbo.MissingProc"),
+                Refs(EmitOne(Sql(
+                    "CREATE SYNONYM dbo.SynFar FOR Other.dbo.T",
+                    "GO",
+                    "CREATE SYNONYM dbo.SynGone FOR dbo.MissingProc",
+                    "GO",
+                    "CREATE PROCEDURE dbo.UseSyn AS EXEC dbo.SynGone"))),
+                "synonyms to absent targets");
+
+            Eq(Sorted(
+                "unresolved dbo.Absent external",
+                $"unresolved_use {D}V -> dbo.Absent"),
+                Refs(EmitOne(Sql("CREATE VIEW dbo.V AS SELECT GETDATE() AS g, a.id FROM dbo.Absent a"))),
+                "a view's absent table is an unresolved use; its scalar call gives nothing");
+        }
+
+        static void TestUnresolvedTypes()
+        {
+            var recs = EmitOne(Sql(
+                "CREATE PROCEDURE dbo.Typed @p dbo.MissingType AS",
+                "CREATE TABLE #temp (c dbo.MissingType);",
+                "DECLARE @t TABLE (c dbo.MissingType);",
+                "SELECT 1;"));
+            Eq(Sorted(
+                "unresolved dbo.MissingType external",
+                $"unresolved_use {D}Typed -> dbo.MissingType"), Refs(recs), "one record and one edge for the absent UDT");
+            var fn = One(recs, "function", Root + "/d/D.sqlproj.dbo", "Typed");
+            Eq(S(fn, "id"), S(Of(recs, "unresolved_use").Single(), "from"), "the edge starts at the procedure's Function");
+
+            var sys = EmitIn(AppSchema, new Dictionary<string, string>
+            {
+                ["d/a.sql"] = Sql(
+                    "CREATE TABLE app.Sys (a sysname, b SYSNAME, c sys.sysname, d geography, e geometry, f hierarchyid)",
+                    "GO",
+                    "CREATE PROCEDURE app.SysP @a sysname, @b SYSNAME, @c sys.sysname, @d geography, @e geometry, @f hierarchyid AS",
+                    "DECLARE @g sysname, @h SYSNAME, @i sys.sysname, @j geography, @k geometry, @l hierarchyid;",
+                    "SELECT 1;"),
+            });
+            Eq("a,b,c,d,e,f", ColumnsOf(sys, One(sys, "struct", Root + "/d/D.sqlproj.app", "Sys")), "system-typed columns emitted");
+            One(sys, "function", Root + "/d/D.sqlproj.app", "SysP");
+            Eq("", Refs(sys), "system types give no record and no edge");
         }
 
         // e2e: the committed tests/fixtures/projects tree, located from the test binary.
