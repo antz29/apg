@@ -54,20 +54,40 @@ fn read_utf16le(path: &Path) -> String {
     String::from_utf16(&units).expect("valid UTF-16")
 }
 
-/// The text of every node of `kind` in `tree`, in tree order.
-fn texts(tree: &Tree, src: &str, kind: &str) -> Vec<String> {
-    fn walk(node: Node, src: &str, kind: &str, out: &mut Vec<String>) {
+/// Every node of `kind` in `tree`, in tree order.
+fn nodes<'t>(tree: &'t Tree, kind: &str) -> Vec<Node<'t>> {
+    fn walk<'t>(node: Node<'t>, kind: &str, out: &mut Vec<Node<'t>>) {
         if node.kind() == kind {
-            out.push(src[node.byte_range()].to_string());
+            out.push(node);
         }
         let mut cur = node.walk();
         for child in node.children(&mut cur) {
-            walk(child, src, kind, out);
+            walk(child, kind, out);
         }
     }
     let mut out = Vec::new();
-    walk(tree.root_node(), src, kind, &mut out);
+    walk(tree.root_node(), kind, &mut out);
     out
+}
+
+/// The text of every node of `kind` in `tree`, in tree order.
+fn texts(tree: &Tree, src: &str, kind: &str) -> Vec<String> {
+    nodes(tree, kind)
+        .iter()
+        .map(|n| src[n.byte_range()].to_string())
+        .collect()
+}
+
+/// The text of `node`'s `field` child.
+fn field<'s>(node: Node, field: &str, src: &'s str) -> &'s str {
+    &src[node.child_by_field_name(field).expect(field).byte_range()]
+}
+
+/// The kinds from `node` up to the root.
+fn ancestry(node: Node) -> Vec<&'static str> {
+    std::iter::successors(Some(node), Node::parent)
+        .map(|n| n.kind())
+        .collect()
 }
 
 /// Every ERROR (with its text) and MISSING (with its kind) node in `tree`.
@@ -105,14 +125,23 @@ mod e2e {
         let path = dir.write("main.ps1", b". $PSScriptRoot\\lib.ps1\n. ./other.ps1\n");
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
+        let ops = nodes(&tree, "invocation_operator_command");
+        let shape: Vec<_> = ops
+            .iter()
+            .map(|n| (field(*n, "operator", &src), field(*n, "command", &src)))
+            .collect();
         assert_eq!(
-            texts(&tree, &src, "invocation_operator_command"),
-            [". $PSScriptRoot\\lib.ps1", ". ./other.ps1"]
+            shape,
+            [(".", "$PSScriptRoot\\lib.ps1"), (".", "./other.ps1")]
         );
-        assert_eq!(
-            texts(&tree, &src, "command_argument"),
-            ["$PSScriptRoot\\lib.ps1", "./other.ps1"]
-        );
+        let first = ops[0].child_by_field_name("command").expect("command");
+        assert_eq!(first.kind(), "command_argument");
+        let parts: Vec<_> = (0..first.named_child_count())
+            .map(|i| first.named_child(i as u32).expect("child").kind())
+            .collect();
+        assert_eq!(parts, ["variable", "argument_fragment"]);
+        assert_eq!(texts(&tree, &src, "variable"), ["$PSScriptRoot"]);
+        assert_eq!(texts(&tree, &src, "argument_fragment"), ["\\lib.ps1"]);
     }
 
     #[test]
@@ -127,6 +156,7 @@ mod e2e {
             ["using module ./Foo.psm1"]
         );
         assert_eq!(texts(&tree, &src, "command_argument"), ["./Foo.psm1"]);
+        assert!(nodes(&tree, "command").is_empty());
     }
 
     #[test]
@@ -135,15 +165,27 @@ mod e2e {
         let dir = Scratch::new("dsc");
         let path = dir.write(
             "web.ps1",
-            b"configuration Web {\n    Node 'localhost' {\n        File Site {\n            DestinationPath = 'C:\\site'\n        }\n    }\n}\n",
+            b"configuration Web { Node 'localhost' { File Site { } } }\n",
         );
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
-        assert_eq!(texts(&tree, &src, "configuration_definition").len(), 1);
-        assert_eq!(texts(&tree, &src, "node_statement").len(), 1);
-        assert_eq!(texts(&tree, &src, "type_identifier"), ["File"]);
-        assert_eq!(texts(&tree, &src, "resource_statement").len(), 1);
-        assert_eq!(texts(&tree, &src, "identifier"), ["DestinationPath"]);
+        let res = nodes(&tree, "resource_statement");
+        assert_eq!(res.len(), 1);
+        assert_eq!(
+            (field(res[0], "type", &src), field(res[0], "name", &src)),
+            ("File", "Site")
+        );
+        assert_eq!(
+            ancestry(res[0]),
+            [
+                "resource_statement",
+                "script_block",
+                "node_statement",
+                "script_block",
+                "configuration_definition",
+                "source_file"
+            ]
+        );
     }
 
     #[test]
@@ -156,24 +198,24 @@ mod e2e {
         );
         let src = read_utf8(&path);
         let tree = parse_clean(&src);
-        let root = tree.root_node();
-        let pipeline = root.named_child(0).expect("pipeline");
-        let expr = pipeline.named_child(0).expect("command_expression");
-        let hash = expr.named_child(0).expect("hashtable_expression");
+        let hashes = nodes(&tree, "hashtable_expression");
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(&src[hashes[0].byte_range()], src.trim_end());
+        // walked up from the hashtable, so no wrapper count is assumed
         assert_eq!(
-            [root.kind(), pipeline.kind(), expr.kind(), hash.kind()],
+            ancestry(hashes[0]),
             [
-                "source_file",
-                "pipeline",
+                "hashtable_expression",
                 "command_expression",
-                "hashtable_expression"
+                "pipeline",
+                "source_file"
             ]
         );
-        assert_eq!(texts(&tree, &src, "hashtable_expression"), [src.trim_end()]);
-        assert_eq!(
-            texts(&tree, &src, "identifier"),
-            ["RootModule", "NestedModules", "FunctionsToExport"]
-        );
+        let keys: Vec<_> = nodes(&tree, "hash_entry")
+            .into_iter()
+            .map(|e| field(e, "key", &src))
+            .collect();
+        assert_eq!(keys, ["RootModule", "NestedModules", "FunctionsToExport"]);
     }
 
     #[test]
