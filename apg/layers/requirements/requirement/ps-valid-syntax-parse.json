@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-valid-syntax-parse",
-  "body": "PowerShell valid within the engine ceiling parses with no error or missing-node region, one-line param bodies, enum underlying types, generic base types, ./ and $PSScriptRoot paths, empty script blocks, using and configuration included.",
+  "body": "PowerShell valid within the engine ceiling parses to an error-free tree, one-line param bodies, enum underlying types, generic base types, ./ and $PSScriptRoot paths, empty script blocks, using and configuration included.",
   "properties": {
     "feature": "ps-frontend"
   },
