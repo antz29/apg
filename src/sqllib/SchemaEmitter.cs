@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
+using System.Xml;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace Apg.SqlFrontend
 {
-    // Pure unified-JSONL emitter over database scopes and in-memory .sql texts. No I/O.
+    // Unified-JSONL emitter: Emit is pure over database scopes and in-memory .sql texts; Run reads the listed files.
     public static class SchemaEmitter
     {
         // One emitted object of a scope: canonical spelling Schema.Name, its id and Function (true) or Struct kind.
@@ -19,12 +21,54 @@ namespace Apg.SqlFrontend
             List<SqlProjectReader.Scope> scopes, IReadOnlyDictionary<string, string> sources, string idPrefix,
             TextWriter stdout, TextWriter stderr)
         {
-            var run = new Run(rootDir, idPrefix, stdout, stderr);
-            run.All(scopes, sources);
-            return run.Index;
+            var emission = new Emission(rootDir, idPrefix, stdout, stderr);
+            emission.All(scopes, sources);
+            return emission.Index;
         }
 
-        sealed class Run
+        // The scan entry over the --targets list: the listed absolute paths are the only input (no directory walk).
+        // moduleDirs are absolute; returns Emit's declaration index.
+        public static Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>> Run(string rootDir,
+            IEnumerable<string> targetPaths, IReadOnlyList<string> moduleDirs, IReadOnlyList<string> excludePatterns,
+            string idPrefix, TextWriter stdout, TextWriter stderr)
+        {
+            var mods = moduleDirs.Select(m => Path.TrimEndingDirectorySeparator(Path.GetFullPath(m))).ToList();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var projects = new List<string>();
+            var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var line in targetPaths)
+            {
+                string full = Path.GetFullPath(line);
+                string rel = Path.GetRelativePath(rootDir, full).Replace(Path.DirectorySeparatorChar, '/');
+                if (rel == ".." || rel.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(rel) || !seen.Add(rel))
+                    continue;
+                string ext = Path.GetExtension(full);
+                bool isProject = ext.Equals(".sqlproj", StringComparison.OrdinalIgnoreCase);
+                if (!isProject && !ext.Equals(".sql", StringComparison.OrdinalIgnoreCase)) continue;
+                if (excludePatterns.Any(p => full.Contains(p, StringComparison.OrdinalIgnoreCase))) continue;
+                if (mods.Count > 0 && !mods.Any(m => IsWithin(full, m))) continue;
+                try
+                {
+                    // A project is parsed here too so one unreadable or malformed .sqlproj is reported, not scan-fatal.
+                    if (isProject) { SqlProjectReader.ParseProject(rel, File.ReadAllText(full)); projects.Add(rel); }
+                    else if (!File.Exists(full)) stderr.WriteLine($"sql: {rel}: file not found");
+                    else sources[rel] = File.ReadAllText(full, Encoding.UTF8);
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is XmlException)
+                {
+                    stderr.WriteLine($"sql: {rel}: {(e is FileNotFoundException || e is DirectoryNotFoundException ? "file not found" : e.Message)}");
+                }
+            }
+            var scopes = SqlProjectReader.Read(rootDir, projects, sources.Keys);
+            return Emit(rootDir, scopes, sources, idPrefix, stdout, stderr);
+        }
+
+        // `path` equals `dir` or lies under it, on a separator boundary (as csharplib SourceDiscovery.IsWithin).
+        static bool IsWithin(string path, string dir) =>
+            path.StartsWith(dir, StringComparison.Ordinal)
+            && (path.Length == dir.Length || path[dir.Length] == Path.DirectorySeparatorChar || dir.EndsWith(Path.DirectorySeparatorChar));
+
+        sealed class Emission
         {
             readonly string root, prefix;
             readonly TextWriter output, errors;
@@ -40,7 +84,7 @@ namespace Apg.SqlFrontend
                 new Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>>();
             int next;
 
-            public Run(string rootDir, string idPrefix, TextWriter stdout, TextWriter stderr)
+            public Emission(string rootDir, string idPrefix, TextWriter stdout, TextWriter stderr)
             {
                 root = rootDir; prefix = idPrefix; output = stdout; errors = stderr;
             }
