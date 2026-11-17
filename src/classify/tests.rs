@@ -81,6 +81,35 @@ mod unit {
         }
     }
 
+    /// sql-frontend phase-06 task-13: a SQL file's code type follows path
+    /// segments only — test/tests → `test`, gen/generated/obj (SSDT build
+    /// output) → `generated`, vendor/third_party/thirdparty → `external` —
+    /// with no filename marker, and a test segment wins over obj.
+    #[test]
+    fn sql_code_type_follows_path_segments() {
+        for (p, want) in [
+            ("db/test/a.sql", "test"),
+            ("tests/b.sql", "test"),
+            ("Db/obj/test/x.sql", "test"),
+            ("gen/c.sql", "generated"),
+            ("generated/d.sql", "generated"),
+            ("Db/obj/Debug/e.sql", "generated"),
+            ("vendor/f.sql", "external"),
+            ("third_party/g.sql", "external"),
+            ("thirdparty/h.sql", "external"),
+            ("test_x.sql", "src"),
+            ("x_test.sql", "src"),
+            ("Tables/Orders.sql", "src"),
+        ] {
+            assert_eq!(builtin_code_type(p, "sql"), want, "{p} must be {want}");
+            assert_eq!(
+                classify_code_type(p, "sql.x", "sql", None),
+                want,
+                "{p} must classify as {want}"
+            );
+        }
+    }
+
     /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in
