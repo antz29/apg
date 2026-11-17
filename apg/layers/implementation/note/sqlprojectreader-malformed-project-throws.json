@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "sqlprojectreader-malformed-project-throws",
-  "body": "Read reads each named .sqlproj with File.ReadAllText and parses it with ParseProject, unguarded, so any read or parse failure of one named project — a missing or unreadable file (FileNotFoundException, IOException, UnauthorizedAccessException) or malformed XML (XmlException) — throws out of Read and would abort the whole SQL scan; a .. Build Include that climbs above the repository root resolves to no repository path and matches no file without any report. Upgrade when SchemaEmitter.Run wires Read into the scan: catch any read or parse failure per project, write one sql: diagnostic for that .sqlproj, and treat that project's files as loose.",
+  "body": "Read reads each named .sqlproj with File.ReadAllText and parses it with ParseProject, unguarded, so a read or parse failure of one named project throws out of Read; SchemaEmitter.Run pre-parses each listed .sqlproj and drops a failing one with a sql: diagnostic before calling Read, so in the scan Read throws only if a project file changes or vanishes between those two reads. A .. Build Include that climbs above the repository root resolves to no repository path and matches no file without any report. Upgrade when Read takes already-parsed projects or catches per-project failures itself, and report an above-root include as a diagnostic if it must be visible.",
   "properties": {},
   "out": [
     {

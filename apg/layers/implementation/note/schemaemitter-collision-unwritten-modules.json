@@ -2,12 +2,12 @@
   "layer": "implementation",
   "type": "note",
   "name": "schemaemitter-collision-unwritten-modules",
-  "body": "All seeds the FQN-collision claims with every module identity its first pass finds, including a schema module that is never written because its only object is then dropped as a repeat or collision, so such an unwritten module can still cause another object to be dropped as a collision. Upgrade if module identity of the scan is to mean only the module records actually emitted.",
+  "body": "Emission.All seeds the FQN-collision claims with every module identity its first pass finds, including a schema module that is never written because its only object is then dropped as a repeat or collision, so such an unwritten module can still cause another object to be dropped as a collision. Upgrade if module identity of the scan is to mean only the module records actually emitted.",
   "properties": {},
   "out": [
     {
       "kind": "details",
-      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Run.All",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Emission.All",
       "properties": {}
     }
   ],

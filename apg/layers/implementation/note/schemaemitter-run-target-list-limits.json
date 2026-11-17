@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schemaemitter-run-target-list-limits",
+  "body": "Run drops a duplicate target line by exact-case comparison of its repo-relative path, so one file listed in two letter cases on a case-insensitive filesystem is emitted twice, and it reads each listed .sqlproj twice (its own pre-parse, then SqlProjectReader.Read), so a project changed between the reads can still throw; its moduleDirs comparison is exact-case on absolute paths, as csharplib's. Upgrade if the --targets producer can list case variants, or when Read accepts the already-parsed projects.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
