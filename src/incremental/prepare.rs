@@ -419,6 +419,9 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     let store_root = match FactStore::resolve(apg_root) {
         Ok(s) => s.root,
         Err(_) => {
+            // Not a git repository: no store, so nothing is recorded or reused,
+            // but the walked manifest still lists the tree's files (the sql
+            // stream's universe).
             return Prepared {
                 store_root: PathBuf::new(),
                 cache_key,
@@ -427,7 +430,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
                 changed_rel: BTreeSet::new(),
                 removed_fqns: BTreeSet::new(),
                 reuse_candidates: Vec::new(),
-                manifest: Manifest::default(),
+                manifest: Manifest::build(scan_root),
                 recorded_content_key: None,
                 previous: None,
             };
