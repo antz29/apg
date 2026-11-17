@@ -251,6 +251,13 @@ fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
 /// in addition to the set, so callers pass only the non-hidden exclusions they
 /// need. The exclusion set — not `depth` — is the safety bound: an excluded
 /// dependency/generated tree is never entered.
+///
+/// SQL: a tree is detected by a `.sql` file in any letter case under the
+/// default skip set (`target`, `node_modules`), with the hidden dot-name rule
+/// still in force. Detection is a presence test only: the files sqlfrontend
+/// reads and emits are exactly the tracked `.sql`/`.sqlproj` paths of its
+/// `--targets` list (`sql_stream_targets`), so a gitignored `.sql` under `bin/`
+/// or `obj/` is never graphed.
 pub fn has_extension(
     dir: &std::path::Path,
     exts: &[&str],
