@@ -49,6 +49,19 @@ const V_CUSTOMERS_SQL: &str =
 
 const SEED_SQL: &str = "INSERT INTO dbo.Customers (Id, Name) VALUES (1, N'a')\nGO\n";
 
+/// One broken batch (line 3) between two valid ones: `dbo.Good1` (lines 1..1)
+/// and `dbo.Good2` (lines 5..7).
+const BROKEN_SQL: &str = "CREATE TABLE dbo.Good1 (Id INT)\nGO\nCREATE TABLE dbo.Bad (Id INT,,\nGO\nCREATE PROCEDURE dbo.Good2\nAS\n    SELECT 1\nGO\n";
+
+/// The entries of the scan log's `Languages:` line.
+fn languages(log: &str) -> Vec<String> {
+    let line = log
+        .lines()
+        .find_map(|l| l.strip_prefix("Languages: "))
+        .unwrap_or_else(|| panic!("no Languages: line: {log}"));
+    line.split(", ").map(str::to_string).collect()
+}
+
 /// The staged `sqlfrontend` the candidate runs (`<profile>/frontends`),
 /// resolved from `apg_bin()`. Fails loudly naming the build when absent.
 fn sql_frontend_bin() -> PathBuf {
@@ -262,5 +275,147 @@ mod e2e {
         );
         assert_eq!(types.len(), 6, "every .sql file is a sql File: {types:?}");
         assert!(types.iter().all(|t| t == "src"), "code_type: {types:?}");
+    }
+
+    /// `--language sql` selects sql as the only code language (the staged
+    /// structural streams follow it); a plain scan auto-detects an upper-case
+    /// `.SQL` file.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg); run via cargo test-e2e"]
+    fn language_flag_and_auto_detect_select_sql() {
+        sql_frontend_bin();
+        let repo = sql_repo("sql-langflag");
+        let (out, log) = scan(&repo, &["--language", "sql"]);
+        assert!(out.status.success(), "scan: {log}");
+        let langs = languages(&log);
+        assert_eq!(langs.first().map(String::as_str), Some("sql"), "{langs:?}");
+        assert!(
+            langs[1..]
+                .iter()
+                .all(|l| apg::frontends::STRUCTURAL_LANGUAGES.contains(&l.as_str())),
+            "only structural streams may follow sql: {langs:?}"
+        );
+        assert!(log.contains("running sql frontend"), "{log}");
+
+        let upper = Repo::new("sql-autodetect");
+        upper.write("DB/T.SQL", CUSTOMERS_SQL);
+        upper.commit_all("upper-case sql");
+        let (out, log) = scan(&upper, &[]);
+        assert!(out.status.success(), "scan: {log}");
+        assert!(
+            languages(&log).contains(&"sql".to_string()),
+            "sql auto-detected: {log}"
+        );
+        let owners = column(
+            &query_rows(
+                &upper,
+                "MATCH (m:Module)-[:Contains]->(f:File) WHERE f.fqn = 'DB/T.SQL' RETURN m.fqn",
+            ),
+            "m.fqn",
+        );
+        assert!(
+            !owners.is_empty() && owners.iter().all(|m| m.starts_with("sql.")),
+            "DB/T.SQL must be a sql. File: {owners:?}"
+        );
+    }
+
+    /// A plain scan leaves `.sqlproj` files to the xml stream while every
+    /// `.sql` file belongs to a sql. module and to no structural stream.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg); run via cargo test-e2e"]
+    fn sqlproj_stays_an_xml_file_and_sql_leaves_the_structural_streams() {
+        sql_frontend_bin();
+        let repo = sql_repo("sql-claims");
+        let (out, log) = scan(&repo, &[]);
+        assert!(out.status.success(), "scan: {log}");
+
+        for proj in ["Legacy/Legacy.sqlproj", "Sdk/Sdk.sqlproj"] {
+            let owners = column(
+                &query_rows(
+                    &repo,
+                    &format!(
+                        "MATCH (m:Module)-[:Contains]->(f:File) WHERE f.fqn = '{proj}' RETURN m.fqn"
+                    ),
+                ),
+                "m.fqn",
+            );
+            assert!(
+                !owners.is_empty() && owners.iter().all(|m| m.starts_with("xml.")),
+                "{proj} must be an xml. File only: {owners:?}"
+            );
+        }
+
+        let rows = query_rows(
+            &repo,
+            "MATCH (m:Module)-[:Contains]->(f:File) WHERE f.fqn ENDS WITH '.sql' RETURN f.fqn, m.fqn ORDER BY f.fqn",
+        );
+        let files = column(&rows, "f.fqn");
+        let owners = column(&rows, "m.fqn");
+        assert_eq!(
+            files,
+            vec![
+                "Legacy/Procs/GetOrders.sql",
+                "Legacy/Procs/Helper.sql",
+                "Legacy/Tables/Orders.sql",
+                "Sdk/dbo/Customers.sql",
+                "Sdk/dbo/vCustomers.sql",
+                "scripts/seed.sql",
+            ],
+            "each .sql file is contained exactly once"
+        );
+        for m in &owners {
+            assert!(m.starts_with("sql."), "sql file under {m}: {rows:?}");
+            for structural in ["misc.", "md.", "xml."] {
+                assert!(!m.starts_with(structural), "{m}");
+            }
+        }
+    }
+
+    /// A broken batch is diagnosed, not fatal: the valid batches around it
+    /// are graphed and the scan exits 0.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg); run via cargo test-e2e"]
+    fn syntax_error_does_not_abort_the_scan() {
+        sql_frontend_bin();
+        let repo = sql_repo("sql-syntax");
+        repo.write("scripts/broken.sql", BROKEN_SQL);
+        repo.commit_all("broken batch");
+        let (out, log) = scan(&repo, &["--language", "sql"]);
+        assert!(out.status.success(), "scan: {log}");
+        assert!(!log.contains("sql frontend failed"), "{log}");
+
+        let decls: Vec<String> = ["Struct", "Function"]
+            .iter()
+            .flat_map(|label| {
+                column(
+                    &query_rows(
+                        &repo,
+                        &format!(
+                            "MATCH (n:{label}) WHERE n.path = 'scripts/broken.sql' RETURN n.fqn"
+                        ),
+                    ),
+                    "n.fqn",
+                )
+            })
+            .collect();
+        for want in [".dbo.Good1", ".dbo.Good2"] {
+            assert!(
+                decls.iter().any(|d| d.ends_with(want)),
+                "missing {want}: {decls:?}"
+            );
+        }
+
+        let file_log = std::fs::read_to_string(repo.root.join("apg/.trans/apg-frontend.log"))
+            .expect("read apg-frontend.log");
+        let diag = file_log
+            .lines()
+            .filter_map(|l| l.strip_prefix("sql: "))
+            .find_map(|l| l.split_once("broken.sql:").map(|(_, rest)| rest))
+            .unwrap_or_else(|| panic!("no sql: broken.sql diagnostic: {file_log}"));
+        let mut pos = diag.splitn(3, ':');
+        let line: usize = pos.next().unwrap().parse().expect("diagnostic line");
+        let col: usize = pos.next().unwrap().parse().expect("diagnostic column");
+        assert_eq!(line, 3, "diagnostic on the broken batch: {diag}");
+        assert!(col >= 1, "{diag}");
     }
 }
