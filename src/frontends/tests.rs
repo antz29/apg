@@ -137,6 +137,63 @@ mod unit {
         assert!(!ext_matches("SQL", &[".sql"], false));
     }
 
+    /// sql-frontend phase-06 task-20: any `.sql`/`.sqlproj` change (any case)
+    /// widens to every tracked `.sql` path; the sql target list carries `.sql`
+    /// and `.sqlproj` paths only, while `.sqlproj` stays in the xml list too.
+    #[test]
+    fn sql_targets_cover_the_whole_stream() {
+        use std::collections::BTreeSet;
+        let set =
+            |paths: &[&str]| -> BTreeSet<String> { paths.iter().map(|p| p.to_string()).collect() };
+        let tracked = set(&[
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "scripts/c.Sql",
+            "Db/Db.sqlproj",
+            "main.go",
+            "App/App.cs",
+            "pom.xml",
+        ]);
+        let all_sql = set(&["Db/Tables/A.sql", "Db/Views/B.SQL", "scripts/c.Sql"]);
+        for changed in [
+            set(&["Db/Views/B.SQL"]),
+            set(&["Db/Db.sqlproj"]),
+            set(&["Other/Other.SQLPROJ"]),
+        ] {
+            assert_eq!(
+                whole_language_targets(&changed, &tracked),
+                all_sql,
+                "{changed:?}"
+            );
+        }
+        let non_sql = set(&["main.go", "App/App.cs", "pom.xml"]);
+        assert!(whole_language_targets(&non_sql, &tracked).is_empty());
+
+        let root = Path::new("/root");
+        let abs = |rel: &str| root.join(rel).to_string_lossy().into_owned();
+        let mut expected: Vec<String> = [
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "scripts/c.Sql",
+            "Db/Db.sqlproj",
+        ]
+        .iter()
+        .map(|r| abs(r))
+        .collect();
+        expected.sort();
+        let sql = targets_for_language(&tracked, root, "sql");
+        assert_eq!(sql, expected);
+        assert!(!sql.contains(&abs("main.go")));
+        assert!(!targets_for_language(&set(&["Db/Db.sqlproj"]), root, "sql").is_empty());
+        let xml = targets_for_language(&tracked, root, "xml");
+        assert!(xml.contains(&abs("Db/Db.sqlproj")));
+        let go = targets_for_language(&tracked, root, "go");
+        for rel in all_sql.iter() {
+            assert!(!go.contains(&abs(rel)), "{rel} reached go");
+            assert!(!xml.contains(&abs(rel)), "{rel} reached xml");
+        }
+    }
+
     /// schema-alignment phase-02 task-17: the agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural
