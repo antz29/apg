@@ -370,6 +370,13 @@ namespace SqlFrontend.Tests
                 ("EmitLooseDirectoriesShareOneScope", TestEmitLooseDirectoriesShareOneScope),
                 ("EmitModuleCollisionDropsTable", TestEmitModuleCollisionDropsTable),
                 ("EmitViewDuplicateColumnKeepsOne", TestEmitViewDuplicateColumnKeepsOne),
+                ("RefsReadsWritesTriggers", TestRefsReadsWritesTriggers),
+                ("RefsScopeAndNameResolution", TestRefsScopeAndNameResolution),
+                ("RefsLocalNamesGiveNothing", TestRefsLocalNamesGiveNothing),
+                ("RefsTypeUses", TestRefsTypeUses),
+                ("RefsCalls", TestRefsCalls),
+                ("RefsSynonyms", TestRefsSynonyms),
+                ("RefsTopLevelOutsideUnits", TestRefsTopLevelOutsideUnits),
             };
 
         const string Root = "/repo";
@@ -669,6 +676,281 @@ namespace SqlFrontend.Tests
             });
             StreamShape(recs);
             Eq("id", ColumnsOf(recs, One(recs, "struct", "dbo", "V")), "one id column");
+        }
+
+        // Reference records rendered with ids mapped to their repo-relative parent.name, sorted (duplicates kept).
+        static string Refs(List<JsonElement> recs)
+        {
+            string Rel(string p) => p.StartsWith(Root + "/", StringComparison.Ordinal) ? p.Substring(Root.Length + 1) : p;
+            var names = new Dictionary<string, string>();
+            foreach (var r in recs)
+                if (S(r, "id") != null) names[S(r, "id")] = Rel(S(r, "parent")) + "." + S(r, "name");
+            string N(string id) => id != null && names.TryGetValue(id, out var n) ? n : "?" + id;
+            var lines = new List<string>();
+            foreach (var r in recs)
+            {
+                string type = S(r, "type");
+                if (type == "uses")
+                    lines.Add($"uses {N(S(r, "from"))} -> {N(S(r, "to"))} {(r.TryGetProperty("properties", out var p) ? S(p, "kind") : null)}");
+                else if (type == "calls") lines.Add($"calls {N(S(r, "from"))} -> {N(S(r, "to"))}");
+                else if (type == "unresolved") lines.Add($"unresolved {S(r, "fqn")} {S(r, "category")}");
+                else if (type == "unresolved_use" || type == "unresolved_call") lines.Add($"{type} {N(S(r, "from"))} -> {S(r, "to")}");
+            }
+            return Sorted(lines.ToArray());
+        }
+
+        static string Sorted(params string[] lines) => string.Join("\n", lines.OrderBy(l => l, StringComparer.Ordinal));
+
+        // Every uses/calls edge after the records of both endpoints and every uses edge carrying properties.kind;
+        // every unresolved edge after its source record and an unresolved record naming its target.
+        static void RefShape(List<JsonElement> recs)
+        {
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            var unresolved = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var r in recs)
+            {
+                string type = S(r, "type"), from = S(r, "from"), to = S(r, "to");
+                if (type == "uses" || type == "calls")
+                {
+                    Eq(true, ids.Contains(from) && ids.Contains(to), $"{type} {from}->{to} follows its endpoints");
+                    if (type == "uses")
+                        Eq(true, r.TryGetProperty("properties", out var p) && S(p, "kind") != null, $"uses {from}->{to} carries properties.kind");
+                }
+                else if (type == "unresolved_use" || type == "unresolved_call")
+                    Eq(true, ids.Contains(from) && unresolved.Contains(to), $"{type} {from}->{to} follows its endpoints");
+                else if (type == "unresolved") unresolved.Add(S(r, "fqn"));
+                else if (S(r, "id") != null) ids.Add(S(r, "id"));
+            }
+        }
+
+        const string D = "d/D.sqlproj.dbo.";
+
+        // One SDK-style project d/D.sqlproj (default schema dbo) holding one file; parse-clean, stream-shaped.
+        static List<JsonElement> EmitOne(string sql)
+        {
+            var (recs, err) = RunEmit(new[] { Sdk("d/D.sqlproj", "") }, new Dictionary<string, string> { ["d/a.sql"] = sql });
+            Eq("", string.Join("\n", err), "diagnostics");
+            StreamShape(recs);
+            RefShape(recs);
+            return recs;
+        }
+
+        static void TestRefsReadsWritesTriggers()
+        {
+            var recs = EmitOne(string.Join("\n",
+                "CREATE TABLE dbo.Orders (id INT, qty INT)",
+                "GO",
+                "CREATE TABLE dbo.Lines (id INT)",
+                "GO",
+                "CREATE TABLE dbo.Audit (id INT)",
+                "GO",
+                "CREATE TABLE dbo.Log (id INT)",
+                "GO",
+                "CREATE TABLE dbo.Stage (id INT)",
+                "GO",
+                "CREATE VIEW dbo.V AS SELECT id FROM dbo.Lines",
+                "GO",
+                "CREATE SEQUENCE dbo.Seq START WITH 1",
+                "GO",
+                "CREATE PROCEDURE dbo.ReadTwice AS",
+                "SELECT id FROM dbo.Orders",
+                "SELECT o.id FROM dbo.Orders o JOIN dbo.V v ON v.id = o.id",
+                "GO",
+                "CREATE PROCEDURE dbo.Writes AS",
+                "INSERT INTO dbo.Lines (id) VALUES (1)",
+                "UPDATE dbo.Audit SET id = 1",
+                "DELETE FROM dbo.Log",
+                "MERGE dbo.Stage AS t USING dbo.Lines AS s ON t.id = s.id WHEN MATCHED THEN DELETE;",
+                "GO",
+                "CREATE PROCEDURE dbo.ByAlias AS UPDATE o SET qty = 1 FROM dbo.Orders o",
+                "GO",
+                "CREATE PROCEDURE dbo.MergeAs AS",
+                "MERGE dbo.Orders AS t USING dbo.Lines AS s ON t.id = s.id WHEN MATCHED THEN UPDATE SET qty = 1;",
+                "GO",
+                "CREATE PROCEDURE dbo.ReadWrite AS",
+                "SELECT id FROM dbo.Audit",
+                "UPDATE dbo.Audit SET id = 2",
+                "GO",
+                "CREATE TRIGGER dbo.TrgOrders ON dbo.Orders AFTER INSERT AS UPDATE dbo.Orders SET qty = 0",
+                "GO",
+                "CREATE PROCEDURE dbo.NextId AS SELECT NEXT VALUE FOR dbo.Seq") + "\n");
+            Eq(Sorted(
+                $"uses {D}V -> {D}Lines read",
+                $"uses {D}ReadTwice -> {D}Orders read",
+                $"uses {D}ReadTwice -> {D}V read",
+                $"uses {D}Writes -> {D}Lines write",
+                $"uses {D}Writes -> {D}Audit write",
+                $"uses {D}Writes -> {D}Log write",
+                $"uses {D}Writes -> {D}Stage write",
+                $"uses {D}ByAlias -> {D}Orders write",
+                $"uses {D}MergeAs -> {D}Orders write",
+                $"uses {D}MergeAs -> {D}Lines read",
+                $"uses {D}ReadWrite -> {D}Audit write",
+                $"uses {D}TrgOrders -> {D}Orders trigger",
+                $"uses {D}NextId -> {D}Seq read"), Refs(recs), "reference records");
+        }
+
+        static void TestRefsScopeAndNameResolution()
+        {
+            var (recs, err) = RunEmit(new[]
+            {
+                Sdk("app/App.sqlproj", "<PropertyGroup><DefaultSchema>app</DefaultSchema></PropertyGroup>\n"),
+                Sdk("other/Other.sqlproj", ""),
+            }, new Dictionary<string, string>
+            {
+                ["app/t.sql"] = string.Join("\n",
+                    "CREATE TABLE Widgets (id INT)",
+                    "GO",
+                    "CREATE TABLE dbo.Orders (id INT)",
+                    "GO",
+                    "CREATE PROCEDURE GetW AS SELECT id FROM Widgets",
+                    "GO",
+                    "CREATE PROCEDURE dbo.GetO AS SELECT id FROM [Dbo].[ORDERS]") + "\n",
+                ["other/t.sql"] = string.Join("\n",
+                    "CREATE TABLE app.Widgets (id INT)",
+                    "GO",
+                    "CREATE TABLE dbo.Orders (id INT)",
+                    "GO",
+                    "CREATE PROCEDURE dbo.GetO2 AS SELECT id FROM dbo.Orders") + "\n",
+            });
+            Eq("", string.Join("\n", err), "diagnostics");
+            StreamShape(recs);
+            RefShape(recs);
+            const string A = "app/App.sqlproj.", O = "other/Other.sqlproj.";
+            Eq(Sorted(
+                $"uses {A}app.GetW -> {A}app.Widgets read",
+                $"uses {A}dbo.GetO -> {A}dbo.Orders read",
+                $"uses {O}dbo.GetO2 -> {O}dbo.Orders read"), Refs(recs), "each reference resolves in its own scope only");
+        }
+
+        static void TestRefsLocalNamesGiveNothing()
+        {
+            var recs = EmitOne(string.Join("\n",
+                "CREATE TABLE dbo.Orders (id INT)",
+                "GO",
+                "CREATE PROCEDURE dbo.Locals AS",
+                "CREATE TABLE #t (id INT)",
+                "SELECT id FROM #t",
+                "SELECT id FROM ##g",
+                "DECLARE @tv TABLE (id INT)",
+                "INSERT INTO @tv (id) SELECT o.id FROM dbo.Orders o",
+                "SELECT id FROM @tv",
+                ";WITH c AS (SELECT id FROM dbo.Orders) SELECT id FROM c",
+                "UPDATE o SET id = 1 FROM dbo.Orders o",
+                "GO",
+                "CREATE TRIGGER dbo.Trg ON dbo.Orders AFTER UPDATE AS",
+                "SELECT id FROM inserted UNION ALL SELECT id FROM deleted") + "\n");
+            Eq(Sorted(
+                $"uses {D}Locals -> {D}Orders write",
+                $"uses {D}Trg -> {D}Orders trigger"), Refs(recs), "only dbo.Orders is referenced (no unresolved record)");
+        }
+
+        static void TestRefsTypeUses()
+        {
+            var recs = EmitOne(string.Join("\n",
+                "CREATE TYPE dbo.Phone FROM NVARCHAR(20)",
+                "GO",
+                "CREATE TYPE dbo.Code FROM INT",
+                "GO",
+                "CREATE TYPE dbo.Lines AS TABLE (sku INT, phone dbo.Phone)",
+                "GO",
+                "CREATE TABLE dbo.Customers (id INT, phone dbo.Phone)",
+                "GO",
+                "CREATE PROCEDURE dbo.Typed @p dbo.Phone, @rows dbo.Lines READONLY AS",
+                "DECLARE @v dbo.Code",
+                "SELECT 1",
+                "GO",
+                "CREATE PROCEDURE dbo.TempTyped AS",
+                "DECLARE @t TABLE (c dbo.Code)",
+                "CREATE TABLE #x (c dbo.Phone)",
+                "SELECT 1",
+                "GO",
+                "CREATE FUNCTION dbo.Tvf() RETURNS @r TABLE (c dbo.Code) AS BEGIN RETURN END",
+                "GO",
+                "CREATE PROCEDURE dbo.Once @p dbo.Code AS",
+                "DECLARE @t TABLE (c dbo.Code)",
+                "CREATE TABLE #y (c dbo.Code)",
+                "SELECT 1") + "\n");
+            Eq(Sorted(
+                $"uses {D}Lines.phone -> {D}Phone type",
+                $"uses {D}Customers.phone -> {D}Phone type",
+                $"uses {D}Typed -> {D}Phone type",
+                $"uses {D}Typed -> {D}Lines type",
+                $"uses {D}Typed -> {D}Code type",
+                $"uses {D}TempTyped -> {D}Code type",
+                $"uses {D}TempTyped -> {D}Phone type",
+                $"uses {D}Tvf -> {D}Code type",
+                $"uses {D}Once -> {D}Code type"), Refs(recs), "type uses");
+        }
+
+        static void TestRefsCalls()
+        {
+            var recs = EmitOne(string.Join("\n",
+                "CREATE TABLE dbo.Orders (id INT)",
+                "GO",
+                "CREATE PROCEDURE dbo.Helper AS SELECT 1",
+                "GO",
+                "CREATE FUNCTION dbo.Scalar(@x INT) RETURNS INT AS BEGIN RETURN @x END",
+                "GO",
+                "CREATE FUNCTION dbo.Rows() RETURNS TABLE AS RETURN SELECT id FROM dbo.Orders",
+                "GO",
+                "CREATE PROCEDURE dbo.Caller AS",
+                "EXEC dbo.Helper",
+                "EXEC dbo.Helper",
+                "SELECT dbo.Scalar(1), dbo.Scalar(2)",
+                "SELECT id FROM dbo.Rows()",
+                "GO",
+                "CREATE FUNCTION dbo.FnCaller() RETURNS INT AS",
+                "BEGIN RETURN dbo.Scalar(2) + (SELECT TOP 1 id FROM dbo.Rows()) END",
+                "GO",
+                "CREATE TRIGGER dbo.TrgCalls ON dbo.Orders AFTER INSERT AS",
+                "EXEC dbo.Helper",
+                "SELECT dbo.Scalar(3)",
+                "SELECT id FROM dbo.Rows()",
+                "GO",
+                "CREATE VIEW dbo.VCalls AS SELECT dbo.Scalar(id) AS s FROM dbo.Orders") + "\n");
+            Eq(Sorted(
+                $"uses {D}Rows -> {D}Orders read",
+                $"calls {D}Caller -> {D}Helper",
+                $"calls {D}Caller -> {D}Scalar",
+                $"calls {D}Caller -> {D}Rows",
+                $"calls {D}FnCaller -> {D}Scalar",
+                $"calls {D}FnCaller -> {D}Rows",
+                $"uses {D}TrgCalls -> {D}Orders trigger",
+                $"calls {D}TrgCalls -> {D}Helper",
+                $"calls {D}TrgCalls -> {D}Scalar",
+                $"calls {D}TrgCalls -> {D}Rows",
+                $"uses {D}VCalls -> {D}Orders read"), Refs(recs), "one calls edge per callee; none from the view");
+        }
+
+        static void TestRefsSynonyms()
+        {
+            var recs = EmitOne(string.Join("\n",
+                "CREATE TABLE dbo.Orders (id INT)",
+                "GO",
+                "CREATE PROCEDURE dbo.Helper AS SELECT 1",
+                "GO",
+                "CREATE SYNONYM dbo.SynT FOR dbo.Orders",
+                "GO",
+                "CREATE SYNONYM dbo.SynP FOR dbo.Helper",
+                "GO",
+                "CREATE PROCEDURE dbo.UseSyn AS",
+                "EXEC dbo.SynP",
+                "SELECT id FROM dbo.SynT") + "\n");
+            Eq(Sorted(
+                $"uses {D}SynT -> {D}Orders read",
+                $"calls {D}UseSyn -> {D}Helper",
+                $"uses {D}UseSyn -> {D}SynT read"), Refs(recs), "synonym references");
+        }
+
+        static void TestRefsTopLevelOutsideUnits()
+        {
+            var recs = EmitOne(string.Join("\n",
+                "CREATE TABLE dbo.Orders (id INT)",
+                "GO",
+                "INSERT INTO dbo.Orders (id) VALUES (1)",
+                "SELECT id FROM dbo.Orders") + "\n");
+            Eq("", Refs(recs), "no reference record outside every unit");
         }
 
         // e2e: the committed tests/fixtures/projects tree, located from the test binary.
