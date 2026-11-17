@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "sqlfrontend-spike-main-limits",
-  "body": "Program.Main reads each .sql file through SqlSourceReader and reports only plain CREATE declarations (ScriptDom models CREATE OR ALTER and ALTER as separate statement classes, which it skips), printing a file's diagnostics before its declarations rather than interleaved in batch order. Upgrade when Main is rewired onto SchemaEmitter, which declares CREATE OR ALTER and ALTER of views, procedures, functions and triggers.",
+  "body": "Program.Main accepts --cache-dir and --cache-key and ignores them, so sqlfrontend keeps no per-language artifact cache of its own, unlike csharpfrontend; and a flag given without a following value is ignored as in the C# frontend, so a trailing --targets with no file reports missing --targets. Upgrade if the sql stream ever needs cached artifacts or a valueless flag must be its own usage error.",
   "properties": {},
   "out": [
     {
