@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.Json;
 using Apg.SqlFrontend;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
@@ -21,7 +23,7 @@ namespace SqlFrontend.Tests
             var tiers = new Dictionary<string, List<(string, Action)>>
             {
                 ["unit"] = UnitTests(),
-                ["int"] = new List<(string, Action)>(),
+                ["int"] = IntTests(),
                 ["e2e"] = new List<(string, Action)> { ("ProjectFixtureScopes", TestProjectFixtureScopes) },
             };
             if (args.Length > 1 || (args.Length == 1 && !tiers.ContainsKey(args[0])))
@@ -347,6 +349,294 @@ namespace SqlFrontend.Tests
             var proj = scopes.Single(s => s.IsProject && s.Files.Contains("db/a.sql"));
             Eq(("db/Db.sqlproj", "app"), (proj.ModuleIdentity, proj.DefaultSchema), "project scope identity/schema");
             Eq("db/Db.sqlproj", Owner(scopes, "db/B.SQL"), "upper-case .SQL project member");
+        }
+
+        // int: SchemaEmitter.Emit wired to SqlSourceReader and SqlProjectReader over inline texts; /repo is never touched.
+        static List<(string, Action)> IntTests() =>
+            new List<(string, Action)>
+            {
+                ("EmitDeclarations", TestEmitDeclarations),
+                ("EmitLooseRepeatKeepsFirstSpelling", TestEmitLooseRepeatKeepsFirstSpelling),
+                ("EmitSchemaCaseFollowsFirstDeclaration", TestEmitSchemaCaseFollowsFirstDeclaration),
+                ("EmitLooseDirectoriesMergeByCase", TestEmitLooseDirectoriesMergeByCase),
+                ("EmitModuleCollisionDropsTable", TestEmitModuleCollisionDropsTable),
+                ("EmitViewDuplicateColumnKeepsOne", TestEmitViewDuplicateColumnKeepsOne),
+            };
+
+        const string Root = "/repo";
+
+        static (List<JsonElement>, List<string>) RunEmit(IEnumerable<SqlProjectReader.Project> projects,
+            Dictionary<string, string> sources)
+        {
+            var scopes = SqlProjectReader.BuildScopes(projects, sources.Keys);
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            SchemaEmitter.Emit(Root, scopes, sources, "n", stdout, stderr);
+            var recs = new List<JsonElement>();
+            foreach (var line in stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                using var doc = JsonDocument.Parse(line);
+                recs.Add(doc.RootElement.Clone());
+            }
+            return (recs, stderr.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList());
+        }
+
+        static string S(JsonElement r, string prop) =>
+            r.TryGetProperty(prop, out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.ToString()) : null;
+
+        static int I(JsonElement r, string prop) => r.GetProperty(prop).GetInt32();
+
+        static List<JsonElement> Of(List<JsonElement> recs, string type) => recs.Where(r => S(r, "type") == type).ToList();
+
+        static JsonElement One(List<JsonElement> recs, string type, string parent, string name)
+        {
+            var m = recs.Where(r => S(r, "type") == type && S(r, "parent") == parent && S(r, "name") == name).ToList();
+            Eq(1, m.Count, $"{type} {parent}.{name} emitted once");
+            return m.FirstOrDefault();
+        }
+
+        static JsonElement FileRec(List<JsonElement> recs, string path) => Of(recs, "file").Single(r => S(r, "path") == path);
+
+        static string Modules(List<JsonElement> recs) =>
+            string.Join(",", Of(recs, "module").Select(r => S(r, "fqn")).OrderBy(f => f, StringComparer.Ordinal));
+
+        // Names of the struct records the contains edges from `id` reach, in emission order.
+        static string ColumnsOf(List<JsonElement> recs, JsonElement owner)
+        {
+            string id = S(owner, "id");
+            var kids = new HashSet<string>(Of(recs, "contains").Where(c => S(c, "from") == id).Select(c => S(c, "to")));
+            return string.Join(",", Of(recs, "struct").Where(r => kids.Contains(S(r, "id"))).Select(r => S(r, "name")));
+        }
+
+        static JsonElement Column(List<JsonElement> recs, JsonElement owner, string name) =>
+            One(recs, "struct", S(owner, "parent") + "." + S(owner, "name"), name);
+
+        // Every module identity non-empty and unprefixed; every contains edge after the records of both endpoints.
+        static void StreamShape(List<JsonElement> recs)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var r in recs)
+            {
+                string type = S(r, "type");
+                if (type == "module")
+                {
+                    string fqn = S(r, "fqn");
+                    Eq(false, string.IsNullOrEmpty(fqn) || fqn.StartsWith("sql.", StringComparison.Ordinal), $"module <{fqn}> identity");
+                    seen.Add(fqn);
+                }
+                else if (type == "contains")
+                    Eq(true, seen.Contains(S(r, "from")) && seen.Contains(S(r, "to")),
+                        $"contains {S(r, "from")}->{S(r, "to")} follows its endpoints");
+                else if (S(r, "id") != null) seen.Add(S(r, "id"));
+            }
+        }
+
+        static int Utf8(string text, int index) => Encoding.UTF8.GetByteCount(text.Substring(0, index));
+
+        static void TestEmitDeclarations()
+        {
+            const string P = Root + "/db/Db.sqlproj";
+            string app = P + ".app", sales = P + ".sales";
+            var proj = Sdk("db/Db.sqlproj", "<PropertyGroup><DefaultSchema>app</DefaultSchema></PropertyGroup>\n");
+            string tables = string.Join("\n",
+                "-- café €",                                     // 1 multi-byte characters before every object
+                "CREATE TABLE Orders (",                         // 2
+                "  id INT,",                                     // 3
+                "  name NVARCHAR(10)",                           // 4
+                ")",                                             // 5
+                "GO",                                            // 6
+                "CREATE TABLE sales.Orders (id INT)",            // 7
+                "CREATE TABLE #temp (id INT)",                   // 8
+                "ALTER TABLE sales.Orders ADD qty INT",          // 9
+                "GO",                                            // 10
+                "CREATE TYPE Phone FROM NVARCHAR(20)",           // 11
+                "CREATE TYPE Lines AS TABLE (sku INT, qty INT)", // 12
+                "CREATE SEQUENCE Seq START WITH 1",              // 13
+                "CREATE SYNONYM Syn FOR Orders");                // 14, no trailing newline
+            string code = string.Join("\n",
+                "CREATE PROCEDURE GetOrders AS SELECT 1",                                      // 1
+                "GO",                                                                          // 2
+                "CREATE FUNCTION sales.Total() RETURNS INT AS BEGIN RETURN 1 END",             // 3
+                "GO",                                                                          // 4
+                "CREATE FUNCTION Itvf() RETURNS TABLE AS RETURN SELECT 1 AS x",                // 5
+                "GO",                                                                          // 6
+                "CREATE FUNCTION Mtvf() RETURNS @r TABLE (x INT) AS BEGIN RETURN END",         // 7
+                "GO",                                                                          // 8
+                "CREATE TRIGGER TrgS ON sales.Orders AFTER INSERT AS SELECT 1",                // 9
+                "GO",                                                                          // 10
+                "CREATE TRIGGER TrgD ON DATABASE FOR CREATE_TABLE AS SELECT 1",                // 11
+                "GO",                                                                          // 12
+                "CREATE OR ALTER PROCEDURE Upsert AS SELECT 1",                                // 13
+                "GO",                                                                          // 14
+                "ALTER VIEW AltV AS SELECT 1 AS a",                                            // 15
+                "GO",                                                                          // 16
+                "ALTER FUNCTION AltF() RETURNS INT AS BEGIN RETURN 1 END",                     // 17
+                "GO",                                                                          // 18
+                "CREATE OR ALTER TRIGGER TrgO ON Orders AFTER UPDATE AS SELECT 1",             // 19
+                "GO",                                                                          // 20
+                "CREATE VIEW Vsel AS SELECT o.id, o.name AS label, o.id + 1, * FROM Orders o", // 21
+                "GO",                                                                          // 22
+                "CREATE VIEW Vcols (a,",                                                       // 23
+                "  b) AS SELECT 1, 2",                                                         // 24
+                "GO",                                                                          // 25
+                "CREATE PROCEDURE Multi AS",                                                   // 26
+                "SELECT 1",                                                                    // 27
+                "SELECT 2",                                                                    // 28
+                "GO",                                                                          // 29
+                "ALTER PROCEDURE GetOrders AS SELECT 2") + "\n";                               // 30
+            var (recs, err) = RunEmit(new[] { proj }, new Dictionary<string, string>
+            {
+                ["db/Tables.sql"] = tables,
+                ["db/Code.sql"] = code,
+                ["scripts/load.sql"] = "CREATE TABLE Staging (id INT)\n",
+                ["root.sql"] = "CREATE TABLE RootT (id INT)\nCREATE TABLE sales.Two (id INT)",
+            });
+            StreamShape(recs);
+
+            // Modules: project, its schemas, loose directory, scan root, bare loose schemas.
+            Eq(string.Join(",", new[] { Root, P, app, sales, Root + "/scripts", "dbo", "sales" }.OrderBy(f => f, StringComparer.Ordinal)),
+                Modules(recs), "module records");
+            foreach (var schema in new[] { app, sales })
+                Eq(1, Of(recs, "contains").Count(c => S(c, "from") == P && S(c, "to") == schema), $"contains {P}->{schema}");
+
+            // Files: member -> P, loose -> its directory module, scan-root file -> /repo; end_line = line count.
+            foreach (var (path, parent, lines) in new[]
+            {
+                ("db/Tables.sql", P, 14), ("db/Code.sql", P, 30), ("scripts/load.sql", Root + "/scripts", 1), ("root.sql", Root, 2),
+            })
+            {
+                var f = FileRec(recs, Root + "/" + path);
+                Eq((parent, 1, lines), (S(f, "parent"), I(f, "start_line"), I(f, "end_line")), $"file {path}");
+            }
+
+            // Structs: table, temp table, alias type, table type, sequence, synonym, views; one-part names take app.
+            var orders = One(recs, "struct", app, "Orders");
+            var salesOrders = One(recs, "struct", sales, "Orders");
+            var temp = One(recs, "struct", app, "#temp");
+            One(recs, "struct", app, "Phone");
+            var lines12 = One(recs, "struct", app, "Lines");
+            One(recs, "struct", app, "Seq");
+            One(recs, "struct", app, "Syn");
+            One(recs, "struct", app, "AltV");
+            var vsel = One(recs, "struct", app, "Vsel");
+            var vcols = One(recs, "struct", app, "Vcols");
+            One(recs, "struct", "dbo", "Staging");
+            One(recs, "struct", "dbo", "RootT");
+            One(recs, "struct", "sales", "Two");
+
+            // Functions: procedures, scalar/inline/multi-statement functions, DML and DDL triggers, CREATE OR ALTER and ALTER.
+            foreach (var (parent, name) in new[]
+            {
+                (app, "GetOrders"), (sales, "Total"), (app, "Itvf"), (app, "Mtvf"), (sales, "TrgS"), (app, "TrgD"),
+                (app, "Upsert"), (app, "AltF"), (app, "TrgO"), (app, "Multi"),
+            })
+                One(recs, "function", parent, name);
+            Eq(10, Of(recs, "function").Count, "function records");
+
+            // Columns contained by their object; ALTER TABLE adds none; view select list names alias/column refs only.
+            Eq("id,name", ColumnsOf(recs, orders), "Orders columns");
+            Eq("id", ColumnsOf(recs, salesOrders), "sales.Orders columns (ALTER TABLE declares nothing)");
+            Eq("id", ColumnsOf(recs, temp), "#temp columns");
+            Eq("sku,qty", ColumnsOf(recs, lines12), "table type columns");
+            Eq("id,label", ColumnsOf(recs, vsel), "view select-list columns");
+            Eq("a,b", ColumnsOf(recs, vcols), "view column-list columns");
+
+            // Spans: original-file lines across GO batches; start/end are UTF-8 bytes after the multi-byte comment.
+            int ordersAt = tables.IndexOf("CREATE TABLE Orders"), ordersEnd = tables.IndexOf(")\nGO") + 1;
+            Eq((2, 5, Utf8(tables, ordersAt), Utf8(tables, ordersEnd)),
+                (I(orders, "start_line"), I(orders, "end_line"), I(orders, "start"), I(orders, "end")), "Orders span");
+            int idAt = tables.IndexOf("id INT,");
+            var id = Column(recs, orders, "id");
+            Eq((3, 3, Utf8(tables, idAt), Utf8(tables, idAt + "id INT".Length)),
+                (I(id, "start_line"), I(id, "end_line"), I(id, "start"), I(id, "end")), "Orders.id span");
+            Eq((4, 4), (I(Column(recs, orders, "name"), "start_line"), I(Column(recs, orders, "name"), "end_line")), "Orders.name lines");
+            Eq((7, 7, Utf8(tables, tables.IndexOf("CREATE TABLE sales"))),
+                (I(salesOrders, "start_line"), I(salesOrders, "end_line"), I(salesOrders, "start")), "sales.Orders span after GO");
+            Eq((12, 12), (I(lines12, "start_line"), I(lines12, "end_line")), "Lines span");
+            Eq((21, 21), (I(Column(recs, vsel, "label"), "start_line"), I(Column(recs, vsel, "label"), "end_line")), "Vsel.label lines");
+            Eq((23, 24), (I(vcols, "start_line"), I(vcols, "end_line")), "Vcols span");
+            Eq(23, I(Column(recs, vcols, "a"), "start_line"), "Vcols.a line");
+            Eq(24, I(Column(recs, vcols, "b"), "start_line"), "Vcols.b line");
+            var multi = One(recs, "function", app, "Multi");
+            Eq((26, 28), (I(multi, "start_line"), I(multi, "end_line")), "Multi span");
+            Eq((3, 3), (I(One(recs, "function", sales, "Total"), "start_line"), I(One(recs, "function", sales, "Total"), "end_line")), "Total span");
+            Eq(1, I(One(recs, "function", app, "GetOrders"), "start_line"), "GetOrders keeps its first declaration");
+
+            // A later ALTER of an already-declared procedure in the scope is a repeat: one diagnostic, nothing emitted.
+            Eq("sql: db/Code.sql:30:1: repeated declaration of app.GetOrders, first declared at db/Code.sql:1",
+                string.Join("\n", err), "diagnostics");
+        }
+
+        static void TestEmitLooseRepeatKeepsFirstSpelling()
+        {
+            var (recs, err) = RunEmit(new SqlProjectReader.Project[0], new Dictionary<string, string>
+            {
+                ["db/a.sql"] = "CREATE TABLE [Dbo].[Orders] (id INT)\n",
+                ["db/b.sql"] = "\nCREATE TABLE DBO.ORDERS (id INT)\n",
+            });
+            StreamShape(recs);
+            Eq("/repo/db,Dbo", Modules(recs), "module records");
+            One(recs, "struct", "Dbo", "Orders");
+            Eq(2, Of(recs, "struct").Count, "one table plus its column");
+            Eq("sql: db/b.sql:2:1: repeated declaration of Dbo.Orders, first declared at db/a.sql:1",
+                string.Join("\n", err), "diagnostics");
+        }
+
+        static void TestEmitSchemaCaseFollowsFirstDeclaration()
+        {
+            const string P = Root + "/db/Db.sqlproj";
+            var (recs, err) = RunEmit(new[] { Sdk("db/Db.sqlproj", "") }, new Dictionary<string, string>
+            {
+                ["db/a.sql"] = "CREATE TABLE Sales.A (id INT)\n",
+                ["db/b.sql"] = "CREATE TABLE SALES.B (id INT)\n",
+            });
+            StreamShape(recs);
+            Eq(string.Join(",", new[] { P, P + ".Sales" }), Modules(recs), "module records");
+            One(recs, "struct", P + ".Sales", "A");
+            One(recs, "struct", P + ".Sales", "B");
+            Eq(0, err.Count, "diagnostics");
+        }
+
+        static void TestEmitLooseDirectoriesMergeByCase()
+        {
+            var (recs, err) = RunEmit(new SqlProjectReader.Project[0], new Dictionary<string, string>
+            {
+                ["Scripts/a.sql"] = "CREATE TABLE dbo.A (id INT)\n",
+                ["scripts/b.sql"] = "CREATE TABLE dbo.B (id INT)\n",
+            });
+            StreamShape(recs);
+            Eq("/repo/Scripts,dbo", Modules(recs), "one directory module spelled /repo/Scripts");
+            Eq("/repo/Scripts", S(FileRec(recs, Root + "/Scripts/a.sql"), "parent"), "Scripts/a.sql parent");
+            Eq("/repo/Scripts", S(FileRec(recs, Root + "/scripts/b.sql"), "parent"), "scripts/b.sql parent");
+            One(recs, "struct", "dbo", "A");
+            One(recs, "struct", "dbo", "B");
+            Eq(0, err.Count, "diagnostics");
+        }
+
+        static void TestEmitModuleCollisionDropsTable()
+        {
+            var (recs, err) = RunEmit(new SqlProjectReader.Project[0], new Dictionary<string, string>
+            {
+                ["dbo.Orders/x.sql"] = "CREATE TABLE Other (id INT)\n",
+                ["root.sql"] = "CREATE TABLE dbo.Orders (id INT, qty INT)\n",
+            });
+            StreamShape(recs);
+            Eq("/repo,/repo/dbo.Orders,dbo", Modules(recs), "module records");
+            Eq(0, recs.Count(r => S(r, "name") == "Orders" || S(r, "parent") == "dbo.Orders"), "table and its columns dropped");
+            Eq("/repo", S(FileRec(recs, Root + "/root.sql"), "parent"), "root.sql still emitted");
+            One(recs, "struct", "dbo", "Other");
+            Eq("sql: root.sql:1:1: dbo.Orders renders sql.dbo.Orders, already taken by module /repo/dbo.Orders",
+                string.Join("\n", err), "diagnostics");
+        }
+
+        static void TestEmitViewDuplicateColumnKeepsOne()
+        {
+            var (recs, _) = RunEmit(new SqlProjectReader.Project[0], new Dictionary<string, string>
+            {
+                ["v.sql"] = "CREATE VIEW dbo.V AS SELECT o.id, p.id FROM dbo.T o JOIN dbo.T p ON 1 = 1\n",
+            });
+            StreamShape(recs);
+            Eq("id", ColumnsOf(recs, One(recs, "struct", "dbo", "V")), "one id column");
         }
 
         // e2e: the committed tests/fixtures/projects tree, located from the test binary.
