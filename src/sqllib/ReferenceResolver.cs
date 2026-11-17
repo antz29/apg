@@ -269,7 +269,8 @@ namespace Apg.SqlFrontend
                 if (collect && types) unit.Call(n.SchemaObject, Functions, n, false);
             }
 
-            public override void Visit(SelectStatement n) => Ctes(n);
+            public override void Visit(SelectStatement n) { Ctes(n); Read(n.Into); }
+            public override void Visit(TruncateTableStatement n) => Read(n.TableName);
             public override void Visit(InsertStatement n) => Ctes(n);
             public override void Visit(UpdateStatement n) => Ctes(n);
             public override void Visit(DeleteStatement n) => Ctes(n);
@@ -329,6 +330,12 @@ namespace Apg.SqlFrontend
                     && (name.Equals("inserted", StringComparison.OrdinalIgnoreCase) || name.Equals("deleted", StringComparison.OrdinalIgnoreCase)))
                     return;
                 unit.Add(n.SchemaObject, ObjectKinds, writes.Contains(n) ? "write" : "read");
+            }
+
+            // SELECT … INTO and TRUNCATE TABLE name an object outside a NamedTableReference: a read (sql-uses-kind); #temp is local.
+            void Read(SchemaObjectName n)
+            {
+                if (collect && !(n?.BaseIdentifier?.Value ?? "#").StartsWith('#')) unit.Add(n, ObjectKinds, "read");
             }
 
             public override void Visit(NextValueForExpression n)

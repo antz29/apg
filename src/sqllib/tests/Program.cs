@@ -375,6 +375,7 @@ namespace SqlFrontend.Tests
                 ("RefsReadsWritesTriggers", TestRefsReadsWritesTriggers),
                 ("RefsScopeAndNameResolution", TestRefsScopeAndNameResolution),
                 ("RefsLocalNamesGiveNothing", TestRefsLocalNamesGiveNothing),
+                ("RefsTruncateAndSelectInto", TestRefsTruncateAndSelectInto),
                 ("RefsTypeUses", TestRefsTypeUses),
                 ("RefsCalls", TestRefsCalls),
                 ("RefsSynonyms", TestRefsSynonyms),
@@ -861,6 +862,34 @@ namespace SqlFrontend.Tests
             Eq(Sorted(
                 $"uses {D}Locals -> {D}Orders write",
                 $"uses {D}Trg -> {D}Orders trigger"), Refs(recs), "only dbo.Orders is referenced (no unresolved record)");
+        }
+
+        static void TestRefsTruncateAndSelectInto()
+        {
+            Eq(Sorted(
+                "unresolved dbo.Absent external",
+                $"unresolved_use {D}Copies -> dbo.Absent",
+                $"uses {D}Trunc -> {D}Log read",
+                $"uses {D}Copies -> {D}Copy read",
+                $"uses {D}Copies -> {D}Log read",
+                $"uses {D}Both -> {D}Log write"),
+                Refs(EmitOne(Sql(
+                    "CREATE TABLE dbo.Log (id INT)",
+                    "GO",
+                    "CREATE TABLE dbo.Copy (id INT)",
+                    "GO",
+                    "CREATE PROCEDURE dbo.Trunc AS TRUNCATE TABLE dbo.Log",
+                    "GO",
+                    "CREATE PROCEDURE dbo.Copies AS",
+                    "SELECT id INTO dbo.Copy FROM dbo.Log",
+                    "SELECT id INTO dbo.Absent FROM dbo.Log",
+                    "SELECT id INTO #t FROM dbo.Log",
+                    "GO",
+                    "CREATE PROCEDURE dbo.Both AS",
+                    "TRUNCATE TABLE dbo.Log",
+                    "INSERT INTO dbo.Log (id) VALUES (1)",
+                    "TRUNCATE TABLE dbo.Log"))),
+                "TRUNCATE and SELECT INTO targets are reads; an INSERT raises to one write; #temp gives nothing");
         }
 
         static void TestRefsTypeUses()
