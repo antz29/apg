@@ -16,12 +16,13 @@ namespace Apg.SqlFrontend
         public sealed record Declaration(string Schema, string Name, string Id, bool IsFunction);
 
         // rootDir: absolute, '/'-separated, no trailing separator. sources: repo-relative .sql path -> text.
+        // bomFiles: source paths whose file starts with a stripped UTF-8 BOM, so their byte offsets start at 3.
         // Returns each scope's declaration index: Schema.Name (ordinal-ignore-case) -> emitted declaration.
         public static Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>> Emit(string rootDir,
             List<SqlProjectReader.Scope> scopes, IReadOnlyDictionary<string, string> sources, string idPrefix,
-            TextWriter stdout, TextWriter stderr)
+            TextWriter stdout, TextWriter stderr, ISet<string> bomFiles = null)
         {
-            var emission = new Emission(rootDir, idPrefix, stdout, stderr);
+            var emission = new Emission(rootDir, idPrefix, stdout, stderr, bomFiles ?? new HashSet<string>());
             emission.All(scopes, sources);
             return emission.Index;
         }
@@ -36,6 +37,7 @@ namespace Apg.SqlFrontend
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var projects = new List<string>();
             var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+            var bomFiles = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in targetPaths)
             {
                 string full = Path.GetFullPath(line);
@@ -52,7 +54,13 @@ namespace Apg.SqlFrontend
                     // A project is parsed here too so one unreadable or malformed .sqlproj is reported, not scan-fatal.
                     if (isProject) { SqlProjectReader.ParseProject(rel, File.ReadAllText(full)); projects.Add(rel); }
                     else if (!File.Exists(full)) stderr.WriteLine($"sql: {rel}: file not found");
-                    else sources[rel] = File.ReadAllText(full, Encoding.UTF8);
+                    else
+                    {
+                        byte[] raw = File.ReadAllBytes(full);
+                        if (raw.Length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) bomFiles.Add(rel);
+                        using var reader = new StreamReader(new MemoryStream(raw), Encoding.UTF8);
+                        sources[rel] = reader.ReadToEnd();
+                    }
                 }
                 catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is XmlException)
                 {
@@ -60,7 +68,7 @@ namespace Apg.SqlFrontend
                 }
             }
             var scopes = SqlProjectReader.Read(rootDir, projects, sources.Keys);
-            return Emit(rootDir, scopes, sources, idPrefix, stdout, stderr);
+            return Emit(rootDir, scopes, sources, idPrefix, stdout, stderr, bomFiles);
         }
 
         // `path` equals `dir` or lies under it, on a separator boundary (as csharplib SourceDiscovery.IsWithin).
@@ -72,6 +80,7 @@ namespace Apg.SqlFrontend
         {
             readonly string root, prefix;
             readonly TextWriter output, errors;
+            readonly ISet<string> boms;
             readonly HashSet<string> written = new HashSet<string>(StringComparer.Ordinal);
             // Repo-relative module identity (ignore-case) -> first spelling and its (path, offset) declaration point.
             readonly Dictionary<string, (string Fqn, string Path, int Offset)> modules =
@@ -84,9 +93,9 @@ namespace Apg.SqlFrontend
                 new Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>>();
             int next;
 
-            public Emission(string rootDir, string idPrefix, TextWriter stdout, TextWriter stderr)
+            public Emission(string rootDir, string idPrefix, TextWriter stdout, TextWriter stderr, ISet<string> bomFiles)
             {
-                root = rootDir; prefix = idPrefix; output = stdout; errors = stderr;
+                root = rootDir; prefix = idPrefix; output = stdout; errors = stderr; boms = bomFiles;
             }
 
             void Write(object record) => output.WriteLine(JsonSerializer.Serialize(record));
@@ -168,7 +177,7 @@ namespace Apg.SqlFrontend
                 List<(SqlSourceReader.Batch, TSqlStatement, (string, string, bool, List<(string, TSqlFragment)>))> decls)
             {
                 string abs = root + "/" + rel, scopeModule = Canonical(ScopeModule(scope));
-                var map = new Positions(text);
+                var map = new Positions(text, boms.Contains(rel) ? 3 : 0);
                 Write(new { type = "file", path = abs, parent = scopeModule, start_line = 1, end_line = map.LineCount });
                 foreach (var (batch, stmt, (schema, name, isFunction, columns)) in decls)
                 {
@@ -286,9 +295,11 @@ namespace Apg.SqlFrontend
             readonly int[] bytes;
             readonly List<int> newlines = new List<int>();
 
-            public Positions(string text)
+            // byteBase: the file bytes before text[0] (a stripped BOM); it shifts byte offsets, never lines.
+            public Positions(string text, int byteBase)
             {
                 bytes = new int[text.Length + 1];
+                bytes[0] = byteBase;
                 for (int i = 0; i < text.Length; i++)
                 {
                     char c = text[i];

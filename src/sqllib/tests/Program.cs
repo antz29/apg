@@ -808,6 +808,15 @@ namespace SqlFrontend.Tests
                 var empty = ParseLines(RunTargets(root, new List<string>(), new List<string>(), "n").Item1);
                 Eq(0, Of(empty, "file").Count, "empty list emits no file record");
                 Eq(0, Of(empty, "struct").Count, "empty list emits no struct record");
+
+                // A UTF-8 BOM is in the file's bytes: offsets count it, lines do not.
+                File.WriteAllBytes(Path.Combine(root, "bom.sql"),
+                    new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes("\nCREATE TABLE dbo.Bom (id INT)\n")).ToArray());
+                var bom = ParseLines(RunTargets(root, new[] { root + "/bom.sql", root + "/kept.sql" }, new List<string>(), "n").Item1);
+                var b = One(bom, "struct", "dbo", "Bom");
+                Eq((3 + 1, 3 + 1 + 29, 2, 2), (I(b, "start"), I(b, "end"), I(b, "start_line"), I(b, "end_line")), "BOM file object bytes/lines");
+                var k = One(bom, "struct", "dbo", "Kept");
+                Eq((0, 30, 1), (I(k, "start"), I(k, "end"), I(k, "start_line")), "non-BOM file object bytes unchanged");
             }
             finally
             {
