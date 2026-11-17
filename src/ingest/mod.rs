@@ -547,6 +547,13 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
                     graph.calls.insert((e.from, e.to));
                 }
                 "uses" => {
+                    // A freshly emitted record's properties win over the cached ones.
+                    if !e.properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .entry(("uses", e.from.clone(), e.to.clone()))
+                            .or_insert(e.properties);
+                    }
                     graph.uses.insert((e.from, e.to));
                 }
                 "unresolved_call" => {
