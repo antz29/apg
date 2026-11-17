@@ -507,6 +507,11 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     for f in &changed_rel {
         targets_rel.extend(state.overloads.peer_files(f));
     }
+    // The sql stream is whole-project: any .sql/.sqlproj change re-targets
+    // every tracked .sql file (a removed one stays here as delete scope).
+    let sql_targets =
+        crate::frontends::whole_language_targets(&targets_rel, manifest.entries.keys());
+    targets_rel.extend(sql_targets);
 
     // FULL-UNIVERSE SEAM (feedback-92): the incremental path derives the full
     // code-FQN universe from the PREVIOUS database. With a non-empty target set
