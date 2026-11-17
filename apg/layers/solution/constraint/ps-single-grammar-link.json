@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "ps-single-grammar-link",
-  "body": "psfrontend links exactly one PowerShell grammar crate, woodruffw-trough-tree-sitter-powershell, because it and tree-sitter-powershell both export the C symbol tree_sitter_powershell and a binary linking both silently binds only one.",
+  "body": "psfrontend links exactly one crate that exports the C symbol tree_sitter_powershell, woodruffw-trough-tree-sitter-powershell, since a binary linking two such crates silently binds only one.",
   "properties": {},
   "out": [],
   "in": []
