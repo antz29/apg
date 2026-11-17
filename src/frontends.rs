@@ -82,6 +82,9 @@ pub fn available_languages() -> Vec<String> {
         if dir.join("cobolfrontend").exists() {
             langs.push("cobol".into());
         }
+        if dir.join("sqlfrontend").exists() || dir.join("sqlfrontend.exe").exists() {
+            langs.push("sql".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
