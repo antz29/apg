@@ -1576,8 +1576,8 @@ mod unit {
     /// `code_identity` strips exactly ONE leading language root — every root in
     /// `LANGUAGE_ROOTS`, a bare FQN unchanged, and only a real `<root>.`
     /// boundary (so `rusty.main` is never mangled). `LANGUAGE_ROOTS` is the
-    /// complete `available_languages` vocabulary (twenty-one ids: the code/agent
-    /// ids including `cobol`, plus the structural streams, `md` included):
+    /// complete `available_languages` vocabulary (twenty-two ids: the code/agent
+    /// ids including `cobol` and `sql`, plus the structural streams, `md` included):
     /// `agent` is a member and `agent.<file-stem>` strips to the bare stem
     /// exactly once, and a structural root strips the same way.
     #[test]
@@ -1585,11 +1585,12 @@ mod unit {
         assert!(
             LANGUAGE_ROOTS.contains(&"agent")
                 && LANGUAGE_ROOTS.contains(&"cobol")
+                && LANGUAGE_ROOTS.contains(&"sql")
                 && LANGUAGE_ROOTS.contains(&"sh")
                 && LANGUAGE_ROOTS.contains(&"misc")
                 && LANGUAGE_ROOTS.contains(&"sln")
-                && LANGUAGE_ROOTS.len() == 21,
-            "LANGUAGE_ROOTS must carry the twenty-one available_languages ids: {LANGUAGE_ROOTS:?}"
+                && LANGUAGE_ROOTS.len() == 22,
+            "LANGUAGE_ROOTS must carry the twenty-two available_languages ids: {LANGUAGE_ROOTS:?}"
         );
         for root in LANGUAGE_ROOTS {
             assert_eq!(
