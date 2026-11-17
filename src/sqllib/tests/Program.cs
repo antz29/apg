@@ -32,6 +32,8 @@ namespace SqlFrontend.Tests
                     ("EmitterTargetsList", TestEmitterTargetsList),
                     ("EmitterTargetGuards", TestEmitterTargetGuards),
                     ("EmitterCli", TestEmitterCli),
+                    ("ReferencesFixture", TestReferencesFixture),
+                    ("ReferencesCli", TestReferencesCli),
                 },
             };
             if (args.Length > 1 || (args.Length == 1 && !tiers.ContainsKey(args[0])))
@@ -682,9 +684,9 @@ namespace SqlFrontend.Tests
         }
 
         // Reference records rendered with ids mapped to their repo-relative parent.name, sorted (duplicates kept).
-        static string Refs(List<JsonElement> recs)
+        static string Refs(List<JsonElement> recs, string root = Root)
         {
-            string Rel(string p) => p.StartsWith(Root + "/", StringComparison.Ordinal) ? p.Substring(Root.Length + 1) : p;
+            string Rel(string p) => p.StartsWith(root + "/", StringComparison.Ordinal) ? p.Substring(root.Length + 1) : p;
             var names = new Dictionary<string, string>();
             foreach (var r in recs)
                 if (S(r, "id") != null) names[S(r, "id")] = Rel(S(r, "parent")) + "." + S(r, "name");
@@ -1440,6 +1442,111 @@ namespace SqlFrontend.Tests
             {
                 File.Delete(listFile);
                 File.Delete(emptyFile);
+            }
+        }
+
+        // e2e: the committed tests/fixtures/references tree — two projects and a loose directory — through Run and Main.
+        static string ReferencesRoot() => Path.TrimEndingDirectorySeparator(Path.GetFullPath(FixtureRoot("references")));
+
+        const string LA = "Legacy/Legacy.sqlproj.app.";
+        const string SD = "Sdk/Sdk.sqlproj.dbo.";
+
+        // Each project's names resolve in its own scope only: Sdk's app.Orders stays external though Legacy declares it.
+        static readonly string ExpectedReferences = Sorted(
+            $"uses {LA}Orders.ContactPhone -> {LA}Phone type",
+            $"uses {LA}OrderView -> {LA}Orders read",
+            $"uses {LA}OrdersSyn -> {LA}Orders read",
+            "unresolved Archive.dbo.Orders external",
+            $"unresolved_use {LA}FarSyn -> Archive.dbo.Orders",
+            $"uses {LA}OrderTotal -> {LA}Orders read",
+            $"uses {LA}OrdersFor -> {LA}Orders read",
+            $"uses {LA}PlaceOrder -> {LA}OrderLines type",
+            $"uses {LA}PlaceOrder -> {LA}Phone type",
+            $"uses {LA}PlaceOrder -> {LA}OrderIds read",
+            $"uses {LA}PlaceOrder -> {LA}Orders write",
+            $"uses {LA}PlaceOrder -> {LA}OrderLog write",
+            $"calls {LA}PlaceOrder -> {LA}OrderTotal",
+            $"calls {LA}PlaceOrder -> {LA}Helper",
+            $"calls {LA}PlaceOrder -> {LA}OrdersFor",
+            $"uses {LA}CloseOrders -> {LA}Orders write",
+            $"uses {LA}CloseOrders -> {LA}Customers read",
+            $"uses {LA}CloseOrders -> {LA}OrderLog write",
+            $"uses {LA}CloseOrders -> {LA}OrderView read",
+            $"uses {LA}Staging -> {LA}Phone type",
+            $"uses {LA}Staging -> {LA}Customers read",
+            $"uses {LA}Staging -> {LA}Orders read",
+            "unresolved SYS.SP_EXECUTESQL builtin",
+            "unresolved SYS.TABLES builtin",
+            "unresolved INFORMATION_SCHEMA.TABLES builtin",
+            "unresolved GETDATE builtin",
+            $"unresolved_call {LA}Dynamic -> SYS.SP_EXECUTESQL",
+            $"unresolved_use {LA}Dynamic -> SYS.TABLES",
+            $"unresolved_use {LA}Dynamic -> INFORMATION_SCHEMA.TABLES",
+            $"unresolved_call {LA}Dynamic -> GETDATE",
+            $"calls {LA}ViaSynonyms -> {LA}Helper",
+            $"uses {LA}ViaSynonyms -> {LA}OrdersSyn read",
+            $"uses {LA}ViaSynonyms -> {LA}FarSyn read",
+            $"uses {LA}OrdersAudit -> {LA}Orders trigger",
+            $"uses {LA}OrdersAudit -> {LA}OrderLog write",
+            $"uses {SD}ListOrders -> {SD}Orders read",
+            "unresolved app.Orders external",
+            $"unresolved_use {SD}ListOrders -> app.Orders",
+            $"uses {SD}CountOrders -> {SD}Orders read",
+            $"calls {SD}CountOrders -> {SD}ListOrders",
+            "unresolved dbo.ArchivedOrders external",
+            "unresolved_use dbo.ReadArchive -> dbo.ArchivedOrders",
+            "unresolved_use dbo.ReadArchiveAgain -> dbo.ArchivedOrders");
+
+        static readonly string[] RefTypes = { "calls", "uses", "unresolved", "unresolved_call", "unresolved_use" };
+
+        static void AllJsonObjects(string output)
+        {
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                bool isObject;
+                try { using var doc = JsonDocument.Parse(line); isObject = doc.RootElement.ValueKind == JsonValueKind.Object; }
+                catch (JsonException) { isObject = false; }
+                Eq(true, isObject, $"stdout line is a JSON object: {line}");
+            }
+        }
+
+        static void TestReferencesFixture()
+        {
+            string root = ReferencesRoot();
+            var targets = FixtureTargets(root);
+            Eq(9, targets.Count, "references fixture .sql/.sqlproj files");
+            var (output, errors) = RunTargets(root, targets, new List<string>(), "r");
+            Eq("", errors, "diagnostics");
+            AllJsonObjects(output);
+            var recs = ParseLines(output);
+            StreamShape(recs);
+            RefShape(recs);
+            Eq(ExpectedReferences, Refs(recs, root), "reference records");
+        }
+
+        static void TestReferencesCli()
+        {
+            string root = ReferencesRoot();
+            var targets = FixtureTargets(root);
+            string listFile = Path.Combine(Path.GetTempPath(), "sqlfe-refs-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                File.WriteAllLines(listFile, targets);
+                var (code, output, errors) = RunMain(root, "--targets", listFile);
+                Eq(0, code, "exit code");
+                Eq("", errors, "CLI diagnostics");
+                AllJsonObjects(output);
+                var recs = ParseLines(output);
+                RefShape(recs);
+                Eq(ExpectedReferences, Refs(recs, root), "CLI reference records");
+                var direct = ParseLines(RunTargets(root, targets, new List<string>(), "r").Item1);
+                Eq(string.Join("\n", direct.Where(r => RefTypes.Contains(S(r, "type"))).Select(r => Normalise(r, "r"))),
+                    string.Join("\n", recs.Where(r => RefTypes.Contains(S(r, "type"))).Select(r => Normalise(r, "n"))),
+                    "CLI reference records equal SchemaEmitter.Run modulo id prefix");
+            }
+            finally
+            {
+                File.Delete(listFile);
             }
         }
     }

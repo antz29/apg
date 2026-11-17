@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.Build.Sql/0.2.0-preview">
+  <PropertyGroup>
+    <Name>Sdk</Name>
+  </PropertyGroup>
+</Project>
