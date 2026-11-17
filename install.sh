@@ -42,7 +42,7 @@ raw_frontends=""
 install_all=0
 components=""
 
-ALL_FRONTENDS="cpp go rust csharp java ts py cobol"
+ALL_FRONTENDS="cpp go rust csharp java ts py cobol sql"
 
 usage() {
     cat <<'EOF'
@@ -61,6 +61,7 @@ Components:
   ts              TypeScript scanner frontend (tsfrontend)
   py              Python scanner frontend (pyfrontend)
   cobol           COBOL scanner frontend (cobolfrontend)
+  sql             T-SQL scanner frontend (sqlfrontend)
   all             Core scanner + all frontends
 
 Options:
@@ -107,8 +108,9 @@ normalize_component() {
         ts | typescript | apg-ts) echo "ts" ;;
         py | python | apg-py) echo "py" ;;
         cobol | apg-cobol) echo "cobol" ;;
+        sql | tsql | apg-sql) echo "sql" ;;
         all) echo "all" ;;
-        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, cobol, all)" ;;
+        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, cobol, sql, all)" ;;
     esac
 }
 
@@ -218,6 +220,10 @@ if [ "$uninstall" -eq 1 ]; then
             cobol)
                 rm -f "$frontends_dir/cobolfrontend"
                 echo "Removed COBOL frontend."
+                ;;
+            sql)
+                rm -f "$frontends_dir/sqlfrontend"
+                echo "Removed T-SQL frontend."
                 ;;
         esac
     done
@@ -437,6 +443,10 @@ for f in $target_frontends; do
             [ -x "$work/extract_${f}/cobolfrontend" ] || die "${tarball} does not contain 'cobolfrontend'"
             install -m 0755 "$work/extract_${f}/cobolfrontend" "$frontends_dir/cobolfrontend"
             ;;
+        sql)
+            [ -x "$work/extract_${f}/sqlfrontend" ] || die "${tarball} does not contain 'sqlfrontend'"
+            install -m 0755 "$work/extract_${f}/sqlfrontend" "$frontends_dir/sqlfrontend"
+            ;;
     esac
 
     installed_components="${installed_components}${installed_components:+, }${f}"
@@ -474,6 +484,7 @@ for lang in $ALL_FRONTENDS; do
         ts) [ -d "$frontends_dir/tsfrontend" ] && present=1 ;;
         py) [ -x "$frontends_dir/pyfrontend" ] && present=1 ;;
         cobol) [ -x "$frontends_dir/cobolfrontend" ] && present=1 ;;
+        sql) [ -x "$frontends_dir/sqlfrontend" ] && present=1 ;;
     esac
     if [ "$present" -eq 1 ]; then
         installed_langs="${installed_langs}${installed_langs:+ }$lang"
