@@ -121,6 +121,20 @@ fn clean_top_pipeline(src: &str, cmd: &str) {
     );
 }
 
+/// Each `[[package]]` entry's `(name, version)` in a Cargo.lock text.
+fn lock_packages(lock: &str) -> Vec<(&str, &str)> {
+    fn field<'a>(entry: &'a str, key: &str) -> &'a str {
+        entry
+            .lines()
+            .find_map(|l| l.strip_prefix(key)?.strip_prefix(" = "))
+            .map_or("", |v| v.trim_matches('"'))
+    }
+    lock.split("[[package]]")
+        .skip(1)
+        .map(|e| (field(e, "name"), field(e, "version")))
+        .collect()
+}
+
 mod unit {
     use super::*;
 
@@ -906,5 +920,33 @@ mod unit {
             ),
         ]);
         assert_eq!(errors(closed), ["ERROR \"= (1 + \\n\""]);
+    }
+
+    /// solution.constraint.ps-single-grammar-link: exactly one crate exports
+    /// `tree_sitter_powershell`, and it is the pinned woodruffw grammar.
+    #[test]
+    fn single_grammar_link() {
+        let manifest = include_str!("../Cargo.toml");
+        let deps: Vec<&str> = manifest
+            .split("[dependencies]")
+            .nth(1)
+            .expect("[dependencies]")
+            .lines()
+            .take_while(|l| !l.starts_with('['))
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert!(deps.contains(&r#"woodruffw-trough-tree-sitter-powershell = "=0.1.6""#));
+        assert!(deps.contains(&r#"tree-sitter = "=0.26.13""#));
+        assert!(!deps.iter().any(|l| l.starts_with("tree-sitter-powershell")));
+
+        let pkgs = lock_packages(include_str!("../Cargo.lock"));
+        let ps: Vec<_> = pkgs
+            .iter()
+            .filter(|(n, _)| n.contains("powershell"))
+            .collect();
+        assert_eq!(ps, [&("woodruffw-trough-tree-sitter-powershell", "0.1.6")]);
+        assert!(pkgs.contains(&("tree-sitter", "0.26.13")));
+        assert!(!pkgs.iter().any(|(n, _)| *n == "tree-sitter-powershell"));
     }
 }
