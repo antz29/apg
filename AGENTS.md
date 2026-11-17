@@ -20,7 +20,10 @@ files — the system of record at rest).
   Python: `src/pylib` — a
   standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, COBOL:
   `src/cobollib` — a standalone `cobolfrontend` binary with a hand-written
-  COBOL parser, the bundled
+  COBOL parser, T-SQL: `src/sqllib/Program.cs` — a standalone single-file
+  `sqlfrontend` binary built on `Microsoft.SqlServer.TransactSql.ScriptDom`
+  (`TSql170Parser`), claiming `.sql` in any letter case and reading `.sqlproj`
+  membership statically, the bundled
   structural scanner: `src/structlib` — a standalone `structfrontend` binary
   that graphs every tracked text/config/packaging file the code frontends don't
   claim, serving the Markdown stream (absorbing the retired `src/mdlib`
@@ -46,17 +49,18 @@ files — the system of record at rest).
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
   tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
   the Python (`src/pylib`), COBOL (`src/cobollib`), bundled structural
-  (`src/structlib`) and bundled agent (`src/agentlib`) crates) and stages them to
+  (`src/structlib`) and bundled agent (`src/agentlib`) crates, `dotnet publish`
+  (self-contained single-file) for the T-SQL frontend — `src/sqllib`) and stages them to
   `target/<profile>/frontends`. The base `apg` binary itself is
   built against a prebuilt static liblbug plus `openssl@3` (no bundled
   LadybugDB and no `cmake`); the Homebrew `scanner` formula installs it together
-  with the bundled `structfrontend` and `agentfrontend`, while the eight
+  with the bundled `structfrontend` and `agentfrontend`, while the nine
   per-language frontends ship as their own formulae. Run a scan with
   `apg scan <dir>` (or the `apg_scan` tool). `apg` resolves frontends at
   runtime relative to the binary (`<exe_dir>/frontends` or
   `<exe_dir>/../libexec/frontends`) or via `APG_FRONTEND_DIR`.
   `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`, `cpp`, `rust`, `ts`,
-  `csharp`, `struct`, `py`, `agent`, `cobol`; `0` to skip) limits what build.rs
+  `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`; `0` to skip) limits what build.rs
   compiles — `struct` and `agent` are the bundled structural and
   agent-definition scanners.
 - **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
@@ -96,7 +100,10 @@ files — the system of record at rest).
   (`serde`/`serde_json`), needs nothing at scan time (a self-contained binary
   that never shells out), has no engine pin (hand-written parser), and is
   bounded by its dialect table — `cobol85` (default), `cobol2002`,
-  `cobol2014`, `ibm`, with `cobol2023` refused. The bundled structural scanner (`structfrontend`,
+  `cobol2014`, `ibm`, with `cobol2023` refused; T-SQL (`src/sqllib`) builds
+  with a .NET SDK (`net9.0`) + NuGet, is self-contained at scan time (it never
+  runs MSBuild, `dotnet` or a database), and is bounded by ScriptDom
+  `180.140.0`'s `TSql170Parser` (the SQL Server 2025 / Azure SQL ceiling). The bundled structural scanner (`structfrontend`,
   `src/structlib`, absorbing the retired `src/mdlib` Markdown frontend) builds
   with stable Rust + crates.io and needs nothing at scan time (it never shells
   out), bounded by `serde`/`serde_json`/`unicode-normalization` 0.1 with no
@@ -186,7 +193,7 @@ The project builds a single `apg` binary (package `apg`):
   — run the pipeline; produces `apg/.trans/db.lbug` (derived from the durable
   `apg/layers/**` node files and the scanned code) and
   `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
-  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`); when omitted, `apg` auto-detects **every** language present and
+  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`, `sql`); when omitted, `apg` auto-detects **every** language present and
   scans them all, merging their graphs into one database (a multi-language repo
   like a Go backend + TS frontend gets a single `apg/.trans/db.lbug`). Each frontend's
   opaque ids are namespaced per language (`--id-prefix`), and the ingestor
@@ -196,7 +203,7 @@ The project builds a single `apg` binary (package `apg`):
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
   is always skipped; C# claims `.cs`, `.csx`, `.cshtml` and `.razor` sources;
-  COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
+  COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources in any case; SQL claims `.sql` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
   `cobol2002`, `cobol2014` or `ibm` (overrides `cobol.dialect` in
   `apg/config.json`; `cobol2023` is refused); `--copy-path <dir>` is a COBOL
   copybook search directory (repeatable). `--force` is a true rebuild: it discards `db.lbug` (with
@@ -319,9 +326,9 @@ opencode **v2** only — the `~/.config/opencode/` layout and the
 
 The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): the base `scanner` formula (the binary
-plus the bundled structural scanner), and eight per-language frontend formulae —
+plus the bundled structural scanner), and nine per-language frontend formulae —
 `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`,
-`apg-cobol` —
+`apg-cobol`, `apg-sql` —
 each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
 `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
@@ -478,7 +485,9 @@ The opt-in COBOL cobc agreement and budget e2e
 `cargo build --release --manifest-path src/cobollib/Cargo.toml` first (it
 fails when the release `cobolfrontend` is missing) and GnuCOBOL `cobc` on
 `PATH` or named by `APG_COBC`; it skips only when `cobc` is missing or
-unrunnable. Wiring those invocations into
+unrunnable. The T-SQL frontend's test project is a .NET project, not a cargo
+crate: `dotnet run --project src/sqllib/tests/SqlFrontend.Tests.csproj` runs
+its tiers, likewise outside `scripts/gate.sh`. Wiring those invocations into
 `scripts/gate.sh` has not been done (`scripts/**` is **run-only for every
 agent except `build-implementer`, which owns it** and may change a step), so the
 root `scripts/gate.sh` does NOT run them — invoke them yourself when a change
@@ -649,8 +658,8 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    blocks otherwise).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
-4. **Repoint all 9 formulae (the base `scanner` plus the eight per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
-   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`):
+4. **Repoint all 10 formulae (the base `scanner` plus the nine per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`, `apg-sql`):
    `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
    `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
@@ -714,9 +723,9 @@ Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
 `Language` node per `lang_switch` stream (its FQN is the bare language id, e.g.
 `rust`) and roots every module FQN under it. `<language-id>` is the stream's
 declared id verbatim: the code frontends' `go`/`java`/`cpp`/`rust`/`ts`/`js`/
-`csharp`/`py`/`cobol`, the agent frontend's `agent`, and the bundled structural
+`csharp`/`py`/`cobol`/`sql`, the agent frontend's `agent`, and the bundled structural
 scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
-`sln`/`misc` — the twenty-one ids `layers::LANGUAGE_ROOTS` names (see
+`sln`/`misc` — the twenty-two ids `layers::LANGUAGE_ROOTS` names (see
 `src/layers/code_refs.rs`, mirrored by `src/ingest/` and
 `src/incremental/language.rs`).
 
@@ -1013,6 +1022,7 @@ Built-in defaults (per language):
 - **C++**: `test` = `*_test.cpp`/`test_*.cpp` or `test`/`tests` segment; `generated` = `*.pb.cc`/`*.pb.h` or `gen`/`generated` segment; `external` = `vendor`/`third_party`/`external`.
 - **Rust**: `test` = `*_test.rs` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`; else `src`.
 - **COBOL**: `test` = a `test`/`tests` path segment or a `test_*`, `*_test.*` or `*-test.*` filename (case-insensitive); `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src` — copybooks (`.cpy`) included.
+- **SQL**: `test` = `test`/`tests` segment; `generated` = `gen`/`generated`/`obj` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src`.
 
 An `apg/config.json` at the project root **replaces** the defaults. Shape:
 
