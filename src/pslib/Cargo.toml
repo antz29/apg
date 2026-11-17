@@ -1,0 +1,8 @@
+[package]
+name = "psfrontend"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+tree-sitter = "=0.26.13"
+tree-sitter-powershell = "=0.26.6"
