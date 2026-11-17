@@ -15,7 +15,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user go rust
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,rust
 #
-#   # Install everything (scanner + all 8 frontends):
+#   # Install everything (scanner + all 9 frontends):
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 #
 # Layout (mirrors the brew formula): the real binary lives in
