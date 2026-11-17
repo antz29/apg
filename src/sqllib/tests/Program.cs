@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Apg.SqlFrontend;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
@@ -24,7 +25,13 @@ namespace SqlFrontend.Tests
             {
                 ["unit"] = UnitTests(),
                 ["int"] = IntTests(),
-                ["e2e"] = new List<(string, Action)> { ("ProjectFixtureScopes", TestProjectFixtureScopes) },
+                ["e2e"] = new List<(string, Action)>
+                {
+                    ("ProjectFixtureScopes", TestProjectFixtureScopes),
+                    ("EmitterFixture", TestEmitterFixture),
+                    ("EmitterTargetsList", TestEmitterTargetsList),
+                    ("EmitterCli", TestEmitterCli),
+                },
             };
             if (args.Length > 1 || (args.Length == 1 && !tiers.ContainsKey(args[0])))
             {
@@ -686,6 +693,203 @@ namespace SqlFrontend.Tests
                     Eq(want, (owners[0].ModuleIdentity, owners[0].DefaultSchema, owners[0].IsProject), $"{file} scope");
             }
             Eq(expected.Count, scopes.Sum(s => s.Files.Count), "no extra scoped files");
+        }
+
+        // e2e: the committed tests/fixtures/emitter tree, read through SchemaEmitter.Run and Program.Main.
+        static string EmitterRoot() => Path.TrimEndingDirectorySeparator(Path.GetFullPath(FixtureRoot("emitter")));
+
+        // Absolute path of every committed .sql and .sqlproj fixture under root, ordinal order.
+        static List<string> FixtureTargets(string root) =>
+            Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Where(p => p.EndsWith(".sql", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".sqlproj", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(p => p, StringComparer.Ordinal).ToList();
+
+        static (string, string) RunTargets(string root, IEnumerable<string> targets, IReadOnlyList<string> excludes, string prefix)
+        {
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            SchemaEmitter.Run(root, targets, new List<string>(), excludes, prefix, stdout, stderr);
+            return (stdout.ToString(), stderr.ToString());
+        }
+
+        static List<JsonElement> ParseLines(string text)
+        {
+            var recs = new List<JsonElement>();
+            foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                using var doc = JsonDocument.Parse(line);
+                recs.Add(doc.RootElement.Clone());
+            }
+            return recs;
+        }
+
+        static void TestEmitterFixture()
+        {
+            string root = EmitterRoot();
+            var targets = FixtureTargets(root);
+            Eq(9, targets.Count, "emitter fixture .sql/.sqlproj files");
+            var (output, errors) = RunTargets(root, targets, new List<string>(), "n");
+            var recs = ParseLines(output);
+            StreamShape(recs);
+            string lp = root + "/Legacy/Legacy.sqlproj", sp = root + "/Sdk/Sdk.sqlproj";
+            string lapp = lp + ".app", lsales = lp + ".sales", sdbo = sp + ".dbo";
+
+            // Modules: absolute project and loose-directory identities, P.schema project schemas, bare loose dbo.
+            Eq(string.Join(",", new[] { lp, lapp, lsales, sp, sdbo, root + "/Sdk/bin/Debug", root + "/Sdk/obj/Debug", root + "/scripts", "dbo" }
+                .OrderBy(f => f, StringComparer.Ordinal)), Modules(recs), "module records");
+            foreach (var (from, to) in new[] { (lp, lapp), (lp, lsales), (sp, sdbo) })
+                Eq(1, Of(recs, "contains").Count(c => S(c, "from") == from && S(c, "to") == to), $"contains {from}->{to}");
+
+            // Files: project members under P; the listed obj/ and bin/ files loose under their directory modules.
+            foreach (var (rel, parent, lines) in new[]
+            {
+                ("Legacy/Schema/Code.sql", lp, 10), ("Legacy/Schema/Tables.sql", lp, 9), ("Sdk/Tables/Customers.sql", sp, 1),
+                ("Sdk/bin/Debug/Published.sql", root + "/Sdk/bin/Debug", 1), ("Sdk/obj/Debug/Generated.sql", root + "/Sdk/obj/Debug", 1),
+                ("scripts/a.sql", root + "/scripts", 1), ("scripts/b.sql", root + "/scripts", 2),
+            })
+            {
+                var f = Of(recs, "file").Where(r => S(r, "path") == root + "/" + rel).ToList();
+                Eq(1, f.Count, $"file {rel} emitted once");
+                if (f.Count == 1) Eq((parent, 1, lines), (S(f[0], "parent"), I(f[0], "start_line"), I(f[0], "end_line")), $"file {rel}");
+            }
+            Eq(7, Of(recs, "file").Count, "file records");
+
+            // Objects with parent, spelling, file and line span; columns as name:start-end in source order.
+            foreach (var (type, parent, name, rel, sl, el, cols) in new[]
+            {
+                ("struct", lapp, "Orders", "Legacy/Schema/Tables.sql", 2, 5, "id:3-3,total:4-4"),
+                ("struct", lsales, "Audit", "Legacy/Schema/Tables.sql", 7, 7, "id:7-7,note:7-7"),
+                ("struct", lapp, "Lines", "Legacy/Schema/Tables.sql", 9, 9, "sku:9-9,qty:9-9"),
+                ("struct", lapp, "OrderTotals", "Legacy/Schema/Code.sql", 1, 3, "id:2-2,amount:2-2"),
+                ("function", lapp, "GetOrders", "Legacy/Schema/Code.sql", 5, 7, ""),
+                ("function", lsales, "OrdersAudit", "Legacy/Schema/Code.sql", 9, 10, ""),
+                ("struct", sdbo, "Customers", "Sdk/Tables/Customers.sql", 1, 1, "id:1-1"),
+                ("struct", "dbo", "Published", "Sdk/bin/Debug/Published.sql", 1, 1, "id:1-1"),
+                ("struct", "dbo", "Generated", "Sdk/obj/Debug/Generated.sql", 1, 1, "id:1-1"),
+                ("struct", "dbo", "Items", "scripts/a.sql", 1, 1, "id:1-1"),
+            })
+            {
+                var o = One(recs, type, parent, name);
+                if (o.ValueKind == JsonValueKind.Undefined) continue;
+                Eq((root + "/" + rel, sl, el), (S(o, "path"), I(o, "start_line"), I(o, "end_line")), $"{type} {parent}.{name}");
+                string id = S(o, "id");
+                var kids = new HashSet<string>(Of(recs, "contains").Where(c => S(c, "from") == id).Select(c => S(c, "to")));
+                var columns = Of(recs, "struct").Where(r => kids.Contains(S(r, "id"))).ToList();
+                foreach (var c in columns)
+                    Eq((parent + "." + name, root + "/" + rel), (S(c, "parent"), S(c, "path")), $"column {name}.{S(c, "name")} parent/path");
+                Eq(cols, string.Join(",", columns.Select(c => $"{S(c, "name")}:{I(c, "start_line")}-{I(c, "end_line")}")), $"{name} columns");
+            }
+            Eq(20, Of(recs, "struct").Count, "struct records (objects plus columns)");
+            Eq(2, Of(recs, "function").Count, "function records");
+            Eq(0, recs.Count(r => S(r, "name") == "ITEMS"), "repeat spelling dropped");
+
+            Eq("sql: scripts/b.sql:2:1: repeated declaration of dbo.Items, first declared at scripts/a.sql:1",
+                string.Join("\n", errors.Split('\n', StringSplitOptions.RemoveEmptyEntries)), "diagnostics");
+        }
+
+        static void TestEmitterTargetsList()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "sqlfe-e2e-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(dir);
+                string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+                foreach (var (file, table) in new[] { ("kept.sql", "Kept"), ("Upper.SQL", "Upper"), ("stray.sql", "Stray"), ("skipme.sql", "Skip") })
+                    File.WriteAllText(Path.Combine(root, file), $"CREATE TABLE dbo.{table} (id INT)\n");
+                var listed = new[] { "kept.sql", "Upper.SQL", "skipme.sql" }.Select(f => root + "/" + f).ToList();
+
+                var recs = ParseLines(RunTargets(root, listed, new List<string> { "skipme" }, "n").Item1);
+                Eq(string.Join(",", new[] { root + "/Upper.SQL", root + "/kept.sql" }),
+                    string.Join(",", Of(recs, "file").Select(r => S(r, "path")).OrderBy(p => p, StringComparer.Ordinal)),
+                    "only listed, non-excluded files emitted");
+                Eq("Kept,Upper", string.Join(",", Of(recs, "struct").Where(r => S(r, "parent") == "dbo").Select(r => S(r, "name"))
+                    .OrderBy(n => n, StringComparer.Ordinal)), "tables of the emitted files only");
+
+                var empty = ParseLines(RunTargets(root, new List<string>(), new List<string>(), "n").Item1);
+                Eq(0, Of(empty, "file").Count, "empty list emits no file record");
+                Eq(0, Of(empty, "struct").Count, "empty list emits no struct record");
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            }
+        }
+
+        // Program.Main in-process with Console.Out/Error captured (as RunScanner in src/csharplib/tests/Program.cs).
+        static (int, string, string) RunMain(params string[] args)
+        {
+            var outWriter = new StringWriter();
+            var errWriter = new StringWriter();
+            var oldOut = Console.Out;
+            var oldErr = Console.Error;
+            Console.SetOut(outWriter);
+            Console.SetError(errWriter);
+            int code;
+            try { code = Apg.SqlFrontend.Program.Main(args); }
+            finally
+            {
+                Console.SetOut(oldOut);
+                Console.SetError(oldErr);
+            }
+            return (code, outWriter.ToString(), errWriter.ToString());
+        }
+
+        // A record with its id/from/to opaque-id prefix stripped, for comparing streams across --id-prefix values.
+        static string Normalise(JsonElement r, string prefix) =>
+            string.Join(",", r.EnumerateObject().Select(p =>
+                (p.Name == "id" || p.Name == "from" || p.Name == "to") && p.Value.ValueKind == JsonValueKind.String
+                    && Regex.IsMatch(p.Value.GetString(), "^" + Regex.Escape(prefix) + "[0-9]+$")
+                    ? p.Name + "=#" + p.Value.GetString().Substring(prefix.Length)
+                    : p.Name + "=" + p.Value.GetRawText()));
+
+        static void TestEmitterCli()
+        {
+            string root = EmitterRoot();
+            var targets = FixtureTargets(root);
+            string tmp = Path.GetTempPath(), stamp = Guid.NewGuid().ToString("N");
+            string listFile = Path.Combine(tmp, "sqlfe-targets-" + stamp + ".txt");
+            string emptyFile = Path.Combine(tmp, "sqlfe-empty-" + stamp + ".txt");
+            try
+            {
+                File.WriteAllLines(listFile, targets);
+                var (code, output, errors) = RunMain(root, "--targets", listFile, "--id-prefix", "q");
+                Eq(0, code, "exit code");
+                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
+                {
+                    bool isObject;
+                    try { using var doc = JsonDocument.Parse(line); isObject = doc.RootElement.ValueKind == JsonValueKind.Object; }
+                    catch (JsonException) { isObject = false; }
+                    Eq(true, isObject, $"stdout line is a JSON object: {line}");
+                }
+                var recs = ParseLines(output);
+                var modules = Of(recs, "module").Select(r => S(r, "fqn")).ToList();
+                foreach (var proj in targets.Where(t => t.EndsWith(".sqlproj", StringComparison.OrdinalIgnoreCase)))
+                    Eq(1, modules.Count(m => m == proj), $"module record for {proj}");
+                foreach (var m in modules)
+                    Eq(true, m == "dbo" || m.StartsWith(root + "/", StringComparison.Ordinal), $"module <{m}> absolute or bare schema");
+                var sqlFiles = targets.Where(t => t.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)).ToList();
+                Eq(sqlFiles.Count, Of(recs, "file").Count, "file records");
+                foreach (var f in sqlFiles)
+                    Eq(1, Of(recs, "file").Count(r => S(r, "path") == f), $"file record for {f}");
+                foreach (var r in recs.Where(r => S(r, "id") != null))
+                    Eq(true, S(r, "id").StartsWith("q", StringComparison.Ordinal), $"id {S(r, "id")} has prefix q");
+
+                var (direct, directErrors) = RunTargets(root, targets, new List<string>(), "n");
+                Eq(string.Join("\n", ParseLines(direct).Select(r => Normalise(r, "n"))),
+                    string.Join("\n", recs.Select(r => Normalise(r, "q"))), "CLI records equal SchemaEmitter.Run modulo id prefix");
+                Eq(directErrors, errors, "CLI diagnostics equal SchemaEmitter.Run");
+
+                File.WriteAllText(emptyFile, "");
+                var (emptyCode, emptyOut, _) = RunMain(root, "--targets", emptyFile, "--id-prefix", "q");
+                Eq(0, emptyCode, "empty targets exit code");
+                Eq(0, Of(ParseLines(emptyOut), "file").Count, "empty targets emits no file record");
+            }
+            finally
+            {
+                File.Delete(listFile);
+                File.Delete(emptyFile);
+            }
         }
     }
 }
