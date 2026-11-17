@@ -467,6 +467,8 @@ pub fn id_prefix_for(language: &str) -> &'static str {
 ///   of absolute source-file paths, one per line, no header, blanks ignored. An
 ///   absent flag or an empty file means "no emission filter". A language whose
 ///   target set is unchanged and empty is skipped entirely (phase-03 task-5).
+///   For `sql` the list is ALWAYS present (full scan and no-store scan alike)
+///   and is the emission universe: an empty list emits no `.sql` file.
 /// * `--cache-dir <abs dir>`: the shared content-addressed store root
 ///   (`<git-common-dir>/apg/facts`).
 /// * `--cache-key <key>`: the global cache key (`domain.value.cache-key`),
@@ -505,7 +507,7 @@ impl FrontendHandoff {
 
     /// Appends the handoff flags to a frontend `Command` for `lang`.
     pub fn append(&self, child: &mut Command, tmp: &Path, lang: &str, targets: &[String]) {
-        if self.targets_enabled {
+        if passes_targets_flag(lang, self.targets_enabled) {
             let path = self.write_targets(tmp, lang, targets);
             child.arg("--targets").arg(path);
         }
@@ -516,6 +518,12 @@ impl FrontendHandoff {
             child.arg("--cache-key").arg(key);
         }
     }
+}
+
+/// Whether `lang`'s spawn carries `--targets <file>`: whenever the target filter
+/// is enabled, and always for `sql`, whose list is its emission universe.
+pub fn passes_targets_flag(lang: &str, targets_enabled: bool) -> bool {
+    targets_enabled || lang == "sql"
 }
 
 /// The `incremental::language_of` bucket a **scan language id** belongs to.///
@@ -842,8 +850,13 @@ pub fn spawn_frontend_args(
     // set — so a full scan (`targets_enabled == false`) passes the cache flags
     // and NO `--targets`, and the incremental argv is unchanged in flags AND
     // order (AC (b)). With no hand-off at all (no store / `NotAGitRepo`) nothing
-    // is appended (AC (c)).
-    if handoff.targets_enabled || handoff.cache_dir.is_some() || handoff.cache_key.is_some() {
+    // is appended (AC (c)) — except for `sql`, whose `--targets` list is always
+    // present (even empty, even with no store) as its emission universe: an
+    // empty list emits no `.sql` file.
+    if passes_targets_flag(lang, handoff.targets_enabled)
+        || handoff.cache_dir.is_some()
+        || handoff.cache_key.is_some()
+    {
         handoff.append(&mut child, tmp, lang, targets);
     }
     child
