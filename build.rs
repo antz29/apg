@@ -100,12 +100,15 @@ fn watch_frontend_sources() {
 /// <target>/<profile>/frontends. Also populated by `apg`'s runtime lookup
 /// (see `frontend_dir` in main.rs) so dev builds and the brew formula can
 /// both resolve frontends from a known spot. Created here (best effort).
+/// The profile dir is the parent of OUT_DIR's nearest `build` ancestor, which
+/// covers both cargo layouts: `<profile>/build/apg-<hash>/out` (old) and
+/// `<profile>/build/apg/<hash>/out` (new build-dir layout).
 fn stage_dir() -> PathBuf {
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    let profile_dir = PathBuf::from(&out_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let profile_dir = out_dir
+        .ancestors()
+        .find(|p| p.file_name() == Some(std::ffi::OsStr::new("build")))
+        .and_then(|b| b.parent())
         .expect("OUT_DIR has unexpected shape")
         .to_path_buf();
     let stage_dir = profile_dir.join("frontends");
