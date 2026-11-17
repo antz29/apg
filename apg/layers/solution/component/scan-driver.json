@@ -52,6 +52,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.frontends.passes_targets_flag",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.frontends.should_spawn_language",
       "properties": {}
     },

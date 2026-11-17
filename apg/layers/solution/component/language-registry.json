@@ -27,7 +27,17 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.frontends.sql_stream_targets",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.frontends.targets_for_language",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.whole_language_targets",
       "properties": {}
     },
     {
