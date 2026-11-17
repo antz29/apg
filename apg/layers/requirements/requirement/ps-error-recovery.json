@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-error-recovery",
-  "body": "A PowerShell file with syntax errors yields every declaration and reference that parses outside its error and missing-node regions, which recovery keeps local to the broken statement, and the scan continues past it.",
+  "body": "A PowerShell file yields every declaration and reference outside its error and missing-node regions, each local to its broken statement except that a file ending inside nested unclosed constructs is wholly one region, and the scan continues.",
   "properties": {
     "feature": "ps-frontend"
   },
