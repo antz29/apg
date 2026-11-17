@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-engine-pin",
-  "body": "psfrontend parses with tree-sitter-powershell =0.26.6 on the tree-sitter =0.26.13 runtime, so its ceiling is that grammar's PowerShell 7.3 syntax plus Windows PowerShell 5.1 workflow syntax.",
+  "body": "psfrontend parses with woodruffw-trough-tree-sitter-powershell =0.1.6 on the tree-sitter =0.26.13 runtime at parser ABI 15, so its ceiling is that grammar's PowerShell 7.5 syntax, workflow and DSC configuration syntax included.",
   "properties": {
     "feature": "ps-frontend"
   },

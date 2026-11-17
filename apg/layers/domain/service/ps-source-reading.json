@@ -39,6 +39,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.ps-text-encoding",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-valid-syntax-parse",
+      "properties": {}
     }
   ],
   "in": [

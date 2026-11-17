@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "ps-modelled-constructs",
-  "body": "The PowerShell frontend models functions, filters, workflows, classes, enums, manifests, dot-sources and Import-Module; using statements, DSC configuration blocks and remote or dynamic invocation get no construct of their own.",
+  "body": "The PowerShell frontend models functions, filters, workflows, classes, enums, manifests, dot-sources and Import-Module; using statements, DSC configuration, node and resource blocks and remote or dynamic invocation get no construct of their own, and their keywords are never commands.",
   "properties": {},
   "out": [],
   "in": []

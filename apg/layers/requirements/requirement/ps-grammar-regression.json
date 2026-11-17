@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-grammar-regression",
-  "body": "A test pins the grammar node kinds the frontend reads, class and enum statements and dot-source invocations included, so a grammar bump that reshapes them fails the suite.",
+  "body": "A test pins the grammar tree shapes the frontend reads, class and enum definitions, using statements, configuration blocks and dot-source invocations included, so a grammar bump that reshapes them fails the suite.",
   "properties": {
     "feature": "ps-frontend"
   },

@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.ps-text-encoding",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ps-valid-syntax-parse",
+      "properties": {}
     }
   ],
   "in": [

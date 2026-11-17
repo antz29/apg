@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ps-build-deps",
-  "body": "psfrontend builds with stable Rust 1.98.1, crates.io access and a C compiler, which compiles the tree-sitter runtime and the grammar's generated parser and external scanner.",
+  "body": "psfrontend builds with stable Rust 1.98.1, crates.io access and a C compiler, which compiles the tree-sitter runtime and the woodruffw-trough grammar's generated C sources.",
   "properties": {
     "feature": "ps-frontend"
   },
