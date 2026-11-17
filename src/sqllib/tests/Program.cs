@@ -30,6 +30,7 @@ namespace SqlFrontend.Tests
                     ("ProjectFixtureScopes", TestProjectFixtureScopes),
                     ("EmitterFixture", TestEmitterFixture),
                     ("EmitterTargetsList", TestEmitterTargetsList),
+                    ("EmitterTargetGuards", TestEmitterTargetGuards),
                     ("EmitterCli", TestEmitterCli),
                 },
             };
@@ -845,6 +846,69 @@ namespace SqlFrontend.Tests
             finally
             {
                 if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            }
+        }
+
+        // Run's target-list guards: missing .sql, outside-root line, duplicate line, malformed and missing .sqlproj.
+        static void TestEmitterTargetGuards()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "sqlfe-e2e-" + Guid.NewGuid().ToString("N"));
+            string outsideName = "sqlfe-outside-" + Guid.NewGuid().ToString("N") + ".sql";
+            string outside = Path.Combine(Path.GetTempPath(), outsideName);
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(dir, "Bad"));
+                string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+                File.WriteAllText(Path.Combine(root, "kept.sql"), "CREATE TABLE dbo.Kept (id INT)\n");
+                File.WriteAllText(Path.Combine(root, "Bad", "Bad.sqlproj"), "<Project><ItemGroup><Build Include=\"x.sql\" </ItemGroup>");
+                File.WriteAllText(Path.Combine(root, "Bad", "x.sql"), "CREATE TABLE dbo.X (id INT)\n");
+                File.WriteAllText(outside, "CREATE TABLE dbo.Outside (id INT)\n");
+
+                // (a) a listed .sql absent on disk.
+                var (outA, errA) = RunTargets(root, new[] { root + "/gone.sql", root + "/kept.sql" }, new List<string>(), "n");
+                var recsA = ParseLines(outA);
+                Eq("sql: gone.sql: file not found", string.Join("\n", errA.Split('\n', StringSplitOptions.RemoveEmptyEntries)), "(a) missing .sql diagnostic");
+                Eq(0, Of(recsA, "file").Count(r => S(r, "path") == root + "/gone.sql"), "(a) no file record for missing .sql");
+                Eq(1, Of(recsA, "file").Count(r => S(r, "path") == root + "/kept.sql"), "(a) listed .sql still emitted");
+
+                // (b) a line resolving outside rootDir, the file present on disk.
+                var (outB, errB) = RunTargets(root, new[] { root + "/../" + outsideName, root + "/kept.sql" }, new List<string>(), "n");
+                var recsB = ParseLines(outB);
+                Eq("", errB, "(b) outside-root line reports nothing");
+                Eq(root + "/kept.sql", string.Join(",", Of(recsB, "file").Select(r => S(r, "path"))), "(b) outside-root line has no file record");
+                Eq(0, Of(recsB, "struct").Count(r => S(r, "name") == "Outside"), "(b) outside-root table not emitted");
+
+                // (c) the same .sql listed twice.
+                var (outC, errC) = RunTargets(root, new[] { root + "/kept.sql", root + "/kept.sql" }, new List<string>(), "n");
+                var recsC = ParseLines(outC);
+                Eq(1, Of(recsC, "file").Count(r => S(r, "path") == root + "/kept.sql"), "(c) duplicate line gives one file record");
+                Eq("", errC, "(c) duplicate line reports nothing");
+
+                // (d) a malformed and a missing .sqlproj: each reported once, the .sql files still emitted.
+                string outD = null, errD = null;
+                try
+                {
+                    (outD, errD) = RunTargets(root, new[] { root + "/Bad/Bad.sqlproj", root + "/Gone/Gone.sqlproj", root + "/Bad/x.sql", root + "/kept.sql" },
+                        new List<string>(), "n");
+                }
+                catch (Exception e) { Fail($"(d) exception escaped Run: {e}"); return; }
+                var errLines = errD.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                Eq(2, errLines.Length, "(d) one diagnostic per bad project");
+                Eq(1, errLines.Count(l => l.StartsWith("sql: Bad/Bad.sqlproj: ", StringComparison.Ordinal)), "(d) malformed .sqlproj diagnostic");
+                Eq(1, errLines.Count(l => l == "sql: Gone/Gone.sqlproj: file not found"), "(d) missing .sqlproj diagnostic");
+                var recsD = ParseLines(outD);
+                Eq(1, Of(recsD, "file").Count(r => S(r, "path") == root + "/kept.sql"), "(d) other listed .sql still emitted");
+                var x = Of(recsD, "file").Where(r => S(r, "path") == root + "/Bad/x.sql").ToList();
+                Eq(1, x.Count, "(d) .sql under the malformed project emitted once");
+                if (x.Count == 1) Eq(root + "/Bad", S(x[0], "parent"), "(d) .sql under the malformed project is loose");
+                One(recsD, "struct", "dbo", "X");
+                Eq(0, Of(recsD, "module").Count(r => S(r, "fqn") == root + "/Bad/Bad.sqlproj"), "(d) no module for the malformed .sqlproj");
+                Eq(0, Of(recsD, "module").Count(r => S(r, "fqn") == root + "/Gone/Gone.sqlproj"), "(d) no module for the missing .sqlproj");
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                File.Delete(outside);
             }
         }
 
