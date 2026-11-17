@@ -16,7 +16,7 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 /// granularity key for the fact store.
 ///
 /// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
-/// `csharp`, `py`, `cpp`, `agent`, `md`, and the bundled structural scanner's
+/// `csharp`, `py`, `cpp`, `sql`, `agent`, `md`, and the bundled structural scanner's
 /// `sh`, `yaml`, `json`, `toml`, `xml`, `sln`, `dockerfile`, `makefile`, `ini`,
 /// `misc`) so it can be compared directly against the scan's detected/requested
 /// language ids — `apg.targets_for_language` filters the win-B target set with
@@ -106,6 +106,8 @@ pub fn language_of(rel: &str) -> &'static str {
         "json" => "json",
         "toml" => "toml",
         "xml" => "xml",
+        // SQL in any letter case (`.SQL`); ahead of the MSBuild arm so `.sqlproj` stays `xml`.
+        _ if ext.eq_ignore_ascii_case("sql") => "sql",
         // MSBuild project/property/target files, .NET config and resources are
         // XML, in any letter case (`App.CSPROJ`), like `structfrontend`'s
         // lowercasing `stream_for_path`.
