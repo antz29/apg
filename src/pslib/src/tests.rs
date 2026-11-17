@@ -749,4 +749,80 @@ mod unit {
             "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block>node_statement(keyword:'node' name:bare_word\"x\" body:script_block>resource_statement(type:type_identifier\"File\" name:bare_word\"f\" body:resource_body\"{ }\")))",
         )]);
     }
+
+    /// requirements.requirement.ps-valid-syntax-parse: valid syntax parses clean.
+    #[test]
+    fn y_valid_syntax_fixtures() {
+        let cases: &[(&str, &str)] = &[
+            (
+                "./x.ps1 a",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"./x.ps1\" command_argument>bare_word\"a\"))",
+            ),
+            (
+                ".\\x.ps1 a",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\".\\\\x.ps1\" command_argument>bare_word\"a\"))",
+            ),
+            (
+                "sub\\x.ps1 a",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"sub\\\\x.ps1\" command_argument>bare_word\"a\"))",
+            ),
+            (
+                "Import-Module $PSScriptRoot\\lib.ps1",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\")))",
+            ),
+            (
+                "Import-Module -Name $PSScriptRoot\\lib.ps1",
+                "source_file>pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_parameter(name:command_parameter_name\"-Name\") command_argument(variable\"$PSScriptRoot\" argument_fragment\"\\\\lib.ps1\")))",
+            ),
+            (
+                "function F { param($a) X }",
+                "source_file>function_definition(keyword:'function' name:function_name\"F\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"X\"))))",
+            ),
+            (
+                "filter F { param($a) X }",
+                "source_file>function_definition(keyword:'filter' name:function_name\"F\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"X\"))))",
+            ),
+            (
+                "workflow W { param($a) X }",
+                "source_file>function_definition(keyword:'workflow' name:function_name\"W\" body:script_block(param_block('param' parameters:parameter_list>parameter(name:variable\"$a\")) pipeline(elements:command(name:command_name>bare_word\"X\"))))",
+            ),
+            (
+                "enum E : byte { A }",
+                "source_file>enum_definition('enum' name:identifier\"E\" ':' underlying_type:type_name(name:type_identifier\"byte\") body:enum_body(members:enum_member(name:identifier\"A\")))",
+            ),
+            (
+                "class C : System.Collections.Generic.List[int] { }",
+                "source_file>class_definition('class' name:identifier\"C\" ':' base_types:type_name(name:type_identifier\"System.Collections.Generic.List\" type_name(name:type_identifier\"int\")) body:class_body\"{ }\")",
+            ),
+            (
+                "class D : System.IO.Stream { }",
+                "source_file>class_definition('class' name:identifier\"D\" ':' base_types:type_name(name:type_identifier\"System.IO.Stream\") body:class_body\"{ }\")",
+            ),
+            (
+                "configuration C { }",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block\"{ }\")",
+            ),
+            (
+                "configuration C { Node x { File f { } } }",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block>node_statement(keyword:'node' name:bare_word\"x\" body:script_block>resource_statement(type:type_identifier\"File\" name:bare_word\"f\" body:resource_body\"{ }\")))",
+            ),
+            (
+                "configuration C { Node x { Get-Inner; File f { DestinationPath = (Get-Path); Ensure = 'Present' } } }",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block>node_statement(keyword:'node' name:bare_word\"x\" body:script_block(pipeline(elements:command(name:command_name>bare_word\"Get-Inner\")) resource_statement(type:type_identifier\"File\" name:bare_word\"f\" body:resource_body(properties:hash_entry(key:identifier\"DestinationPath\" '=' value:pipeline(elements:command_expression(expression:parenthesized_expression>pipeline(elements:command(name:command_name>bare_word\"Get-Path\"))))) properties:hash_entry(key:identifier\"Ensure\" '=' value:pipeline(elements:command_expression(expression:single_quoted_string\"'Present'\"))))))))",
+            ),
+            (
+                "configuration C { Node x { . ./lib.ps1; Import-Module Foo } }",
+                "source_file>configuration_definition('configuration' name:command_argument>bare_word\"C\" body:script_block>node_statement(keyword:'node' name:bare_word\"x\" body:script_block(pipeline(elements:command(name:invocation_operator_command(operator:'.' command:command_argument>bare_word\"./lib.ps1\"))) pipeline(elements:command(name:command_name>bare_word\"Import-Module\" command_argument>bare_word\"Foo\")))))",
+            ),
+            (
+                "using module ./Foo.psm1",
+                "source_file>using_statement('using' kind:'module' value:command_argument>bare_word\"./Foo.psm1\")",
+            ),
+        ];
+        for (src, _) in cases {
+            assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+            assert_eq!(parse(src).root_node().kind(), "source_file", "{src:?}");
+        }
+        check(cases);
+    }
 }
