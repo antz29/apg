@@ -90,6 +90,15 @@ mod unit {
         assert_eq!(language_of("App.CSPROJ"), "xml");
         assert_eq!(language_of("Web.Config"), "xml");
         assert_eq!(language_of("Strings.ResX"), "xml");
+        // `.sql` is the SQL frontend's claim in any case; `.sqlproj` stays XML
+        // and look-alike extensions stay residual.
+        assert_eq!(language_of("dbo/Tables/Orders.sql"), "sql");
+        assert_eq!(language_of("X.SQL"), "sql");
+        assert_eq!(language_of("y.Sql"), "sql");
+        assert_eq!(language_of("App.sqlproj"), "xml");
+        assert_eq!(language_of("Legacy.SQLPROJ"), "xml");
+        assert_eq!(language_of("q.sqlx"), "misc");
+        assert_eq!(language_of("q.psql"), "misc");
         assert_eq!(language_of("App.sln"), "sln");
         assert_eq!(language_of("Legacy.SLN"), "sln");
         assert_eq!(language_of("Dockerfile"), "dockerfile");
