@@ -543,9 +543,18 @@ pub fn targets_for_language(
     language: &str,
 ) -> Vec<String> {
     let bucket = language_bucket(language);
+    // For sql this list drives only the spawn verdict (sqlfrontend's --targets
+    // is the whole tracked sql set); a .sqlproj stays xml in language_of.
+    let is_sqlproj = |rel: &str| {
+        Path::new(rel)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("sqlproj"))
+    };
     let mut out: Vec<String> = targets_rel
         .iter()
-        .filter(|rel| incremental::language_of(rel) == bucket)
+        .filter(|rel| {
+            incremental::language_of(rel) == bucket || (bucket == "sql" && is_sqlproj(rel))
+        })
         .map(|rel| scan_root.join(rel).to_string_lossy().into_owned())
         .collect();
     out.sort();
