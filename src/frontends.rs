@@ -304,7 +304,7 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
     // Every candidate shares the ONE generalised `has_extension` walker; each
     // names only the non-hidden directories it must not descend into
     // (`skip_set`), and the depth bound is explicit per candidate rather than a
-    // shared magic literal. Matching is exact-case except C# and COBOL.
+    // shared magic literal. Matching is exact-case except C#, COBOL and SQL.
     let candidates = vec![
         (
             "java",
@@ -360,6 +360,8 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             true,
         ),
+        // SQL claims `.sql` sources in any letter case.
+        ("sql", &[".sql"], 5, DEFAULT_DETECTOR_SKIP, true),
     ];
     let mut out = Vec::new();
     for (lang, exts, depth, skip, ci) in &candidates {
