@@ -91,6 +91,9 @@ namespace Apg.SqlFrontend
                 new Dictionary<SqlProjectReader.Scope, Dictionary<string, string>>();
             public readonly Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>> Index =
                 new Dictionary<SqlProjectReader.Scope, Dictionary<string, Declaration>>();
+            readonly Dictionary<string, ReferenceResolver.Kind> kinds = new Dictionary<string, ReferenceResolver.Kind>(StringComparer.Ordinal);
+            // Collect resolves against the index at call time, so each emitted unit waits until every file is indexed.
+            readonly List<Action<ReferenceResolver>> collects = new List<Action<ReferenceResolver>>();
             int next;
 
             public Emission(string rootDir, string idPrefix, TextWriter stdout, TextWriter stderr, ISet<string> bomFiles)
@@ -174,6 +177,9 @@ namespace Apg.SqlFrontend
                     foreach (var d in f.Result.Diagnostics) errors.WriteLine(d);
                     EmitFile(owner[f.Path], f.Path, f.Text, f.Decls);
                 }
+                var resolver = new ReferenceResolver(Index, kinds);
+                foreach (var collect in collects) collect(resolver);
+                resolver.Flush(output);
             }
 
             void EmitFile(SqlProjectReader.Scope scope, string rel, string text,
@@ -210,6 +216,11 @@ namespace Apg.SqlFrontend
                             start, end, start_line = sl, end_line = el });
                     else
                         Write(new { type = "struct", id, parent, name, path = abs, start, end, start_line = sl, end_line = el });
+                    var kind = KindOf(stmt);
+                    kinds[id] = kind;
+                    var columnIds = new Dictionary<ColumnDefinition, string>();
+                    if (kind != ReferenceResolver.Kind.Type && kind != ReferenceResolver.Kind.Sequence)
+                        collects.Add(r => r.Collect(scope, rel, scope.DefaultSchema, stmt, id, kind, columnIds));
                     foreach (var (column, fragment) in columns)
                     {
                         var (cs, ce, csl, cel) = map.Span(batch, fragment);
@@ -224,6 +235,7 @@ namespace Apg.SqlFrontend
                         Write(new { type = "struct", id = cid, parent = parent + "." + name, name = column, path = abs,
                             start = cs, end = ce, start_line = csl, end_line = cel });
                         Write(new { type = "contains", from = id, to = cid });
+                        if (fragment is ColumnDefinition def) columnIds[def] = cid;
                     }
                     Index[scope][identity] = new Declaration(spelled, name, id, isFunction);
                 }
@@ -263,6 +275,20 @@ namespace Apg.SqlFrontend
                     return null;
             }
         }
+
+        // The resolver kind of a statement Declare accepted (the same classification as Declare's switch).
+        static ReferenceResolver.Kind KindOf(TSqlStatement stmt) => stmt switch
+        {
+            ViewStatementBody _ => ReferenceResolver.Kind.View,
+            ProcedureStatementBody _ => ReferenceResolver.Kind.Procedure,
+            FunctionStatementBody _ => ReferenceResolver.Kind.Function,
+            TriggerStatementBody _ => ReferenceResolver.Kind.Trigger,
+            CreateTableStatement _ => ReferenceResolver.Kind.Table,
+            CreateTypeTableStatement _ => ReferenceResolver.Kind.TableType,
+            CreateSequenceStatement _ => ReferenceResolver.Kind.Sequence,
+            CreateSynonymStatement _ => ReferenceResolver.Kind.Synonym,
+            _ => ReferenceResolver.Kind.Type,
+        };
 
         static string Schema(SchemaObjectName name, string fallback) => name.SchemaIdentifier?.Value ?? fallback;
 
