@@ -160,11 +160,14 @@ namespace Apg.SqlFrontend
                     files.Add((path, text, result, decls));
                 }
                 foreach (var m in modules) claimed[m.Key] = "module " + m.Value.Fqn;
+                // Every loose directory is one loose database scope: its scopes share one repeat set and one index.
+                var looseFirsts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var looseIndex = new Dictionary<string, Declaration>(StringComparer.OrdinalIgnoreCase);
                 foreach (var s in scopes)
                 {
                     Module(Canonical(ScopeModule(s)));
-                    firsts[s] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    Index[s] = new Dictionary<string, Declaration>(StringComparer.OrdinalIgnoreCase);
+                    firsts[s] = s.IsProject ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) : looseFirsts;
+                    Index[s] = s.IsProject ? new Dictionary<string, Declaration>(StringComparer.OrdinalIgnoreCase) : looseIndex;
                 }
                 foreach (var f in files)
                 {

@@ -366,6 +366,7 @@ namespace SqlFrontend.Tests
                 ("EmitLooseRepeatKeepsFirstSpelling", TestEmitLooseRepeatKeepsFirstSpelling),
                 ("EmitSchemaCaseFollowsFirstDeclaration", TestEmitSchemaCaseFollowsFirstDeclaration),
                 ("EmitLooseDirectoriesMergeByCase", TestEmitLooseDirectoriesMergeByCase),
+                ("EmitLooseDirectoriesShareOneScope", TestEmitLooseDirectoriesShareOneScope),
                 ("EmitModuleCollisionDropsTable", TestEmitModuleCollisionDropsTable),
                 ("EmitViewDuplicateColumnKeepsOne", TestEmitViewDuplicateColumnKeepsOne),
             };
@@ -618,6 +619,29 @@ namespace SqlFrontend.Tests
             One(recs, "struct", "dbo", "A");
             One(recs, "struct", "dbo", "B");
             Eq(0, err.Count, "diagnostics");
+        }
+
+        static void TestEmitLooseDirectoriesShareOneScope()
+        {
+            var sources = new Dictionary<string, string>
+            {
+                ["scripts/a.sql"] = "CREATE TABLE dbo.T (id INT)\n",
+                ["tables/b.sql"] = "CREATE TABLE dbo.T (id INT)\n",
+            };
+            var scopes = SqlProjectReader.BuildScopes(new SqlProjectReader.Project[0], sources.Keys);
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+            var index = SchemaEmitter.Emit(Root, scopes, sources, "n", stdout, stderr);
+            var recs = stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => JsonDocument.Parse(l).RootElement.Clone()).ToList();
+            StreamShape(recs);
+            One(recs, "struct", "dbo", "T");
+            Eq("sql: tables/b.sql:1:1: repeated declaration of dbo.T, first declared at scripts/a.sql:1",
+                stderr.ToString().TrimEnd('\n'), "diagnostics");
+            var a = scopes.Single(s => s.Files.Contains("scripts/a.sql"));
+            var b = scopes.Single(s => s.Files.Contains("tables/b.sql"));
+            Eq(true, index[b].TryGetValue("dbo.T", out var viaB) && ReferenceEquals(index[a]["dbo.T"], viaB),
+                "tables scope resolves dbo.T to scripts/a.sql's declaration");
         }
 
         static void TestEmitModuleCollisionDropsTable()
