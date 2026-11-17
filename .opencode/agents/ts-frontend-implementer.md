@@ -38,6 +38,9 @@ permissions:
   - { action: edit, resource: "src/structlib/**", effect: deny }
   - { action: edit, resource: "src/pylib/**", effect: deny }
   - { action: edit, resource: "src/agentlib/**", effect: deny }
+  - { action: edit, resource: "src/cobollib/**", effect: deny }
+  - { action: edit, resource: "src/pslib/**", effect: deny }
+  - { action: edit, resource: "src/sqllib/**", effect: deny }
   - { action: edit, resource: "src/*/target/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/build.rs", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/Cargo.toml", effect: deny }
@@ -53,9 +56,16 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/src/structlib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/pylib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/agentlib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/cobollib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/pslib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/*/target/**", effect: deny }
   - { action: edit, resource: ".opencode/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/.opencode/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/tslib/**", effect: allow }
+  - { action: edit, resource: "apg/.worktrees/*/src/tslib/node_modules/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/tslib/target/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/tslib/*/target/**", effect: deny }
   - { action: external_directory, resource: "*", effect: deny }
   - { action: external_directory, resource: "/tmp/**", effect: allow }
   - { action: shell, resource: "*", effect: deny }
