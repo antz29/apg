@@ -137,6 +137,18 @@ mod unit {
         assert!(!ext_matches("SQL", &[".sql"], false));
     }
 
+    /// sql-frontend phase-06 task-30: `sql` always carries `--targets` (its
+    /// list is its emission universe); every other language only when enabled.
+    #[test]
+    fn passes_targets_flag_is_always_on_for_sql() {
+        assert!(passes_targets_flag("sql", false));
+        assert!(passes_targets_flag("sql", true));
+        assert!(!passes_targets_flag("go", false));
+        assert!(!passes_targets_flag("xml", false));
+        assert!(!passes_targets_flag("csharp", false));
+        assert!(passes_targets_flag("go", true));
+    }
+
     /// sql-frontend phase-06 task-20: any `.sql`/`.sqlproj` change (any case)
     /// widens to every tracked `.sql` path; the sql target list carries `.sql`
     /// and `.sqlproj` paths only, while `.sqlproj` stays in the xml list too.
