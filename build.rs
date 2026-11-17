@@ -65,6 +65,7 @@ fn watch_frontend_sources() {
         "src/pylib",
         "src/agentlib",
         "src/cobollib",
+        "src/sqllib",
     ];
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     while let Some(dir) = stack.pop() {
