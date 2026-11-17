@@ -154,6 +154,14 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
                 };
                 return Some(bin.display().to_string());
             }
+            "sql" if dir.join("sqlfrontend").exists() || dir.join("sqlfrontend.exe").exists() => {
+                let bin = if dir.join("sqlfrontend").exists() {
+                    dir.join("sqlfrontend")
+                } else {
+                    dir.join("sqlfrontend.exe")
+                };
+                return Some(bin.display().to_string());
+            }
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
@@ -184,6 +192,7 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         "py" => option_env!("APG_FRONTEND_PY"),
         "cobol" => option_env!("APG_FRONTEND_COBOL"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
+        "sql" => option_env!("APG_FRONTEND_SQL"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
         // JS/TS frontend under the `js` id.
