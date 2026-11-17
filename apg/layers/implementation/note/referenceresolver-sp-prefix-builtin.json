@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "referenceresolver-sp-prefix-builtin",
+  "body": "Unit.Call treats an EXEC of any absent one- or two-part procedure whose name starts with sp_ or xp_ (ignoring case), or whose schema is sys, as the builtin unresolved call SYS.<NAME>, so a user-schema procedure such as dbo.sp_foo absent from the scope is reported as SYS.SP_FOO rather than as an external dbo.sp_foo. Upgrade if only sys-schema or schema-less sp_/xp_ names are to count as builtin.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.ReferenceResolver.Unit.Call",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

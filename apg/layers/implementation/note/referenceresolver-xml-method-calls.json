@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "referenceresolver-xml-method-calls",
+  "body": "Walker.Visit(FunctionCall) treats every FunctionCall with a MultiPartIdentifierCallTarget as a schema-qualified function call, so an XML data-type method on a column (t.c.value(...), t.c.query(...), t.c.exist(...)) is resolved as a function and, being absent, becomes an external unresolved call named by its written parts (t.c.value). Upgrade by recognising XML method names on column targets and dropping them if those calls must not appear as external targets.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.ReferenceResolver.Walker.Visit(FunctionCall)",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
