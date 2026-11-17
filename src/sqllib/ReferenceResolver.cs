@@ -16,13 +16,22 @@ namespace Apg.SqlFrontend
         static readonly Kind[] ObjectKinds = { Kind.Table, Kind.View, Kind.Sequence, Kind.Synonym };
         static readonly Kind[] TypeKinds = { Kind.Type, Kind.TableType };
         static readonly Kind[] TriggerTargets = { Kind.Table, Kind.View };
+        static readonly Kind[] Procedures = { Kind.Procedure, Kind.Synonym };
+        static readonly Kind[] Functions = { Kind.Function, Kind.Synonym };
+        static readonly Kind[] SynonymObjects = { Kind.Table, Kind.View, Kind.Sequence };
+        static readonly Kind[] SynonymCallees = { Kind.Procedure, Kind.Function };
         static readonly IReadOnlyDictionary<ColumnDefinition, string> NoColumnIds = new Dictionary<ColumnDefinition, string>();
 
         readonly Dictionary<SqlProjectReader.Scope, Dictionary<string, SchemaEmitter.Declaration>> index;
         readonly IReadOnlyDictionary<string, Kind> kinds;
-        readonly List<(string From, string To, string Kind)> uses = new List<(string, string, string)>();
-        // (from, to) -> its position in uses: a repeat only raises the kind (read < write < trigger).
+        // Uses and calls in unit-then-source order; a calls To may be a synonym id, mapped to its callee at Flush.
+        readonly List<(bool Call, string From, string To, string Kind)> edges = new List<(bool, string, string, string)>();
+        // (from, to) -> its position in edges: a repeat use only raises the kind (read < write < trigger).
         readonly Dictionary<(string, string), int> positions = new Dictionary<(string, string), int>();
+        readonly HashSet<(string, string)> calls = new HashSet<(string, string)>();
+        // Synonym id -> its procedure or function target id, filled as synonyms are collected and read only at Flush,
+        // so a call through a synonym collected after its caller still resolves.
+        readonly Dictionary<string, string> synonymCallees = new Dictionary<string, string>();
 
         // index: Emit's per-scope Schema.Name (ordinal-ignore-case) -> emitted declaration; kindById: each declaration id's kind.
         public ReferenceResolver(Dictionary<SqlProjectReader.Scope, Dictionary<string, SchemaEmitter.Declaration>> index,
@@ -47,6 +56,12 @@ namespace Apg.SqlFrontend
                     foreach (var d in defs)
                         if ((columnIds ?? NoColumnIds).TryGetValue(d, out var columnId)) unit.Type(columnId, d.DataType);
                     break;
+                case Kind.Synonym:
+                    var target = (statement as CreateSynonymStatement)?.ForName; // the FOR <base object> name
+                    unit.Add(target, SynonymObjects, "read");
+                    var callee = Resolve(scope, defaultSchema, target, SynonymCallees);
+                    if (callee != null) synonymCallees[unitId] = callee.Id;
+                    break;
                 case Kind.View:
                 case Kind.Procedure:
                 case Kind.Function:
@@ -64,8 +79,14 @@ namespace Apg.SqlFrontend
 
         public void Flush(TextWriter stdout)
         {
-            foreach (var (from, to, kind) in uses)
-                stdout.WriteLine(JsonSerializer.Serialize(new { type = "uses", from, to, properties = new { kind } }));
+            var emitted = new HashSet<(string, string)>();
+            foreach (var (call, from, raw, kind) in edges)
+            {
+                if (!call) { stdout.WriteLine(JsonSerializer.Serialize(new { type = "uses", from, to = raw, properties = new { kind } })); continue; }
+                string to = raw;
+                if (kinds.TryGetValue(raw, out var k) && k == Kind.Synonym && !synonymCallees.TryGetValue(raw, out to)) continue;
+                if (emitted.Add((from, to))) stdout.WriteLine(JsonSerializer.Serialize(new { type = "calls", from, to }));
+            }
         }
 
         static int Rank(string kind) => kind == "trigger" ? 2 : kind == "write" ? 1 : 0;
@@ -82,8 +103,13 @@ namespace Apg.SqlFrontend
 
         void Edge(string from, string to, string kind)
         {
-            if (!positions.TryGetValue((from, to), out int i)) { positions[(from, to)] = uses.Count; uses.Add((from, to, kind)); }
-            else if (Rank(kind) > Rank(uses[i].Kind)) uses[i] = (from, to, kind);
+            if (!positions.TryGetValue((from, to), out int i)) { positions[(from, to)] = edges.Count; edges.Add((false, from, to, kind)); }
+            else if (Rank(kind) > Rank(edges[i].Kind)) edges[i] = (false, from, to, kind);
+        }
+
+        void Call(string from, string to)
+        {
+            if (calls.Add((from, to))) edges.Add((true, from, to, null));
         }
 
         static bool OnePart(SchemaObjectName n) => n.SchemaIdentifier == null && n.DatabaseIdentifier == null && n.ServerIdentifier == null;
@@ -111,17 +137,44 @@ namespace Apg.SqlFrontend
                 var d = type is UserDataTypeReference u ? r.Resolve(scope, schema, u.Name, TypeKinds) : null;
                 if (d != null) r.Edge(from, d.Id, "type");
             }
+
+            public void Call(SchemaObjectName name, Kind[] wanted)
+            {
+                var d = r.Resolve(scope, schema, name, wanted);
+                if (d != null) r.Call(Id, d.Id);
+            }
         }
 
         sealed class Walker : TSqlFragmentVisitor
         {
             readonly Unit unit;
+            // types: the unit is a Function (not a view), so type uses and calls start at it.
             readonly bool dml, types, collect;
             readonly HashSet<TSqlFragment> locals, writes;
 
             public Walker(Unit u, bool dmlTrigger, bool typeUses, bool collecting, HashSet<TSqlFragment> localRefs, HashSet<TSqlFragment> writeRefs)
             {
                 unit = u; dml = dmlTrigger; types = typeUses; collect = collecting; locals = localRefs; writes = writeRefs;
+            }
+
+            public override void Visit(ExecutableProcedureReference n)
+            {
+                if (collect && types) unit.Call(n.ProcedureReference?.ProcedureReference?.Name, Procedures);
+            }
+
+            // Only a schema-qualified scalar call; a schema-less one is a built-in (task 5.4).
+            public override void Visit(FunctionCall f)
+            {
+                if (!collect || !types || f.CallTarget is not MultiPartIdentifierCallTarget t) return;
+                var name = new SchemaObjectName();
+                foreach (var i in t.MultiPartIdentifier.Identifiers) name.Identifiers.Add(i);
+                name.Identifiers.Add(f.FunctionName);
+                unit.Call(name, Functions);
+            }
+
+            public override void Visit(SchemaObjectFunctionTableReference n)
+            {
+                if (collect && types) unit.Call(n.SchemaObject, Functions);
             }
 
             public override void Visit(SelectStatement n) => Ctes(n);
