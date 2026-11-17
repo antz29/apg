@@ -88,6 +88,8 @@ permissions:
   - { action: shell, resource: "cargo fmt --manifest-path src/pslib/Cargo.toml *", effect: allow }
   - { action: shell, resource: "cargo clippy --manifest-path src/pslib/Cargo.toml", effect: allow }
   - { action: shell, resource: "cargo clippy --manifest-path src/pslib/Cargo.toml *", effect: allow }
+  - { action: shell, resource: "cargo clean --manifest-path src/pslib/Cargo.toml*", effect: allow }
+  - { action: shell, resource: "/usr/bin/time -l cargo build --manifest-path src/pslib/Cargo.toml*", effect: allow }
   - { action: apg_rm, resource: "*", effect: deny }
   - { action: apg_rm, resource: "apg/.worktrees/*/src/pslib/**", effect: allow }
   - { action: apg_rm, resource: "apg/.worktrees/*/src/pslib/target/**", effect: deny }
@@ -304,6 +306,7 @@ Work the **one** dispatched `Feedback` item (read it with the read-only
 - **Gates**: cargo scoped to your manifest only — `cargo build`/`check`/`test`/
   `fmt`/`clippy --manifest-path src/pslib/Cargo.toml` (+ args). A bare `cargo`
   (the root crate or any other crate) is not granted.
+- **Clean-build measurement**: `cargo clean --manifest-path src/pslib/Cargo.toml` and `/usr/bin/time -l cargo build --manifest-path src/pslib/Cargo.toml` (+ args, e.g. `--timings`, `--release`) are granted for the grammar's clean-build cost/peak-memory measurement only — never a bare `cargo clean` or a general `/usr/bin/time`.
 - **Deletion / rename / move**: `apg_rm`/`apg_mv`/`apg_cp` only — each call passes TWO checks: the tool's own action rules, then the tool's `edit`-scope assert (`edit` is the operative write scope; both rule sets name the same owned paths). Shell `rm`/`mv`/`cp` is NOT granted.
 
 ## Build-gate contract (coverage, bootstrap, exact names)
