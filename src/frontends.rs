@@ -561,6 +561,34 @@ pub fn targets_for_language(
     out
 }
 
+/// The whole-stream sql widening: every tracked path whose `language_of` is
+/// `"sql"` when any changed path's extension is `sql` or `sqlproj` (any letter
+/// case), else empty. Pure — no I/O; relative paths in, relative paths out.
+///
+/// Every sql spawn emits every tracked `.sql` file its `--targets` list names,
+/// so once any `.sql`/`.sqlproj` file is added, modified or removed, every
+/// tracked `.sql` file must be a re-emission target and none may be reused
+/// from the fact store. A removed `.sql` is not tracked, so it is not returned
+/// here; it stays in the caller's changed set so the splice deletes its rows.
+pub fn whole_language_targets<'a>(
+    changed_rel: &std::collections::BTreeSet<String>,
+    tracked_rel: impl IntoIterator<Item = &'a String>,
+) -> std::collections::BTreeSet<String> {
+    let touches_sql = changed_rel.iter().any(|rel| {
+        Path::new(rel)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("sql") || e.eq_ignore_ascii_case("sqlproj"))
+    });
+    if !touches_sql {
+        return std::collections::BTreeSet::new();
+    }
+    tracked_rel
+        .into_iter()
+        .filter(|rel| incremental::language_of(rel) == "sql")
+        .cloned()
+        .collect()
+}
+
 /// The win-C per-language frontend spawn verdict (phase-03 task-5).
 ///
 /// On the win-B incremental path (`full_scan == false`):
