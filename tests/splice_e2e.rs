@@ -5216,6 +5216,98 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// Task 8.14 (e2e): a program Struct's Struct-to-File `copy` Uses edge to
+    /// a statement-only copybook survives the warm cached-fact reassembly
+    /// (`splice_cached` + `finalize_graph` behind a missing seed db.lbug),
+    /// equal to the full scan and to a `--force` rebuild.
+    ///
+    /// Scratch /tmp repo + candidate binary + spawned cobol frontend: real I/O,
+    /// so this is `#[ignore]`d e2e.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/cobol frontend/db.lbug); run via cargo test-e2e"]
+    fn copy_uses_edge_survives_a_warm_full_load_reassembly() {
+        use apg::testutil::Repo;
+
+        const PROG_A: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGA.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+        const PROG_B: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGB.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+        let scan = |dir: &Path, home: &str, extra: &[&str]| -> String {
+            let mut args = vec!["scan", ".", "--language", "cobol", "--copy-path", "lib"];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_ok(dir, home, &args).stderr).into_owned()
+        };
+        let copy_rows = |dir: &Path, home: &str| {
+            edge_lines(
+                dir,
+                home,
+                "MATCH (a:Struct)-[r:Uses]->(b:File) RETURN a.fqn AS a, b.fqn AS b, r.properties AS p",
+            )
+        };
+        let copy_p = serde_json::json!("{\"kind\":\"copy\"}").to_string();
+        let assert_copy = |label: &str, rows: &[String]| {
+            assert_eq!(
+                rows.len(),
+                2,
+                "{label}: one copy edge per program: {rows:#?}"
+            );
+            for prog in ["PROGA", "PROGB"] {
+                assert!(
+                    rows.iter().any(|r| r.contains(prog)
+                        && r.contains(" -> lib/STMTS.cpy ")
+                        && r.ends_with(&copy_p)),
+                    "{label}: {prog} -> lib/STMTS.cpy kind=copy: {rows:#?}"
+                );
+            }
+            assert!(
+                rows.iter().all(|r| !r.ends_with(" null")),
+                "{label}: NULL properties: {rows:#?}"
+            );
+        };
+
+        let repo = Repo::new("cobol-warm-copy");
+        let home = sibling_home(&repo, "cobol-warm-copy");
+        let home_s = home.to_str().unwrap().to_string();
+        repo.write(
+            ".gitignore",
+            "/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write("A.cob", PROG_A);
+        repo.write("B.cob", PROG_B);
+        repo.write("lib/STMTS.cpy", "           DISPLAY 'S'.\n");
+        repo.commit_all("init source");
+        apg_ok(&repo.root, &home_s, &["init", "."]);
+        repo.commit_all("apg init");
+        scan(&repo.root, &home_s, &[]);
+        apg_ok(&repo.root, &home_s, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+
+        // (1) Full scan: both programs hold their kind=copy edge.
+        scan(&wt, &home_s, &["--force"]);
+        let full = copy_rows(&wt, &home_s);
+        assert_copy("(1) full scan", &full);
+
+        // (2) Drop the seed db.lbug, keep the fact store: the cached-fact
+        // reassembly full-loads with the same copy edges.
+        std::fs::remove_file(wt.join("apg/.trans/db.lbug")).unwrap();
+        let log2 = scan(&wt, &home_s, &[]);
+        assert!(
+            log2.contains("[scan] warm cache:")
+                || log2.contains("[scan] incremental: 0 target file(s)"),
+            "(2) must assemble from the warm fact store: {log2}"
+        );
+        assert!(
+            log2.contains("[load] splice: no previous db.lbug to seed from — full load"),
+            "(2) the dropped seed must force the full load: {log2}"
+        );
+        let warm = copy_rows(&wt, &home_s);
+        assert_copy("(2) warm reassembly", &warm);
+        assert_eq!(warm, full, "(2) warm rows equal the full scan");
+        scan(&wt, &home_s, &["--force"]);
+        assert_eq!(copy_rows(&wt, &home_s), warm, "(2) --force rows");
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     /// Task 8.13 (e2e): SQL Uses-edge `kind` properties survive a splice
     /// re-scan and the warm cached-fact reassembly (`splice_cached` behind a
     /// missing seed db.lbug), each equal to the full scan and a `--force`
