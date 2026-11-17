@@ -423,6 +423,7 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "misc" => "mi",
         "py" => "py",
         "cobol" => "cb",
+        "sql" => "sq",
         // The agent-definition frontend's stream keeps its own prefix, distinct
         // from `x` (the unknown-id fallback) so a merged agent stream cannot
         // collide opaque ids.
