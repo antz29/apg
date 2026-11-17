@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sql-code-type-case-sensitive-segments",
+  "body": "sql_code_type matches path segments case-sensitively through has_seg, as cobol_code_type does, so a .sql file under a capitalised Test/, Tests/, Gen/, Obj/ or Vendor/ folder classifies as src. The lowercase segment set covers the planned fixtures (Db/obj/Debug/e.sql). Upgrade when SSDT projects with capitalised folder names appear: add the capitalised names to each segment list, as the csharp arm already does with \"Test\", \"Tests\".",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.classify.sql_code_type",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
