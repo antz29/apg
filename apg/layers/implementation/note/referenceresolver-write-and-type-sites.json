@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "referenceresolver-write-and-type-sites",
-  "body": "Collect marks only INSERT, UPDATE, DELETE and MERGE targets as writes (an OUTPUT … INTO table counts as a read), takes type uses only from parameters, DECLARE variables and table, table-variable, temp-table and RETURNS-table columns (a CAST or CONVERT to a user-defined type gives no edge), and finds aliases only at the top level of a FROM clause and through its joins, not inside subqueries, as requirements.requirement.sql-uses-kind and requirements.requirement.sql-type-uses state the sites. Upgrade if OUTPUT INTO is to be a write, CAST/CONVERT targets are to be type uses, or subquery aliases can be write targets.",
+  "body": "Collect marks only INSERT, UPDATE, DELETE and MERGE targets as writes, so an OUTPUT … INTO table, a TRUNCATE TABLE target and a SELECT … INTO target are object references of kind read (a #temp or ##temp TRUNCATE or INTO target is local, checked by its # prefix alone); it takes type uses only from parameters, DECLARE variables and table, table-variable, temp-table and RETURNS-table columns (a CAST or CONVERT to a user-defined type gives no edge); and it finds aliases only at the top level of a FROM clause and through its joins, not inside subqueries, as requirements.requirement.sql-uses-kind and requirements.requirement.sql-type-uses state the sites. Upgrade if OUTPUT INTO, TRUNCATE or SELECT INTO are to be writes, CAST/CONVERT targets are to be type uses, or subquery aliases can be write targets.",
   "properties": {},
   "out": [
     {
