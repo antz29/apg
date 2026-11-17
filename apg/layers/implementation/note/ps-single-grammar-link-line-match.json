@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-single-grammar-link-line-match",
+  "body": "single_grammar_link checks the src/pslib Cargo.toml [dependencies] pins by exact line text over include_str!, so a harmless reformat (e.g. the table form { version = \"=0.1.6\" }) fails it. Limit: manifest style is pinned alongside the versions. Upgrade to a TOML parser dev-dependency when the manifest style changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.tests.unit.single_grammar_link",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

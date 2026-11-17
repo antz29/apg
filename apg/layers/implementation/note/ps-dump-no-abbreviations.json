@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-dump-no-abbreviations",
+  "body": "The pslib test dump renders every node kind in full, with no abbreviation table, so pinned tree strings in the unit tier are long. Limit: a long single-child chain repeated across many pins makes them hard to read and to re-derive after a grammar bump. Upgrade by adding an abbreviation for that chain only when such a repeated chain appears.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.tests.dump",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
