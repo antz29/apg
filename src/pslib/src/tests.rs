@@ -105,6 +105,22 @@ fn check(cases: &[(&str, &str)]) {
     assert!(bad.is_empty(), "grammar shape drift:\n{}", bad.join("\n"));
 }
 
+/// Asserts `src` parses to a `source_file` root with a direct-child pipeline
+/// whose text is `cmd`, holding no ERROR or MISSING node.
+fn clean_top_pipeline(src: &str, cmd: &str) {
+    let tree = parse(src);
+    let root = tree.root_node();
+    assert_eq!(root.kind(), "source_file", "{src:?}");
+    let mut cur = root.walk();
+    let hit = root
+        .children(&mut cur)
+        .find(|n| n.kind() == "pipeline" && &src[n.byte_range()] == cmd);
+    assert!(
+        hit.is_some_and(|p| !p.has_error()),
+        "{cmd:?} swallowed in {src:?}"
+    );
+}
+
 mod unit {
     use super::*;
 
@@ -824,5 +840,71 @@ mod unit {
             assert_eq!(parse(src).root_node().kind(), "source_file", "{src:?}");
         }
         check(cases);
+    }
+
+    /// requirements.requirement.ps-error-recovery: invalid input stays a local
+    /// region, except a file ending inside nested unclosed constructs.
+    #[test]
+    fn z_invalid_input_locality() {
+        // (A) local regions, alone and after a clean statement.
+        let a: &[(&str, &[&str], &str)] = &[
+            (
+                "(1 + 2",
+                &["MISSING )"],
+                "source_file>pipeline(elements:command_expression(expression:parenthesized_expression(pipeline(elements:command_expression(expression:binary_expression(left:integer_literal\"1\" operator:'+' right:integer_literal\"2\"))) MISSING ')')))",
+            ),
+            (
+                "Get-A\n(1 + 2",
+                &["MISSING )"],
+                "source_file(pipeline(elements:command(name:command_name>bare_word\"Get-A\")) pipeline(elements:command_expression(expression:parenthesized_expression(pipeline(elements:command_expression(expression:binary_expression(left:integer_literal\"1\" operator:'+' right:integer_literal\"2\"))) MISSING ')'))))",
+            ),
+            (
+                "$x = @(1",
+                &["MISSING )"],
+                "source_file>assignment_statement(left:variable\"$x\" operator:'=' right:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:integer_literal\"1\")) MISSING ')'))))",
+            ),
+            (
+                "Get-A\n$x = @(1",
+                &["MISSING )"],
+                "source_file(pipeline(elements:command(name:command_name>bare_word\"Get-A\")) assignment_statement(left:variable\"$x\" operator:'=' right:pipeline(elements:command_expression(expression:array_expression('@(' pipeline(elements:command_expression(expression:integer_literal\"1\")) MISSING ')')))))",
+            ),
+            (
+                "$x = ",
+                &["ERROR \"=\""],
+                "source_file(pipeline(elements:command_expression(expression:variable\"$x\")) ERROR>'=')",
+            ),
+            (
+                "Get-A\n$x = ",
+                &["ERROR \"=\""],
+                "source_file(pipeline(elements:command(name:command_name>bare_word\"Get-A\")) pipeline(elements:command_expression(expression:variable\"$x\")) ERROR>'=')",
+            ),
+        ];
+        for (src, errs, _) in a {
+            assert_eq!(parse(src).root_node().kind(), "source_file", "{src:?}");
+            assert_eq!(errors(src), *errs, "{src:?}");
+            if src.starts_with("Get-A\n") {
+                clean_top_pipeline(src, "Get-A");
+            }
+        }
+        check(&a.iter().map(|(s, _, d)| (*s, *d)).collect::<Vec<_>>());
+
+        // (B) the whole-file exception, and its closed variant staying local.
+        let open = "Get-A\nfunction F { Get-B\n$x = (1 + \n";
+        assert_eq!(parse(open).root_node().kind(), "ERROR");
+        assert_eq!(errors(open), [format!("ERROR {open:?}")]);
+        let closed = "Get-A\nfunction F { Get-B\n$x = (1 + \n}\nGet-C\n";
+        clean_top_pipeline(closed, "Get-A");
+        clean_top_pipeline(closed, "Get-C");
+        check(&[
+            (
+                open,
+                "ERROR(pipeline(elements:command(name:command_name>bare_word\"Get-A\")) 'function' function_name\"F\" pipeline(elements:command(name:command_name>bare_word\"Get-B\")) variable\"$x\" '=' integer_literal\"1\" '+')",
+            ),
+            (
+                closed,
+                "source_file(pipeline(elements:command(name:command_name>bare_word\"Get-A\")) function_definition(keyword:'function' name:function_name\"F\" body:script_block(pipeline(elements:command(name:command_name>bare_word\"Get-B\")) pipeline(elements:command_expression(expression:variable\"$x\")) ERROR('=' integer_literal\"1\" '+'))) pipeline(elements:command(name:command_name>bare_word\"Get-C\")))",
+            ),
+        ]);
+        assert_eq!(errors(closed), ["ERROR \"= (1 + \\n\""]);
     }
 }
