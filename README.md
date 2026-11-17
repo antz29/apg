@@ -183,7 +183,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 # Or use the --frontends flag:
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,ts
 
-# Install everything (scanner + all 8 frontends):
+# Install everything (scanner + all 9 frontends):
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 ```
 
