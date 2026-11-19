@@ -4,6 +4,7 @@
 
 pub mod diag;
 pub mod parse;
+pub mod paths;
 pub mod scan;
 pub mod source;
 
