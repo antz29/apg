@@ -1,8 +1,9 @@
 //! Facts for the unified JSONL stream: a Module per manifest or scan-root-relative directory and a File
 //! per claimed PowerShell source, a script Struct plus its units (contains-linked) per
-//! `.ps1`/`.psm1`, with each file's syntax-error regions reported to stderr.
+//! `.ps1`/`.psm1` with its file dependencies (uses/unresolved uses), with each file's
+//! syntax-error regions reported to stderr.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -10,6 +11,8 @@ use crate::diag::{self, write_diagnostic, Diagnostic};
 use crate::identity;
 use crate::manifest::{self, ModuleMap};
 use crate::parse::parse;
+use crate::paths::FileIndex;
+use crate::resolve::{self, Dep, DepKind, DepSite, ManifestStems};
 use crate::source;
 use crate::units::{self, FileUnits, UnitKind};
 
@@ -53,6 +56,22 @@ pub enum Rec {
         from: String,
         to: String,
     },
+    /// A script's file dependency: its Struct's `uses` of the File it dot-sources or imports,
+    /// `properties.kind` `dot-source` or `import-module`.
+    Uses {
+        from: String,
+        to: String,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+        properties: BTreeMap<String, String>,
+    },
+    UnresolvedUse {
+        from: String,
+        to: String,
+    },
+    Unresolved {
+        fqn: String,
+        category: String,
+    },
 }
 
 /// Accumulates one scan's records. Ids are `<prefix>1`, `<prefix>2`, ... in emission order;
@@ -66,6 +85,12 @@ pub struct Emitter {
     paths: BTreeSet<String>,
     /// Each scanned script's record path and its (base-relative) units, in scan order.
     units: Vec<(String, FileUnits)>,
+    /// Each scanned script's dependency sites, parallel to `units`.
+    sites: Vec<Vec<DepSite>>,
+    /// Every scanned file's base-relative path to its File record path.
+    record_paths: HashMap<String, String>,
+    /// Each script's (base-relative) dot-sourced File paths, first-site order.
+    dot_sourced: HashMap<String, Vec<String>>,
     /// How many scanned files held at least one error region.
     errored: usize,
     next_id: usize,
@@ -97,6 +122,9 @@ impl Emitter {
             map: ModuleMap::default(),
             paths: BTreeSet::new(),
             units: Vec::new(),
+            sites: Vec::new(),
+            record_paths: HashMap::new(),
+            dot_sourced: HashMap::new(),
             errored: 0,
             next_id: 0,
             base: base.to_path_buf(),
@@ -132,8 +160,10 @@ impl Emitter {
         if script {
             self.units
                 .push((path.to_string(), units::scan_units(&rel, &decoded, &tree)));
+            self.sites.push(resolve::file_deps(&decoded, &tree));
         }
         let module = self.map.module(&rel);
+        self.record_paths.insert(rel.clone(), path.to_string());
         self.paths.insert(rel);
         if self.modules.insert(module.clone()) {
             self.recs.push(Rec::Module {
@@ -156,7 +186,11 @@ impl Emitter {
         let (paths, files): (Vec<String>, Vec<FileUnits>) =
             std::mem::take(&mut self.units).into_iter().unzip();
         let id = identity::resolve(&self.map, &files, &self.paths);
-        for (path, fu) in paths.iter().zip(&files) {
+        let index = FileIndex::new(self.paths.iter().cloned());
+        let stems = ManifestStems::new(&self.map);
+        let sites = std::mem::take(&mut self.sites);
+        let mut named = HashSet::new();
+        for ((path, fu), sites) in paths.iter().zip(&files).zip(&sites) {
             let rel = fu.path.as_str();
             let script = self.fresh_id();
             let span = fu.file_span;
@@ -213,7 +247,69 @@ impl Emitter {
                 });
                 ids[i] = Some(uid);
             }
+            let deps: Vec<Dep> = sites
+                .iter()
+                .map(|s| resolve::resolve_site(s, rel, &index, &stems))
+                .collect();
+            // Dot-source wins: one uses per File, whatever the order and count of its sites.
+            let mut dots: Vec<String> = Vec::new();
+            for d in &deps {
+                if let Dep::File {
+                    path: p,
+                    kind: DepKind::DotSource,
+                } = d
+                {
+                    if !dots.contains(p) {
+                        dots.push(p.clone());
+                    }
+                }
+            }
+            let (mut linked, mut used) = (HashSet::new(), HashSet::new());
+            for d in deps {
+                match d {
+                    Dep::File { path: p, .. } => {
+                        if linked.insert(p.clone()) {
+                            let kind = if dots.contains(&p) {
+                                DepKind::DotSource
+                            } else {
+                                DepKind::ImportModule
+                            };
+                            self.recs.push(Rec::Uses {
+                                from: script.clone(),
+                                to: self.record_paths.get(&p).cloned().unwrap_or(p),
+                                properties: BTreeMap::from([(
+                                    "kind".to_string(),
+                                    kind.as_str().to_string(),
+                                )]),
+                            });
+                        }
+                    }
+                    Dep::Unresolved { name, category } => {
+                        if named.insert(name.clone()) {
+                            self.recs.push(Rec::Unresolved {
+                                fqn: name.clone(),
+                                category: category.to_string(),
+                            });
+                        }
+                        if used.insert(name.clone()) {
+                            self.recs.push(Rec::UnresolvedUse {
+                                from: script.clone(),
+                                to: name,
+                            });
+                        }
+                    }
+                }
+            }
+            if !dots.is_empty() {
+                self.dot_sourced.insert(rel.to_string(), dots);
+            }
         }
+    }
+
+    /// The (base-relative) Files the script at base-relative `path` dot-sources, first-site
+    /// order; empty when none.
+    pub fn dot_sourced(&self, path: &str) -> &[String] {
+        self.dot_sourced.get(path).map_or(&[], Vec::as_slice)
     }
 
     /// The records emitted so far, in order.
@@ -228,13 +324,14 @@ impl Emitter {
 
     /// Keeps only the facts of the `targets` files (File records and the Struct/Function
     /// records located in them); a Module stays when a kept File sits in it, a Contains edge
-    /// when both its ends are kept.
+    /// when both its ends are kept, a Uses/UnresolvedUse when its source is kept (a File target
+    /// is a path, never rewritten), an Unresolved when a kept UnresolvedUse names it.
     pub fn retain_targets(&mut self, targets: &HashSet<String>) {
         self.recs.retain(|r| match r {
             Rec::File { path, .. } | Rec::Struct { path, .. } | Rec::Function { path, .. } => {
                 targets.contains(path)
             }
-            Rec::Module { .. } | Rec::Contains { .. } => true,
+            _ => true,
         });
         let ids: HashSet<String> = self
             .recs
@@ -246,6 +343,19 @@ impl Emitter {
             .collect();
         self.recs.retain(|r| match r {
             Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
+            Rec::Uses { from, .. } | Rec::UnresolvedUse { from, .. } => ids.contains(from),
+            _ => true,
+        });
+        let named: HashSet<String> = self
+            .recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::UnresolvedUse { to, .. } => Some(to.clone()),
+                _ => None,
+            })
+            .collect();
+        self.recs.retain(|r| match r {
+            Rec::Unresolved { fqn, .. } => named.contains(fqn),
             _ => true,
         });
         let parents: BTreeSet<String> = self

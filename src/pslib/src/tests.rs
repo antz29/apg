@@ -3415,6 +3415,12 @@ mod int {
                     | Rec::Struct { path, .. }
                     | Rec::Function { path, .. } => *path == target,
                     Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
+                    Rec::Uses { from, .. } | Rec::UnresolvedUse { from, .. } => {
+                        ids.contains(from)
+                    }
+                    Rec::Unresolved { fqn, .. } => full.records().iter().any(|u| {
+                        matches!(u, Rec::UnresolvedUse { from, to } if ids.contains(from) && to == fqn)
+                    }),
                 })
                 .cloned()
                 .collect();
