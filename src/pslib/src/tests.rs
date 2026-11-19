@@ -1358,6 +1358,13 @@ fn unresolved_call(from: &str, to: &str) -> Rec {
     }
 }
 
+/// The modelled-constructs fixture: using statements, a DSC configuration whose Node body
+/// and resource property value hold commands, an empty configuration, a top-level command.
+const MODELLED_M: &str = "using module ./Foo.psm1\nusing namespace System.IO\nconfiguration Web {\n    Import-DscResource -ModuleName PSDesiredStateConfiguration\n    Node 'localhost' {\n        Get-Inner\n        File Site {\n            DestinationPath = (Get-Path)\n            Ensure = 'Present'\n        }\n    }\n}\nconfiguration C { }\nGet-Thing\n";
+
+/// Function F's body: a configuration with a Node and a resource block beside a command.
+const MODELLED_N: &str = "function F {\n    configuration Cfg {\n        Node 'n' {\n            File Site {\n                DestinationPath = 'x'\n            }\n        }\n    }\n    Get-Other\n}\n";
+
 mod unit {
     use super::*;
 
@@ -6230,5 +6237,91 @@ mod int {
         let list = "System.Collections.Generic.List";
         let want = unresolved_then(list, "stdlib", unresolved_use(".g.ps1.W", list));
         assert_eq!(got, want);
+    }
+
+    /// domain.constraint.ps-modelled-constructs: using, configuration, Node and resource
+    /// keywords are no commands, units or dependencies; only the commands inside them call.
+    #[test]
+    fn finish_models_using_and_dsc_keywords_as_no_commands() {
+        for (p, src, kinds) in [
+            (
+                "m.ps1",
+                MODELLED_M,
+                &[
+                    "using_statement",
+                    "configuration_definition",
+                    "node_statement",
+                    "resource_statement",
+                ][..],
+            ),
+            (
+                "n.ps1",
+                MODELLED_N,
+                &[
+                    "configuration_definition",
+                    "node_statement",
+                    "resource_statement",
+                ][..],
+            ),
+        ] {
+            let tree = parse(src);
+            let have: BTreeSet<&str> = descendants(tree.root_node())
+                .iter()
+                .map(|n| n.kind())
+                .collect();
+            for k in kinds {
+                assert!(have.contains(k), "{p} holds no {k}");
+            }
+        }
+        // requirements.requirement.ps-command-facts: the Node body's and the resource
+        // property value's commands, then the top-level one
+        let body = ".m.ps1.<script>";
+        let mut want = Vec::new();
+        for name in ["Get-Inner", "Get-Path", "Get-Thing"] {
+            want.extend(unresolved_then(
+                name,
+                "external",
+                unresolved_call(body, name),
+            ));
+        }
+        let facts = generic_facts(&[("m.ps1", MODELLED_M)]);
+        assert_eq!(facts, want);
+        let forbidden = [
+            "using",
+            "module",
+            "namespace",
+            "configuration",
+            "Web",
+            "C",
+            "Node",
+            "localhost",
+            "File",
+            "Site",
+            "DestinationPath",
+            "Ensure",
+            "Import-DscResource",
+        ];
+        for r in &facts {
+            let name = match r {
+                Rec::Calls { to, .. } | Rec::UnresolvedCall { to, .. } => to,
+                Rec::Unresolved { fqn, .. } => fqn,
+                // no Uses or UnresolvedUse from the script Struct: using module is no file dependency
+                _ => panic!("{r:?}"),
+            };
+            let last = name.rsplit('.').next().unwrap_or(name);
+            assert!(
+                !forbidden
+                    .iter()
+                    .any(|f| f.eq_ignore_ascii_case(name) || f.eq_ignore_ascii_case(last)),
+                "{r:?}"
+            );
+        }
+        let e = emit_tree(&[("m.ps1", MODELLED_M)]);
+        let units: BTreeSet<String> = record_keys(e.records()).into_values().collect();
+        assert_eq!(units, [s(".m.ps1"), s(body)].into());
+        // n.ps1: a configuration inside F's body gives F only its Get-Other call
+        let f = ".n.ps1.F";
+        let want = unresolved_then("Get-Other", "external", unresolved_call(f, "Get-Other"));
+        assert_eq!(generic_facts(&[("n.ps1", MODELLED_N)]), want);
     }
 }
