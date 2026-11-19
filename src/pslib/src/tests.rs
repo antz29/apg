@@ -6325,4 +6325,13 @@ mod int {
         let want = unresolved_then("Get-Other", "external", unresolved_call(f, "Get-Other"));
         assert_eq!(generic_facts(&[("n.ps1", MODELLED_N)]), want);
     }
+
+    /// requirements.requirement.ps-this-method-call: the braced `${this}` spelling is a
+    /// calls edge to the class's method, with no Unresolved record.
+    #[test]
+    fn finish_braced_this_method_call_is_a_calls_edge() {
+        let m = ".k.ps1.K.M";
+        let facts = generic_facts(&[("k.ps1", "class K { M() { ${this}.M() } }\n")]);
+        assert_eq!(facts, [calls(m, m)]);
+    }
 }
