@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-import-module-parameter-binding",
+  "body": "import_module binds Import-Module parameters left to right as the grammar yields them: a value-taking parameter directly followed by another parameter binds nothing (so -Prefix -Force X leaves X positional), a parameter given twice keeps its first value, and of -ModuleInfo and -Assembly the first in source wins. Limit: PowerShell refuses each of these invocations, while the scan still derives a site from them. Upgrade by reporting such invocations as computed or as diagnostics when real scripts rely on them.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.resolve.import_module",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
