@@ -459,6 +459,7 @@ fn unit_at(kind: UnitKind, name: &str, start: usize, end: usize) -> Unit {
         },
         ordinal: 0,
         property_types: Vec::new(),
+        bases: vec![],
     }
 }
 

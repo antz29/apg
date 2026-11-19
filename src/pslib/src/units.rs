@@ -31,6 +31,8 @@ pub struct Unit {
     pub ordinal: usize,
     /// Written property type names, deduplicated in order (Class only).
     pub property_types: Vec<String>,
+    /// Written base class/interface names, deduplicated in order (Class only).
+    pub bases: Vec<String>,
 }
 
 /// A file's whole-file span and its units, `units[0]` the `<script>` body.
@@ -77,7 +79,11 @@ pub fn scan_units(path: &str, src: &Decoded, tree: &Tree) -> FileUnits {
                             } else {
                                 UnitKind::Enum
                             };
-                            units.push(unit(k, name, span_of(src, node), None));
+                            let mut u = unit(k, name, span_of(src, node), None);
+                            if class {
+                                u.bases = bases(node, src);
+                            }
+                            units.push(u);
                             if class {
                                 members(node, units.len() - 1, src, &mut units);
                             }
@@ -102,6 +108,20 @@ pub fn scan_units(path: &str, src: &Decoded, tree: &Tree) -> FileUnits {
         file_span,
         units,
     }
+}
+
+/// A class's written base class/interface names, `[]`-stripped and trimmed,
+/// deduplicated case-insensitively in written order.
+fn bases(class: Node<'_>, src: &Decoded) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut cur = class.walk();
+    class
+        .children_by_field_name("base_types", &mut cur)
+        .filter(|b| b.kind() == "type_name")
+        .map(|b| property_type_name(src.text[b.byte_range()].trim()).trim())
+        .filter(|t| seen.insert(t.to_lowercase()))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Pushes the Method/Constructor units of class unit `owner` and fills its
@@ -237,5 +257,6 @@ fn unit(kind: UnitKind, name: &str, span: Span, owner: Option<usize>) -> Unit {
         span,
         ordinal: 0,
         property_types: Vec::new(),
+        bases: Vec::new(),
     }
 }
