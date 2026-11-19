@@ -5737,7 +5737,7 @@ mod int {
         }
     }
 
-    /// call_sites: `[T]::m(...)` is Static, `$this.m(...)` (any case) This, any other
+    /// call_sites: `[T]::m(...)` is Static, `$this.m(...)`/`${this}.m(...)` (any case) This, any other
     /// `x.m(...)` Instance; member access without an argument list is no site.
     #[test]
     fn resolve_call_sites_member_invocations() {
@@ -5756,15 +5756,16 @@ mod int {
                 vec![("[", stat("System.IO.Path", "Combine", 2))],
             ),
             (
-                "class K {\n    M() {\n        $this.M()\n        $this.M(1, 2)\n        $THIS.m(1)\n        $this.P.Q()\n        ${this}.M()\n    }\n}\n",
+                "class K {\n    M() {\n        $this.M()\n        $this.M(1, 2)\n        $THIS.m(1)\n        $this.P.Q()\n        ${this}.M()\n        ${THIS}.m(1)\n    }\n}\n",
                 vec![
                     ("$this.M()", this("M", 0)),
                     ("$this.M(1", this("M", 2)),
                     ("$THIS", this("m", 1)),
                     // the receiver is an expression, not `$this`
                     ("$this.P.Q()", inst("Q", 0)),
-                    // pinned as the code stands: `${this}` is not spelled `$this`
-                    ("${this}", inst("M", 0)),
+                    // `${this}` is the same variable as `$this`, any case
+                    ("${this}", this("M", 0)),
+                    ("${THIS}", this("m", 1)),
                 ],
             ),
             ("$x.M(1)", vec![("$x", inst("M", 1))]),

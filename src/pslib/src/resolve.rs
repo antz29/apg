@@ -747,7 +747,7 @@ fn operator_call(node: Node, text: &str) -> Option<CallKind> {
     }
 }
 
-/// `[T]::m(...)` is Static, `$this.m(...)` This, any other `x.m(...)` Instance.
+/// `[T]::m(...)` is Static, `$this.m(...)` / `${this}.m(...)` This, any other `x.m(...)` Instance.
 fn member_call(node: Node, text: &str) -> Option<CallKind> {
     let access = node
         .child_by_field_name("function")
@@ -777,7 +777,9 @@ fn member_call(node: Node, text: &str) -> Option<CallKind> {
             member,
             argc,
         }),
-        "." if object.kind() == "variable" && obj.eq_ignore_ascii_case("$this") => {
+        "." if object.kind() == "variable"
+            && (obj.eq_ignore_ascii_case("$this") || obj.eq_ignore_ascii_case("${this}")) =>
+        {
             Some(CallKind::This { member, argc })
         }
         "." => Some(CallKind::Instance { member, argc }),
