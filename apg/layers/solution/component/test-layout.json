@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "test-layout",
-  "body": "The test organization of the root crate: each module's unit and integration tests in a sibling file, its end-to-end tests in a per-module top-level integration crate, the cargo aliases pointing at the libtest filters, and the repository gate script.",
+  "body": "The test organization of the root crate: each module's unit and integration tests in a sibling file, its end-to-end tests in a per-module top-level integration crate, the cargo aliases for the libtest filters, and the repository gate script.",
   "properties": {},
   "out": [
     {
