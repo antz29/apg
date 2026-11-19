@@ -601,6 +601,137 @@ fn unit_names<'i>(id: &'i Identity, files: &[FileUnits], path: &str) -> Vec<&'i 
     (0..n).map(|i| id.unit_name(path, i)).collect()
 }
 
+/// `tree`'s ModuleMap: its paths assigned with the parsed keys of its `.psd1` sources.
+fn tree_map<B: AsRef<[u8]>>(tree: &[(&str, B)]) -> ModuleMap {
+    let files: Vec<&str> = tree.iter().map(|(p, _)| *p).collect();
+    let psd1: Vec<(&str, String)> = tree
+        .iter()
+        .filter(|(p, _)| p.ends_with(".psd1"))
+        .map(|(p, b)| (*p, decode_mapped(b.as_ref()).text))
+        .collect();
+    let psd1: Vec<(&str, &str)> = psd1.iter().map(|(p, t)| (*p, t.as_str())).collect();
+    module_map(&files, &psd1)
+}
+
+/// An Emitter over `/r` that, with `tree`'s ModuleMap set, scanned each `(path, bytes)`
+/// as `/r/<path>` in order, then finished.
+fn emit_tree<B: AsRef<[u8]>>(tree: &[(&str, B)]) -> Emitter {
+    let mut e = Emitter::new(Path::new("/r"), "n");
+    e.set_modules(tree_map(tree));
+    for (p, b) in tree {
+        e.scan_file(&format!("/r/{p}"), b.as_ref());
+    }
+    e.finish();
+    e
+}
+
+/// `identity::resolve` rebuilt from `tree`'s in-memory inputs: its ModuleMap, the
+/// units of each decoded file and its path set.
+fn tree_identity<B: AsRef<[u8]>>(tree: &[(&str, B)]) -> Identity {
+    let units: Vec<FileUnits> = tree
+        .iter()
+        .map(|(p, b)| {
+            let src = decode_mapped(b.as_ref());
+            scan_units(p, &src, &parse(&src.text))
+        })
+        .collect();
+    let paths = tree.iter().map(|(p, _)| s(p)).collect();
+    identity::resolve(&tree_map(tree), &units, &paths)
+}
+
+/// Phase 7's `ps` rendering re-implemented over `recs`: each Module/Struct/Function
+/// record's (key, `ps.` + key), Functions grouped by exact (parent, name) as the
+/// ingestor's render_function_fqns does.
+fn ps_rendered(recs: &[Rec]) -> Vec<(String, String)> {
+    let mut groups: std::collections::HashMap<(&str, &str), usize> = Default::default();
+    for r in recs {
+        if let Rec::Function { parent, name, .. } = r {
+            *groups.entry((parent, name)).or_default() += 1;
+        }
+    }
+    recs.iter()
+        .filter_map(|r| {
+            let key = match r {
+                Rec::Module { fqn } => fqn.clone(),
+                Rec::Struct { parent, name, .. } => format!("{parent}.{name}"),
+                Rec::Function {
+                    parent,
+                    name,
+                    params,
+                    ..
+                } if groups[&(parent.as_str(), name.as_str())] > 1 => {
+                    format!("{parent}.{name}({})", params.join(","))
+                }
+                Rec::Function { parent, name, .. } => format!("{parent}.{name}"),
+                _ => return None,
+            };
+            Some((key.clone(), format!("ps.{key}")))
+        })
+        .collect()
+}
+
+/// `tree` emitted, asserting its rendered keys are distinct and equal the rebuilt
+/// identity's keys, no Function (parent, name) group has two members, and every
+/// Struct/Function parent is a key.
+fn assert_emitted<B: AsRef<[u8]>>(tree: &[(&str, B)]) -> Emitter {
+    let e = emit_tree(tree);
+    let mut keys: Vec<String> = ps_rendered(e.records())
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    keys.sort();
+    let set: BTreeSet<&String> = keys.iter().collect();
+    assert_eq!(set.len(), keys.len(), "duplicate key in {keys:?}");
+    let mut want = tree_identity(tree).keys();
+    want.sort();
+    assert_eq!(keys, want);
+    let mut functions = std::collections::HashSet::new();
+    for r in e.records() {
+        let parent = match r {
+            Rec::Function { parent, name, .. } => {
+                assert!(functions.insert((parent, name)), "{parent} {name}");
+                parent
+            }
+            Rec::Struct { parent, .. } => parent,
+            _ => continue,
+        };
+        assert!(set.contains(parent), "parent {parent} is no key");
+    }
+    e
+}
+
+/// The `ps.`-rendered FQN of the record keyed `key` in `recs`.
+fn rendered_of(recs: &[Rec], key: &str) -> String {
+    ps_rendered(recs)
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .unwrap_or_else(|| panic!("no record keyed {key}"))
+        .1
+}
+
+/// A script with a top-level statement, class C (a typed property, a constructor, an
+/// overload pair and a repeated signature), enum E and function F.
+const EMIT_SCRIPT: &str = "Get-A\nclass C {\n    [E]$p\n    C() { }\n    M() { }\n    M([int]$x) { }\n    M([Int]$y) { }\n}\nenum E { A; B }\nfunction F { }\n";
+
+/// The whole-tree uniqueness fixture: every collision identity resolves.
+const UNIQUE_TREE: [(&str, &str); 15] = [
+    ("x.a.ps1", "Get-A\n"),
+    (".x/a.ps1", "Get-A\n"),
+    ("a.b/c.ps1", "Get-A\n"),
+    ("a/b.c.ps1", "Get-A\n"),
+    ("a.b.ps1/f.ps1", "Get-A\n"),
+    ("a/b.ps1", "Get-A\n"),
+    ("m/a.ps1", "class B { }\n"),
+    ("m.a.ps1.B/f.ps1", "Get-A\n"),
+    ("m/s.ps1", "function C.M { }\nclass C {\n    M() { }\n}\n"),
+    ("s.ps1", "class C {\n    M() { }\n    M([int]$x) { }\n}\n"),
+    (".s.ps1.C.M(int)/f.ps1", "Get-A\n"),
+    ("build.ps1", "function F {}\n"),
+    ("build/x.ps1", "function F {}\n"),
+    ("q/one.ps1", "function G { }\n"),
+    ("q/two.ps1", "function G { }\n"),
+];
+
 mod unit {
     use super::*;
 
@@ -2870,5 +3001,262 @@ mod int {
         assert_eq!(id.unit_parent(".x/a.ps1", 1), ".x.a.ps1//.x/a.ps1");
         assert_eq!(id.unit_name("x.a.ps1", 1), "G");
         assert_eq!(id.unit_name(".x/a.ps1", 1), "G");
+    }
+
+    #[test]
+    fn finish_emits_script_and_unit_records_in_ordinal_order() {
+        let manifest = "@{ NestedModules = @('a.ps1') }\n";
+        let e = assert_emitted(&[("m/a.ps1", EMIT_SCRIPT), ("m/M.psd1", manifest)]);
+        let (path, md) = ("/r/m/a.ps1", "m/M.psd1");
+        let (sk, ck) = ("m/M.psd1.a.ps1", "m/M.psd1.a.ps1.C");
+        let n = line_count(EMIT_SCRIPT);
+        let whole = ((0, EMIT_SCRIPT.len()), (1, n));
+        let at = |decl: &str| {
+            let start = EMIT_SCRIPT.find(decl).expect(decl);
+            (start, start + decl.len())
+        };
+        let class = &EMIT_SCRIPT[at("class C").0..at("\nenum").0];
+        type Loc = ((usize, usize), (usize, usize));
+        let st = |id: &str, parent: &str, name: &str, ((start, end), (l1, l2)): Loc| Rec::Struct {
+            id: s(id),
+            parent: s(parent),
+            name: s(name),
+            path: s(path),
+            start,
+            end,
+            start_line: l1,
+            end_line: l2,
+        };
+        let func =
+            |id: &str, parent: &str, name: &str, params: &[&str], ((start, end), (l1, l2)): Loc| {
+                Rec::Function {
+                    id: s(id),
+                    parent: s(parent),
+                    name: s(name),
+                    params: params.iter().map(|p| s(p)).collect(),
+                    file: s(path),
+                    path: s(path),
+                    start,
+                    end,
+                    start_line: l1,
+                    end_line: l2,
+                }
+            };
+        let has = |from: &str, to: &str| Rec::Contains {
+            from: s(from),
+            to: s(to),
+        };
+        // the .psd1 manifest yields its File only; M([Int]$y) repeats M(int) and is dropped
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s(md) },
+                file(path, md, n),
+                file("/r/m/M.psd1", md, 1),
+                st("n1", md, "a.ps1", whole),
+                func("n2", sk, "<script>", &[], whole),
+                has("n1", "n2"),
+                st("n3", sk, "C", (at(class), (2, 8))),
+                has("n1", "n3"),
+                func("n4", ck, "new", &[], (at("C() { }"), (4, 4))),
+                has("n3", "n4"),
+                func("n5", ck, "M()", &[], (at("M() { }"), (5, 5))),
+                has("n3", "n5"),
+                func("n6", ck, "M(int)", &["int"], (at("M([int]$x) { }"), (6, 6))),
+                has("n3", "n6"),
+                st("n7", sk, "E", (at("enum E { A; B }"), (9, 9))),
+                has("n1", "n7"),
+                func("n8", sk, "F", &[], (at("function F { }"), (10, 10))),
+                has("n1", "n8"),
+            ]
+        );
+        // each overload is a group of one, keyed by its signed name
+        let recs = e.records();
+        assert_eq!(
+            rendered_of(recs, &format!("{ck}.M()")),
+            "ps.m/M.psd1.a.ps1.C.M()"
+        );
+        assert_eq!(
+            rendered_of(recs, &format!("{ck}.M(int)")),
+            "ps.m/M.psd1.a.ps1.C.M(int)"
+        );
+    }
+
+    #[test]
+    fn finish_reports_raw_offsets_of_a_utf16_script() {
+        let narrow = emit_tree(&[("a.ps1", EMIT_SCRIPT)]);
+        let bytes = utf16_bytes(EMIT_SCRIPT, false);
+        let wide = assert_emitted(&[("a.ps1", &bytes)]);
+        let located = |e: &Emitter| -> Vec<(String, String, usize, usize, usize, usize)> {
+            e.records()
+                .iter()
+                .filter_map(|r| match r {
+                    Rec::Struct {
+                        parent,
+                        name,
+                        start,
+                        end,
+                        start_line,
+                        end_line,
+                        ..
+                    }
+                    | Rec::Function {
+                        parent,
+                        name,
+                        start,
+                        end,
+                        start_line,
+                        end_line,
+                        ..
+                    } => Some((
+                        parent.clone(),
+                        name.clone(),
+                        *start,
+                        *end,
+                        *start_line,
+                        *end_line,
+                    )),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (w, n) = (located(&wide), located(&narrow));
+        assert_eq!(w.len(), 8);
+        // the script Struct and <script>: the whole file, the BOM included
+        for row in &w[..2] {
+            let span = (row.2, row.3, row.4, row.5);
+            assert_eq!(
+                span,
+                (0, bytes.len(), 1, line_count(EMIT_SCRIPT)),
+                "{}",
+                row.1
+            );
+        }
+        for (w, n) in w.iter().zip(&n) {
+            assert_eq!((&w.0, &w.1, w.4, w.5), (&n.0, &n.1, n.4, n.5));
+        }
+        for (w, n) in w.iter().zip(&n).skip(2) {
+            let raw = raw_text(&bytes, Some(false), w.2, w.3);
+            assert_eq!(raw, &EMIT_SCRIPT[n.2..n.3], "{}", w.1);
+        }
+    }
+
+    #[test]
+    fn finish_keys_are_unique_across_the_scan() {
+        let e = assert_emitted(&UNIQUE_TREE);
+        let recs = e.records();
+        let mut suffixed: Vec<(&str, &str)> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Struct { path, name, .. } | Rec::Function { path, name, .. }
+                    if name.contains("//") =>
+                {
+                    Some((path.as_str(), name.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        suffixed.sort();
+        // scripts by their path, units by //<path>:<ordinal>; the build pair never
+        assert_eq!(
+            suffixed,
+            [
+                ("/r/.x/a.ps1", "a.ps1//.x/a.ps1"),
+                ("/r/a.b/c.ps1", "c.ps1//a.b/c.ps1"),
+                ("/r/a/b.c.ps1", "b.c.ps1//a/b.c.ps1"),
+                ("/r/a/b.ps1", "b.ps1//a/b.ps1"),
+                ("/r/m/a.ps1", "B//m/a.ps1:2"),
+                ("/r/m/s.ps1", "C.M//m/s.ps1:2"),
+                ("/r/m/s.ps1", "M//m/s.ps1:4"),
+                ("/r/s.ps1", "M(int)//s.ps1:4"),
+                ("/r/x.a.ps1", "x.a.ps1//x.a.ps1"),
+            ]
+        );
+        let struct_parent = |n: &str| {
+            recs.iter()
+                .find_map(|r| match r {
+                    Rec::Struct { parent, name, .. } if name == n => Some(parent.as_str()),
+                    _ => None,
+                })
+                .expect(n)
+        };
+        let functions = |p: &str| -> Vec<&str> {
+            recs.iter()
+                .filter_map(|r| match r {
+                    Rec::Function { parent, name, .. } if parent == p => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(struct_parent("x.a.ps1//x.a.ps1"), "");
+        assert_eq!(struct_parent("a.ps1//.x/a.ps1"), ".x");
+        let keys: BTreeSet<String> = ps_rendered(recs).into_iter().map(|(k, _)| k).collect();
+        assert!(keys.contains(".s.ps1.C.M()") && keys.contains(".s.ps1.C.M(int)//s.ps1:4"));
+        assert!(!keys.contains(".s.ps1.C.M"));
+        // the build pair: a leading-dot root scope beside the build module
+        for m in ["", "build"] {
+            assert!(recs.contains(&Rec::Module { fqn: s(m) }), "{m:?}");
+        }
+        assert_eq!(struct_parent("build.ps1"), "");
+        assert_eq!(rendered_of(recs, ".build.ps1"), "ps..build.ps1");
+        assert_eq!(functions(".build.ps1"), ["<script>", "F"]);
+        assert_eq!(rendered_of(recs, ".build.ps1.F"), "ps..build.ps1.F");
+        assert_eq!(struct_parent("x.ps1"), "build");
+        assert_eq!(rendered_of(recs, "build.x.ps1"), "ps.build.x.ps1");
+        assert_eq!(functions("build.x.ps1"), ["<script>", "F"]);
+        assert_eq!(rendered_of(recs, "build.x.ps1.F"), "ps.build.x.ps1.F");
+        // same-named functions in two files stay plain
+        assert_eq!(functions("q.one.ps1"), ["<script>", "G"]);
+        assert_eq!(functions("q.two.ps1"), ["<script>", "G"]);
+    }
+
+    #[test]
+    fn retain_targets_keeps_one_files_records_as_the_full_run_emits_them() {
+        let full = emit_tree(&UNIQUE_TREE);
+        for (p, _) in UNIQUE_TREE {
+            let target = format!("/r/{p}");
+            let mut e = emit_tree(&UNIQUE_TREE);
+            e.retain_targets(&[target.clone()].into());
+            let module = full
+                .records()
+                .iter()
+                .find_map(|r| match r {
+                    Rec::File { path, parent, .. } if *path == target => Some(parent),
+                    _ => None,
+                })
+                .expect(p);
+            let ids: std::collections::HashSet<&String> = full
+                .records()
+                .iter()
+                .filter_map(|r| match r {
+                    Rec::Struct { id, path, .. } | Rec::Function { id, path, .. }
+                        if *path == target =>
+                    {
+                        Some(id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            // an edge stays only when both ends are kept
+            let want: Vec<Rec> = full
+                .records()
+                .iter()
+                .filter(|r| match r {
+                    Rec::Module { fqn } => fqn == module,
+                    Rec::File { path, .. }
+                    | Rec::Struct { path, .. }
+                    | Rec::Function { path, .. } => *path == target,
+                    Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
+                })
+                .cloned()
+                .collect();
+            let edges = want
+                .iter()
+                .filter(|r| matches!(r, Rec::Contains { .. }))
+                .count();
+            assert!(ids.len() >= 2, "{p}");
+            assert_eq!(edges, ids.len() - 1, "{p}: one edge per unit");
+            assert_eq!(e.records(), want, "{p}");
+        }
     }
 }
