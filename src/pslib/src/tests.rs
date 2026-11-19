@@ -3,7 +3,7 @@
 
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
 use crate::parse::parse;
-use crate::paths::{normalise, resolve, FileIndex};
+use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span};
 use std::path::Path;
@@ -205,6 +205,73 @@ fn file(path: &str, parent: &str, end_line: usize) -> Rec {
         start_line: 1,
         end_line,
     }
+}
+
+/// `node` and every node beneath it, in tree order.
+fn descendants(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut out = vec![node];
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        out.extend(descendants(child));
+    }
+    out
+}
+
+/// The `command` field of the first `invocation_operator_command` with
+/// operator `op`, anywhere under `root`.
+fn operand<'t>(root: Node<'t>, op: &str) -> Option<Node<'t>> {
+    descendants(root)
+        .into_iter()
+        .find(|n| {
+            n.kind() == "invocation_operator_command"
+                && n.child_by_field_name("operator")
+                    .is_some_and(|o| o.kind() == op)
+        })?
+        .child_by_field_name("command")
+}
+
+/// The first `command_argument` of the first `command` named `name`
+/// (case-insensitively), with `src` its text source.
+fn first_arg<'t>(root: Node<'t>, src: &str, name: &str) -> Option<Node<'t>> {
+    let cmd = descendants(root).into_iter().find(|n| {
+        n.kind() == "command"
+            && n.child_by_field_name("name").is_some_and(|c| {
+                c.kind() == "command_name" && src[c.byte_range()].eq_ignore_ascii_case(name)
+            })
+    })?;
+    let mut cur = cmd.walk();
+    let arg = cmd
+        .named_children(&mut cur)
+        .find(|n| n.kind() == "command_argument");
+    arg
+}
+
+/// The value of hash entry `key` in the first direct child of the
+/// `source_file` root that is (or wraps exactly) a `hashtable_expression`.
+fn manifest_value<'t>(root: Node<'t>, src: &str, key: &str) -> Option<Node<'t>> {
+    let mut cur = root.walk();
+    let table = root.named_children(&mut cur).find_map(|mut n| {
+        while matches!(n.kind(), "pipeline" | "command_expression") && n.named_child_count() == 1 {
+            n = n.named_child(0)?;
+        }
+        (n.kind() == "hashtable_expression").then_some(n)
+    })?;
+    let mut cur = table.walk();
+    let entry = table.named_children(&mut cur).find(|e| {
+        e.kind() == "hash_entry"
+            && e.child_by_field_name("key")
+                .is_some_and(|k| &src[k.byte_range()] == key)
+    })?;
+    entry.child_by_field_name("value")
+}
+
+/// `path_arg` of the node `locate` finds in `src`, which must parse with no
+/// ERROR or MISSING node.
+fn arg_of(src: &str, locate: impl Fn(Node<'_>) -> Option<Node<'_>>) -> PathArg {
+    assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+    let tree = parse(src);
+    let node = locate(tree.root_node()).unwrap_or_else(|| panic!("no site in {src:?}"));
+    path_arg(node, src)
 }
 
 mod unit {
@@ -1498,5 +1565,99 @@ mod int {
             ]
         );
         assert!(out.ends_with(b"\n"));
+    }
+
+    fn st(text: &str, anchored: bool) -> PathArg {
+        PathArg::Static {
+            text: s(text),
+            anchored,
+        }
+    }
+
+    /// Operand spellings (after the operator) and their classification.
+    fn operand_cells() -> Vec<(&'static str, PathArg)> {
+        vec![
+            ("./lib.ps1", st("./lib.ps1", false)),
+            ("'lib.ps1'", st("lib.ps1", false)),
+            ("\"lib.ps1\"", st("lib.ps1", false)),
+            (r"$PSScriptRoot\lib.ps1", st("lib.ps1", true)),
+            ("\"$PSScriptRoot/lib.ps1\"", st("lib.ps1", true)),
+            ("\"$psscriptroot\\lib.ps1\"", st("lib.ps1", true)),
+            (
+                r"'$PSScriptRoot\lib.ps1'",
+                st(r"$PSScriptRoot\lib.ps1", false),
+            ),
+            ("$path", PathArg::Computed),
+            ("\"$env:X\\lib.ps1\"", PathArg::Computed),
+            ("\"$PSScriptRoot$x.ps1\"", PathArg::Computed),
+            ("(Join-Path $PSScriptRoot lib.ps1)", PathArg::Computed),
+            ("./l`ib.ps1", PathArg::Computed),
+            (r"$PSScriptRoot\l`ib.ps1", PathArg::Computed),
+            ("\"l`ib.ps1\"", PathArg::Computed),
+            ("'`lib.ps1'", st("`lib.ps1", false)),
+            (r"${PSScriptRoot}\x.ps1", st("x.ps1", true)),
+            ("\"${PSScriptRoot}/x.ps1\"", st("x.ps1", true)),
+            (r"${psscriptroot}\x.ps1", st("x.ps1", true)),
+            (r"$PSSCRIPTROOT\x.ps1", st("x.ps1", true)),
+            ("$psscriptroot/x.ps1", st("x.ps1", true)),
+        ]
+    }
+
+    #[test]
+    fn paths_path_arg_over_invocation_operands() {
+        for (operand_src, want) in operand_cells() {
+            for op in [".", "&"] {
+                let src = format!("{op} {operand_src}\n");
+                assert_eq!(arg_of(&src, |r| operand(r, op)), want, "{src:?}");
+            }
+            // nested in a function body, not a direct child of the root
+            let src = format!("function F {{\n    . {operand_src}\n}}\n");
+            assert_eq!(arg_of(&src, |r| operand(r, ".")), want, "{src:?}");
+        }
+    }
+
+    #[test]
+    fn paths_path_arg_over_import_module_arguments() {
+        for (operand_src, want) in operand_cells() {
+            for src in [
+                format!("Import-Module {operand_src}\n"),
+                format!("Import-Module -Name {operand_src}\n"),
+            ] {
+                let got = arg_of(&src, |r| first_arg(r, &src, "Import-Module"));
+                assert_eq!(got, want, "{src:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn paths_path_arg_over_manifest_values() {
+        for src in [
+            "@{ RootModule = 'Foo.psm1' }\n",
+            "# manifest\n@{ RootModule = 'Foo.psm1' }\n",
+            MANIFEST,
+        ] {
+            let got = arg_of(src, |r| manifest_value(r, src, "RootModule"));
+            assert_eq!(got, st("Foo.psm1", false), "{src:?}");
+        }
+    }
+
+    #[test]
+    fn paths_path_arg_resolves_per_anchoring_form() {
+        let dir = "mods/Foo";
+        for (src, want) in [
+            (". ./lib.ps1\n", "mods/Foo/lib.ps1"),
+            (". $PSScriptRoot\\sub\\lib.ps1\n", "mods/Foo/sub/lib.ps1"),
+            (". \"$PSScriptRoot/../Bar/lib.ps1\"\n", "mods/Bar/lib.ps1"),
+            (". ${PSScriptRoot}\\x.ps1\n", "mods/Foo/x.ps1"),
+            ("@{ RootModule = 'Foo.psm1' }\n", "mods/Foo/Foo.psm1"),
+        ] {
+            let got = match arg_of(src, |r| {
+                operand(r, ".").or_else(|| manifest_value(r, src, "RootModule"))
+            }) {
+                PathArg::Static { text, .. } => resolve(dir, &text),
+                PathArg::Computed => None,
+            };
+            assert_eq!(got.as_deref(), Some(want), "{src:?}");
+        }
     }
 }
