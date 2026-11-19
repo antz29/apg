@@ -2,6 +2,7 @@
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
+use crate::manifest::{wildcard_match, ExportSpec};
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
@@ -1461,6 +1462,56 @@ mod unit {
         assert_eq!(idx.find("A.ps1"), Some("A.ps1"));
         assert_eq!(idx.find("A.PS1"), None);
         assert_eq!(idx.find("c.ps1"), None);
+    }
+
+    #[test]
+    fn manifest_wildcard_match() {
+        let yes = [
+            ("Get-Foo", "get-foo"),
+            ("get-foo", "GET-FOO"),
+            ("*-Foo", "Get-Foo"),
+            ("Get-*o", "Get-Foo"),
+            ("Get-*", "Get-Foo"),
+            ("*", "Anything"),
+            ("*", ""),
+            ("G*t-F*", "Get-Foo"),
+            ("Get-F?o", "Get-Foo"),
+            ("[ab]ar", "Bar"),
+            ("[a-c]ar", "car"),
+            ("a`*b", "a*b"),
+            ("a`[b]", "a[b]"),
+            // An unclosed `[` is a literal `[`.
+            ("a[b", "a[b"),
+        ];
+        for (p, n) in yes {
+            assert!(wildcard_match(p, n), "{p:?} should match {n:?}");
+        }
+        let no = [
+            ("Get-Foo", "Get-Bar"),
+            ("Get-F?o", "Get-Fo"),
+            ("Get-F?o", "Get-Fooo"),
+            ("[ab]ar", "car"),
+            ("[a-c]ar", "dar"),
+            ("a`*b", "axxb"),
+            ("a`[b]", "ab"),
+            ("a[b", "ab"),
+            ("Get-*", "Set-Foo"),
+        ];
+        for (p, n) in no {
+            assert!(!wildcard_match(p, n), "{p:?} should not match {n:?}");
+        }
+    }
+
+    #[test]
+    fn manifest_export_spec() {
+        let names = ["Remove-A", "Set-Item", "Get-A"];
+        assert!(ExportSpec::All.matches("Anything"));
+        assert_eq!(ExportSpec::All.exported(names), names);
+        let pats = ExportSpec::Patterns(vec![s("Get-*"), s("Set-Item")]);
+        assert!(!pats.matches("Remove-A"));
+        assert_eq!(pats.exported(names), ["Set-Item", "Get-A"]);
+        assert_eq!(ExportSpec::Patterns(vec![s("*")]).exported(names), names);
+        assert!(ExportSpec::Patterns(vec![]).exported(names).is_empty());
     }
 }
 
