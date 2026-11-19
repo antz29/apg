@@ -193,6 +193,19 @@ fn raw_text(bytes: &[u8], be: Option<bool>, start: usize, end: usize) -> String 
         .expect("valid UTF-16")
 }
 
+fn s(x: &str) -> String {
+    x.to_string()
+}
+
+fn file(path: &str, parent: &str, end_line: usize) -> Rec {
+    Rec::File {
+        path: s(path),
+        parent: s(parent),
+        start_line: 1,
+        end_line,
+    }
+}
+
 mod unit {
     use super::*;
 
@@ -1300,19 +1313,6 @@ mod unit {
 mod int {
     use super::*;
     use std::collections::HashSet;
-
-    fn s(x: &str) -> String {
-        x.to_string()
-    }
-
-    fn file(path: &str, parent: &str, end_line: usize) -> Rec {
-        Rec::File {
-            path: s(path),
-            parent: s(parent),
-            start_line: 1,
-            end_line,
-        }
-    }
 
     #[test]
     fn diag_error_regions_over_parsed_sources() {
