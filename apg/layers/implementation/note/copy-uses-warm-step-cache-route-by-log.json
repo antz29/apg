@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "copy-uses-warm-step-cache-route-by-log",
-  "body": "Step 2 (db.lbug removed, fact store kept) proves the cached-fact route by the log line `[scan] incremental: 0 target file(s), 5 reusable file(s)` plus the full-load-fallback reassembly line; the cobol frontend still spawns with an empty --targets list, and the test does not assert that it emits no copy records, so the kind=copy edges are attributed to splice_cached's restore of cached FragEdge properties by that zero-target evidence rather than by a direct check. Upgrade by asserting the cobol frontend emits no records for an empty target list (or that no frontend spawns on the warm route) if the restore must be proven directly.",
+  "body": "Step 2 reaches the cached-fact reassembly by an uncommitted spec-only node file under apg/layers/ (kept db.lbug, so the delta dispatch runs, the splice guard refuses the unrepresented authored row and the pipeline re-assembles the full graph through ingest_with_reuse and splice_cached) while the cobol frontend logs `no changed targets — frontend skipped (facts reused)` and never spawns, so both kind=copy edges can come only from splice_cached's restore of cached FragEdge properties; with that restore removed the edges vanish and the test fails. The trigger rests on git status reporting the untracked node file as a changed target, the same trigger the netbeans-scale acceptance test uses. Upgrade by switching to a committed authored change or another seed-fallback trigger if untracked apg/layers files stop counting as delta targets.",
   "properties": {},
   "out": [
     {
