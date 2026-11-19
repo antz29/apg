@@ -608,7 +608,9 @@ mod e2e {
             ["module", "file", "struct", "function", "contains"].map(count),
             [3, 4, 3, 3, 3]
         );
-        assert_eq!(recs.len(), 16);
+        // plus Get-A's one unresolved record and each <script>'s unresolved call to it
+        assert_eq!(["unresolved", "unresolved_call"].map(count), [1, 3]);
+        assert_eq!(recs.len(), 20);
         let file = |p: &str, m: &str| (format!("{root}/{p}"), m.to_string(), 1, 1);
         assert_eq!(
             file_recs(&recs),
@@ -687,14 +689,19 @@ mod e2e {
         dir.write("sub/b.ps1", b"Get-B\nGet-C\n");
         let root = dir.root();
         let b = format!("{root}/sub/b.ps1");
-        // b.ps1's records, its script Struct and <script> Function ids `n{s}`/`n{f}`
+        // b.ps1's records, its script Struct and <script> Function ids `n{s}`/`n{f}`, then
+        // its two external command calls
         let only_b = |s: usize, f: usize| {
             format!(
                 "{{\"type\":\"module\",\"fqn\":\"sub\"}}\n\
                  {{\"type\":\"file\",\"path\":\"{b}\",\"parent\":\"sub\",\"start_line\":1,\"end_line\":2}}\n\
                  {{\"type\":\"struct\",\"id\":\"n{s}\",\"parent\":\"sub\",\"name\":\"b.ps1\",\"path\":\"{b}\",\"start\":0,\"end\":12,\"start_line\":1,\"end_line\":2}}\n\
                  {{\"type\":\"function\",\"id\":\"n{f}\",\"parent\":\"sub.b.ps1\",\"name\":\"<script>\",\"file\":\"{b}\",\"path\":\"{b}\",\"start\":0,\"end\":12,\"start_line\":1,\"end_line\":2}}\n\
-                 {{\"type\":\"contains\",\"from\":\"n{s}\",\"to\":\"n{f}\"}}\n"
+                 {{\"type\":\"contains\",\"from\":\"n{s}\",\"to\":\"n{f}\"}}\n\
+                 {{\"type\":\"unresolved\",\"fqn\":\"Get-B\",\"category\":\"external\"}}\n\
+                 {{\"type\":\"unresolved_call\",\"from\":\"n{f}\",\"to\":\"Get-B\"}}\n\
+                 {{\"type\":\"unresolved\",\"fqn\":\"Get-C\",\"category\":\"external\"}}\n\
+                 {{\"type\":\"unresolved_call\",\"from\":\"n{f}\",\"to\":\"Get-C\"}}\n"
             )
         };
         let side = Scratch::new("bin-tgt-side");

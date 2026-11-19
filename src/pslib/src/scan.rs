@@ -11,13 +11,16 @@ use crate::diag::{self, write_diagnostic, Diagnostic};
 use crate::identity;
 use crate::manifest::{self, ModuleMap};
 use crate::parse::parse;
-use crate::paths::FileIndex;
-use crate::resolve::{self, Dep, DepKind, DepSite, ManifestStems};
+use crate::paths::{self, FileIndex, PathArg};
+use crate::resolve::{
+    self, CallKind, CallSite, CommandIndex, Dep, DepKind, DepSite, DotSourceMap, ManifestStems,
+    Target, TypeIndex, TypeRes,
+};
 use crate::source;
 use crate::units::{self, FileUnits, UnitKind};
 
 /// Unified JSONL records (SPEC §2), the `ps` stream's wire shapes.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Rec {
     Module {
@@ -56,8 +59,8 @@ pub enum Rec {
         from: String,
         to: String,
     },
-    /// A script's file dependency: its Struct's `uses` of the File it dot-sources or imports,
-    /// `properties.kind` `dot-source` or `import-module`.
+    /// A script's file dependency (its Struct's `uses` of the File it dot-sources or imports,
+    /// `properties.kind` `dot-source` or `import-module`), or a class's type use (no kind).
     Uses {
         from: String,
         to: String,
@@ -65,6 +68,14 @@ pub enum Rec {
         properties: BTreeMap<String, String>,
     },
     UnresolvedUse {
+        from: String,
+        to: String,
+    },
+    Calls {
+        from: String,
+        to: String,
+    },
+    UnresolvedCall {
         from: String,
         to: String,
     },
@@ -87,10 +98,12 @@ pub struct Emitter {
     units: Vec<(String, FileUnits)>,
     /// Each scanned script's dependency sites, parallel to `units`.
     sites: Vec<Vec<DepSite>>,
+    /// Each scanned script's invocation sites, parallel to `units`.
+    calls: Vec<Vec<CallSite>>,
     /// Every scanned file's base-relative path to its File record path.
     record_paths: HashMap<String, String>,
     /// Each script's (base-relative) dot-sourced File paths, first-site order.
-    dot_sourced: HashMap<String, Vec<String>>,
+    dot_sourced: DotSourceMap,
     /// How many scanned files held at least one error region.
     errored: usize,
     next_id: usize,
@@ -113,6 +126,33 @@ fn rel_of(base: &Path, path: &Path) -> String {
         .join("/")
 }
 
+/// `fu`'s unit indices in ordinal order.
+fn ordinal_order(fu: &FileUnits) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..fu.units.len()).collect();
+    order.sort_by_key(|&i| fu.units[i].ordinal);
+    order
+}
+
+/// Pushes `edge` unless an equal edge was pushed, preceded — the first time any fact names
+/// it — by the `Unresolved` record of `name` carrying its whole-tree category.
+fn emit(
+    recs: &mut Vec<Rec>,
+    seen: &mut HashSet<Rec>,
+    named: &mut HashSet<String>,
+    cats: &HashMap<String, &str>,
+    edge: Rec,
+    name: Option<String>,
+) {
+    if !seen.insert(edge.clone()) {
+        return;
+    }
+    if let Some(n) = name.filter(|n| named.insert(n.clone())) {
+        let category = cats[&n].to_string();
+        recs.push(Rec::Unresolved { fqn: n, category });
+    }
+    recs.push(edge);
+}
+
 impl Emitter {
     /// An emitter whose module identities are relative to `base` and whose ids start `id_prefix`.
     pub fn new(base: &Path, id_prefix: &str) -> Self {
@@ -123,8 +163,9 @@ impl Emitter {
             paths: BTreeSet::new(),
             units: Vec::new(),
             sites: Vec::new(),
+            calls: Vec::new(),
             record_paths: HashMap::new(),
-            dot_sourced: HashMap::new(),
+            dot_sourced: DotSourceMap::new(),
             errored: 0,
             next_id: 0,
             base: base.to_path_buf(),
@@ -161,6 +202,7 @@ impl Emitter {
             self.units
                 .push((path.to_string(), units::scan_units(&rel, &decoded, &tree)));
             self.sites.push(resolve::file_deps(&decoded, &tree));
+            self.calls.push(resolve::call_sites(&decoded, &tree));
         }
         let module = self.map.module(&rel);
         self.record_paths.insert(rel.clone(), path.to_string());
@@ -181,7 +223,8 @@ impl Emitter {
 
     /// Names every scanned script's units over the whole tree, then emits per script (scan
     /// order) its Struct and each unit in ordinal order, each contained by its script (a
-    /// Method/Constructor by its class).
+    /// Method/Constructor by its class), then its file dependencies, class type references and
+    /// call sites. Every name, target and unresolved category is resolved over the whole tree.
     pub fn finish(&mut self) {
         let (paths, files): (Vec<String>, Vec<FileUnits>) =
             std::mem::take(&mut self.units).into_iter().unzip();
@@ -189,10 +232,181 @@ impl Emitter {
         let index = FileIndex::new(self.paths.iter().cloned());
         let stems = ManifestStems::new(&self.map);
         let sites = std::mem::take(&mut self.sites);
-        let mut named = HashSet::new();
-        for ((path, fu), sites) in paths.iter().zip(&files).zip(&sites) {
-            let rel = fu.path.as_str();
+        let calls = std::mem::take(&mut self.calls);
+        // Ids in emission order (a script's Struct, then its units in ordinal order), assigned
+        // up front so a call can name a unit of a later file.
+        let mut ids: Vec<(String, Vec<String>)> = Vec::new();
+        for fu in &files {
             let script = self.fresh_id();
+            let mut uids = vec![String::new(); fu.units.len()];
+            for i in ordinal_order(fu) {
+                uids[i] = self.fresh_id();
+            }
+            ids.push((script, uids));
+        }
+        let by_path: HashMap<&str, usize> = files
+            .iter()
+            .enumerate()
+            .map(|(k, f)| (f.path.as_str(), k))
+            .collect();
+        let unit_id = |path: &str, i: usize| ids[by_path[path]].1[i].clone();
+        let deps: Vec<Vec<Dep>> = files
+            .iter()
+            .zip(&sites)
+            .map(|(fu, s)| {
+                s.iter()
+                    .map(|s| resolve::resolve_site(s, &fu.path, &index, &stems))
+                    .collect()
+            })
+            .collect();
+        // Dot-source wins: one uses per File, whatever the order and count of its sites.
+        for (fu, deps) in files.iter().zip(&deps) {
+            let mut dots: Vec<String> = Vec::new();
+            for d in deps {
+                if let Dep::File {
+                    path: p,
+                    kind: DepKind::DotSource,
+                } = d
+                {
+                    if !dots.contains(p) {
+                        dots.push(p.clone());
+                    }
+                }
+            }
+            if !dots.is_empty() {
+                self.dot_sourced.insert(fu.path.clone(), dots);
+            }
+        }
+        let dot = &self.dot_sourced;
+        let types = TypeIndex::new(&files);
+        let commands = CommandIndex::new(&files, &self.map, dot);
+        // Each file's type references then call sites: (from id, is a call, target).
+        let facts: Vec<Vec<(String, bool, Target)>> = files
+            .iter()
+            .zip(&calls)
+            .zip(&ids)
+            .map(|((fu, calls), (_, uids))| {
+                let rel = fu.path.as_str();
+                let dir = rel.rsplit_once('/').map_or("", |(d, _)| d);
+                let unresolved =
+                    |name: String, category: &'static str| Target::Unresolved { name, category };
+                let command = |name: &str| {
+                    let res = commands.resolve_command(name, rel, dot, &self.map, &index);
+                    resolve::command_target(res, name)
+                };
+                let mut out = Vec::new();
+                for i in ordinal_order(fu) {
+                    let u = &fu.units[i];
+                    if u.kind != UnitKind::Class {
+                        continue;
+                    }
+                    for n in u.property_types.iter().chain(&u.bases) {
+                        let t = resolve::type_target(types.resolve_type(n, rel, dot), n);
+                        out.push((uids[i].clone(), false, t));
+                    }
+                }
+                for site in calls {
+                    let caller = resolve::enclosing(fu, site.raw_offset);
+                    let target = match &site.kind {
+                        CallKind::Command { name } => command(name),
+                        CallKind::CallLiteral { arg, written } => {
+                            let script = match arg {
+                                PathArg::Static { text, .. } => paths::resolve(dir, text)
+                                    .and_then(|p| index.find(&p))
+                                    .filter(|p| p.to_ascii_lowercase().ends_with(".ps1")),
+                                PathArg::Computed => None,
+                            };
+                            script.map_or_else(
+                                || command(written),
+                                |p| Target::Unit {
+                                    path: p.to_string(),
+                                    index: 0,
+                                },
+                            )
+                        }
+                        CallKind::FuncValue => {
+                            unresolved(resolve::nameless_key(rel, site.raw_offset), "func-value")
+                        }
+                        CallKind::Static {
+                            type_name,
+                            member,
+                            argc,
+                        } => {
+                            let t = resolve::type_name(type_name);
+                            let tm = format!("{t}.{member}");
+                            match types.resolve_type(type_name, rel, dot) {
+                                TypeRes::One { path, index: c } => {
+                                    let cf = &files[by_path[path.as_str()]];
+                                    let new = member.eq_ignore_ascii_case("new");
+                                    let m = (cf.units[c].kind == UnitKind::Class)
+                                        .then(|| resolve::select_member(cf, c, member, *argc, new))
+                                        .flatten();
+                                    m.map_or_else(
+                                        || unresolved(tm, "unknown"),
+                                        |index| Target::Unit { path, index },
+                                    )
+                                }
+                                TypeRes::Many => unresolved(t, "unknown"),
+                                TypeRes::Outside if resolve::is_system_type(&t) => {
+                                    unresolved(tm, "stdlib")
+                                }
+                                TypeRes::Outside => unresolved(tm, "external"),
+                            }
+                        }
+                        CallKind::This { member, argc } => {
+                            let u = &fu.units[caller];
+                            let member_of =
+                                matches!(u.kind, UnitKind::Method | UnitKind::Constructor);
+                            u.owner
+                                .filter(|_| member_of)
+                                .and_then(|c| resolve::select_member(fu, c, member, *argc, false))
+                                .map_or_else(
+                                    || unresolved(member.clone(), "unknown"),
+                                    |index| Target::Unit {
+                                        path: rel.to_string(),
+                                        index,
+                                    },
+                                )
+                        }
+                        CallKind::Instance { member, .. } => unresolved(member.clone(), "unknown"),
+                    };
+                    out.push((uids[caller].clone(), true, target));
+                }
+                out
+            })
+            .collect();
+        // Each unresolved name's category: the first of unknown > func-value > external > stdlib
+        // that any of its sites assigns.
+        let rank = |c: &str| {
+            ["unknown", "func-value", "external", "stdlib"]
+                .iter()
+                .position(|k| *k == c)
+                .unwrap_or(0)
+        };
+        let mut cats: HashMap<String, &'static str> = HashMap::new();
+        let unresolved_deps = deps.iter().flatten().filter_map(|d| match d {
+            Dep::Unresolved { name, category } => Some((name, *category)),
+            Dep::File { .. } => None,
+        });
+        let unresolved_facts = facts.iter().flatten().filter_map(|(_, _, t)| match t {
+            Target::Unresolved { name, category } => Some((name, *category)),
+            Target::Unit { .. } => None,
+        });
+        for (name, c) in unresolved_deps.chain(unresolved_facts) {
+            let e = cats.entry(name.clone()).or_insert(c);
+            if rank(c) < rank(e) {
+                *e = c;
+            }
+        }
+        let (mut named, mut seen) = (HashSet::new(), HashSet::new());
+        for (k, ((path, fu), (deps, facts))) in paths
+            .iter()
+            .zip(&files)
+            .zip(deps.into_iter().zip(facts))
+            .enumerate()
+        {
+            let rel = fu.path.as_str();
+            let (script, uids) = &ids[k];
             let span = fu.file_span;
             self.recs.push(Rec::Struct {
                 id: script.clone(),
@@ -204,12 +418,9 @@ impl Emitter {
                 start_line: span.start_line,
                 end_line: span.end_line,
             });
-            let mut order: Vec<usize> = (0..fu.units.len()).collect();
-            order.sort_by_key(|&i| fu.units[i].ordinal);
-            let mut ids: Vec<Option<String>> = vec![None; fu.units.len()];
-            for i in order {
+            for i in ordinal_order(fu) {
                 let u = &fu.units[i];
-                let uid = self.fresh_id();
+                let uid = uids[i].clone();
                 let (parent, name) = (id.unit_parent(rel, i), id.unit_name(rel, i).to_string());
                 let s = u.span;
                 self.recs.push(match u.kind {
@@ -236,72 +447,69 @@ impl Emitter {
                         end_line: s.end_line,
                     },
                 });
-                // A class precedes its members in ordinal order, so its id is set.
-                let from = u.owner.map_or_else(
-                    || script.clone(),
-                    |o| ids[o].clone().expect("class before member"),
-                );
-                self.recs.push(Rec::Contains {
-                    from,
-                    to: uid.clone(),
-                });
-                ids[i] = Some(uid);
+                let from = u.owner.map_or_else(|| script.clone(), |o| uids[o].clone());
+                self.recs.push(Rec::Contains { from, to: uid });
             }
-            let deps: Vec<Dep> = sites
-                .iter()
-                .map(|s| resolve::resolve_site(s, rel, &index, &stems))
-                .collect();
-            // Dot-source wins: one uses per File, whatever the order and count of its sites.
-            let mut dots: Vec<String> = Vec::new();
-            for d in &deps {
-                if let Dep::File {
-                    path: p,
-                    kind: DepKind::DotSource,
-                } = d
-                {
-                    if !dots.contains(p) {
-                        dots.push(p.clone());
-                    }
-                }
-            }
-            let (mut linked, mut used) = (HashSet::new(), HashSet::new());
+            let dots = dot.get(rel).map_or(&[][..], Vec::as_slice);
             for d in deps {
-                match d {
+                let (edge, name) = match d {
                     Dep::File { path: p, .. } => {
-                        if linked.insert(p.clone()) {
-                            let kind = if dots.contains(&p) {
-                                DepKind::DotSource
-                            } else {
-                                DepKind::ImportModule
-                            };
-                            self.recs.push(Rec::Uses {
-                                from: script.clone(),
-                                to: self.record_paths.get(&p).cloned().unwrap_or(p),
-                                properties: BTreeMap::from([(
-                                    "kind".to_string(),
-                                    kind.as_str().to_string(),
-                                )]),
-                            });
-                        }
+                        let kind = if dots.contains(&p) {
+                            DepKind::DotSource
+                        } else {
+                            DepKind::ImportModule
+                        };
+                        let to = self.record_paths.get(&p).cloned().unwrap_or(p);
+                        let properties =
+                            BTreeMap::from([("kind".to_string(), kind.as_str().to_string())]);
+                        let from = script.clone();
+                        (
+                            Rec::Uses {
+                                from,
+                                to,
+                                properties,
+                            },
+                            None,
+                        )
                     }
-                    Dep::Unresolved { name, category } => {
-                        if named.insert(name.clone()) {
-                            self.recs.push(Rec::Unresolved {
-                                fqn: name.clone(),
-                                category: category.to_string(),
-                            });
-                        }
-                        if used.insert(name.clone()) {
-                            self.recs.push(Rec::UnresolvedUse {
-                                from: script.clone(),
-                                to: name,
-                            });
-                        }
+                    Dep::Unresolved { name, .. } => {
+                        let from = script.clone();
+                        let edge = Rec::UnresolvedUse {
+                            from,
+                            to: name.clone(),
+                        };
+                        (edge, Some(name))
                     }
-                }
+                };
+                emit(&mut self.recs, &mut seen, &mut named, &cats, edge, name);
             }
-            if !dots.is_empty() {
-                self.dot_sourced.insert(rel.to_string(), dots);
+            for (from, call, target) in facts {
+                let (edge, name) = match target {
+                    Target::Unit { path, index } => {
+                        let to = unit_id(&path, index);
+                        let edge = if call {
+                            Rec::Calls { from, to }
+                        } else {
+                            let properties = BTreeMap::new();
+                            Rec::Uses {
+                                from,
+                                to,
+                                properties,
+                            }
+                        };
+                        (edge, None)
+                    }
+                    Target::Unresolved { name, .. } => {
+                        let to = name.clone();
+                        let edge = if call {
+                            Rec::UnresolvedCall { from, to }
+                        } else {
+                            Rec::UnresolvedUse { from, to }
+                        };
+                        (edge, Some(name))
+                    }
+                };
+                emit(&mut self.recs, &mut seen, &mut named, &cats, edge, name);
             }
         }
     }
@@ -324,9 +532,24 @@ impl Emitter {
 
     /// Keeps only the facts of the `targets` files (File records and the Struct/Function
     /// records located in them); a Module stays when a kept File sits in it, a Contains edge
-    /// when both its ends are kept, a Uses/UnresolvedUse when its source is kept (a File target
-    /// is a path, never rewritten), an Unresolved when a kept UnresolvedUse names it.
+    /// when both its ends are kept, a Uses/UnresolvedUse/Calls/UnresolvedCall when its source is
+    /// kept (a Calls or Uses into a dropped record retargeted to that record's full-run identity
+    /// key; a File target is a path, never rewritten), an Unresolved when a kept UnresolvedUse or
+    /// UnresolvedCall names it.
     pub fn retain_targets(&mut self, targets: &HashSet<String>) {
+        let keys: HashMap<String, String> = self
+            .recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Struct {
+                    id, parent, name, ..
+                }
+                | Rec::Function {
+                    id, parent, name, ..
+                } => Some((id.clone(), identity::record_key(parent, name))),
+                _ => None,
+            })
+            .collect();
         self.recs.retain(|r| match r {
             Rec::File { path, .. } | Rec::Struct { path, .. } | Rec::Function { path, .. } => {
                 targets.contains(path)
@@ -343,14 +566,24 @@ impl Emitter {
             .collect();
         self.recs.retain(|r| match r {
             Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
-            Rec::Uses { from, .. } | Rec::UnresolvedUse { from, .. } => ids.contains(from),
+            Rec::Uses { from, .. }
+            | Rec::UnresolvedUse { from, .. }
+            | Rec::Calls { from, .. }
+            | Rec::UnresolvedCall { from, .. } => ids.contains(from),
             _ => true,
         });
+        for r in &mut self.recs {
+            if let Rec::Calls { to, .. } | Rec::Uses { to, .. } = r {
+                if let Some(key) = keys.get(to.as_str()).filter(|_| !ids.contains(to.as_str())) {
+                    *to = key.clone();
+                }
+            }
+        }
         let named: HashSet<String> = self
             .recs
             .iter()
             .filter_map(|r| match r {
-                Rec::UnresolvedUse { to, .. } => Some(to.clone()),
+                Rec::UnresolvedUse { to, .. } | Rec::UnresolvedCall { to, .. } => Some(to.clone()),
                 _ => None,
             })
             .collect();

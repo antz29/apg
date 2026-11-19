@@ -3822,6 +3822,20 @@ mod int {
                 has("n1", "n7"),
                 func("n8", sk, "F", &[], (at("function F { }"), (10, 10))),
                 has("n1", "n8"),
+                // C's [E] property type, then <script>'s Get-A call
+                Rec::Uses {
+                    from: s("n3"),
+                    to: s("n7"),
+                    properties: Default::default(),
+                },
+                Rec::Unresolved {
+                    fqn: s("Get-A"),
+                    category: s("external"),
+                },
+                Rec::UnresolvedCall {
+                    from: s("n2"),
+                    to: s("Get-A"),
+                },
             ]
         );
         // each overload is a group of one, keyed by its signed name
@@ -4001,11 +4015,13 @@ mod int {
                     | Rec::Struct { path, .. }
                     | Rec::Function { path, .. } => *path == target,
                     Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
-                    Rec::Uses { from, .. } | Rec::UnresolvedUse { from, .. } => {
-                        ids.contains(from)
-                    }
+                    Rec::Uses { from, .. }
+                    | Rec::UnresolvedUse { from, .. }
+                    | Rec::Calls { from, .. }
+                    | Rec::UnresolvedCall { from, .. } => ids.contains(from),
                     Rec::Unresolved { fqn, .. } => full.records().iter().any(|u| {
-                        matches!(u, Rec::UnresolvedUse { from, to } if ids.contains(from) && to == fqn)
+                        matches!(u, Rec::UnresolvedUse { from, to } | Rec::UnresolvedCall { from, to }
+                            if ids.contains(from) && to == fqn)
                     }),
                 })
                 .cloned()
@@ -4411,7 +4427,7 @@ mod int {
             ]
         };
         // util.ps1's three dot-sources and PSReadLine's two imports each yield one edge;
-        // `. { 1 }` yields nothing
+        // `. { 1 }` yields no dependency, only a func-value call
         let mut want = vec![uses(&main, "/r/lib/util.ps1", "dot-source")];
         want.extend(unresolved(nameless(". $x"), "unknown"));
         want.push(uses(&main, "/r/mods/Foo/Foo.psm1", "import-module"));
@@ -4426,7 +4442,34 @@ mod int {
         // a .ps1 path is not importable
         want.extend(unresolved(nameless("Import-Module ./lib"), "unknown"));
         want.extend(unresolved(nameless("Import-Module $m"), "unknown"));
+        let block = nameless(". { 1 }");
+        want.push(Rec::Unresolved {
+            fqn: block.clone(),
+            category: s("func-value"),
+        });
         assert_eq!(dep_recs(recs), want);
+        let body = recs
+            .iter()
+            .find_map(|r| match r {
+                Rec::Function { id, name, path, .. }
+                    if name == "<script>" && path == "/r/main.ps1" =>
+                {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .expect("main <script>");
+        let calls: Vec<&Rec> = recs
+            .iter()
+            .filter(|r| matches!(r, Rec::UnresolvedCall { to, .. } if to.starts_with("<nameless@")))
+            .collect();
+        assert_eq!(
+            calls,
+            [&Rec::UnresolvedCall {
+                from: body,
+                to: block
+            }]
+        );
         let files: BTreeSet<&String> = recs
             .iter()
             .filter_map(|r| match r {
@@ -4470,7 +4513,8 @@ mod int {
                 })
                 .collect()
         };
-        let sites = [". $x", "Import-Module ./lib", "Import-Module $m"];
+        // the dependency sites, then `. { 1 }`'s func-value call
+        let sites = [". $x", "Import-Module ./lib", "Import-Module $m", ". { 1 }"];
         let key = |width: usize, bom: usize| -> Vec<String> {
             sites
                 .iter()
