@@ -800,6 +800,84 @@ fn site_ancestry(src: &str) -> Vec<(&str, bool)> {
         .collect()
 }
 
+/// The file-dependency fixture's script: every dot-source and Import-Module site form, in
+/// source order, the last inside a function body.
+const DEP_MAIN: &str = ". $PSScriptRoot\\lib\\util.ps1\n. ./lib/util.ps1\n. $x\n. { 1 }\nImport-Module ./mods/Foo/Foo.psm1\nImport-Module Foo\nImport-Module Bar\nImport-Module Microsoft.PowerShell.Utility\nImport-Module PSReadLine\nImport-Module PSReadLine\nImport-Module ./lib/util.ps1\nImport-Module $m\nfunction F { . ./lib/util.ps1 }\n";
+
+/// The file-dependency fixture tree with `main` as main.ps1's bytes: Foo's manifest and root
+/// module, two stem-colliding Bar manifests, a dot-sourced script and a data file, the two
+/// `.psd1` sources each carrying sites of their own.
+fn dep_tree(main: Vec<u8>) -> Vec<(&'static str, Vec<u8>)> {
+    [
+        (
+            "mods/Foo/Foo.psd1",
+            "@{ RootModule = 'Foo.psm1' }\n. ../../lib/util.ps1\nImport-Module ManifestOnly\n",
+        ),
+        ("mods/Foo/Foo.psm1", "function Get-Foo { }\n"),
+        ("mods/Bar/Bar.psd1", "@{ FunctionsToExport = '*' }\n"),
+        ("other/Bar/Bar.psd1", "@{ FunctionsToExport = '*' }\n"),
+        ("lib/util.ps1", "function Get-Util { }\n"),
+        (
+            "data/cfg.psd1",
+            "@{ Setting = 1 }\n. ../lib/util.ps1\nImport-Module CfgOnly\n",
+        ),
+    ]
+    .map(|(p, src)| (p, src.as_bytes().to_vec()))
+    .into_iter()
+    .chain([("main.ps1", main)])
+    .collect()
+}
+
+/// Three scripts naming Foo.psm1 by dot-source and Import-Module in every order and count.
+const PRECEDENCE_TREE: [(&str, &str); 5] = [
+    ("mods/Foo/Foo.psd1", "@{ RootModule = 'Foo.psm1' }\n"),
+    ("mods/Foo/Foo.psm1", "function Get-Foo { }\n"),
+    (
+        "dot_then_import.ps1",
+        ". ./mods/Foo/Foo.psm1\nImport-Module ./mods/Foo/Foo.psm1\n",
+    ),
+    (
+        "import_then_dot.ps1",
+        "Import-Module ./mods/Foo/Foo.psm1\n. ./mods/Foo/Foo.psm1\n",
+    ),
+    (
+        "two_imports.ps1",
+        "Import-Module ./mods/Foo/Foo.psm1\n. ./mods/Foo/Foo.psm1\nImport-Module ./mods/Foo/Foo.psm1\n",
+    ),
+];
+
+/// `recs`' file-dependency records (uses, unresolved uses, unresolved targets), in order.
+fn dep_recs(recs: &[Rec]) -> Vec<Rec> {
+    recs.iter()
+        .filter(|r| {
+            matches!(
+                r,
+                Rec::Uses { .. } | Rec::UnresolvedUse { .. } | Rec::Unresolved { .. }
+            )
+        })
+        .cloned()
+        .collect()
+}
+
+/// A uses record from `from` to the File path `to`, of dependency `kind`.
+fn uses(from: &str, to: &str, kind: &str) -> Rec {
+    Rec::Uses {
+        from: s(from),
+        to: s(to),
+        properties: [(s("kind"), s(kind))].into(),
+    }
+}
+
+/// The id of the script Struct (its file's first Struct) emitted for `path` in `recs`.
+fn script_id(recs: &[Rec], path: &str) -> String {
+    recs.iter()
+        .find_map(|r| match r {
+            Rec::Struct { id, path: p, .. } if p == path => Some(id.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no script Struct for {path}"))
+}
+
 mod unit {
     use super::*;
 
@@ -3801,5 +3879,162 @@ mod int {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn finish_emits_file_dependency_records() {
+        let e = emit_tree(&dep_tree(DEP_MAIN.into()));
+        let recs = e.records();
+        let main = script_id(recs, "/r/main.ps1");
+        let nameless = |site: &str| {
+            let at = DEP_MAIN.find(site).expect(site);
+            format!("<nameless@main.ps1:{at}>")
+        };
+        let unresolved = |fqn: String, category: &str| {
+            [
+                Rec::Unresolved {
+                    fqn: fqn.clone(),
+                    category: s(category),
+                },
+                Rec::UnresolvedUse {
+                    from: main.clone(),
+                    to: fqn,
+                },
+            ]
+        };
+        // util.ps1's three dot-sources and PSReadLine's two imports each yield one edge;
+        // `. { 1 }` yields nothing
+        let mut want = vec![uses(&main, "/r/lib/util.ps1", "dot-source")];
+        want.extend(unresolved(nameless(". $x"), "unknown"));
+        want.push(uses(&main, "/r/mods/Foo/Foo.psm1", "import-module"));
+        want.push(uses(&main, "/r/mods/Foo/Foo.psd1", "import-module"));
+        for (name, category) in [
+            ("Bar", "unknown"),
+            ("Microsoft.PowerShell.Utility", "stdlib"),
+            ("PSReadLine", "external"),
+        ] {
+            want.extend(unresolved(s(name), category));
+        }
+        // a .ps1 path is not importable
+        want.extend(unresolved(nameless("Import-Module ./lib"), "unknown"));
+        want.extend(unresolved(nameless("Import-Module $m"), "unknown"));
+        assert_eq!(dep_recs(recs), want);
+        let files: BTreeSet<&String> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::File { path, .. } => Some(path),
+                _ => None,
+            })
+            .collect();
+        let mut fqns = Vec::new();
+        for r in recs {
+            match r {
+                Rec::Uses { to, .. } => assert!(files.contains(to), "{to}"),
+                Rec::Unresolved { fqn, .. } => fqns.push(fqn),
+                _ => {}
+            }
+        }
+        let distinct: BTreeSet<&&String> = fqns.iter().collect();
+        assert_eq!(distinct.len(), fqns.len(), "{fqns:?}");
+        // the .psd1 sites yield nothing: no script Struct carries them
+        assert!(
+            files.contains(&s("/r/data/cfg.psd1")) && files.contains(&s("/r/mods/Foo/Foo.psd1"))
+        );
+        assert!(!recs
+            .iter()
+            .any(|r| matches!(r, Rec::Struct { path, .. } if path.ends_with(".psd1"))));
+        assert!(!fqns.iter().any(|f| *f == "ManifestOnly" || *f == "CfgOnly"));
+        assert_eq!(e.dot_sourced("main.ps1"), ["lib/util.ps1"]);
+        assert!(e.dot_sourced("lib/util.ps1").is_empty());
+    }
+
+    #[test]
+    fn finish_keys_nameless_dependencies_at_raw_utf16_offsets() {
+        let nameless = |main: Vec<u8>| -> Vec<String> {
+            emit_tree(&dep_tree(main))
+                .records()
+                .iter()
+                .filter_map(|r| match r {
+                    Rec::Unresolved { fqn, .. } if fqn.starts_with("<nameless@") => {
+                        Some(fqn.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let sites = [". $x", "Import-Module ./lib", "Import-Module $m"];
+        let key = |width: usize, bom: usize| -> Vec<String> {
+            sites
+                .iter()
+                .map(|site| {
+                    let units = DEP_MAIN[..DEP_MAIN.find(site).expect(site)]
+                        .encode_utf16()
+                        .count();
+                    format!("<nameless@main.ps1:{}>", bom + width * units)
+                })
+                .collect()
+        };
+        let (narrow, wide) = (
+            nameless(DEP_MAIN.into()),
+            nameless(utf16_bytes(DEP_MAIN, false)),
+        );
+        assert_eq!(narrow, key(1, 0));
+        // the BOM plus two bytes per code unit
+        assert_eq!(wide, key(2, 2));
+        for (w, n) in wide.iter().zip(&narrow) {
+            assert_ne!(w, n);
+        }
+    }
+
+    #[test]
+    fn retain_targets_keeps_a_kept_scripts_dependency_records() {
+        let tree = dep_tree(DEP_MAIN.into());
+        let full = emit_tree(&tree);
+        let mut main = emit_tree(&tree);
+        main.retain_targets(&[s("/r/main.ps1")].into());
+        assert_eq!(dep_recs(main.records()), dep_recs(full.records()));
+        // a Uses survives with its source script, its target File dropped
+        for to in [
+            "/r/lib/util.ps1",
+            "/r/mods/Foo/Foo.psm1",
+            "/r/mods/Foo/Foo.psd1",
+        ] {
+            let kept = main.records();
+            assert!(!kept
+                .iter()
+                .any(|r| matches!(r, Rec::File { path, .. } if path == to)));
+            assert!(kept
+                .iter()
+                .any(|r| matches!(r, Rec::Uses { to: t, .. } if t == to)));
+        }
+        assert_eq!(main.dot_sourced("main.ps1"), ["lib/util.ps1"]);
+        // util.ps1 alone: main's edges go, and with them every Unresolved
+        let mut util = emit_tree(&tree);
+        util.retain_targets(&[s("/r/lib/util.ps1")].into());
+        assert!(full
+            .records()
+            .iter()
+            .any(|r| matches!(r, Rec::Unresolved { .. })));
+        assert_eq!(dep_recs(util.records()), []);
+        assert_eq!(util.dot_sourced("main.ps1"), ["lib/util.ps1"]);
+    }
+
+    /// requirements.requirement.ps-file-dependency-kind-precedence
+    #[test]
+    fn finish_dot_source_wins_whatever_the_site_order_and_count() {
+        let e = emit_tree(&PRECEDENCE_TREE);
+        let recs = e.records();
+        let scripts = [
+            "dot_then_import.ps1",
+            "import_then_dot.ps1",
+            "two_imports.ps1",
+        ];
+        let mut want = Vec::new();
+        for p in scripts {
+            let id = script_id(recs, &format!("/r/{p}"));
+            want.push(uses(&id, "/r/mods/Foo/Foo.psm1", "dot-source"));
+            assert_eq!(e.dot_sourced(p), ["mods/Foo/Foo.psm1"], "{p}");
+        }
+        assert_eq!(dep_recs(recs), want);
     }
 }
