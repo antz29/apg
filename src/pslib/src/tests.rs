@@ -3,8 +3,15 @@
 
 use crate::diag::{error_summary, write_diagnostic, Diagnostic};
 use crate::parse::parse;
+use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span};
+use std::path::Path;
 use tree_sitter::Node;
+
+/// An owned argv from string literals.
+fn argv(args: &[&str]) -> Vec<String> {
+    args.iter().map(|a| a.to_string()).collect()
+}
 
 /// A dot-sourcing script: an anchored and a relative operand.
 const DOT_SOURCING: &str = ". $PSScriptRoot\\lib.ps1\n. ./other.ps1\n";
@@ -1107,5 +1114,164 @@ mod unit {
         assert_eq!(error_summary(0), "ps: 0 files had syntax errors");
         assert_eq!(error_summary(1), "ps: 1 file had syntax errors");
         assert_eq!(error_summary(2), "ps: 2 files had syntax errors");
+    }
+
+    #[test]
+    fn scan_parse_args() {
+        let a = parse_args(&argv(&[
+            "root",
+            "--module",
+            "a",
+            "--module",
+            "b",
+            "--id-prefix",
+            "p",
+            "--targets",
+            "t.txt",
+            "--cache-dir",
+            "c",
+            "--cache-key",
+            "k",
+            "skip",
+            "--module",
+        ]))
+        .unwrap();
+        assert_eq!(a.root, "root");
+        assert_eq!(a.modules, ["a", "b"]);
+        assert_eq!(a.id_prefix, "p");
+        assert_eq!(a.targets.as_deref(), Some("t.txt"));
+        // cache flags eat their values; an unknown arg and a valueless flag are excludes
+        assert_eq!(a.excludes, ["skip", "--module"]);
+
+        let d = parse_args(&argv(&["root"])).unwrap();
+        assert_eq!(d.id_prefix, "n");
+        assert!(d.modules.is_empty() && d.targets.is_none() && d.excludes.is_empty());
+
+        assert!(parse_args(&[])
+            .unwrap_err()
+            .starts_with("usage: psfrontend"));
+    }
+
+    #[test]
+    fn scan_is_ps_source() {
+        for p in ["a.ps1", "B.PSM1", "c.Psd1"] {
+            assert!(is_ps_source(Path::new(p)), "{p}");
+        }
+        for p in ["a.ps", "a.txt", "ps1"] {
+            assert!(!is_ps_source(Path::new(p)), "{p}");
+        }
+    }
+
+    #[test]
+    fn scan_fresh_id_uses_prefix() {
+        let mut e = Emitter::new(Path::new("/r"), "ps");
+        assert_eq!(e.fresh_id(), "ps1");
+        assert_eq!(e.fresh_id(), "ps2");
+    }
+
+    #[test]
+    fn scan_rec_serialises_unified_keys() {
+        let s = |x: &str| x.to_string();
+        let cases = [
+            (Rec::Module { fqn: s("m") }, "module", vec!["fqn", "type"]),
+            (
+                Rec::File {
+                    path: s("/r/a.ps1"),
+                    parent: s("m"),
+                    start_line: 1,
+                    end_line: 3,
+                },
+                "file",
+                vec!["end_line", "parent", "path", "start_line", "type"],
+            ),
+            (
+                Rec::Struct {
+                    id: s("n1"),
+                    parent: s("m"),
+                    name: s("C"),
+                    path: s("/r/a.ps1"),
+                    start: 4,
+                    end: 20,
+                    start_line: 2,
+                    end_line: 3,
+                },
+                "struct",
+                vec![
+                    "end",
+                    "end_line",
+                    "id",
+                    "name",
+                    "parent",
+                    "path",
+                    "start",
+                    "start_line",
+                    "type",
+                ],
+            ),
+            (
+                Rec::Function {
+                    id: s("n2"),
+                    parent: s("m"),
+                    name: s("f"),
+                    params: Vec::new(),
+                    file: s("/r/a.ps1"),
+                    path: s("/r/a.ps1"),
+                    start: 0,
+                    end: 9,
+                    start_line: 1,
+                    end_line: 1,
+                },
+                "function",
+                vec![
+                    "end",
+                    "end_line",
+                    "file",
+                    "id",
+                    "name",
+                    "parent",
+                    "path",
+                    "start",
+                    "start_line",
+                    "type",
+                ],
+            ),
+        ];
+        for (rec, tag, keys) in cases {
+            let v = serde_json::to_value(&rec).unwrap();
+            let obj = v.as_object().unwrap();
+            assert_eq!(obj["type"], tag);
+            let mut got: Vec<&str> = obj.keys().map(String::as_str).collect();
+            got.sort_unstable();
+            assert_eq!(got, keys, "{tag}");
+        }
+        let v = serde_json::to_value(Rec::Struct {
+            id: s("n1"),
+            parent: s("m"),
+            name: s("C"),
+            path: s("p"),
+            start: 4,
+            end: 20,
+            start_line: 2,
+            end_line: 3,
+        })
+        .unwrap();
+        assert_eq!(
+            (&v["start"], &v["end"], &v["start_line"], &v["end_line"]),
+            (&4.into(), &20.into(), &2.into(), &3.into())
+        );
+        let f = serde_json::to_value(Rec::Function {
+            id: s("n2"),
+            parent: s("m"),
+            name: s("f"),
+            params: vec![s("x")],
+            file: s("p"),
+            path: s("p"),
+            start: 0,
+            end: 9,
+            start_line: 1,
+            end_line: 1,
+        })
+        .unwrap();
+        assert_eq!(f["params"], serde_json::json!(["x"]));
     }
 }
