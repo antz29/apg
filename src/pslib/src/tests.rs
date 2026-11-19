@@ -3,6 +3,7 @@
 
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
 use crate::parse::parse;
+use crate::paths::{normalise, resolve, FileIndex};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span};
 use std::path::Path;
@@ -1307,6 +1308,56 @@ mod unit {
         })
         .unwrap();
         assert_eq!(f["params"], serde_json::json!(["x"]));
+    }
+
+    #[test]
+    fn paths_normalise_segments() {
+        let n = |p: &str| normalise(p.split('/')).map(|v| v.join("/"));
+        assert_eq!(n("./a/./b").as_deref(), Some("a/b"));
+        assert_eq!(n("a/../b").as_deref(), Some("b"));
+        assert_eq!(n("a//b").as_deref(), Some("a/b"));
+        assert_eq!(n("../x"), None);
+        assert_eq!(n("a/b/../../.."), None);
+    }
+
+    #[test]
+    fn paths_resolve_against_file_dir() {
+        let r = |text| resolve("mods/Foo", text);
+        for t in [r"lib\x.ps1", "lib/x.ps1", r".\lib\x.ps1"] {
+            assert_eq!(r(t).as_deref(), Some("mods/Foo/lib/x.ps1"), "{t}");
+        }
+        assert_eq!(
+            r(r"lib\sub/x.ps1").as_deref(),
+            Some("mods/Foo/lib/sub/x.ps1")
+        );
+        assert_eq!(r(r"..\Bar\b.psm1").as_deref(), Some("mods/Bar/b.psm1"));
+        assert_eq!(r(r"..\..\..\x.ps1"), None);
+        assert_eq!(resolve("", "x.ps1").as_deref(), Some("x.ps1"));
+        // A path normalising to the repo root resolves to the empty path.
+        assert_eq!(resolve("", ".").as_deref(), Some(""));
+        assert_eq!(resolve("", ".."), None);
+        for t in [
+            "/x.ps1",
+            r"\x.ps1",
+            r"C:\x.ps1",
+            r"\\srv\share\x.ps1",
+            "~/x.ps1",
+            "",
+        ] {
+            assert_eq!(r(t), None, "{t:?}");
+            assert_eq!(resolve("", t), None, "{t:?}");
+        }
+    }
+
+    #[test]
+    fn paths_file_index_case_rules() {
+        let idx = FileIndex::new(["a/b.ps1", "a.ps1", "A.ps1"].map(s));
+        assert_eq!(idx.find("a/b.ps1"), Some("a/b.ps1"));
+        assert_eq!(idx.find("A/B.PS1"), Some("a/b.ps1"));
+        assert_eq!(idx.find("a.ps1"), Some("a.ps1"));
+        assert_eq!(idx.find("A.ps1"), Some("A.ps1"));
+        assert_eq!(idx.find("A.PS1"), None);
+        assert_eq!(idx.find("c.ps1"), None);
     }
 }
 
