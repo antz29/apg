@@ -2,7 +2,7 @@
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
-use crate::manifest::{wildcard_match, ExportSpec};
+use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, ManifestKeys, ModuleMap};
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
@@ -166,6 +166,75 @@ const NESTED_OPEN_AT_EOF: &str = "Get-A\nfunction F { Get-B\n$x = (1 + \n";
 /// Asserts `src` parses to an ERROR root (requirements.requirement.ps-error-recovery).
 fn assert_error_root(src: &str) {
     assert_eq!(parse(src).root_node().kind(), "ERROR", "{src:?}");
+}
+
+/// Asserts `src` parses to a `source_file` root (requirements.requirement.ps-error-recovery).
+fn assert_source_root(src: &str) {
+    assert_eq!(parse(src).root_node().kind(), "source_file", "{src:?}");
+}
+
+/// [`MANIFEST`] followed by a broken statement outside its hashtable.
+const MANIFEST_BROKEN_ELSEWHERE: &str = "@{\n    RootModule = 'Foo.psm1'\n    NestedModules = @('lib\\Helpers.ps1')\n    FunctionsToExport = @('Get-Foo')\n}\n$x = )\n";
+
+/// A manifest whose NestedModules entry lies inside a local ERROR node.
+const MANIFEST_BROKEN_ENTRY: &str = "@{\n    NestedModules ) = 'a.ps1'\n    RootModule = 'Foo.psm1'\n    FunctionsToExport = @('Get-Foo')\n}\n";
+
+/// A manifest-shaped `.psd1` ending inside nested unclosed constructs: a whole-file ERROR root.
+const MANIFEST_OPEN_AT_EOF: &str = "@{ RootModule = 'Foo.psm1'\nNestedModules = @(\n";
+
+/// `read_manifest` over `src`'s parse.
+fn keys_of(src: &str) -> Option<ManifestKeys> {
+    read_manifest(src, &parse(src))
+}
+
+fn mk(root: Option<PathArg>, nested: Vec<PathArg>, exports: ExportSpec) -> Option<ManifestKeys> {
+    Some(ManifestKeys {
+        root_module: root,
+        nested_modules: nested,
+        exports,
+    })
+}
+
+fn pats(ps: &[&str]) -> ExportSpec {
+    ExportSpec::Patterns(ps.iter().map(|p| s(p)).collect())
+}
+
+/// The `mods/Foo` manifest: every NestedModules entry form `assign` meets.
+const FOO_PSD1: &str = "@{\n    RootModule = 'Foo.psm1'\n    NestedModules = @(\n        '.\\lib\\Helpers.ps1', 'sub/../Other.ps1', 'Bare', 'x.dll', 'Other.psd1',\n        'missing.ps1', '..\\..\\..\\up.ps1', $x, 'LIB\\CASE.PS1', '..\\Shared\\s.ps1',\n        '..\\both.ps1', \"$PSScriptRoot\\anchored.ps1\"\n    )\n    FunctionsToExport = 'Get-Foo'\n}\n";
+
+/// Every file of the in-memory repo, assigned with its parsed manifests plus a
+/// hand-built `mods/Bar/Bar.psd1` (listed last, sorting first) naming `../both.ps1`.
+fn module_fixture() -> ModuleMap {
+    let files = [
+        "run.ps1",
+        "mods/both.ps1",
+        "mods/Bar/Bar.psd1",
+        "mods/Shared/s.ps1",
+        "mods/Foo/Foo.psd1",
+        "mods/Foo/Foo.psm1",
+        "mods/Foo/lib/Helpers.ps1",
+        "mods/Foo/lib/case.ps1",
+        "mods/Foo/Other.ps1",
+        "mods/Foo/Other.psd1",
+        "mods/Foo/Broken.psd1",
+        "mods/Foo/x.dll",
+        "mods/Foo/anchored.ps1",
+        "mods/Foo/loose.ps1",
+    ]
+    .map(s);
+    // the repo's .psd1 sources: a manifest, a data file and a whole-file ERROR
+    let psd1 = [
+        ("mods/Foo/Foo.psd1", FOO_PSD1),
+        ("mods/Foo/Other.psd1", "@{ Setting = 1 }\n"),
+        ("mods/Foo/Broken.psd1", MANIFEST_OPEN_AT_EOF),
+    ];
+    let mut manifests: Vec<(String, ManifestKeys)> = psd1
+        .into_iter()
+        .filter_map(|(p, src)| Some((s(p), keys_of(src)?)))
+        .collect();
+    let bar = mk(None, vec![st("..\\both.ps1", false)], ExportSpec::All).unwrap();
+    manifests.push((s("mods/Bar/Bar.psd1"), bar));
+    assign(&files, &manifests)
 }
 
 /// `src`'s error regions as `(line, col, message)`.
@@ -1710,5 +1779,161 @@ mod int {
             };
             assert_eq!(got.as_deref(), Some(want), "{src:?}");
         }
+    }
+
+    #[test]
+    fn manifest_read_manifest_over_parsed_trees() {
+        let all = || ExportSpec::All;
+        let foo = || Some(st("Foo.psm1", false));
+        let ab = || vec![st("a.ps1", false), st("b.ps1", false)];
+        let cells: Vec<(&str, Option<ManifestKeys>)> = vec![
+            ("@{ RootModule = 'Foo.psm1' }\n", mk(foo(), vec![], all())),
+            (
+                "@{ NestedModules = 'a.ps1' }\n",
+                mk(None, vec![st("a.ps1", false)], all()),
+            ),
+            (
+                "@{ NestedModules = @('a.ps1', 'b.ps1') }\n",
+                mk(None, ab(), all()),
+            ),
+            (
+                "@{ NestedModules = 'a.ps1', 'b.ps1' }\n",
+                mk(None, ab(), all()),
+            ),
+            (
+                "@{ FunctionsToExport = 'Get-A' }\n",
+                mk(None, vec![], pats(&["Get-A"])),
+            ),
+            (
+                "@{ FunctionsToExport = @('Get-A', 'Set-*') }\n",
+                mk(None, vec![], pats(&["Get-A", "Set-*"])),
+            ),
+            (
+                "@{ FunctionsToExport = '*' }\n",
+                mk(None, vec![], pats(&["*"])),
+            ),
+            (
+                "@{ FunctionsToExport = @() }\n",
+                mk(None, vec![], pats(&[])),
+            ),
+            (
+                "@{ rootmodule = 'Foo.psm1'; 'NESTEDMODULES' = 'a.ps1'; \"functionsToExport\" = 'Get-A' }\n",
+                mk(foo(), vec![st("a.ps1", false)], pats(&["Get-A"])),
+            ),
+            // a repeated key: the first wins
+            (
+                "@{ 'RootModule' = 'Foo.psm1'; rootmodule = 'x' }\n",
+                mk(foo(), vec![], all()),
+            ),
+            (
+                "@{ NestedModules = @('a.ps1', $x) }\n",
+                mk(None, vec![st("a.ps1", false), PathArg::Computed], all()),
+            ),
+            ("@{ Setting = 1 }\n", None),
+            ("Get-A\n$x = 1\n", None),
+        ];
+        for (src, want) in cells {
+            assert_source_root(src);
+            assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+            assert_eq!(keys_of(src), want, "{src:?}");
+        }
+
+        // (1a) local regions: a syntax error outside the hashtable ...
+        assert_source_root(MANIFEST_BROKEN_ELSEWHERE);
+        assert!(!errors(MANIFEST_BROKEN_ELSEWHERE).is_empty());
+        let full = mk(
+            foo(),
+            vec![st("lib\\Helpers.ps1", false)],
+            pats(&["Get-Foo"]),
+        );
+        assert_eq!(keys_of(MANIFEST_BROKEN_ELSEWHERE), full);
+        assert_eq!(keys_of(MANIFEST), full);
+        // ... and an entry inside a local ERROR node, skipped with its value
+        assert_source_root(MANIFEST_BROKEN_ENTRY);
+        let errs = errors(MANIFEST_BROKEN_ENTRY);
+        assert!(
+            errs.iter().any(|e| e.starts_with("ERROR")
+                && e.contains("NestedModules")
+                && e.contains("a.ps1")),
+            "{errs:?}"
+        );
+        assert_eq!(
+            keys_of(MANIFEST_BROKEN_ENTRY),
+            mk(foo(), vec![], pats(&["Get-Foo"]))
+        );
+
+        // (1b) the whole-file region: no manifest
+        assert_error_root(MANIFEST_OPEN_AT_EOF);
+        assert_eq!(keys_of(MANIFEST_OPEN_AT_EOF), None);
+    }
+
+    #[test]
+    fn manifest_assign_over_path_lists() {
+        assert_eq!(errors(FOO_PSD1), Vec::<String>::new());
+        let map = module_fixture();
+        let foo = map.manifest_of("mods/Foo/Foo.psd1").expect("Foo manifest");
+        assert_eq!(
+            (foo.path.as_str(), foo.base.as_str()),
+            ("mods/Foo/Foo.psd1", "mods/Foo")
+        );
+        assert_eq!(foo.exports, pats(&["Get-Foo"]));
+        // entry order; a bare name, .dll, .psd1, missing file, path above the
+        // root, computed value and the Bar-claimed ../both.ps1 claim nothing
+        assert_eq!(
+            foo.members,
+            [
+                "mods/Foo/Foo.psm1",
+                "mods/Foo/lib/Helpers.ps1",
+                "mods/Foo/Other.ps1",
+                "mods/Foo/lib/case.ps1",
+                "mods/Shared/s.ps1",
+                "mods/Foo/anchored.ps1",
+            ]
+        );
+        let bar = map.manifest_of("mods/Bar/Bar.psd1").expect("Bar manifest");
+        assert_eq!(bar.members, ["mods/both.ps1"]);
+        let at = |p: &str| (map.module(p), map.base(p));
+        let foo_mod = (s("mods/Foo/Foo.psd1"), s("mods/Foo"));
+        for p in [
+            "mods/Foo/Foo.psd1",
+            "mods/Foo/Foo.psm1",
+            "mods/Foo/lib/Helpers.ps1",
+            "mods/Foo/Other.ps1",
+            "mods/Foo/lib/case.ps1",
+            "mods/Foo/anchored.ps1",
+            // reached through ..\: the manifest's base, not its own directory
+            "mods/Shared/s.ps1",
+        ] {
+            assert_eq!(at(p), foo_mod, "{p}");
+        }
+        assert_eq!(at("mods/both.ps1"), (s("mods/Bar/Bar.psd1"), s("mods/Bar")));
+        for p in [
+            "mods/Foo/loose.ps1",
+            "mods/Foo/Other.psd1",
+            "mods/Foo/Broken.psd1",
+            "mods/Foo/x.dll",
+        ] {
+            assert_eq!(at(p), (s("mods/Foo"), s("mods/Foo")), "{p}");
+        }
+        assert_eq!(at("run.ps1"), (s(""), s("")));
+    }
+
+    #[test]
+    fn manifest_module_map_queries() {
+        let map = module_fixture();
+        let holder = |p| map.manifest_of(p).map(|m| m.path.as_str());
+        assert_eq!(
+            holder("mods/Foo/lib/Helpers.ps1"),
+            Some("mods/Foo/Foo.psd1")
+        );
+        assert_eq!(holder("mods/Foo/Foo.psd1"), Some("mods/Foo/Foo.psd1"));
+        assert_eq!(holder("mods/Foo/loose.ps1"), None);
+        assert_eq!(holder("run.ps1"), None);
+        assert_eq!(
+            map.modules(),
+            ["", "mods/Bar/Bar.psd1", "mods/Foo", "mods/Foo/Foo.psd1"]
+        );
+        assert_eq!(map.module("elsewhere/deep/x.ps1"), "elsewhere/deep");
+        assert_eq!(map.module("x.ps1"), "");
     }
 }
