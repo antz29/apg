@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "repo-gate-step-summary",
-  "body": "The repository gate ends every run, green or red, with a step summary of one line per step it ran or skipped, each naming the step and its outcome as passed, failed or skipped.",
+  "body": "The repository gate ends every run, green or red, with a summary of one line per step of that run's mode, naming the step and its outcome: passed, failed, skipped by its own condition, or not run after an earlier failure.",
   "properties": {
     "feature": "repo-gate"
   },
