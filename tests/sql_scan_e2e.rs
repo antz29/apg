@@ -169,8 +169,10 @@ fn sql_facts(repo: &Repo) -> BTreeSet<String> {
         .iter()
         .flat_map(|q| query_rows(repo, q))
         .map(|mut row| {
-            // A full load writes `{}` where the splice leaves the column unset;
-            // both decode to the empty map, so compare the canonical encoding.
+            // The splice leaves the column unset only on Contains/Calls/UnresolvedCall/
+            // UnresolvedUse edges, where a full load writes `{}`; Uses rows carry the
+            // full load's rendering (`{}` when absent). Unset and `{}` both decode to
+            // the empty map, so compare the canonical encoding.
             if let Some(p) = row.get_mut("r.properties") {
                 let raw = p.as_str().or(p.is_null().then_some("")).expect("string");
                 *p = properties_json(&properties_from_json(raw).expect("properties")).into();
