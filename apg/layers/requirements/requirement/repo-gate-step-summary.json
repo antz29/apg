@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "repo-gate-step-summary",
+  "body": "The repository gate ends every run, green or red, with a step summary of one line per step it ran or skipped, each naming the step and its outcome as passed, failed or skipped.",
+  "properties": {
+    "feature": "repo-gate"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.source-contributor",
+      "properties": {}
+    }
+  ]
+}

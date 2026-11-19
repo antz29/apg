@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.repo-gate-step-summary",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.testable-library-surface",
       "properties": {}
     }

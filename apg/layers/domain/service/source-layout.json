@@ -12,7 +12,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.e2e-fixtures-author-pre-scan-through-the-single-file-writer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.graph-visible-tests",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.repo-gate-step-summary",
       "properties": {}
     },
     {
@@ -28,11 +38,6 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.tier-separable-tests",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.e2e-fixtures-author-pre-scan-through-the-single-file-writer",
       "properties": {}
     }
   ],
