@@ -3,8 +3,11 @@
 
 use std::collections::HashMap;
 
+use tree_sitter::{Node, Tree};
+
 use crate::manifest::ModuleMap;
 use crate::paths::{self, FileIndex, PathArg};
+use crate::source::Decoded;
 
 /// The kind a file dependency's uses edge carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +65,115 @@ pub enum SiteKind {
 pub struct DepSite {
     pub kind: SiteKind,
     pub raw_offset: usize,
+}
+
+/// `Import-Module`'s switches and the switch-typed common parameters: they take no value.
+const SWITCHES: &[&str] = &[
+    "Force",
+    "Global",
+    "PassThru",
+    "AsCustomObject",
+    "DisableNameChecking",
+    "NoClobber",
+    "SkipEditionCheck",
+    "UseWindowsPowerShell",
+    "Verbose",
+    "Debug",
+    "WhatIf",
+    "Confirm",
+];
+
+/// Every dot-source and `Import-Module` site outside ERROR regions, in source order.
+pub fn file_deps(src: &Decoded, tree: &Tree) -> Vec<DepSite> {
+    let mut out = Vec::new();
+    walk_deps(tree.root_node(), src, &mut out);
+    out
+}
+
+fn walk_deps(node: Node, src: &Decoded, out: &mut Vec<DepSite>) {
+    // A site inside an ERROR node (the whole-file ERROR root included) is skipped.
+    if node.is_error() {
+        return;
+    }
+    let kind = match node.kind() {
+        "invocation_operator_command" => dot_source(node, &src.text),
+        "command" => import_module(node, &src.text),
+        _ => None,
+    };
+    if let Some(kind) = kind {
+        out.push(DepSite {
+            kind,
+            raw_offset: src.raw_offset(node.start_byte()),
+        });
+    }
+    let mut c = node.walk();
+    for child in node.children(&mut c) {
+        walk_deps(child, src, out);
+    }
+}
+
+/// A `.` invocation's operand, unless it is a script block (or the operator is `&`).
+fn dot_source(node: Node, text: &str) -> Option<SiteKind> {
+    if node.child_by_field_name("operator")?.kind() != "." {
+        return None;
+    }
+    let operand = node.child_by_field_name("command")?;
+    let block = operand.named_child_count() == 1
+        && operand
+            .named_child(0)
+            .is_some_and(|n| n.kind() == "script_block");
+    (!block).then(|| SiteKind::DotSource(paths::path_arg(operand, text)))
+}
+
+/// An `Import-Module` command's module argument, bound left to right.
+fn import_module(cmd: Node, text: &str) -> Option<SiteKind> {
+    let t = |n: Node| n.utf8_text(text.as_bytes()).unwrap_or_default();
+    let name = cmd
+        .child_by_field_name("name")
+        .filter(|n| n.kind() == "command_name")?;
+    let names = [
+        "Import-Module",
+        "ipmo",
+        "Microsoft.PowerShell.Core\\Import-Module",
+    ];
+    if !names.iter().any(|m| m.eq_ignore_ascii_case(t(name))) {
+        return None;
+    }
+    let (mut pending, mut bound, mut positional) = (None, Vec::new(), None);
+    let mut c = cmd.walk();
+    for child in cmd.named_children(&mut c) {
+        match child.kind() {
+            "command_parameter" => {
+                let raw = child.child_by_field_name("name").map_or("", t);
+                let p = raw.strip_prefix('-').unwrap_or(raw);
+                let p = p.strip_suffix(':').unwrap_or(p).to_ascii_lowercase();
+                pending = None;
+                if let Some(v) = child.child_by_field_name("value") {
+                    bound.push((p, v));
+                } else if !SWITCHES.iter().any(|s| s.eq_ignore_ascii_case(&p)) {
+                    pending = Some(p);
+                }
+            }
+            "command_argument" => match pending.take() {
+                Some(p) => bound.push((p, child)),
+                None => {
+                    positional.get_or_insert(child);
+                }
+            },
+            _ => {}
+        }
+    }
+    let by = |ps: &[&str]| {
+        bound
+            .iter()
+            .find(|(p, _)| ps.contains(&p.as_str()))
+            .map(|(_, v)| *v)
+    };
+    let arg = by(&["name"])
+        .or_else(|| by(&["fullyqualifiedname"]))
+        .or_else(|| by(&["moduleinfo", "assembly"]))
+        .or(positional)?;
+    Some(SiteKind::Import(import_arg(paths::path_arg(arg, text))))
 }
 
 /// The outcome of matching a module name against the manifest stems.
