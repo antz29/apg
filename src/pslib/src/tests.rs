@@ -1,6 +1,7 @@
 //! The crate's unit/int test root: pure in-memory tests in inner `unit` and
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
+use crate::diag::{error_summary, write_diagnostic, Diagnostic};
 use crate::parse::parse;
 use crate::source::{decode, decode_mapped, line_count, position, span};
 use tree_sitter::Node;
@@ -1089,5 +1090,22 @@ mod unit {
         assert_eq!(position(s, 3), (2, 1));
         assert_eq!(position(s, 6), (2, 3)); // after é (2 bytes, 1 char)
         assert_eq!(position(s, 10), (2, 4)); // after 😀 (4 bytes, 1 char)
+    }
+
+    #[test]
+    fn diag_formats_lines_and_summary() {
+        let d = Diagnostic {
+            file: "a/b.ps1".to_string(),
+            line: 3,
+            col: 7,
+            message: "syntax error".to_string(),
+        };
+        assert_eq!(d.to_string(), "a/b.ps1:3:7: syntax error");
+        let mut out = Vec::new();
+        write_diagnostic(&mut out, &d).unwrap();
+        assert_eq!(out, b"ps: a/b.ps1:3:7: syntax error\n");
+        assert_eq!(error_summary(0), "ps: 0 files had syntax errors");
+        assert_eq!(error_summary(1), "ps: 1 file had syntax errors");
+        assert_eq!(error_summary(2), "ps: 2 files had syntax errors");
     }
 }
