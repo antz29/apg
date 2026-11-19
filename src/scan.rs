@@ -713,7 +713,27 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // union in the reused units' own code FQNs — otherwise a reused file
         // newer than the local database would drop out of the universe and
         // falsely trip `spec drift`.
-        if let Some(plan) = &reuse_plan {
+        // Skipped when the local seed matches the store and every reused unit is
+        // already in the local database (the one-file rescan's O(files) decode).
+        // The index is loaded only once the keys match; an empty (or unreadable)
+        // index fails safe to the full union.
+        let store = std::cell::OnceCell::new();
+        if let Some(plan) = &reuse_plan
+            && incremental::reuse_universe_needed(
+                incremental.previous.as_ref(),
+                incremental
+                    .previous
+                    .as_ref()
+                    .and_then(|p| p.content_key.as_deref()),
+                incremental.recorded_content_key.as_deref(),
+                &plan.files,
+                |lang, rel, oid| {
+                    let store: &cache::FactStore =
+                        store.get_or_init(|| cache::FactStore::at(plan.store_root.clone()).load());
+                    store.is_empty() || store.has_unit(lang, rel, oid, &plan.cache_key)
+                },
+            )
+        {
             universe.extend(reuse_universe(
                 &plan.store_root,
                 &plan.cache_key,
