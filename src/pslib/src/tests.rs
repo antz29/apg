@@ -11,8 +11,9 @@ use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::resolve::{
     command_target, file_deps, import_arg, module_category, nameless_key, resolve_site,
-    select_member, split_qualified, CommandRes, Dep, DepKind, DepSite, ImportArg, ManifestStems,
-    SiteKind, StemMatch, Target, INBOX_MODULES,
+    select_member, split_qualified, type_name, type_target, CommandRes, Dep, DepKind, DepSite,
+    DotSourceMap, ImportArg, ManifestStems, SiteKind, StemMatch, Target, TypeIndex, TypeRes,
+    INBOX_MODULES,
 };
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
@@ -514,6 +515,38 @@ fn unit_rows(fu: &FileUnits) -> Vec<(UnitKind, &str, usize)> {
         .iter()
         .map(|u| (u.kind, u.name.as_str(), u.ordinal))
         .collect()
+}
+
+/// The units of `src` parsed and scanned, keyed as the repo-relative `path`.
+fn units_at(path: &str, src: &str) -> FileUnits {
+    FileUnits {
+        path: s(path),
+        ..units_of(src.as_bytes())
+    }
+}
+
+/// A hand-built file `path`: `<script>`, then one unit per `(kind, name)`.
+fn type_file(path: &str, types: &[(UnitKind, &str)]) -> FileUnits {
+    let mut units = vec![unit_at(UnitKind::ScriptBody, "<script>", 0, 0)];
+    units.extend(types.iter().map(|&(k, n)| unit_at(k, n, 0, 0)));
+    FileUnits {
+        path: s(path),
+        file_span: units[0].span,
+        units,
+    }
+}
+
+/// A dot-source map from `(script, dot-sourced files)` pairs.
+fn dots(pairs: &[(&str, &[&str])]) -> DotSourceMap {
+    pairs.iter().map(|(p, ds)| (s(p), argv(ds))).collect()
+}
+
+/// `TypeRes::One` naming unit `index` of `path`.
+fn one(path: &str, index: usize) -> TypeRes {
+    TypeRes::One {
+        path: s(path),
+        index,
+    }
 }
 
 /// The function/class/enum/method declaration nodes under `root` whose name
@@ -4274,5 +4307,344 @@ mod int {
             assert_eq!(e.dot_sourced(p), ["mods/Foo/Foo.psm1"], "{p}");
         }
         assert_eq!(dep_recs(recs), want);
+    }
+
+    #[test]
+    fn units_scan_class_bases() {
+        let cases: [(&str, &[&str]); 6] = [
+            ("class C : B { }\n", &["B"]),
+            ("class C : B, IFoo, IBar { }\n", &["B", "IFoo", "IBar"]),
+            ("class C : B, b { }\n", &["B"]),
+            (
+                "class C : System.IDisposable { }\n",
+                &["System.IDisposable"],
+            ),
+            (
+                "class C : System.Collections.Generic.List[int] { }\n",
+                &["System.Collections.Generic.List[int]"],
+            ),
+            ("class C { }\n", &[]),
+        ];
+        for (src, want) in cases {
+            assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+            let fu = units_of(src.as_bytes());
+            assert_eq!(fu.units[1].kind, UnitKind::Class, "{src:?}");
+            assert_eq!(fu.units[1].bases, want, "{src:?}");
+        }
+        // an enum's underlying type is no base; every non-Class unit has none
+        let src =
+            "enum E : byte { A }\nfunction F { }\nclass K : B {\n    M() { }\n    K() { }\n}\n";
+        assert_eq!(errors(src), Vec::<String>::new());
+        let fu = units_of(src.as_bytes());
+        for u in &fu.units {
+            let want: &[&str] = if u.kind == UnitKind::Class {
+                &["B"]
+            } else {
+                &[]
+            };
+            assert_eq!(u.bases, want, "{u:?}");
+        }
+        assert_eq!(fu.units.len(), 6);
+    }
+
+    #[test]
+    fn units_scan_class_bases_around_a_local_error() {
+        for (src, err) in [("class C : B, { }\n", ","), ("class C : B, ) { }\n", ", )")] {
+            // the ERROR stays inside the class, beside the base list
+            let tree = parse(src);
+            let shape: Vec<(String, &str)> = descendants(tree.root_node())
+                .into_iter()
+                .filter(|n| n.is_error() || n.is_missing())
+                .map(|n| {
+                    (
+                        format!("{:?}", &src[n.byte_range()]),
+                        n.parent().map_or("", |p| p.kind()),
+                    )
+                })
+                .collect();
+            assert_eq!(shape, [(format!("{err:?}"), "class_definition")], "{src:?}");
+            let fu = units_of(src.as_bytes());
+            assert_eq!(fu.units[1].bases, ["B"], "{src:?}");
+        }
+    }
+
+    /// requirements.requirement.ps-type-name-resolution
+    #[test]
+    fn resolve_type_over_scanned_fixtures() {
+        let srcs = [
+            (
+                "a.ps1",
+                "class Foo { }\nclass Bar : Foo {\n    [Foo]$p\n    [Color]$c\n}\n",
+            ),
+            ("b.ps1", "enum Color { Red }\nclass Foo { }\n"),
+            ("c.ps1", "class Widget { }\nclass color2 { }\n"),
+            ("d.ps1", "class Widget { }\n"),
+            ("e.ps1", "Get-A\n"),
+        ];
+        let files: Vec<FileUnits> = srcs
+            .iter()
+            .map(|(p, src)| {
+                assert_eq!(errors(src), Vec::<String>::new(), "{p}");
+                units_at(p, src)
+            })
+            .collect();
+        let bar = &files[0].units[2];
+        assert_eq!((bar.name.as_str(), bar.kind), ("Bar", UnitKind::Class));
+        assert_eq!(bar.property_types, ["Foo", "Color"]);
+        assert_eq!(bar.bases, ["Foo"]);
+        assert_eq!(files[1].units[1].kind, UnitKind::Enum);
+        let index = TypeIndex::new(&files);
+        let dot = dots(&[("a.ps1", &["b.ps1"])]);
+        // step 1 beats the dot-sourced b.ps1's Foo
+        assert_eq!(
+            index.resolve_type(&bar.property_types[0], "a.ps1", &dot),
+            one("a.ps1", 1)
+        );
+        // step 2: an enum is a property's target
+        assert_eq!(
+            index.resolve_type(&bar.property_types[1], "a.ps1", &dot),
+            one("b.ps1", 1)
+        );
+        assert_eq!(
+            index.resolve_type(&bar.bases[0], "a.ps1", &dot),
+            one("a.ps1", 1)
+        );
+        // step 3 from a file with no dot-sources
+        let widget = index.resolve_type("Widget", "e.ps1", &dot);
+        assert_eq!(widget, TypeRes::Many);
+        assert_eq!(
+            type_target(widget, "Widget"),
+            Target::Unresolved {
+                name: s("Widget"),
+                category: "unknown"
+            }
+        );
+        // step 3 with one (color2 is no match): an enum is a base's target
+        let color = index.resolve_type("Color", "e.ps1", &dot);
+        assert_eq!(color, one("b.ps1", 1));
+        assert_eq!(
+            type_target(color, "Color"),
+            Target::Unit {
+                path: s("b.ps1"),
+                index: 1
+            }
+        );
+        // a static type literal's text
+        assert_eq!(
+            index.resolve_type("[Foo[]]", "a.ps1", &dot),
+            one("a.ps1", 1)
+        );
+    }
+
+    /// requirements.requirement.ps-system-type
+    #[test]
+    fn resolve_type_outside_the_scan() {
+        let src = "class W : System.IDisposable, IComparable {\n    [System.String]$a\n    [string]$b\n    [hashtable]$c\n    [pscustomobject]$d\n    [System.IO.FileInfo]$e\n    [ciminstance]$f\n    [math]$g\n    [object]$h\n    [Contoso.Widget]$i\n}\n";
+        assert_eq!(errors(src), Vec::<String>::new());
+        let files = [units_at("w.ps1", src)];
+        let w = &files[0].units[1];
+        let written: Vec<&String> = w.bases.iter().chain(&w.property_types).collect();
+        assert_eq!(
+            written,
+            [
+                "System.IDisposable",
+                "IComparable",
+                "System.String",
+                "string",
+                "hashtable",
+                "pscustomobject",
+                "System.IO.FileInfo",
+                "ciminstance",
+                "math",
+                "object",
+                "Contoso.Widget",
+            ]
+        );
+        let index = TypeIndex::new(&files);
+        let dot = DotSourceMap::new();
+        for name in written {
+            let res = index.resolve_type(name, "w.ps1", &dot);
+            assert_eq!(res, TypeRes::Outside, "{name}");
+            let stdlib = crate::resolve::is_system_type(&type_name(name));
+            let category = if stdlib { "stdlib" } else { "external" };
+            let want = [
+                "System.IDisposable",
+                "System.String",
+                "string",
+                "hashtable",
+                "pscustomobject",
+                "System.IO.FileInfo",
+            ]
+            .contains(&name.as_str());
+            assert_eq!(stdlib, want, "{name}");
+            assert_eq!(
+                type_target(res, name),
+                Target::Unresolved {
+                    name: name.clone(),
+                    category
+                },
+                "{name}"
+            );
+        }
+    }
+
+    /// requirements.requirement.ps-generic-type-name
+    #[test]
+    fn resolve_type_name_strips_brackets_arrays_and_generics() {
+        for (written, want) in [
+            ("[Foo]", "Foo"),
+            ("Foo[]", "Foo"),
+            ("[Foo[][]]", "Foo"),
+            ("[Foo[]]", "Foo"),
+            (" Foo ", "Foo"),
+            ("[string[]]", "string"),
+            (
+                "[System.Collections.Generic.List[string]]",
+                "System.Collections.Generic.List",
+            ),
+            (
+                "System.Collections.Generic.List[int]",
+                "System.Collections.Generic.List",
+            ),
+            (
+                "System.Collections.Generic.List[int][]",
+                "System.Collections.Generic.List",
+            ),
+            (
+                "System.Collections.Generic.List[System.Collections.Generic.List[int]]",
+                "System.Collections.Generic.List",
+            ),
+            (
+                "System.Collections.Generic.Dictionary[string,int]",
+                "System.Collections.Generic.Dictionary",
+            ),
+            ("List[int][]", "List"),
+            ("List[List[int]]", "List"),
+            ("Dictionary[string,int]", "Dictionary"),
+        ] {
+            assert_eq!(type_name(written), want, "{written:?}");
+        }
+    }
+
+    /// requirements.requirement.ps-type-name-resolution
+    #[test]
+    fn resolve_type_step_1_own_file() {
+        use UnitKind::*;
+        let index = TypeIndex::new(&[type_file("a.ps1", &[(Function, "F"), (Class, "Foo")])]);
+        let dot = DotSourceMap::new();
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), one("a.ps1", 2));
+    }
+
+    #[test]
+    fn resolve_type_is_case_insensitive() {
+        let index = TypeIndex::new(&[type_file("a.ps1", &[(UnitKind::Class, "Foo")])]);
+        let dot = DotSourceMap::new();
+        for name in ["foo", "FOO"] {
+            assert_eq!(
+                index.resolve_type(name, "a.ps1", &dot),
+                one("a.ps1", 1),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_type_enum_candidate() {
+        let index = TypeIndex::new(&[type_file("a.ps1", &[(UnitKind::Enum, "Color")])]);
+        let dot = DotSourceMap::new();
+        assert_eq!(index.resolve_type("Color", "a.ps1", &dot), one("a.ps1", 1));
+    }
+
+    #[test]
+    fn resolve_type_step_2_dot_sourced() {
+        let index = TypeIndex::new(&[
+            type_file("a.ps1", &[]),
+            type_file("b.ps1", &[(UnitKind::Class, "Foo")]),
+        ]);
+        let dot = dots(&[("a.ps1", &["b.ps1"])]);
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), one("b.ps1", 1));
+    }
+
+    #[test]
+    fn resolve_type_step_3_any_file() {
+        let index = TypeIndex::new(&[
+            type_file("a.ps1", &[]),
+            type_file("c.ps1", &[(UnitKind::Class, "Foo")]),
+        ]);
+        let dot = DotSourceMap::new();
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), one("c.ps1", 1));
+    }
+
+    #[test]
+    fn resolve_type_step_2_beats_several_at_step_3() {
+        let foo = [(UnitKind::Class, "Foo")];
+        let index = TypeIndex::new(&[
+            type_file("a.ps1", &[]),
+            type_file("b.ps1", &foo),
+            type_file("c.ps1", &foo),
+            type_file("f.ps1", &foo),
+        ]);
+        let dot = dots(&[("a.ps1", &["b.ps1"])]);
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), one("b.ps1", 1));
+    }
+
+    /// requirements.requirement.ps-ambiguous-type
+    #[test]
+    fn resolve_type_several_at_step_2_is_many() {
+        let foo = [(UnitKind::Class, "Foo")];
+        let index = TypeIndex::new(&[
+            type_file("a.ps1", &[]),
+            type_file("b.ps1", &foo),
+            type_file("d.ps1", &foo),
+        ]);
+        let dot = dots(&[("a.ps1", &["b.ps1", "d.ps1"])]);
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), TypeRes::Many);
+    }
+
+    /// requirements.requirement.ps-ambiguous-type
+    #[test]
+    fn resolve_type_several_at_step_3_is_many() {
+        let index = TypeIndex::new(&[
+            type_file("a.ps1", &[]),
+            type_file("c.ps1", &[(UnitKind::Class, "Foo")]),
+            type_file("e.ps1", &[(UnitKind::Enum, "foo")]),
+        ]);
+        let dot = DotSourceMap::new();
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), TypeRes::Many);
+    }
+
+    #[test]
+    fn resolve_type_file_dot_sourced_twice_is_one() {
+        let index = TypeIndex::new(&[
+            type_file("a.ps1", &[]),
+            type_file("b.ps1", &[(UnitKind::Class, "Foo")]),
+        ]);
+        let dot = dots(&[("a.ps1", &["b.ps1", "b.ps1"])]);
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), one("b.ps1", 1));
+    }
+
+    #[test]
+    fn resolve_type_scanned_class_beats_accelerator() {
+        let index = TypeIndex::new(&[type_file("a.ps1", &[(UnitKind::Class, "string")])]);
+        let dot = DotSourceMap::new();
+        assert_eq!(index.resolve_type("string", "a.ps1", &dot), one("a.ps1", 1));
+    }
+
+    /// requirements.requirement.ps-generic-type-name
+    #[test]
+    fn resolve_type_generic_reference_finds_its_base() {
+        let index = TypeIndex::new(&[type_file("a.ps1", &[(UnitKind::Class, "Foo")])]);
+        let dot = DotSourceMap::new();
+        assert_eq!(
+            index.resolve_type("Foo[int]", "a.ps1", &dot),
+            one("a.ps1", 1)
+        );
+    }
+
+    #[test]
+    fn resolve_type_outside() {
+        let index = TypeIndex::new(&[type_file("a.ps1", &[(UnitKind::Class, "Bar")])]);
+        let dot = DotSourceMap::new();
+        assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), TypeRes::Outside);
     }
 }
