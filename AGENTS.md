@@ -836,9 +836,10 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
     `properties` = `{"kind":"copy"}`): the file dependency through which a
     copybook change reaches each program that COPYs it. SQL `Uses` edges
     carry `properties` = `{"kind":"read"|"write"|"trigger"|"type"}`:
-    `read`/`write` from a procedure/function/trigger (Function) or view or
-    synonym (Struct) to the table/view/sequence/synonym (Struct) it reads or
-    writes, `trigger` from a DML trigger to its table/view, `type` from a
+    `read`/`write` from a procedure/function/trigger (Function) or view
+    (Struct) to the table/view/sequence/synonym (Struct) it reads or writes,
+    only `read` from a synonym (Struct), and only to a table, view or
+    sequence, `trigger` from a DML trigger to its table/view, `type` from a
     routine or column to the user-defined type/table type it names. Every
     other `Uses` edge stores `properties` = `{}`.
   - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
