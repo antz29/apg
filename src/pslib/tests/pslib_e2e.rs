@@ -369,6 +369,97 @@ fn file_units(recs: &[serde_json::Value], path: &str) -> Vec<serde_json::Value> 
         .collect()
 }
 
+/// The file-dependency tree's main.ps1: two dot-sources and six imports.
+const DEP_MAIN: &str = ". $PSScriptRoot\\lib\\util.ps1\n. $x\nImport-Module ./mods/Foo/Foo.psm1\nImport-Module Foo\nImport-Module Bar\nImport-Module Microsoft.PowerShell.Utility\nImport-Module PSReadLine\nImport-Module $m\n";
+
+/// The file-dependency tree's syntax-error script: a dot-source before a local error.
+const DEP_BROKEN: &str = ". ./lib/Util.ps1\n$q = 1 )\n";
+
+/// Writes the file-dependency tree into a fresh scratch dir and runs the binary over it.
+fn dep_scan(tag: &str) -> (Scratch, String, Run) {
+    let dir = Scratch::new(tag);
+    dir.write("mods/Foo/Foo.psd1", b"@{\n    RootModule = 'Foo.psm1'\n}\n");
+    dir.write("mods/Foo/Foo.psm1", b"function Get-Foo {}\n");
+    dir.write("mods/Bar/Bar.psd1", b"@{\n    RootModule = 'Bar.psm1'\n}\n");
+    dir.write(
+        "other/Bar/Bar.psd1",
+        b"@{\n    RootModule = 'Bar.psm1'\n}\n",
+    );
+    dir.write("lib/Util.ps1", b"function Get-Util {}\n");
+    dir.write("main.ps1", DEP_MAIN.as_bytes());
+    dir.write("u.ps1", &utf16le_bom("# ünï 😀\n. $y\n"));
+    dir.write("broken.ps1", DEP_BROKEN.as_bytes());
+    dir.write(
+        "dot_then_import.ps1",
+        b". ./mods/Foo/Foo.psm1\nImport-Module ./mods/Foo/Foo.psm1\n",
+    );
+    dir.write(
+        "import_then_dot.ps1",
+        b"Import-Module ./mods/Foo/Foo.psm1\n. ./mods/Foo/Foo.psm1\n",
+    );
+    dir.write(
+        "two_imports.ps1",
+        b"Import-Module ./mods/Foo/Foo.psm1\n. ./mods/Foo/Foo.psm1\nImport-Module ./mods/Foo/Foo.psm1\n",
+    );
+    let root = dir.root();
+    let run = psfrontend(&[&root]);
+    assert!(run.ok, "{:?}", run.stderr);
+    (dir, root, run)
+}
+
+/// The id of the script Struct (parented by a Module) located at `path`.
+fn script_id<'r>(recs: &'r [serde_json::Value], path: &str) -> &'r str {
+    let modules = module_recs(recs);
+    let ids: Vec<&str> = recs
+        .iter()
+        .filter(|r| r["type"] == "struct" && str_of(r, "path") == path)
+        .filter(|r| modules.iter().any(|m| m == str_of(r, "parent")))
+        .map(|r| str_of(r, "id"))
+        .collect();
+    assert_eq!(ids.len(), 1, "{path}");
+    ids[0]
+}
+
+/// The sorted `(to, kind)` of the uses records leaving `id`.
+fn uses_of(recs: &[serde_json::Value], id: &str) -> Vec<(String, String)> {
+    let mut out: Vec<_> = recs
+        .iter()
+        .filter(|r| r["type"] == "uses" && r["from"] == id)
+        .map(|r| {
+            let kind = r["properties"]["kind"].as_str().expect("kind");
+            (str_of(r, "to").to_string(), kind.to_string())
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The sorted `(to, category)` of the unresolved_use records leaving `id`.
+fn unresolved_of(recs: &[serde_json::Value], id: &str) -> Vec<(String, String)> {
+    let mut out: Vec<_> = recs
+        .iter()
+        .filter(|r| r["type"] == "unresolved_use" && r["from"] == id)
+        .map(|r| {
+            let to = str_of(r, "to");
+            let cat = recs
+                .iter()
+                .find(|u| u["type"] == "unresolved" && u["fqn"] == to)
+                .map_or("<none>", |u| str_of(u, "category"));
+            (to.to_string(), cat.to_string())
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The raw offset `N` of a `<nameless@{rel}:N>` sentinel.
+fn sentinel_offset(fqn: &str, rel: &str) -> usize {
+    fqn.strip_prefix(&format!("<nameless@{rel}:"))
+        .and_then(|s| s.strip_suffix('>'))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("not a {rel} sentinel: {fqn}"))
+}
+
 mod e2e {
     use super::*;
 
@@ -888,5 +979,218 @@ mod e2e {
         assert!(!run.ok);
         let last = run.stderr.last().expect("a stderr line");
         assert!(last.starts_with("psfrontend: usage: "), "{last}");
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_file_deps_main() {
+        let (_dir, root, run) = dep_scan("bin-dep-main");
+        let recs = records(&run.stdout);
+        let main = format!("{root}/main.ps1");
+        let id = script_id(&recs, &main);
+        let dep = |p: &str, k: &str| (format!("{root}/{p}"), k.to_string());
+        let uses = uses_of(&recs, id);
+        assert_eq!(
+            uses,
+            [
+                dep("lib/Util.ps1", "dot-source"),
+                dep("mods/Foo/Foo.psd1", "import-module"),
+                dep("mods/Foo/Foo.psm1", "import-module"),
+            ]
+        );
+        let files: Vec<String> = file_recs(&recs).into_iter().map(|f| f.0).collect();
+        assert!(uses.iter().all(|(to, _)| files.contains(to)), "{files:?}");
+        let unresolved = unresolved_of(&recs, id);
+        let named: Vec<(&str, &str)> = unresolved
+            .iter()
+            .filter(|(to, _)| !to.starts_with("<nameless@"))
+            .map(|(t, c)| (t.as_str(), c.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("Bar", "unknown"),
+                ("Microsoft.PowerShell.Utility", "stdlib"),
+                ("PSReadLine", "external"),
+            ]
+        );
+        // each sentinel's offset starts its site's command in the on-disk bytes
+        let raw = fs::read(&main).expect("read main.ps1");
+        let mut sites: Vec<&str> = unresolved
+            .iter()
+            .filter(|(to, _)| to.starts_with("<nameless@"))
+            .map(|(to, cat)| {
+                assert_eq!(cat, "unknown", "{to}");
+                let tail = &raw[sentinel_offset(to, "main.ps1")..];
+                [". $x", "Import-Module $m"]
+                    .into_iter()
+                    .find(|c| tail.starts_with(c.as_bytes()))
+                    .unwrap_or_else(|| panic!("{to} starts no site"))
+            })
+            .collect();
+        sites.sort();
+        assert_eq!(sites, [". $x", "Import-Module $m"]);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_file_deps_utf16_sentinel() {
+        let (_dir, root, run) = dep_scan("bin-dep-wide");
+        let recs = records(&run.stdout);
+        let path = format!("{root}/u.ps1");
+        let unresolved = unresolved_of(&recs, script_id(&recs, &path));
+        assert_eq!(unresolved.len(), 1, "{unresolved:?}");
+        let (to, cat) = &unresolved[0];
+        assert_eq!(cat, "unknown");
+        let raw = fs::read(&path).expect("read u.ps1");
+        let units: Vec<u16> = raw[sentinel_offset(to, "u.ps1")..]
+            .chunks(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        let tail = String::from_utf16(&units).expect("UTF-16 slice");
+        assert!(tail.starts_with(". $y"), "{tail:?}");
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_file_deps_syntax_error() {
+        let (_dir, root, run) = dep_scan("bin-dep-err");
+        let path = format!("{root}/broken.ps1");
+        let mut expected: Vec<String> =
+            psfrontend::diag::error_regions(&path, DEP_BROKEN, &parse(DEP_BROKEN))
+                .iter()
+                .map(|d| format!("ps: {d}"))
+                .collect();
+        assert!(!expected.is_empty());
+        expected.push("ps: 1 file had syntax errors".to_string());
+        assert_eq!(run.stderr, expected);
+        let recs = records(&run.stdout);
+        assert_eq!(
+            uses_of(&recs, script_id(&recs, &path)),
+            [(format!("{root}/lib/Util.ps1"), "dot-source".to_string())]
+        );
+        // the scan continued: every fixture file, those walked after broken.ps1 included
+        let mut files: Vec<String> = file_recs(&recs)
+            .into_iter()
+            .map(|f| {
+                f.0.strip_prefix(&format!("{root}/"))
+                    .expect("in root")
+                    .to_string()
+            })
+            .collect();
+        files.sort();
+        assert_eq!(
+            files,
+            [
+                "broken.ps1",
+                "dot_then_import.ps1",
+                "import_then_dot.ps1",
+                "lib/Util.ps1",
+                "main.ps1",
+                "mods/Bar/Bar.psd1",
+                "mods/Foo/Foo.psd1",
+                "mods/Foo/Foo.psm1",
+                "other/Bar/Bar.psd1",
+                "two_imports.ps1",
+                "u.ps1",
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_file_deps_records_valid() {
+        let (_dir, _root, run) = dep_scan("bin-dep-valid");
+        let recs = records(&run.stdout);
+        let types = [
+            "module",
+            "file",
+            "struct",
+            "function",
+            "contains",
+            "uses",
+            "unresolved_use",
+            "unresolved",
+        ];
+        assert!(
+            recs.iter().all(|r| types.contains(&str_of(r, "type"))),
+            "{recs:?}"
+        );
+        let fqns: Vec<&str> = recs
+            .iter()
+            .filter(|r| r["type"] == "unresolved")
+            .map(|r| str_of(r, "fqn"))
+            .collect();
+        let unique: std::collections::HashSet<&&str> = fqns.iter().collect();
+        assert_eq!(unique.len(), fqns.len(), "{fqns:?}");
+        // every unresolved_use names an emitted unresolved record
+        for r in recs.iter().filter(|r| r["type"] == "unresolved_use") {
+            assert!(fqns.contains(&str_of(r, "to")), "{r}");
+        }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_file_deps_targets_parity() {
+        let (_dir, root, full) = dep_scan("bin-dep-tgt");
+        let full = records(&full.stdout);
+        let main = format!("{root}/main.ps1");
+        let id = script_id(&full, &main).to_string();
+        let named: Vec<&str> = full
+            .iter()
+            .filter(|r| r["type"] == "unresolved_use" && r["from"] == id.as_str())
+            .map(|r| str_of(r, "to"))
+            .collect();
+        let deps = |recs: &[serde_json::Value]| -> Vec<serde_json::Value> {
+            recs.iter()
+                .filter(|r| match str_of(r, "type") {
+                    "uses" | "unresolved_use" => r["from"] == id.as_str(),
+                    "unresolved" => named.contains(&str_of(r, "fqn")),
+                    _ => false,
+                })
+                .cloned()
+                .collect()
+        };
+        let want = deps(&full);
+        let side = Scratch::new("bin-dep-tgt-side");
+        let list = side.write("targets.txt", format!("{main}\n").as_bytes());
+        let run = psfrontend(&[&root, "--targets", list.to_str().expect("UTF-8 path")]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let got = records(&run.stdout);
+        let dep_types = ["uses", "unresolved_use", "unresolved"];
+        let got_deps: Vec<_> = got
+            .iter()
+            .filter(|r| dep_types.contains(&str_of(r, "type")))
+            .cloned()
+            .collect();
+        assert_eq!(got_deps, want);
+        // the dropped files keep their paths as uses targets
+        assert_eq!(file_recs(&got).len(), 1);
+        assert_eq!(uses_of(&got, &id).len(), 3);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_file_deps_kind_precedence() {
+        let (_dir, root, run) = dep_scan("bin-dep-kind");
+        let recs = records(&run.stdout);
+        let psm1 = format!("{root}/mods/Foo/Foo.psm1");
+        for s in [
+            "dot_then_import.ps1",
+            "import_then_dot.ps1",
+            "two_imports.ps1",
+        ] {
+            let id = script_id(&recs, &format!("{root}/{s}"));
+            let to_psm1: Vec<_> = recs
+                .iter()
+                .filter(|r| r["type"] == "uses" && r["from"] == id && str_of(r, "to") == psm1)
+                .collect();
+            assert_eq!(to_psm1.len(), 1, "{s}");
+            assert_eq!(
+                to_psm1[0]["properties"],
+                serde_json::json!({"kind": "dot-source"}),
+                "{s}"
+            );
+        }
     }
 }
