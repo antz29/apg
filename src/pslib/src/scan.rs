@@ -1,4 +1,4 @@
-//! Facts for the unified JSONL stream: a Module per scan-root-relative directory and a File
+//! Facts for the unified JSONL stream: a Module per manifest or scan-root-relative directory and a File
 //! per claimed PowerShell source, with each file's syntax-error regions reported to stderr.
 
 use std::collections::{BTreeSet, HashSet};
@@ -6,6 +6,7 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::diag::{self, write_diagnostic, Diagnostic};
+use crate::manifest::{self, ModuleMap};
 use crate::parse::parse;
 use crate::source;
 
@@ -53,6 +54,7 @@ pub enum Rec {
 pub struct Emitter {
     recs: Vec<Rec>,
     modules: BTreeSet<String>,
+    map: ModuleMap,
     /// How many scanned files held at least one error region.
     errored: usize,
     next_id: usize,
@@ -60,22 +62,19 @@ pub struct Emitter {
     prefix: String,
 }
 
-/// The module identity of `path`: its `/`-joined directory components relative to `base`,
-/// EMPTY at the base itself (never `.`, never absolute).
-fn module_of(base: &Path, path: &Path) -> String {
-    let dir = path.parent().unwrap_or(path);
-    dir.strip_prefix(base).map_or_else(
-        |_| String::new(),
-        |rel| {
-            rel.components()
-                .filter_map(|c| match c {
-                    Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("/")
-        },
-    )
+/// `path`'s `/`-joined components relative to `base` (just its file name outside `base`, so
+/// it falls in the root's empty-identity directory module).
+fn rel_of(base: &Path, path: &Path) -> String {
+    let rel = path
+        .strip_prefix(base)
+        .unwrap_or_else(|_| path.file_name().map_or(path, Path::new));
+    rel.components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 impl Emitter {
@@ -84,11 +83,17 @@ impl Emitter {
         Emitter {
             recs: Vec::new(),
             modules: BTreeSet::new(),
+            map: ModuleMap::default(),
             errored: 0,
             next_id: 0,
             base: base.to_path_buf(),
             prefix: id_prefix.to_string(),
         }
+    }
+
+    /// Sets the module map that parents each scanned file (directory modules until set).
+    pub fn set_modules(&mut self, map: ModuleMap) {
+        self.map = map;
     }
 
     /// The next opaque id: `<prefix>1`, `<prefix>2`, ...
@@ -106,7 +111,7 @@ impl Emitter {
         if !diags.is_empty() {
             self.errored += 1;
         }
-        let module = module_of(&self.base, Path::new(path));
+        let module = self.map.module(&rel_of(&self.base, Path::new(path)));
         if self.modules.insert(module.clone()) {
             self.recs.push(Rec::Module {
                 fqn: module.clone(),
@@ -305,14 +310,36 @@ pub fn run(argv: &[String]) -> Result<(), String> {
     });
     files.sort();
 
+    // Pass 1: read every file, then assign modules over the whole claimed tree.
+    let files: Vec<(PathBuf, Vec<u8>)> = files
+        .into_iter()
+        .filter_map(|p| match std::fs::read(&p) {
+            Ok(bytes) => Some((p, bytes)),
+            Err(_) => {
+                eprintln!("warning: could not read {}", p.display());
+                None
+            }
+        })
+        .collect();
+    let rels: Vec<String> = files.iter().map(|(p, _)| rel_of(&root, p)).collect();
+    let manifests: Vec<_> = files
+        .iter()
+        .zip(&rels)
+        .filter(|((p, _), _)| {
+            p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("psd1"))
+        })
+        .filter_map(|((_, bytes), rel)| {
+            let text = source::decode(bytes);
+            manifest::read_manifest(&text, &parse(&text)).map(|keys| (rel.clone(), keys))
+        })
+        .collect();
+
     let mut emitter = Emitter::new(&root, &args.id_prefix);
+    emitter.set_modules(manifest::assign(&rels, &manifests));
     let mut err = io::stderr();
-    for path in &files {
-        let Ok(bytes) = std::fs::read(path) else {
-            eprintln!("warning: could not read {}", path.display());
-            continue;
-        };
-        for diag in emitter.scan_file(&path.to_string_lossy(), &bytes) {
+    for (path, bytes) in &files {
+        for diag in emitter.scan_file(&path.to_string_lossy(), bytes) {
             write_diagnostic(&mut err, &diag).map_err(|e| e.to_string())?;
         }
     }
