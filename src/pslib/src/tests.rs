@@ -1,7 +1,7 @@
 //! The crate's unit/int test root: pure in-memory tests in inner `unit` and
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
-use crate::diag::{error_summary, write_diagnostic, Diagnostic};
+use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
 use crate::parse::parse;
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span};
@@ -151,6 +151,27 @@ fn utf16_bytes(s: &str, be: bool) -> Vec<u8> {
         .encode_utf16()
         .flat_map(|u| if be { u.to_be_bytes() } else { u.to_le_bytes() });
     bom.into_iter().chain(units).collect()
+}
+
+/// `s` as UTF-8 bytes behind a UTF-8 BOM.
+fn utf8_bom(s: &str) -> Vec<u8> {
+    [&[0xEF, 0xBB, 0xBF][..], s.as_bytes()].concat()
+}
+
+/// A file ending inside nested unclosed blocks: parses to a whole-file ERROR root.
+const NESTED_OPEN_AT_EOF: &str = "Get-A\nfunction F { Get-B\n$x = (1 + \n";
+
+/// Asserts `src` parses to an ERROR root (requirements.requirement.ps-error-recovery).
+fn assert_error_root(src: &str) {
+    assert_eq!(parse(src).root_node().kind(), "ERROR", "{src:?}");
+}
+
+/// `src`'s error regions as `(line, col, message)`.
+fn regions(src: &str) -> Vec<(usize, usize, String)> {
+    error_regions("f.ps1", src, &parse(src))
+        .into_iter()
+        .map(|d| (d.line, d.col, d.message))
+        .collect()
 }
 
 /// The raw bytes `[start, end)` decoded strictly: UTF-8 when `be` is `None`,
@@ -1273,5 +1294,158 @@ mod unit {
         })
         .unwrap();
         assert_eq!(f["params"], serde_json::json!(["x"]));
+    }
+}
+
+mod int {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn s(x: &str) -> String {
+        x.to_string()
+    }
+
+    fn file(path: &str, parent: &str, end_line: usize) -> Rec {
+        Rec::File {
+            path: s(path),
+            parent: s(parent),
+            start_line: 1,
+            end_line,
+        }
+    }
+
+    #[test]
+    fn diag_error_regions_over_parsed_sources() {
+        let syntax = |l, c| (l, c, s("syntax error"));
+        assert!(regions("Get-A\n$x = 1\n").is_empty());
+        // one broken statement, one region at its start
+        assert_eq!(regions("Get-A\n$x = )"), [syntax(2, 4)]);
+        // an outer ERROR holding nested ones is reported once
+        let nested = "Get-A }} {{ ]] = (1 + 2";
+        assert_eq!(errors(nested).len(), 3, "{:?}", errors(nested));
+        assert_eq!(regions(nested), [syntax(1, 1)]);
+        // an unclosed construct
+        assert_eq!(regions("(1 + 2"), [(1, 7, s("missing )"))]);
+        // two separate regions, in source order
+        assert_eq!(
+            regions("Get-A\n$x = )\nGet-B\n(1 + 2"),
+            [syntax(2, 6), (4, 7, s("missing )"))]
+        );
+        // columns count characters, not bytes
+        assert_eq!(regions("'é'; $x = )"), [syntax(1, 9)]);
+        // the whole-file region: one diagnostic where the ERROR root starts
+        assert_error_root(NESTED_OPEN_AT_EOF);
+        let root = parse(NESTED_OPEN_AT_EOF).root_node().start_byte();
+        let (l, c) = position(NESTED_OPEN_AT_EOF, root);
+        assert_eq!(regions(NESTED_OPEN_AT_EOF), [syntax(l, c)]);
+    }
+
+    #[test]
+    fn scan_file_decodes_every_encoding() {
+        let text = "Get-A\n$x = 'é😀'\nGet-B\n";
+        let n = line_count(text);
+        for bytes in [
+            text.as_bytes().to_vec(),
+            utf8_bom(text),
+            utf16_bytes(text, false),
+            utf16_bytes(text, true),
+        ] {
+            let mut e = Emitter::new(Path::new("/r"), "n");
+            assert!(e.scan_file("/r/a.ps1", &bytes).is_empty());
+            let files: Vec<_> = e
+                .records()
+                .iter()
+                .filter(|r| matches!(r, Rec::File { .. }))
+                .collect();
+            assert_eq!(files, [&file("/r/a.ps1", "", n)], "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn scan_file_modules_per_directory() {
+        let mut e = Emitter::new(Path::new("/r"), "n");
+        e.scan_file("/r/a.ps1", b"Get-A\n");
+        e.scan_file("/r/sub/dir/b.ps1", b"Get-B\nGet-C\n");
+        e.scan_file("/r/sub/dir/c.ps1", b"Get-D\n");
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s("") },
+                file("/r/a.ps1", "", 1),
+                Rec::Module { fqn: s("sub/dir") },
+                file("/r/sub/dir/b.ps1", "sub/dir", 2),
+                file("/r/sub/dir/c.ps1", "sub/dir", 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_file_recovers_from_syntax_errors() {
+        let mut e = Emitter::new(Path::new("/r"), "n");
+        let broken = e.scan_file("/r/a.ps1", b"Get-A\n$x = )");
+        assert_eq!(broken.len(), 1);
+        assert_eq!(
+            (broken[0].file.as_str(), broken[0].line, broken[0].col),
+            ("/r/a.ps1", 2, 4)
+        );
+        assert!(e.scan_file("/r/b.ps1", b"Get-B\n").is_empty());
+        let whole = e.scan_file("/r/c.ps1", NESTED_OPEN_AT_EOF.as_bytes());
+        assert_eq!(whole.len(), 1);
+        assert_eq!(whole[0].message, "syntax error");
+        assert!(e.scan_file("/r/d.ps1", b"Get-D\n").is_empty());
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s("") },
+                file("/r/a.ps1", "", 2),
+                file("/r/b.ps1", "", 1),
+                file("/r/c.ps1", "", line_count(NESTED_OPEN_AT_EOF)),
+                file("/r/d.ps1", "", 1),
+            ]
+        );
+        assert_eq!(e.error_summary(), "ps: 2 files had syntax errors");
+    }
+
+    #[test]
+    fn retain_targets_keeps_target_files_and_their_modules() {
+        let mut e = Emitter::new(Path::new("/r"), "n");
+        for p in ["/r/a.ps1", "/r/sub/b.ps1", "/r/other/c.ps1"] {
+            e.scan_file(p, b"Get-A\n");
+        }
+        let targets: HashSet<String> = [s("/r/a.ps1"), s("/r/other/c.ps1")].into();
+        e.retain_targets(&targets);
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s("") },
+                file("/r/a.ps1", "", 1),
+                Rec::Module { fqn: s("other") },
+                file("/r/other/c.ps1", "other", 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn write_jsonl_one_object_per_line() {
+        let mut e = Emitter::new(Path::new("/r"), "n");
+        e.scan_file("/r/a.ps1", b"Get-A\n");
+        e.scan_file("/r/sub/b.ps1", b"Get-B\nGet-C");
+        let mut out = Vec::new();
+        e.write_jsonl(&mut out).unwrap();
+        let lines: Vec<serde_json::Value> = std::str::from_utf8(&out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                serde_json::json!({"type": "module", "fqn": ""}),
+                serde_json::json!({"type": "file", "path": "/r/a.ps1", "parent": "", "start_line": 1, "end_line": 1}),
+                serde_json::json!({"type": "module", "fqn": "sub"}),
+                serde_json::json!({"type": "file", "path": "/r/sub/b.ps1", "parent": "sub", "start_line": 1, "end_line": 2}),
+            ]
+        );
+        assert!(out.ends_with(b"\n"));
     }
 }
