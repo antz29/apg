@@ -716,7 +716,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // Skipped when the local seed matches the store and every reused unit is
         // already in the local database (the one-file rescan's O(files) decode).
         // The index is loaded only once the keys match; an empty (or unreadable)
-        // index fails safe to the full union.
+        // index makes every reused file count as having a recorded unit, so each
+        // one is checked against `previous.scanned` and the union runs only if
+        // some reused file is missing from the local database.
         let store = std::cell::OnceCell::new();
         if let Some(plan) = &reuse_plan
             && incremental::reuse_universe_needed(
