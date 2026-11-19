@@ -11,9 +11,9 @@ use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::resolve::{
     command_target, file_deps, import_arg, module_category, nameless_key, resolve_site,
-    select_member, split_qualified, type_name, type_target, CommandRes, Dep, DepKind, DepSite,
-    DotSourceMap, ImportArg, ManifestStems, SiteKind, StemMatch, Target, TypeIndex, TypeRes,
-    INBOX_MODULES,
+    select_member, split_qualified, type_name, type_target, CommandIndex, CommandRes, Dep, DepKind,
+    DepSite, DotSourceMap, ImportArg, ManifestStems, SiteKind, StemMatch, Target, TypeIndex,
+    TypeRes, INBOX_MODULES,
 };
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
@@ -942,6 +942,189 @@ fn script_id(recs: &[Rec], path: &str) -> String {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no script Struct for {path}"))
+}
+
+/// A command-resolution fixture: module map, file index, units, dot-source map, index.
+type Cmds = (
+    ModuleMap,
+    FileIndex,
+    Vec<FileUnits>,
+    DotSourceMap,
+    CommandIndex,
+);
+
+/// `tree`'s `(path, source)` files scanned, its `.psd1` manifests parsed and
+/// assigned, `extra` `(path, name)` Function units appended by hand, then indexed.
+fn cmds(tree: &[(&str, &str)], dot: &[(&str, &[&str])], extra: &[(&str, &str)]) -> Cmds {
+    let paths: Vec<&str> = tree.iter().map(|(p, _)| *p).collect();
+    let psd1: Vec<(&str, &str)> = tree
+        .iter()
+        .filter(|(p, _)| p.ends_with(".psd1"))
+        .copied()
+        .collect();
+    let map = module_map(&paths, &psd1);
+    let mut files: Vec<FileUnits> = tree.iter().map(|(p, src)| units_at(p, src)).collect();
+    for (p, name) in extra {
+        let f = files
+            .iter_mut()
+            .find(|f| f.path == *p)
+            .expect("extra's file");
+        f.units.push(unit_at(UnitKind::Function, name, 0, 0));
+    }
+    let dot = dots(dot);
+    let index = CommandIndex::new(&files, &map, &dot);
+    (
+        map,
+        FileIndex::new(paths.into_iter().map(s)),
+        files,
+        dot,
+        index,
+    )
+}
+
+/// Resolves command `name` called from `file` over `c`.
+fn call(c: &Cmds, name: &str, file: &str) -> CommandRes {
+    let (map, index, _, dot, cmds) = c;
+    cmds.resolve_command(name, file, dot, map, index)
+}
+
+/// `CommandRes::One` naming unit `index` of `path`.
+fn cmd_one(path: &str, index: usize) -> CommandRes {
+    CommandRes::One {
+        path: s(path),
+        index,
+    }
+}
+
+/// The names in manifest `psd1`'s export set, sorted.
+fn exported(c: &Cmds, psd1: &str) -> Vec<String> {
+    let mut names: Vec<String> = (c.4.exports(psd1).into_iter())
+        .map(|(p, i)| {
+            c.2.iter().find(|f| f.path == p).unwrap().units[i]
+                .name
+                .clone()
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// A manifest source: RootModule `root`, NestedModules `nested` and, when
+/// given, the FunctionsToExport value text.
+fn psd1(root: &str, nested: &[&str], exports: Option<&str>) -> String {
+    let mut m = format!("@{{\n    RootModule = '{root}'\n");
+    if !nested.is_empty() {
+        let list: Vec<String> = nested.iter().map(|n| format!("'{n}'")).collect();
+        m += &format!("    NestedModules = @({})\n", list.join(", "));
+    }
+    if let Some(e) = exports {
+        m += &format!("    FunctionsToExport = {e}\n");
+    }
+    m + "}\n"
+}
+
+/// `name` bare and under each scope prefix (`global:` lowercasing the name).
+fn scoped(name: &str) -> Vec<String> {
+    vec![
+        s(name),
+        format!("script:{name}"),
+        format!("GLOBAL:{}", name.to_lowercase()),
+        format!("Local:{name}"),
+        format!("private:{name}"),
+    ]
+}
+
+/// The export-set fixture: mods/Foo/Foo.psd1 (RootModule Foo.psm1, NestedModules
+/// lib/Helpers.ps1, FunctionsToExport `exports`), Foo.psm1 dot-sourcing priv/d.ps1,
+/// and a non-member loose.ps1; `extra` Function units appended by hand.
+fn export_cmds(exports: Option<&str>, extra: &[(&str, &str)]) -> Cmds {
+    let m = psd1("Foo.psm1", &["lib/Helpers.ps1"], exports);
+    let tree = [
+        ("mods/Foo/Foo.psd1", m.as_str()),
+        (
+            "mods/Foo/Foo.psm1",
+            "function Get-A { function Inner { } }\nfunction Set-B { }\n",
+        ),
+        ("mods/Foo/lib/Helpers.ps1", "function Get-C { }\n"),
+        ("mods/Foo/priv/d.ps1", "function Get-D { }\n"),
+        ("mods/Foo/loose.ps1", "function Get-L { }\n"),
+    ];
+    cmds(
+        &tree,
+        &[("mods/Foo/Foo.psm1", &["mods/Foo/priv/d.ps1"])],
+        extra,
+    )
+}
+
+/// The path-command fixture: main.ps1, lib/tool.ps1, lib/other.ps1 and the
+/// manifest module mods/Foo (exporting every function); `extra` units by hand.
+fn path_cmds(extra: &[(&str, &str)]) -> Cmds {
+    let m = psd1("Foo.psm1", &[], None);
+    let tree = [
+        ("main.ps1", ""),
+        ("lib/tool.ps1", "function T { }\n"),
+        ("lib/other.ps1", ""),
+        ("mods/Foo/Foo.psd1", m.as_str()),
+        ("mods/Foo/Foo.psm1", "function Get-A { }\n"),
+    ];
+    cmds(&tree, &[], extra)
+}
+
+/// The module-qualified fixture: mods/Foo exporting Get-A (Foo.psm1 also declares
+/// Set-B), the data file mods/Foo/Data.psd1, mods/Bar exporting Get-A and Get-C,
+/// and main.ps1 declaring its own Get-A.
+const QUAL_TREE: [(&str, &str); 6] = [
+    (
+        "mods/Foo/Foo.psd1",
+        "@{\n    RootModule = 'Foo.psm1'\n    FunctionsToExport = 'Get-A'\n}\n",
+    ),
+    (
+        "mods/Foo/Foo.psm1",
+        "function Get-A { }\nfunction Set-B { }\n",
+    ),
+    ("mods/Foo/Data.psd1", "@{ Setting = 1 }\n"),
+    (
+        "mods/Bar/Bar.psd1",
+        "@{\n    RootModule = 'Bar.psm1'\n    FunctionsToExport = @('Get-A', 'Get-C')\n}\n",
+    ),
+    (
+        "mods/Bar/Bar.psm1",
+        "function Get-A { }\nfunction Get-C { }\n",
+    ),
+    ("main.ps1", "function Get-A { }\n"),
+];
+
+/// The export fixtures' manifest.
+const FOO: &str = "mods/Foo/Foo.psd1";
+
+/// The step-3 fixture: mods/Foo (exporting Get-A of Foo.psm1, member priv.ps1
+/// declaring Priv-X) plus `extra` files.
+fn step3(extra: &[(&str, &str)]) -> Cmds {
+    let m = psd1("Foo.psm1", &["priv.ps1"], Some("'Get-A'"));
+    let mut tree = vec![
+        ("mods/Foo/Foo.psd1", m.as_str()),
+        ("mods/Foo/Foo.psm1", "function Get-A { }\n"),
+        ("mods/Foo/priv.ps1", "function Priv-X { }\n"),
+    ];
+    tree.extend_from_slice(extra);
+    cmds(&tree, &[], &[])
+}
+
+/// A manifest mods/Microsoft.PowerShell.Utility exporting `exports` from a root
+/// module declaring Get-Mine and Write-Output, and main.ps1.
+fn inbox_stem(exports: &str) -> Cmds {
+    let m = psd1("Microsoft.PowerShell.Utility.psm1", &[], Some(exports));
+    let dir = "mods/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility";
+    let (psd, psm) = (format!("{dir}.psd1"), format!("{dir}.psm1"));
+    let tree = [
+        (psd.as_str(), m.as_str()),
+        (
+            psm.as_str(),
+            "function Get-Mine { }\nfunction Write-Output { }\n",
+        ),
+        ("main.ps1", ""),
+    ];
+    cmds(&tree, &[], &[])
 }
 
 mod unit {
@@ -4646,5 +4829,546 @@ mod int {
         let index = TypeIndex::new(&[type_file("a.ps1", &[(UnitKind::Class, "Bar")])]);
         let dot = DotSourceMap::new();
         assert_eq!(index.resolve_type("Foo", "a.ps1", &dot), TypeRes::Outside);
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_patterns_over_members_and_dot_sourced() {
+        let c = export_cmds(Some("@('Get-*')"), &[]);
+        assert_eq!(exported(&c, FOO), ["Get-A", "Get-C", "Get-D"]);
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_match_case_insensitively() {
+        let c = export_cmds(Some("@('get-*')"), &[]);
+        assert_eq!(exported(&c, FOO), ["Get-A", "Get-C", "Get-D"]);
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_absent_key_exports_every_candidate() {
+        let c = export_cmds(None, &[]);
+        let all = ["Get-A", "Get-C", "Get-D", "Inner", "Set-B"];
+        assert_eq!(exported(&c, FOO), all);
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_empty_array_exports_none() {
+        let c = export_cmds(Some("@()"), &[]);
+        assert!(exported(&c, FOO).is_empty());
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_set_pattern_is_wildcard_match() {
+        let c = export_cmds(Some("'[GS]et-?'"), &[]);
+        let names = ["Get-A", "Set-B", "Get-C", "Get-D", "Inner"];
+        let mut want: Vec<&str> = names
+            .into_iter()
+            .filter(|n| wildcard_match("[GS]et-?", n))
+            .collect();
+        want.sort();
+        assert_eq!(want, ["Get-A", "Get-C", "Get-D", "Set-B"]);
+        assert_eq!(exported(&c, FOO), want);
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_backtick_escaped_pattern_is_literal() {
+        let c = export_cmds(Some("'Get-`?'"), &[("mods/Foo/Foo.psm1", "Get-?")]);
+        assert!(wildcard_match("Get-`?", "Get-?") && !wildcard_match("Get-`?", "Get-A"));
+        assert_eq!(exported(&c, FOO), ["Get-?"]);
+    }
+
+    /// requirements.requirement.ps-manifest-exports
+    #[test]
+    fn resolve_exports_never_a_non_member() {
+        let c = export_cmds(None, &[]);
+        assert!(!exported(&c, FOO).contains(&s("Get-L")));
+        assert_eq!(
+            call(&c, "Get-L", "mods/Foo/lib/Helpers.ps1"),
+            CommandRes::External
+        );
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_path_backslash() {
+        let c = path_cmds(&[]);
+        let res = call(&c, ".\\lib\\tool.ps1", "main.ps1");
+        assert_eq!(res, cmd_one("lib/tool.ps1", 0));
+        assert_eq!(
+            command_target(res, ".\\lib\\tool.ps1"),
+            Target::Unit {
+                path: s("lib/tool.ps1"),
+                index: 0
+            }
+        );
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_path_slash() {
+        let c = path_cmds(&[]);
+        let res = call(&c, "./lib/tool.ps1", "main.ps1");
+        assert_eq!(res, cmd_one("lib/tool.ps1", 0));
+        assert_eq!(
+            command_target(res, "./lib/tool.ps1"),
+            Target::Unit {
+                path: s("lib/tool.ps1"),
+                index: 0
+            }
+        );
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_path_is_case_insensitive() {
+        let c = path_cmds(&[]);
+        let res = call(&c, ".\\LIB\\TOOL.PS1", "main.ps1");
+        assert_eq!(res, cmd_one("lib/tool.ps1", 0));
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_path_beats_same_named_function() {
+        let names = [".\\lib\\tool.ps1", "./lib/tool.ps1"];
+        let extra: Vec<(&str, &str)> = ["main.ps1", "mods/Foo/Foo.psm1"]
+            .into_iter()
+            .flat_map(|f| names.map(|n| (f, n)))
+            .collect();
+        let c = path_cmds(&extra);
+        assert_eq!(
+            exported(&c, FOO).len(),
+            3,
+            "the named functions are exported"
+        );
+        for n in names {
+            assert_eq!(call(&c, n, "main.ps1"), cmd_one("lib/tool.ps1", 0), "{n}");
+        }
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_path_relative_to_calling_file() {
+        let c = path_cmds(&[]);
+        let res = call(&c, ".\\tool.ps1", "lib/other.ps1");
+        assert_eq!(res, cmd_one("lib/tool.ps1", 0));
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_path_missing_is_external_as_written() {
+        let c = path_cmds(&[]);
+        for n in ["./missing.ps1", ".\\missing.ps1"] {
+            let res = call(&c, n, "main.ps1");
+            assert_eq!(res, CommandRes::External, "{n}");
+            let want = Target::Unresolved {
+                name: s(n),
+                category: "external",
+            };
+            assert_eq!(command_target(res, n), want);
+        }
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_path_to_non_ps1_falls_to_qualified_rule() {
+        let c = path_cmds(&[]);
+        let n = ".\\mods\\Foo\\Foo.psm1";
+        let res = call(&c, n, "main.ps1");
+        assert_eq!(res, CommandRes::External);
+        let want = Target::Unresolved {
+            name: s(n),
+            category: "external",
+        };
+        assert_eq!(command_target(res, n), want);
+    }
+
+    /// requirements.requirement.ps-path-command-call
+    #[test]
+    fn resolve_command_engine_function_with_backslash_stays_builtin() {
+        let c = path_cmds(&[]);
+        assert_eq!(call(&c, "cd\\", "main.ps1"), CommandRes::Builtin);
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    /// requirements.requirement.ps-command-scope-prefix
+    #[test]
+    fn resolve_command_step_1_own_file() {
+        let m = psd1("M.psm1", &[], None);
+        let tree = [
+            ("main.ps1", "function Foo { }\nFoo\n"),
+            ("lib.ps1", "function Foo { }\n"),
+            ("mods/M/M.psd1", m.as_str()),
+            ("mods/M/M.psm1", "function Foo { }\n"),
+        ];
+        let c = cmds(&tree, &[("main.ps1", &["lib.ps1"])], &[]);
+        for n in scoped("Foo") {
+            assert_eq!(call(&c, &n, "main.ps1"), cmd_one("main.ps1", 1), "{n}");
+        }
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    /// requirements.requirement.ps-command-scope-prefix
+    #[test]
+    fn resolve_command_step_2_dot_sourced() {
+        let tree = [("main.ps1", ""), ("lib.ps1", "function Foo { }\n")];
+        let c = cmds(&tree, &[("main.ps1", &["lib.ps1"])], &[]);
+        for n in scoped("Foo") {
+            assert_eq!(call(&c, &n, "main.ps1"), cmd_one("lib.ps1", 1), "{n}");
+        }
+    }
+
+    /// Dot-sources are not followed transitively: lib.ps1's own dot-source is unseen.
+    #[test]
+    fn resolve_command_dot_source_is_not_transitive() {
+        let tree = [
+            ("main.ps1", ""),
+            ("lib.ps1", ""),
+            ("deep.ps1", "function Foo { }\n"),
+        ];
+        let c = cmds(
+            &tree,
+            &[("main.ps1", &["lib.ps1"]), ("lib.ps1", &["deep.ps1"])],
+            &[],
+        );
+        assert_eq!(call(&c, "Foo", "lib.ps1"), cmd_one("deep.ps1", 1));
+        assert_eq!(call(&c, "Foo", "main.ps1"), CommandRes::External);
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    /// requirements.requirement.ps-ambiguous-call
+    #[test]
+    fn resolve_command_step_2_several_is_many() {
+        let m = psd1("M.psm1", &[], None);
+        let tree = [
+            ("main.ps1", ""),
+            ("lib.ps1", "function Foo { }\n"),
+            ("lib2.ps1", "function Foo { }\n"),
+            ("mods/M/M.psd1", m.as_str()),
+            ("mods/M/M.psm1", "function Foo { }\n"),
+        ];
+        let c = cmds(&tree, &[("main.ps1", &["lib.ps1", "lib2.ps1"])], &[]);
+        for n in scoped("Foo") {
+            assert_eq!(call(&c, &n, "main.ps1"), CommandRes::Many, "{n}");
+        }
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    /// requirements.requirement.ps-command-scope-prefix
+    #[test]
+    fn resolve_command_step_3_own_module_sees_unexported() {
+        let c = step3(&[]);
+        for n in scoped("Priv-X") {
+            let res = call(&c, &n, "mods/Foo/Foo.psm1");
+            assert_eq!(res, cmd_one("mods/Foo/priv.ps1", 1), "{n}");
+        }
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    #[test]
+    fn resolve_command_step_3_beats_step_4() {
+        let bar = "@{\n    RootModule = 'Bar.psm1'\n}\n";
+        let c = step3(&[
+            ("mods/Bar/Bar.psd1", bar),
+            ("mods/Bar/Bar.psm1", "function Priv-X { }\n"),
+        ]);
+        let res = call(&c, "Priv-X", "mods/Foo/Foo.psm1");
+        assert_eq!(res, cmd_one("mods/Foo/priv.ps1", 1));
+        assert_eq!(
+            call(&c, "Priv-X", "main.ps1"),
+            cmd_one("mods/Bar/Bar.psm1", 1)
+        );
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    /// requirements.requirement.ps-command-scope-prefix
+    #[test]
+    fn resolve_command_step_4_module_export() {
+        let c = cmds(
+            &[QUAL_TREE[0], QUAL_TREE[1], ("scripts/run.ps1", "")],
+            &[],
+            &[],
+        );
+        assert_eq!(exported(&c, FOO), ["Get-A"]);
+        for n in scoped("Get-A") {
+            let res = call(&c, &n, "scripts/run.ps1");
+            assert_eq!(res, cmd_one("mods/Foo/Foo.psm1", 1), "{n}");
+        }
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    #[test]
+    fn resolve_command_step_4_skips_unexported() {
+        let c = cmds(&[QUAL_TREE[0], QUAL_TREE[1], ("run.ps1", "")], &[], &[]);
+        assert_eq!(call(&c, "Set-B", "run.ps1"), CommandRes::External);
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    /// requirements.requirement.ps-ambiguous-call
+    #[test]
+    fn resolve_command_step_4_several_is_many() {
+        let c = cmds(
+            &[&QUAL_TREE[..2], &QUAL_TREE[3..5], &[("run.ps1", "")]].concat(),
+            &[],
+            &[],
+        );
+        assert_eq!(call(&c, "Get-A", "run.ps1"), CommandRes::Many);
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    #[test]
+    fn resolve_command_export_through_two_paths_counts_once() {
+        let m = psd1("Foo.psm1", &["shared.ps1"], None);
+        let tree = [
+            ("mods/Foo/Foo.psd1", m.as_str()),
+            ("mods/Foo/Foo.psm1", ""),
+            ("mods/Foo/shared.ps1", "function Get-S { }\n"),
+            ("run.ps1", ""),
+        ];
+        let c = cmds(
+            &tree,
+            &[("mods/Foo/Foo.psm1", &["mods/Foo/shared.ps1"])],
+            &[],
+        );
+        assert_eq!(exported(&c, FOO), ["Get-S"]);
+        assert_eq!(
+            call(&c, "Get-S", "run.ps1"),
+            cmd_one("mods/Foo/shared.ps1", 1)
+        );
+    }
+
+    /// requirements.requirement.ps-command-resolution-order
+    #[test]
+    fn resolve_command_is_case_insensitive() {
+        let c = cmds(&[("main.ps1", "function Foo { }\n")], &[], &[]);
+        assert_eq!(call(&c, "foo", "main.ps1"), cmd_one("main.ps1", 1));
+    }
+
+    /// requirements.requirement.ps-command-scope-prefix
+    #[test]
+    fn resolve_command_env_prefix_is_kept() {
+        let c = cmds(&[("main.ps1", "function Foo { }\n")], &[], &[]);
+        let res = call(&c, "env:Foo", "main.ps1");
+        assert_eq!(res, CommandRes::External);
+        let want = Target::Unresolved {
+            name: s("env:Foo"),
+            category: "external",
+        };
+        assert_eq!(command_target(res, "env:Foo"), want);
+    }
+
+    /// requirements.requirement.ps-command-scope-prefix
+    #[test]
+    fn resolve_command_target_unqualified() {
+        let un = |name: &str, category| Target::Unresolved {
+            name: s(name),
+            category,
+        };
+        let unit = Target::Unit {
+            path: s("a.ps1"),
+            index: 2,
+        };
+        for (res, name, want) in [
+            (cmd_one("a.ps1", 2), "Foo", unit),
+            (CommandRes::Many, "Foo", un("Foo", "unknown")),
+            (CommandRes::Builtin, "Foo", un("Foo", "stdlib")),
+            (CommandRes::External, "Foo", un("Foo", "external")),
+            (CommandRes::External, "script:Foo", un("Foo", "external")),
+        ] {
+            assert_eq!(command_target(res, name), want, "{name}");
+        }
+    }
+
+    /// requirements.requirement.ps-module-qualified-command
+    #[test]
+    fn resolve_command_qualified_matching_stem() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        let res = call(&c, "Foo\\Get-A", "main.ps1");
+        assert_eq!(res, cmd_one("mods/Foo/Foo.psm1", 1));
+    }
+
+    /// requirements.requirement.ps-module-qualified-command
+    #[test]
+    fn resolve_command_qualified_is_case_insensitive() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        let res = call(&c, "foo\\GET-A", "main.ps1");
+        assert_eq!(res, cmd_one("mods/Foo/Foo.psm1", 1));
+    }
+
+    /// requirements.requirement.ps-module-qualified-command
+    /// requirements.requirement.ps-ambiguous-call
+    #[test]
+    fn resolve_command_qualified_several_is_many() {
+        let other = [
+            (
+                "other/Foo/foo.psd1",
+                "@{\n    RootModule = 'foo.psm1'\n    FunctionsToExport = 'Get-A'\n}\n",
+            ),
+            ("other/Foo/foo.psm1", "function Get-A { }\n"),
+        ];
+        let c = cmds(&[&QUAL_TREE[..], &other].concat(), &[], &[]);
+        let res = call(&c, "Foo\\Get-A", "main.ps1");
+        assert_eq!(res, CommandRes::Many);
+        let want = Target::Unresolved {
+            name: s("Foo\\Get-A"),
+            category: "unknown",
+        };
+        assert_eq!(command_target(res, "Foo\\Get-A"), want);
+    }
+
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_qualified_unexported_is_external() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        for file in ["main.ps1", "mods/Foo/Foo.psm1"] {
+            let res = call(&c, "Foo\\Set-B", file);
+            assert_eq!(res, CommandRes::External, "{file}");
+            let want = Target::Unresolved {
+                name: s("Foo\\Set-B"),
+                category: "external",
+            };
+            assert_eq!(command_target(res, "Foo\\Set-B"), want);
+        }
+    }
+
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_qualified_other_stem_export_is_external() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        let res = call(&c, "Foo\\Get-C", "main.ps1");
+        assert_eq!(res, CommandRes::External);
+        let want = Target::Unresolved {
+            name: s("Foo\\Get-C"),
+            category: "external",
+        };
+        assert_eq!(command_target(res, "Foo\\Get-C"), want);
+    }
+
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_qualified_data_file_is_no_stem() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        assert_eq!(call(&c, "Data\\Get-A", "main.ps1"), CommandRes::External);
+    }
+
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_qualified_unmatched_other_is_external() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        for n in [
+            "CimCmdlets\\Get-CimInstance",
+            "ThreadJob\\Start-ThreadJob",
+            "Contoso\\Get-X",
+            "Microsoft.PowerShell.Utility\\Get-ChildItem",
+        ] {
+            let res = call(&c, n, "main.ps1");
+            assert_eq!(res, CommandRes::External, "{n}");
+            let want = Target::Unresolved {
+                name: s(n),
+                category: "external",
+            };
+            assert_eq!(command_target(res, n), want);
+        }
+    }
+
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_qualified_unmatched_inbox_is_builtin() {
+        let c = cmds(&QUAL_TREE, &[], &[]);
+        for n in [
+            "Microsoft.PowerShell.Utility\\Write-Output",
+            "microsoft.powershell.archive\\EXPAND-ARCHIVE",
+        ] {
+            let res = call(&c, n, "main.ps1");
+            assert_eq!(res, CommandRes::Builtin, "{n}");
+            let want = Target::Unresolved {
+                name: s(n),
+                category: "stdlib",
+            };
+            assert_eq!(command_target(res, n), want);
+        }
+    }
+
+    /// requirements.requirement.ps-module-qualified-command
+    /// requirements.requirement.ps-unmatched-qualified-command
+    #[test]
+    fn resolve_command_qualified_scanned_inbox_stem_unexported_stays_builtin() {
+        let c = inbox_stem("'Get-Mine'");
+        let psm = "mods/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psm1";
+        let mine = call(&c, "Microsoft.PowerShell.Utility\\Get-Mine", "main.ps1");
+        assert_eq!(mine, cmd_one(psm, 1));
+        let wo = call(&c, "Microsoft.PowerShell.Utility\\Write-Output", "main.ps1");
+        assert_eq!(wo, CommandRes::Builtin);
+    }
+
+    /// requirements.requirement.ps-module-qualified-command
+    #[test]
+    fn resolve_command_qualified_scanned_inbox_stem_exported_is_one() {
+        let c = inbox_stem("@('Get-Mine', 'Write-Output')");
+        let psm = "mods/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psm1";
+        let wo = call(&c, "Microsoft.PowerShell.Utility\\Write-Output", "main.ps1");
+        assert_eq!(wo, cmd_one(psm, 2));
+    }
+
+    /// requirements.requirement.ps-builtin-cmdlet-call — the table cites
+    /// apg/.scratch/ps7-builtin-cmdlets.md (PowerShell 7.6 LTS).
+    #[test]
+    fn resolve_command_unmatched_builtin_is_stdlib() {
+        let c = cmds(&[("main.ps1", "")], &[], &[]);
+        for (n, bare) in [
+            ("Get-ChildItem", "Get-ChildItem"),
+            ("get-childitem", "get-childitem"),
+            ("GET-CHILDITEM", "GET-CHILDITEM"),
+            ("Compress-Archive", "Compress-Archive"),
+            ("Clear-Host", "Clear-Host"),
+            ("ls", "ls"),
+            ("gcb", "gcb"),
+            ("script:gci", "gci"),
+        ] {
+            let res = call(&c, n, "main.ps1");
+            assert_eq!(res, CommandRes::Builtin, "{n}");
+            let want = Target::Unresolved {
+                name: s(bare),
+                category: "stdlib",
+            };
+            assert_eq!(command_target(res, n), want);
+        }
+    }
+
+    /// requirements.requirement.ps-external-command-call — the table cites
+    /// apg/.scratch/ps7-builtin-cmdlets.md (PowerShell 7.6 LTS).
+    #[test]
+    fn resolve_command_unmatched_other_is_external() {
+        let c = cmds(&[("main.ps1", "")], &[], &[]);
+        for n in [
+            "git",
+            "git.exe",
+            "Invoke-Pester",
+            "Get-CimInstance",
+            "Set-PSReadLineOption",
+        ] {
+            let res = call(&c, n, "main.ps1");
+            assert_eq!(res, CommandRes::External, "{n}");
+            let want = Target::Unresolved {
+                name: s(n),
+                category: "external",
+            };
+            assert_eq!(command_target(res, n), want);
+        }
+    }
+
+    /// requirements.requirement.ps-builtin-cmdlet-call
+    #[test]
+    fn resolve_command_script_function_shadows_builtin() {
+        let c = cmds(&[("main.ps1", "function Get-ChildItem { }\n")], &[], &[]);
+        assert_eq!(
+            call(&c, "Get-ChildItem", "main.ps1"),
+            cmd_one("main.ps1", 1)
+        );
     }
 }
