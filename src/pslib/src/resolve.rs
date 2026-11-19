@@ -120,12 +120,23 @@ fn dot_source(node: Node, text: &str) -> Option<SiteKind> {
         return None;
     }
     let operand = node.child_by_field_name("command")?;
-    let block = operand.named_child_count() == 1
+    (!is_script_block(operand)).then(|| SiteKind::DotSource(paths::path_arg(operand, text)))
+}
+
+/// Whether an invocation operator's operand is a single script block.
+fn is_script_block(operand: Node) -> bool {
+    operand.named_child_count() == 1
         && operand
             .named_child(0)
-            .is_some_and(|n| n.kind() == "script_block");
-    (!block).then(|| SiteKind::DotSource(paths::path_arg(operand, text)))
+            .is_some_and(|n| n.kind() == "script_block")
 }
+
+/// The command names that import a module (case-insensitive).
+const IMPORT_NAMES: &[&str] = &[
+    "Import-Module",
+    "ipmo",
+    "Microsoft.PowerShell.Core\\Import-Module",
+];
 
 /// An `Import-Module` command's module argument, bound left to right.
 fn import_module(cmd: Node, text: &str) -> Option<SiteKind> {
@@ -133,12 +144,7 @@ fn import_module(cmd: Node, text: &str) -> Option<SiteKind> {
     let name = cmd
         .child_by_field_name("name")
         .filter(|n| n.kind() == "command_name")?;
-    let names = [
-        "Import-Module",
-        "ipmo",
-        "Microsoft.PowerShell.Core\\Import-Module",
-    ];
-    if !names.iter().any(|m| m.eq_ignore_ascii_case(t(name))) {
+    if !IMPORT_NAMES.iter().any(|m| m.eq_ignore_ascii_case(t(name))) {
         return None;
     }
     let (mut pending, mut bound, mut positional) = (None, Vec::new(), None);
@@ -636,4 +642,159 @@ pub fn command_target(res: CommandRes, name: &str) -> Target {
         name: n.to_string(),
         category,
     }
+}
+
+/// What an invocation site calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallKind {
+    Command {
+        name: String,
+    },
+    CallLiteral {
+        arg: PathArg,
+        written: String,
+    },
+    FuncValue,
+    Static {
+        type_name: String,
+        member: String,
+        argc: usize,
+    },
+    This {
+        member: String,
+        argc: usize,
+    },
+    Instance {
+        member: String,
+        argc: usize,
+    },
+}
+
+/// An invocation site and its raw on-disk byte offset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallSite {
+    pub kind: CallKind,
+    pub raw_offset: usize,
+}
+
+/// Every invocation outside ERROR regions, in source order.
+pub fn call_sites(src: &Decoded, tree: &Tree) -> Vec<CallSite> {
+    let mut out = Vec::new();
+    walk_calls(tree.root_node(), src, &mut out);
+    out
+}
+
+fn walk_calls(node: Node, src: &Decoded, out: &mut Vec<CallSite>) {
+    // A site inside an ERROR node (the whole-file ERROR root included) is skipped.
+    if node.is_error() {
+        return;
+    }
+    let text = &src.text;
+    let kind = match node.kind() {
+        "command" => command_call(node, text),
+        "invocation_operator_command" => operator_call(node, text),
+        "invocation_expression" => member_call(node, text),
+        _ => None,
+    };
+    if let Some(kind) = kind {
+        out.push(CallSite {
+            kind,
+            raw_offset: src.raw_offset(node.start_byte()),
+        });
+    }
+    let mut c = node.walk();
+    for child in node.children(&mut c) {
+        walk_calls(child, src, out);
+    }
+}
+
+/// A command named by a `command_name`, except module imports and `Import-DscResource`.
+fn command_call(cmd: Node, text: &str) -> Option<CallKind> {
+    let name = cmd
+        .child_by_field_name("name")
+        .filter(|n| n.kind() == "command_name")?;
+    let name = &text[name.byte_range()];
+    let excluded = IMPORT_NAMES.iter().chain(&["Import-DscResource"]);
+    if excluded.into_iter().any(|m| m.eq_ignore_ascii_case(name)) {
+        return None;
+    }
+    Some(CallKind::Command {
+        name: name.to_string(),
+    })
+}
+
+/// `&` on a static operand is a call literal, on anything else a function value;
+/// `.` on a script block is a function value (any other `.` is a dot-source).
+fn operator_call(node: Node, text: &str) -> Option<CallKind> {
+    let op = node.child_by_field_name("operator")?.kind();
+    let operand = node.child_by_field_name("command")?;
+    match op {
+        "&" => Some(match paths::path_arg(operand, text) {
+            arg @ PathArg::Static { .. } => {
+                let w = text[operand.byte_range()].trim();
+                let unquoted = ['\'', '"']
+                    .iter()
+                    .find_map(|q| w.strip_prefix(*q)?.strip_suffix(*q));
+                CallKind::CallLiteral {
+                    arg,
+                    written: unquoted.unwrap_or(w).to_string(),
+                }
+            }
+            PathArg::Computed => CallKind::FuncValue,
+        }),
+        "." if is_script_block(operand) => Some(CallKind::FuncValue),
+        _ => None,
+    }
+}
+
+/// `[T]::m(...)` is Static, `$this.m(...)` This, any other `x.m(...)` Instance.
+fn member_call(node: Node, text: &str) -> Option<CallKind> {
+    let access = node
+        .child_by_field_name("function")
+        .filter(|n| n.kind() == "member_access")?;
+    let args = node
+        .child_by_field_name("arguments")
+        .filter(|n| n.kind() == "argument_list")?;
+    let object = access.child_by_field_name("object")?;
+    let member = access
+        .child_by_field_name("member")
+        .filter(|n| n.kind() == "identifier")?;
+    let member = text[member.byte_range()].to_string();
+    let mut c = args.walk();
+    let argc = args
+        .named_children(&mut c)
+        .filter(|n| n.kind() != "comment")
+        .count();
+    let obj = &text[object.byte_range()];
+    match access.child_by_field_name("operator")?.kind() {
+        "::" if object.kind() == "type_literal" => Some(CallKind::Static {
+            type_name: obj
+                .strip_prefix('[')
+                .and_then(|t| t.strip_suffix(']'))
+                .unwrap_or(obj)
+                .trim()
+                .to_string(),
+            member,
+            argc,
+        }),
+        "." if object.kind() == "variable" && obj.eq_ignore_ascii_case("$this") => {
+            Some(CallKind::This { member, argc })
+        }
+        "." => Some(CallKind::Instance { member, argc }),
+        _ => None,
+    }
+}
+
+/// The index of the innermost ScriptBody, Function, Method or Constructor unit
+/// whose span holds `raw_offset`; the `<script>` body (0) when no other does.
+pub fn enclosing(file: &FileUnits, raw_offset: usize) -> usize {
+    let callers = file.units.iter().enumerate().filter(|(_, u)| {
+        matches!(
+            u.kind,
+            UnitKind::ScriptBody | UnitKind::Function | UnitKind::Method | UnitKind::Constructor
+        ) && (u.span.start..u.span.end).contains(&raw_offset)
+    });
+    callers
+        .min_by_key(|(_, u)| u.span.end - u.span.start)
+        .map_or(0, |(i, _)| i)
 }
