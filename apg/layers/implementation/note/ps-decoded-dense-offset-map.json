@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-decoded-dense-offset-map",
+  "body": "Decoded keeps one usize raw offset per decoded byte, so its offset map costs about eight times the decoded text in memory. Limit: memory grows linearly with script size at that factor. Upgrade to a sparse map (offsets only where raw and decoded positions diverge) when large scripts make scan memory a concern.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.source.Decoded",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

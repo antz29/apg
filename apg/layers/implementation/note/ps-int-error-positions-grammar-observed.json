@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-int-error-positions-grammar-observed",
+  "body": "The expected error-region positions in this test are what the pinned woodruffw grammar reports, not positions derived from a rule (e.g. `$x = )` at end of file reports at `=`, mid-file at `)`). Limit: a grammar pin bump can move them. Re-derive them from the new grammar whenever the grammar pin changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.tests.int.diag_error_regions_over_parsed_sources",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
