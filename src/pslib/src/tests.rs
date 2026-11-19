@@ -21,7 +21,7 @@ use crate::units::{
     assign_ordinals, bare_name, param_type, property_type_name, scan_units, FileUnits, Unit,
     UnitKind,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tree_sitter::Node;
 
@@ -1177,6 +1177,152 @@ fn command_ancestry(src: &str) -> Vec<(&str, bool)> {
                 up = p.parent();
             }
             (&src[name.byte_range()], inside)
+        })
+        .collect()
+}
+
+/// The call-and-type fixture's main script, scanned last: two dot-sources, a typed class,
+/// a calling function, then every top-level command, operator and member call form.
+const CALL_MAIN: &str = ". ./lib/one.ps1\n. ./types.ps1\nclass Widget : Base, IDisposable {\n    [Color]$c\n    [Shape]$s\n    [System.String]$n\n    [hashtable]$h\n    [ciminstance]$ci\n}\nfunction Local1 { Get-P }\nLocal1\nscript:local1\nDup\nGet-P\nPriv-B\nGet-A\nGet-ChildItem\nls\ngit status\n.\\tools\\run.ps1\n./tools/run.ps1\nFoo\\Get-A\nBar\\Get-A\nFoo\\Priv-B\nMicrosoft.PowerShell.Utility\\Write-Output\nNope\\Get-A\n& ./lib/two.ps1\n& 'Local1'\n& ./missing.ps1\n& { 1 }\n& $sb\n. { 2 }\n[Pair]::new(1)\n[Pair]::new()\n[Pair]::Add(1)\n[Color]::Red()\n[System.IO.Path]::Combine('a','b')\n[math]::Max(1, 2)\n[Contoso.X]::Y()\n$x.Go(1)\n";
+
+/// The call-and-type fixture: Foo (exporting Get-* of its root module and the script that
+/// dot-sources), Bar (exporting all), a dot-sourced and an undotted Dup/Shape library, a
+/// function-less script, the types script and [`CALL_MAIN`].
+const CALL_TREE: [(&str, &str); 10] = [
+    (
+        "mods/Foo/Foo.psd1",
+        "@{\n    RootModule = 'Foo.psm1'\n    FunctionsToExport = 'Get-*'\n}\n",
+    ),
+    (
+        "mods/Foo/Foo.psm1",
+        "function Get-A { }\nfunction Priv-B { }\n. $PSScriptRoot\\priv.ps1\n",
+    ),
+    ("mods/Foo/priv.ps1", "function Get-P { }\n"),
+    ("mods/Bar/Bar.psd1", "@{\n    RootModule = 'Bar.psm1'\n}\n"),
+    ("mods/Bar/Bar.psm1", "function Get-A { }\nfunction Dup { }\n"),
+    ("lib/one.ps1", "function Dup { }\nclass Shape { }\n"),
+    ("lib/two.ps1", "function Dup { }\nclass Shape { }\n"),
+    ("tools/run.ps1", "$v = 1\n"),
+    (
+        "types.ps1",
+        "class Base { }\nenum Color { Red; Green }\nclass Pair {\n    Pair([int]$x) { }\n    Add([int]$a) { }\n    Add([int]$a, [int]$b) { }\n    Run() {\n        $this.Add(1)\n        $this.Add(1, 2, 3)\n        $this.Nope()\n    }\n}\n",
+    ),
+    ("main.ps1", CALL_MAIN),
+];
+
+/// Each Struct/Function record's id in `recs` to its `identity::record_key(parent, name)`.
+fn record_keys(recs: &[Rec]) -> HashMap<String, String> {
+    recs.iter()
+        .filter_map(|r| match r {
+            Rec::Struct {
+                id, parent, name, ..
+            }
+            | Rec::Function {
+                id, parent, name, ..
+            } => Some((id.clone(), record_key(parent, name))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `recs`' call, use and Unresolved records in order, each `from`/`to` that `keys` maps
+/// replaced by its key.
+fn keyed_facts(recs: &[Rec], keys: &HashMap<String, String>) -> Vec<Rec> {
+    let k = |x: &String| keys.get(x).unwrap_or(x).clone();
+    recs.iter()
+        .filter_map(|r| {
+            Some(match r {
+                Rec::Calls { from, to } => Rec::Calls {
+                    from: k(from),
+                    to: k(to),
+                },
+                Rec::UnresolvedCall { from, to } => Rec::UnresolvedCall {
+                    from: k(from),
+                    to: to.clone(),
+                },
+                Rec::UnresolvedUse { from, to } => Rec::UnresolvedUse {
+                    from: k(from),
+                    to: to.clone(),
+                },
+                Rec::Uses {
+                    from,
+                    to,
+                    properties,
+                } => Rec::Uses {
+                    from: k(from),
+                    to: k(to),
+                    properties: properties.clone(),
+                },
+                Rec::Unresolved { .. } => r.clone(),
+                _ => return None,
+            })
+        })
+        .collect()
+}
+
+/// The key of the Struct or Function record named `name` located at `path` in `recs`.
+fn key_at(recs: &[Rec], path: &str, name: &str) -> String {
+    recs.iter()
+        .find_map(|r| match r {
+            Rec::Struct {
+                parent,
+                name: n,
+                path: p,
+                ..
+            }
+            | Rec::Function {
+                parent,
+                name: n,
+                path: p,
+                ..
+            } if p == path && n == name => Some(record_key(parent, n)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no {name} at {path}"))
+}
+
+/// The index of `path`'s script Struct record in `recs`.
+fn script_at(recs: &[Rec], path: &str) -> usize {
+    let id = script_id(recs, path);
+    recs.iter()
+        .position(|r| matches!(r, Rec::Struct { id: i, .. } if *i == id))
+        .expect("script Struct")
+}
+
+/// A Calls record from `from` to `to`.
+fn calls(from: &str, to: &str) -> Rec {
+    Rec::Calls {
+        from: s(from),
+        to: s(to),
+    }
+}
+
+/// A property-free (type) Uses record from `from` to `to`.
+fn type_use(from: &str, to: &str) -> Rec {
+    Rec::Uses {
+        from: s(from),
+        to: s(to),
+        properties: Default::default(),
+    }
+}
+
+/// The Unresolved record of `fqn` with `category`, then `edge` naming it.
+fn unresolved_then(fqn: &str, category: &str, edge: Rec) -> [Rec; 2] {
+    [
+        Rec::Unresolved {
+            fqn: s(fqn),
+            category: s(category),
+        },
+        edge,
+    ]
+}
+
+/// The (fqn, category) of every Unresolved record in `recs`.
+fn unresolved_of(recs: &[Rec]) -> Vec<(String, String)> {
+    recs.iter()
+        .filter_map(|r| match r {
+            Rec::Unresolved { fqn, category } => Some((fqn.clone(), category.clone())),
+            _ => None,
         })
         .collect()
 }
@@ -5699,5 +5845,276 @@ mod int {
             })
             .collect();
         assert_eq!(got, want);
+    }
+
+    /// The call-and-type fixture's call and type records, keyed: type references then
+    /// call sites per script, edges deduplicated, each Unresolved once before its first edge.
+    #[test]
+    fn finish_emits_call_and_type_records() {
+        for (p, src) in CALL_TREE {
+            assert_eq!(errors(src), Vec::<String>::new(), "{p}");
+        }
+        let e = emit_tree(&CALL_TREE);
+        let recs = e.records();
+        let keys = record_keys(recs);
+        let (main, body, widget, local1) = (
+            ".main.ps1",
+            ".main.ps1.<script>",
+            ".main.ps1.Widget",
+            ".main.ps1.Local1",
+        );
+        let pair = ".types.ps1.Pair";
+        let add_int = format!("{pair}.Add(int)");
+        assert_eq!(add_int, ".types.ps1.Pair.Add(int)");
+        let get_p = key_at(recs, "/r/mods/Foo/priv.ps1", "Get-P");
+        let foo_a = key_at(recs, "/r/mods/Foo/Foo.psm1", "Get-A");
+        let bar_a = key_at(recs, "/r/mods/Bar/Bar.psm1", "Get-A");
+        let uc = |to: &str| Rec::UnresolvedCall {
+            from: s(body),
+            to: s(to),
+        };
+        let uu = |to: &str| Rec::UnresolvedUse {
+            from: s(widget),
+            to: s(to),
+        };
+        // main.ps1's dot-sources keep their kind beside the property-free type uses
+        let mut want = vec![
+            uses(main, "/r/lib/one.ps1", "dot-source"),
+            uses(main, "/r/types.ps1", "dot-source"),
+            // property types in order, then bases; Shape at step 2 (only one.ps1 is dot-sourced)
+            type_use(widget, ".types.ps1.Color"),
+            type_use(widget, "lib.one.ps1.Shape"),
+        ];
+        want.extend(unresolved_then(
+            "System.String",
+            "stdlib",
+            uu("System.String"),
+        ));
+        // accelerators: hashtable is System.Collections.Hashtable, ciminstance outside System.
+        want.extend(unresolved_then("hashtable", "stdlib", uu("hashtable")));
+        want.extend(unresolved_then(
+            "ciminstance",
+            "external",
+            uu("ciminstance"),
+        ));
+        want.push(type_use(widget, ".types.ps1.Base"));
+        want.extend(unresolved_then(
+            "IDisposable",
+            "external",
+            uu("IDisposable"),
+        ));
+        // Local1, script:local1 and & 'Local1' give one edge; Dup at step 2 beats Bar's
+        // export and two.ps1; Get-P is Foo's step-4 export through dot-sourced priv.ps1
+        want.extend([
+            calls(local1, &get_p),
+            calls(body, local1),
+            calls(body, "lib.one.ps1.Dup"),
+            calls(body, &get_p),
+        ]);
+        // Get-ChildItem (engine-module cmdlet) and ls (Windows-only default alias): the
+        // PowerShell 7.6 table, apg/.scratch/ps7-builtin-cmdlets.md
+        for (name, category) in [
+            ("Priv-B", "external"),
+            ("Get-A", "unknown"),
+            ("Get-ChildItem", "stdlib"),
+            ("ls", "stdlib"),
+            ("git", "external"),
+        ] {
+            want.extend(unresolved_then(name, category, uc(name)));
+        }
+        // requirements.requirement.ps-path-command-call: the two path commands give one edge
+        want.extend([
+            calls(body, "tools.run.ps1.<script>"),
+            calls(body, &foo_a),
+            calls(body, &bar_a),
+        ]);
+        for (name, category) in [
+            ("Foo\\Priv-B", "external"),
+            ("Microsoft.PowerShell.Utility\\Write-Output", "stdlib"),
+            ("Nope\\Get-A", "external"),
+        ] {
+            want.extend(unresolved_then(name, category, uc(name)));
+        }
+        want.push(calls(body, "lib.two.ps1.<script>"));
+        want.extend(unresolved_then(
+            "./missing.ps1",
+            "external",
+            uc("./missing.ps1"),
+        ));
+        for site in ["& { 1 }", "& $sb", ". { 2 }"] {
+            let at = CALL_MAIN.find(site).expect(site);
+            let n = format!("<nameless@main.ps1:{at}>");
+            want.extend(unresolved_then(&n, "func-value", uc(&n)));
+        }
+        want.push(calls(body, &format!("{pair}.new")));
+        want.extend(unresolved_then("Pair.new", "unknown", uc("Pair.new")));
+        want.push(calls(body, &add_int));
+        for (name, category) in [
+            ("Color.Red", "unknown"),
+            ("System.IO.Path.Combine", "stdlib"),
+            ("math.Max", "external"),
+            ("Contoso.X.Y", "external"),
+            ("Go", "unknown"),
+        ] {
+            want.extend(unresolved_then(name, category, uc(name)));
+        }
+        let at = script_at(recs, "/r/main.ps1");
+        assert_eq!(keyed_facts(&recs[at..], &keys), want);
+        // types.ps1: Run's $this calls by name and arity
+        let run = format!("{pair}.Run");
+        let this = |to: &str| Rec::UnresolvedCall {
+            from: run.clone(),
+            to: s(to),
+        };
+        let mut want = vec![calls(&run, &add_int)];
+        want.extend(unresolved_then("Add", "unknown", this("Add")));
+        want.extend(unresolved_then("Nope", "unknown", this("Nope")));
+        let types = script_at(recs, "/r/types.ps1");
+        assert_eq!(keyed_facts(&recs[types..at], &keys), want);
+        let fqns: Vec<String> = unresolved_of(recs).into_iter().map(|(f, _)| f).collect();
+        let distinct: BTreeSet<&String> = fqns.iter().collect();
+        assert_eq!(distinct.len(), fqns.len(), "{fqns:?}");
+    }
+
+    /// A kept Calls/Uses into a dropped unit names that unit's full-run key.
+    #[test]
+    fn retain_targets_keeps_main_call_and_type_records_retargeting_dropped_units() {
+        let full = emit_tree(&CALL_TREE);
+        let recs = full.records();
+        let keys = record_keys(recs);
+        let mut main = emit_tree(&CALL_TREE);
+        main.retain_targets(&[s("/r/main.ps1")].into());
+        let kept = record_keys(main.records());
+        let dropped: HashMap<String, String> = keys
+            .iter()
+            .filter(|(id, _)| !kept.contains_key(*id))
+            .map(|(id, k)| (id.clone(), k.clone()))
+            .collect();
+        let at = script_at(recs, "/r/main.ps1");
+        let got = keyed_facts(main.records(), &HashMap::new());
+        assert_eq!(got, keyed_facts(&recs[at..], &dropped));
+        let retargeted: BTreeSet<&str> = got
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Calls { to, .. } | Rec::Uses { to, .. }
+                    if !kept.contains_key(to) && !to.starts_with("/r/") =>
+                {
+                    Some(to.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        let get_p = key_at(recs, "/r/mods/Foo/priv.ps1", "Get-P");
+        let foo_a = key_at(recs, "/r/mods/Foo/Foo.psm1", "Get-A");
+        let bar_a = key_at(recs, "/r/mods/Bar/Bar.psm1", "Get-A");
+        let want: BTreeSet<&str> = [
+            "lib.one.ps1.Dup",
+            ".types.ps1.Pair.Add(int)",
+            "lib.two.ps1.<script>",
+            "tools.run.ps1.<script>",
+            ".types.ps1.Pair.new",
+            ".types.ps1.Color",
+            ".types.ps1.Base",
+            "lib.one.ps1.Shape",
+            &get_p,
+            &foo_a,
+            &bar_a,
+        ]
+        .into();
+        assert_eq!(retargeted, want);
+        // lib/two.ps1 alone keeps no main.ps1 call or type record
+        let mut two = emit_tree(&CALL_TREE);
+        two.retain_targets(&[s("/r/lib/two.ps1")].into());
+        assert_eq!(keyed_facts(two.records(), &HashMap::new()), []);
+    }
+
+    /// requirements.requirement.ps-unresolved-category-precedence
+    #[test]
+    fn finish_unresolved_category_precedence_across_sites() {
+        // sort and where are PowerShell 7.6 default aliases (where cross-platform, of
+        // Where-Object): apg/.scratch/ps7-builtin-cmdlets.md
+        let mpu = "Microsoft.PowerShell.Utility";
+        let (import, command) = (
+            "Import-Module Microsoft.PowerShell.Utility\n",
+            "Microsoft.PowerShell.Utility\n",
+        );
+        let cases = vec![
+            (
+                "sort",
+                "unknown",
+                vec![
+                    vec![("a.ps1", "sort\n"), ("b.ps1", "$x.sort()\n")],
+                    vec![("a.ps1", "$x.sort()\n"), ("b.ps1", "sort\n")],
+                    vec![("a.ps1", "sort; $x.sort()\n")],
+                    vec![("a.ps1", "$x.sort(); sort\n")],
+                ],
+            ),
+            (
+                mpu,
+                "external",
+                vec![
+                    vec![("c.ps1", import), ("d.ps1", command)],
+                    vec![("c.ps1", command), ("d.ps1", import)],
+                ],
+            ),
+            (
+                "Shape",
+                "unknown",
+                vec![
+                    vec![
+                        ("e.ps1", "class Shape { }\n"),
+                        ("f.ps1", "class Shape { }\n"),
+                        ("g.ps1", "[Shape]::Make()\n"),
+                        ("h.ps1", "Shape\n"),
+                    ],
+                    vec![
+                        ("e.ps1", "class Shape { }\n"),
+                        ("f.ps1", "class Shape { }\n"),
+                        ("g.ps1", "Shape\n"),
+                        ("h.ps1", "[Shape]::Make()\n"),
+                    ],
+                ],
+            ),
+            (
+                "where",
+                "unknown",
+                vec![
+                    vec![("i.ps1", "where { $_ }\n"), ("j.ps1", "$x.where({ $_ })\n")],
+                    vec![("i.ps1", "$x.where({ $_ })\n"), ("j.ps1", "where { $_ }\n")],
+                    vec![("i.ps1", "where { $_ }; $x.where({ $_ })\n")],
+                    vec![("i.ps1", "$x.where({ $_ }); where { $_ }\n")],
+                ],
+            ),
+        ];
+        let named = |recs: &[Rec], name: &str| -> Vec<(String, String)> {
+            unresolved_of(recs)
+                .into_iter()
+                .filter(|(f, _)| f == name)
+                .collect()
+        };
+        for (name, category, trees) in &cases {
+            for tree in trees {
+                for (p, src) in tree {
+                    assert_eq!(errors(src), Vec::<String>::new(), "{p}");
+                }
+                let e = emit_tree(tree);
+                let want = [(s(name), s(category))];
+                assert_eq!(named(e.records(), name), want, "{tree:?}");
+            }
+        }
+        // --targets: the file whose own site is the lower category keeps its edge and the
+        // whole-tree category
+        for ((name, category, trees), target) in
+            cases.iter().zip(["a.ps1", "c.ps1", "h.ps1", "i.ps1"])
+        {
+            let mut e = emit_tree(&trees[0]);
+            e.retain_targets(&[format!("/r/{target}")].into());
+            let recs = e.records();
+            assert_eq!(named(recs, name), [(s(name), s(category))], "{target}");
+            let edges = recs.iter().filter(|r| {
+                matches!(r, Rec::UnresolvedCall { to, .. } | Rec::UnresolvedUse { to, .. } if to == name)
+            });
+            assert_eq!(edges.count(), 1, "{target}");
+        }
     }
 }
