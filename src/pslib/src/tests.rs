@@ -8,6 +8,9 @@ use crate::identity::{
 use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, ManifestKeys, ModuleMap};
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
+use crate::resolve::{
+    import_arg, module_category, nameless_key, DepKind, ImportArg, INBOX_MODULES,
+};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
 use crate::units::{
@@ -2058,6 +2061,106 @@ mod unit {
         let odd: std::collections::BTreeSet<String> = ["d.(x)/a.ps1".to_string()].into();
         assert!(is_disambiguated("m.s.F//d.(x)/a.ps1:7", &odd));
         assert!(!is_disambiguated("m.s.F//(x)/a.ps1:7", &odd));
+    }
+
+    #[test]
+    fn resolve_import_arg_kind() {
+        assert_eq!(import_arg(PathArg::Computed), ImportArg::Computed);
+        assert_eq!(
+            import_arg(st("Foo.psm1", true)),
+            ImportArg::Path(st("Foo.psm1", true))
+        );
+        // Extension checks ignore ASCII case (Foo.PSD1).
+        for t in [
+            r"lib\Foo.psm1",
+            "lib/Foo",
+            r".\Foo",
+            "./Foo",
+            ".Foo",
+            "Foo.psm1",
+            "Foo.PSD1",
+            "Foo.ps1",
+            "Foo.dll",
+        ] {
+            assert_eq!(
+                import_arg(st(t, false)),
+                ImportArg::Path(st(t, false)),
+                "{t:?}"
+            );
+        }
+        for t in [
+            "Foo",
+            "Foo.Bar",
+            "Microsoft.PowerShell.Utility",
+            "PSReadLine",
+        ] {
+            assert_eq!(import_arg(st(t, false)), ImportArg::Name(s(t)), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_dep_kind_as_str() {
+        assert_eq!(DepKind::DotSource.as_str(), "dot-source");
+        assert_eq!(DepKind::ImportModule.as_str(), "import-module");
+    }
+
+    // In-box list per apg/.scratch/ps7-builtin-cmdlets.md (PowerShell 7.6 LTS, source tag v7.6.0).
+    #[test]
+    fn resolve_inbox_modules_and_category() {
+        let suffixes = [
+            "Core",
+            "Management",
+            "Utility",
+            "Security",
+            "Host",
+            "Diagnostics",
+            "Archive",
+            "PSResourceGet",
+            "ThreadJob",
+        ];
+        let want: Vec<String> = suffixes
+            .iter()
+            .map(|x| format!("Microsoft.PowerShell.{x}"))
+            .collect();
+        assert_eq!(
+            INBOX_MODULES,
+            want.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        let lower: BTreeSet<String> = INBOX_MODULES.iter().map(|m| m.to_lowercase()).collect();
+        assert_eq!(lower.len(), INBOX_MODULES.len());
+        // Case-insensitive whole-name match.
+        for m in INBOX_MODULES {
+            for v in [m.to_string(), m.to_lowercase(), m.to_uppercase()] {
+                assert_eq!(module_category(&v), "stdlib", "{v:?}");
+            }
+        }
+        for v in [
+            "microsoft.powershell.management",
+            "MICROSOFT.POWERSHELL.THREADJOB",
+            "Microsoft.PowerShell.psresourceget",
+        ] {
+            assert_eq!(module_category(v), "stdlib", "{v:?}");
+        }
+        for v in [
+            "Microsoft.PowerShell.SecretManagement",
+            "Microsoft.PowerShell.Crescendo",
+            "PSReadLine",
+            "CimCmdlets",
+            "ThreadJob",
+            "Pester",
+            "Microsoft.PowerShell",
+            "Microsoft.PowerShell.Utility.Extra",
+            "Microsoft.PowerShellX",
+            "MicrosoftXPowerShell.Utility",
+        ] {
+            assert_eq!(module_category(v), "external", "{v:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_nameless_key() {
+        assert_eq!(nameless_key("dir/a.ps1", 17), "<nameless@dir/a.ps1:17>");
+        assert_eq!(nameless_key("a.ps1", 0), "<nameless@a.ps1:0>");
     }
 }
 
