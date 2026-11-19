@@ -264,6 +264,111 @@ fn assert_module_tree(root: &str, recs: &[serde_json::Value]) {
     );
 }
 
+/// The UTF-16LE-with-BOM script of the unit-identity tree: its function after a non-ASCII line.
+const U_PS1: &str = "# ünï 😀\nfunction Get-U {\n    'é'\n}\n";
+
+/// The unit-identity tree's scripts handed to `--targets` one at a time.
+const UNIT_TARGETS: [&str; 7] = [
+    "x.a.ps1",
+    ".x/a.ps1",
+    "a/b.ps1",
+    "m/s.ps1",
+    "build.ps1",
+    "build/x.ps1",
+    "mods/Foo/Foo.psm1",
+];
+
+/// Writes the unit-identity tree: a manifest module, the script/Module/function
+/// collisions, the build pair and a UTF-16LE-with-BOM script.
+fn unit_tree(dir: &Scratch) {
+    dir.write(
+        "mods/Foo/Foo.psd1",
+        b"@{\n    RootModule = 'Foo.psm1'\n    NestedModules = @('lib/Helpers.ps1')\n}\n",
+    );
+    dir.write(
+        "mods/Foo/lib/Helpers.ps1",
+        b"function global:Get-Foo {\n    function Inner { }\n}\nfilter Bar { $_ }\nworkflow Baz { }\n",
+    );
+    dir.write(
+        "mods/Foo/Foo.psm1",
+        b"class C {\n    [E]$p\n    C() { }\n    M() { }\n    M([int]$x) { }\n}\nenum E { A; B }\n",
+    );
+    dir.write("x.a.ps1", b"Get-A\n");
+    dir.write(".x/a.ps1", b"Get-A\n");
+    dir.write("a/b.ps1", b"Get-A\n");
+    dir.write("a.b.ps1/f.ps1", b"Get-A\n");
+    dir.write("m/s.ps1", b"function C.M { }\nclass C {\n    M() { }\n}\n");
+    dir.write("build.ps1", b"function F {}\n");
+    dir.write("build/x.ps1", b"function F {}\n");
+    dir.write("u.ps1", &utf16le_bom(U_PS1));
+}
+
+/// The string field `k` of record `r` (empty when absent).
+fn str_of<'r>(r: &'r serde_json::Value, k: &str) -> &'r str {
+    r[k].as_str().unwrap_or_default()
+}
+
+/// A Function record's params; an empty list is omitted from the JSONL.
+fn params_of(r: &serde_json::Value) -> Vec<&str> {
+    r["params"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|p| p.as_str()).collect())
+        .unwrap_or_default()
+}
+
+/// Phase 7's `ps` rendering re-implemented over `recs`: each Module/Struct/Function
+/// record's (key, `ps.` + key) — Module key = fqn, Struct key = parent.name verbatim,
+/// Functions grouped by exact (parent, name) as the ingestor's render_function_fqns does.
+fn ps_rendered(recs: &[serde_json::Value]) -> Vec<(String, String)> {
+    let mut groups: std::collections::HashMap<(&str, &str), usize> = Default::default();
+    for r in recs.iter().filter(|r| r["type"] == "function") {
+        *groups
+            .entry((str_of(r, "parent"), str_of(r, "name")))
+            .or_default() += 1;
+    }
+    recs.iter()
+        .filter_map(|r| {
+            let (parent, name) = (str_of(r, "parent"), str_of(r, "name"));
+            let key = match str_of(r, "type") {
+                "module" => str_of(r, "fqn").to_string(),
+                "struct" => format!("{parent}.{name}"),
+                "function" if groups[&(parent, name)] > 1 => {
+                    format!("{parent}.{name}({})", params_of(r).join(","))
+                }
+                "function" => format!("{parent}.{name}"),
+                _ => return None,
+            };
+            Some((key.clone(), format!("ps.{key}")))
+        })
+        .collect()
+}
+
+/// The `ps.`-rendered FQN of the record keyed `key` in `recs`.
+fn rendered_of(recs: &[serde_json::Value], key: &str) -> String {
+    ps_rendered(recs)
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .unwrap_or_else(|| panic!("no record keyed {key:?}"))
+        .1
+}
+
+/// The Struct/Function records located in `path` plus the Contains edges leaving them.
+fn file_units(recs: &[serde_json::Value], path: &str) -> Vec<serde_json::Value> {
+    let ids: Vec<&str> = recs
+        .iter()
+        .filter(|r| matches!(str_of(r, "type"), "struct" | "function") && str_of(r, "path") == path)
+        .map(|r| str_of(r, "id"))
+        .collect();
+    recs.iter()
+        .filter(|r| match str_of(r, "type") {
+            "struct" | "function" => ids.contains(&str_of(r, "id")),
+            "contains" => ids.contains(&str_of(r, "from")),
+            _ => false,
+        })
+        .cloned()
+        .collect()
+}
+
 mod e2e {
     use super::*;
 
@@ -584,6 +689,196 @@ mod e2e {
             file_parents(&recs),
             [(helpers, "mods/Foo/Foo.psd1".to_string())]
         );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_unit_names() {
+        let dir = Scratch::new("bin-unit");
+        unit_tree(&dir);
+        let root = dir.root();
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let recs = records(&run.stdout);
+        let of = |t: &'static str| recs.iter().filter(move |r| r["type"] == t);
+        let modules: Vec<&str> = of("module").map(|r| str_of(r, "fqn")).collect();
+        // one script Struct (parent a Module) and one <script> Function it contains, per script
+        for f in of("file") {
+            let path = str_of(f, "path");
+            if path.ends_with(".psd1") {
+                continue;
+            }
+            let scripts: Vec<_> = of("struct")
+                .filter(|r| str_of(r, "path") == path && modules.contains(&str_of(r, "parent")))
+                .collect();
+            let bodies: Vec<_> = of("function")
+                .filter(|r| str_of(r, "path") == path && r["name"] == "<script>")
+                .collect();
+            assert_eq!((scripts.len(), bodies.len()), (1, 1), "{path}");
+            let (s, b) = (scripts[0], bodies[0]);
+            let key = format!("{}.{}", str_of(s, "parent"), str_of(s, "name"));
+            assert_eq!(str_of(b, "parent"), key, "{path}");
+            assert!(
+                of("contains").any(|e| e["from"] == s["id"] && e["to"] == b["id"]),
+                "{path}"
+            );
+        }
+        // the sorted names of the Struct/Function records under `parent`
+        let names = |parent: &str| -> Vec<&str> {
+            let mut out: Vec<&str> = recs
+                .iter()
+                .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
+                .filter(|r| str_of(r, "parent") == parent)
+                .map(|r| str_of(r, "name"))
+                .collect();
+            out.sort();
+            out
+        };
+        // base-relative script names; Get-Foo without global:, the nested function kept
+        let md = "mods/Foo/Foo.psd1";
+        assert_eq!(names(md), ["Foo.psm1", "lib/Helpers.ps1"]);
+        assert_eq!(
+            names(&format!("{md}.lib/Helpers.ps1")),
+            ["<script>", "Bar", "Baz", "Get-Foo", "Inner"]
+        );
+        // the collisions alone are suffixed
+        let mut suffixed: Vec<(String, &str)> = recs
+            .iter()
+            .filter(|r| str_of(r, "name").contains("//"))
+            .map(|r| {
+                let rel = str_of(r, "path")
+                    .strip_prefix(&format!("{root}/"))
+                    .expect("in root");
+                (rel.to_string(), str_of(r, "name"))
+            })
+            .collect();
+        suffixed.sort();
+        let row = |p: &str, n: &'static str| (p.to_string(), n);
+        assert_eq!(
+            suffixed,
+            [
+                row(".x/a.ps1", "a.ps1//.x/a.ps1"),
+                row("a/b.ps1", "b.ps1//a/b.ps1"),
+                row("m/s.ps1", "C.M//m/s.ps1:2"),
+                row("m/s.ps1", "M//m/s.ps1:4"),
+                row("x.a.ps1", "x.a.ps1//x.a.ps1"),
+            ]
+        );
+        // C's overloads carry their signatures and render as groups of one
+        let ck = format!("{md}.Foo.psm1.C");
+        let methods: Vec<(&str, Vec<&str>)> = of("function")
+            .filter(|r| str_of(r, "parent") == ck)
+            .map(|r| (str_of(r, "name"), params_of(r)))
+            .collect();
+        assert_eq!(
+            methods,
+            [("new", vec![]), ("M()", vec![]), ("M(int)", vec!["int"])]
+        );
+        assert_eq!(
+            rendered_of(&recs, &format!("{ck}.M()")),
+            format!("ps.{ck}.M()")
+        );
+        assert_eq!(
+            rendered_of(&recs, &format!("{ck}.M(int)")),
+            format!("ps.{ck}.M(int)")
+        );
+        // the build pair: a root script beside a same-named directory, none suffixed
+        assert_eq!(names(""), ["build.ps1", "u.ps1", "x.a.ps1//x.a.ps1"]);
+        assert_eq!(names(".build.ps1"), ["<script>", "F"]);
+        assert_eq!(names("build"), ["x.ps1"]);
+        assert_eq!(names("build.x.ps1"), ["<script>", "F"]);
+        for (key, fqn) in [
+            ("", "ps."),
+            (".build.ps1", "ps..build.ps1"),
+            (".build.ps1.F", "ps..build.ps1.F"),
+            ("build", "ps.build"),
+            ("build.x.ps1", "ps.build.x.ps1"),
+            ("build.x.ps1.F", "ps.build.x.ps1.F"),
+        ] {
+            assert_eq!(rendered_of(&recs, key), fqn);
+        }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_unit_keys_unique() {
+        let dir = Scratch::new("bin-unit-uniq");
+        unit_tree(&dir);
+        let run = psfrontend(&[&dir.root()]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let recs = records(&run.stdout);
+        let rendered = ps_rendered(&recs);
+        let fqns: std::collections::HashSet<&String> = rendered.iter().map(|(_, f)| f).collect();
+        assert_eq!(fqns.len(), rendered.len(), "duplicate FQN in {rendered:?}");
+        let keys: std::collections::HashSet<&String> = rendered.iter().map(|(k, _)| k).collect();
+        let mut groups = std::collections::HashSet::new();
+        for r in &recs {
+            let parent = str_of(r, "parent");
+            match str_of(r, "type") {
+                "function" => {
+                    assert!(groups.insert((parent, str_of(r, "name"))), "{r}");
+                }
+                "struct" => {}
+                _ => continue,
+            }
+            assert!(
+                keys.contains(&parent.to_string()),
+                "parent of {r} is no key"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_unit_utf16_offsets() {
+        let dir = Scratch::new("bin-unit-wide");
+        unit_tree(&dir);
+        let root = dir.root();
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let path = format!("{root}/u.ps1");
+        let recs = records(&run.stdout);
+        let f = recs
+            .iter()
+            .find(|r| r["type"] == "function" && r["name"] == "Get-U")
+            .expect("Get-U");
+        assert_eq!(str_of(f, "path"), path);
+        let raw = fs::read(&path).expect("read u.ps1");
+        let at = |k: &str| f[k].as_u64().expect(k) as usize;
+        let units: Vec<u16> = raw[at("start")..at("end")]
+            .chunks(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        assert_eq!(
+            String::from_utf16(&units).expect("UTF-16 slice"),
+            "function Get-U {\n    'é'\n}"
+        );
+        assert_eq!((at("start_line"), at("end_line")), (2, 4));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_unit_targets_parity() {
+        let dir = Scratch::new("bin-unit-tgt");
+        unit_tree(&dir);
+        let root = dir.root();
+        let full = psfrontend(&[&root]);
+        assert!(full.ok, "{:?}", full.stderr);
+        let full = records(&full.stdout);
+        let side = Scratch::new("bin-unit-tgt-side");
+        for p in UNIT_TARGETS {
+            let path = format!("{root}/{p}");
+            let list = side.write("targets.txt", format!("{path}\n").as_bytes());
+            let run = psfrontend(&[&root, "--targets", list.to_str().expect("UTF-8 path")]);
+            assert!(run.ok, "{:?}", run.stderr);
+            let want = file_units(&full, &path);
+            assert!(want.len() >= 3, "{p}");
+            let got: Vec<_> = records(&run.stdout)
+                .into_iter()
+                .filter(|r| matches!(str_of(r, "type"), "struct" | "function" | "contains"))
+                .collect();
+            assert_eq!(got, want, "{p}");
+        }
     }
 
     #[test]
