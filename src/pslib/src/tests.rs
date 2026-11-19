@@ -7,7 +7,10 @@ use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
-use crate::units::{assign_ordinals, bare_name, param_type, property_type_name, Unit, UnitKind};
+use crate::units::{
+    assign_ordinals, bare_name, param_type, property_type_name, scan_units, FileUnits, Unit,
+    UnitKind,
+};
 use std::path::Path;
 use tree_sitter::Node;
 
@@ -448,6 +451,65 @@ fn unit_at(kind: UnitKind, name: &str, start: usize, end: usize) -> Unit {
         ordinal: 0,
         property_types: Vec::new(),
     }
+}
+
+/// A top-level statement, function/filter/workflow units and a nested function.
+const SCRIPT_UNITS: &str =
+    "Get-A\nfunction Foo {\n    function Nested { }\n}\nfilter Bar { }\nworkflow Baz { }\n";
+
+/// A class with typed properties, an overload group, a repeated signature, a
+/// constructor and a lone method, then an enum and a case-repeated class.
+const CLASS_UNITS: &str = "class C {\n    [D]$P\n    [D[]]$Q\n    [string]$S\n    M() { }\n    M([int]$x) { }\n    M($y) { }\n    m([Int]$z) { }\n    C([int]$a) { }\n    N([string]$s) { }\n}\nenum E { A; B }\nclass c { }\n";
+
+/// The units of `bytes` decoded, parsed and scanned as `f.ps1`.
+fn units_of(bytes: &[u8]) -> FileUnits {
+    let src = decode_mapped(bytes);
+    scan_units("f.ps1", &src, &parse(&src.text))
+}
+
+/// Each unit's `(kind, name, ordinal)`, in unit order.
+fn unit_rows(fu: &FileUnits) -> Vec<(UnitKind, &str, usize)> {
+    fu.units
+        .iter()
+        .map(|u| (u.kind, u.name.as_str(), u.ordinal))
+        .collect()
+}
+
+/// The function/class/enum/method declaration nodes under `root` whose name
+/// field reads `name`, in tree order.
+fn decls<'t>(root: Node<'t>, src: &str, name: &str) -> Vec<Node<'t>> {
+    descendants(root)
+        .into_iter()
+        .filter(|n| {
+            matches!(
+                n.kind(),
+                "function_definition" | "class_definition" | "enum_definition" | "class_method"
+            ) && n
+                .child_by_field_name("name")
+                .is_some_and(|f| &src[f.byte_range()] == name)
+        })
+        .collect()
+}
+
+/// Each declaration named `name` in `src`'s parse, in tree order, as (it has
+/// an ERROR ancestor, its body holds an ERROR node).
+fn decl_errors(src: &str, name: &str) -> Vec<(bool, bool)> {
+    let tree = parse(src);
+    decls(tree.root_node(), src, name)
+        .into_iter()
+        .map(|n| {
+            let mut up = n.parent();
+            let mut inside = false;
+            while let Some(p) = up {
+                inside |= p.is_error();
+                up = p.parent();
+            }
+            let body = n
+                .child_by_field_name("body")
+                .is_some_and(|b| descendants(b).iter().any(|d| d.is_error()));
+            (inside, body)
+        })
+        .collect()
 }
 
 mod unit {
@@ -2170,5 +2232,310 @@ mod int {
                 module_file("root.ps1", ""),
             ]
         );
+    }
+
+    #[test]
+    fn units_scan_script_body_and_functions() {
+        use UnitKind::*;
+        assert_eq!(errors(SCRIPT_UNITS), Vec::<String>::new());
+        let fu = units_of(SCRIPT_UNITS.as_bytes());
+        let whole = Span {
+            start: 0,
+            end: SCRIPT_UNITS.len(),
+            start_line: 1,
+            end_line: line_count(SCRIPT_UNITS),
+        };
+        assert_eq!(fu.path, "f.ps1");
+        assert_eq!(fu.file_span, whole);
+        assert_eq!(fu.units[0].span, whole);
+        assert_eq!(
+            unit_rows(&fu),
+            [
+                (ScriptBody, "<script>", 1),
+                (Function, "Foo", 2),
+                (Function, "Nested", 3),
+                (Function, "Bar", 4),
+                (Function, "Baz", 5),
+            ]
+        );
+        assert!(fu
+            .units
+            .iter()
+            .all(|u| u.owner.is_none() && u.params.is_empty() && !u.overloaded));
+    }
+
+    #[test]
+    fn units_scan_bare_names_and_first_spelling() {
+        let src = "function global:Get-A { }\nfunction script:B { }\nfunction Local:C { }\nfunction private:D { }\nfunction Foo { }\nfunction foo { }\n";
+        assert_eq!(errors(src), Vec::<String>::new());
+        let f = UnitKind::Function;
+        assert_eq!(
+            unit_rows(&units_of(src.as_bytes())),
+            [
+                (UnitKind::ScriptBody, "<script>", 1),
+                (f, "Get-A", 2),
+                (f, "B", 3),
+                (f, "C", 4),
+                (f, "D", 5),
+                (f, "Foo", 6),
+            ]
+        );
+    }
+
+    #[test]
+    fn units_scan_class_members_and_enum() {
+        use UnitKind::*;
+        assert_eq!(errors(CLASS_UNITS), Vec::<String>::new());
+        let fu = units_of(CLASS_UNITS.as_bytes());
+        // the repeated m([Int]) signature and the later class c are dropped
+        assert_eq!(
+            unit_rows(&fu),
+            [
+                (ScriptBody, "<script>", 1),
+                (Class, "C", 2),
+                (Method, "M", 3),
+                (Method, "M", 4),
+                (Method, "M", 5),
+                (Constructor, "new", 6),
+                (Method, "N", 7),
+                (Enum, "E", 8),
+            ]
+        );
+        let members: Vec<(Vec<String>, bool, Option<usize>)> = fu.units[2..7]
+            .iter()
+            .map(|u| (u.params.clone(), u.overloaded, u.owner))
+            .collect();
+        let p = |ps: &[&str]| ps.iter().map(|t| s(t)).collect::<Vec<_>>();
+        assert_eq!(
+            members,
+            [
+                (p(&[]), true, Some(1)),
+                (p(&["int"]), true, Some(1)),
+                (p(&["object"]), true, Some(1)),
+                (p(&["int"]), false, Some(1)),
+                (p(&["string"]), false, Some(1)),
+            ]
+        );
+        assert_eq!(fu.units[1].property_types, ["D", "string"]);
+        assert_eq!((fu.units[1].owner, fu.units[7].owner), (None, None));
+
+        // a method explicitly named `new` joins the constructor's overload group
+        let src = "class W {\n    W() { }\n    [int] new([int]$i) { return 1 }\n}\n";
+        assert_eq!(errors(src), Vec::<String>::new());
+        let fu = units_of(src.as_bytes());
+        assert_eq!(
+            unit_rows(&fu),
+            [
+                (ScriptBody, "<script>", 1),
+                (Class, "W", 2),
+                (Constructor, "new", 3),
+                (Method, "new", 4),
+            ]
+        );
+        assert!(fu.units[2].overloaded && fu.units[3].overloaded);
+        assert_eq!(fu.units[3].params, ["int"]);
+    }
+
+    #[test]
+    fn units_scan_ordinals_follow_start_offsets() {
+        for src in [SCRIPT_UNITS, CLASS_UNITS] {
+            let fu = units_of(src.as_bytes());
+            let mut by_start: Vec<&Unit> = fu.units.iter().collect();
+            by_start.sort_by_key(|u| (u.kind != UnitKind::ScriptBody, u.span.start));
+            let ords: Vec<usize> = by_start.iter().map(|u| u.ordinal).collect();
+            assert_eq!(ords, (1..=fu.units.len()).collect::<Vec<_>>(), "{src:?}");
+        }
+    }
+
+    #[test]
+    fn units_scan_spans_are_raw_offsets_across_encodings() {
+        let text = "function Foo { 'é😀' }\nGet-A\nclass C {\n    [int] M() { return 1 }\n}\n";
+        let mut lines = Vec::new();
+        for (bytes, be, bom) in [
+            (text.as_bytes().to_vec(), None, 0),
+            (utf8_bom(text), None, 3),
+            (utf16_bytes(text, false), Some(false), 2),
+            (utf16_bytes(text, true), Some(true), 2),
+        ] {
+            let fu = units_of(&bytes);
+            // the whole file in raw bytes, the BOM included
+            let whole = Span {
+                start: 0,
+                end: bytes.len(),
+                start_line: 1,
+                end_line: line_count(text),
+            };
+            assert_eq!(fu.file_span, whole, "{bom}");
+            assert_eq!(fu.units[0].span, whole, "{bom}");
+            assert_eq!(fu.units[1].span.start, bom, "Foo starts past the BOM");
+            let src = decode_mapped(&bytes);
+            let tree = parse(&src.text);
+            let mut got = Vec::new();
+            for name in ["Foo", "C"] {
+                let node = decls(tree.root_node(), &src.text, name)[0];
+                let u = fu.units.iter().find(|u| u.name == name).expect(name);
+                assert_eq!(u.span, span(&src, node.start_byte(), node.end_byte()));
+                let raw = raw_text(&bytes, be, u.span.start, u.span.end);
+                assert_eq!(raw, &src.text[node.byte_range()], "{name} {bom}");
+                got.push((u.span.start_line, u.span.end_line));
+            }
+            lines.push(got);
+        }
+        assert_eq!(lines[0], [(1, 1), (3, 5)]);
+        assert!(lines.iter().all(|l| *l == lines[0]), "{lines:?}");
+    }
+
+    #[test]
+    fn units_scan_using_and_dsc_yield_no_unit() {
+        for src in [USING_MODULE, DSC_CONFIG] {
+            let fu = units_of(src.as_bytes());
+            assert_eq!(
+                unit_rows(&fu),
+                [(UnitKind::ScriptBody, "<script>", 1)],
+                "{src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn units_scan_local_error_regions_keep_outside_units() {
+        use UnitKind::*;
+        // a broken statement between the declarations
+        let src = "function F { }\nGet-A\n$x = )\nGet-B\nclass C { }\n";
+        assert_source_root(src);
+        assert!(!errors(src).is_empty());
+        for name in ["F", "C"] {
+            assert_eq!(decl_errors(src, name), [(false, false)], "{name}");
+        }
+        let rows = [
+            (ScriptBody, "<script>", 1),
+            (Function, "F", 2),
+            (Class, "C", 3),
+        ];
+        assert_eq!(unit_rows(&units_of(src.as_bytes())), rows);
+
+        // an ERROR inside G's body, H nested in that body outside it
+        let src = "function G { function H { }\n$x = (1 + \n}\n";
+        assert_source_root(src);
+        assert_eq!(decl_errors(src, "G"), [(false, true)]);
+        assert_eq!(decl_errors(src, "H"), [(false, false)]);
+        let fu = units_of(src.as_bytes());
+        let rows = [
+            (ScriptBody, "<script>", 1),
+            (Function, "G", 2),
+            (Function, "H", 3),
+        ];
+        assert_eq!(unit_rows(&fu), rows);
+        let tree = parse(src);
+        let g = decls(tree.root_node(), src, "G")[0];
+        let d = decode_mapped(src.as_bytes());
+        assert_eq!(fu.units[1].span, span(&d, g.start_byte(), g.end_byte()));
+
+        // an ERROR inside K's class body, the method Go outside it
+        let src = "class K { [int] Go() { return 1 }\n$x = (1 + \n}\n";
+        assert_source_root(src);
+        assert_eq!(decl_errors(src, "K"), [(false, true)]);
+        assert_eq!(decl_errors(src, "Go"), [(false, false)]);
+        let fu = units_of(src.as_bytes());
+        let rows = [
+            (ScriptBody, "<script>", 1),
+            (Class, "K", 2),
+            (Method, "Go", 3),
+        ];
+        assert_eq!(unit_rows(&fu), rows);
+        assert_eq!(fu.units[2].owner, Some(1));
+    }
+
+    #[test]
+    fn units_scan_skips_declarations_inside_error_nodes() {
+        use UnitKind::*;
+        // the stray `}` wraps the broken statement, declarations included, in an ERROR
+        let broken = "$z = 1 + function Inside-F { } class InsideK { [int] Go() { return 1 } } }\nfunction Inside-F { }\nfunction After { }\n";
+        assert_source_root(broken);
+        assert_eq!(
+            decl_errors(broken, "Inside-F"),
+            [(true, false), (false, false)]
+        );
+        for name in ["InsideK", "Go"] {
+            assert_eq!(decl_errors(broken, name), [(true, false)], "{name}");
+        }
+        assert_eq!(decl_errors(broken, "After"), [(false, false)]);
+        let fu = units_of(broken.as_bytes());
+        let rows = [
+            (ScriptBody, "<script>", 1),
+            (Function, "Inside-F", 2),
+            (Function, "After", 3),
+        ];
+        assert_eq!(unit_rows(&fu), rows);
+        // the ordinals of the same fixture with the broken statement deleted
+        let clean = "function Inside-F { }\nfunction After { }\n";
+        assert_eq!(unit_rows(&units_of(clean.as_bytes())), rows);
+        // the kept Inside-F is the later one, outside the region
+        let tree = parse(broken);
+        let later = decls(tree.root_node(), broken, "Inside-F")[1];
+        let d = decode_mapped(broken.as_bytes());
+        let later = span(&d, later.start_byte(), later.end_byte());
+        assert_eq!(fu.units[1].span, later);
+
+        // a function nested in G's body inside that body's ERROR node
+        let src = "function G { function Inner { } +=\nfunction H { }\n}\n";
+        assert_source_root(src);
+        assert_eq!(decl_errors(src, "G"), [(false, true)]);
+        assert_eq!(decl_errors(src, "Inner"), [(true, false)]);
+        assert_eq!(decl_errors(src, "H"), [(false, false)]);
+        let rows = [
+            (ScriptBody, "<script>", 1),
+            (Function, "G", 2),
+            (Function, "H", 3),
+        ];
+        assert_eq!(unit_rows(&units_of(src.as_bytes())), rows);
+
+        // a method inside the class body's ERROR node
+        let src = "class K { [int] Bad() { return 2 } else\n[int] Ok() { return 3 }\n}\n";
+        assert_source_root(src);
+        assert_eq!(decl_errors(src, "K"), [(false, true)]);
+        assert_eq!(decl_errors(src, "Bad"), [(true, false)]);
+        assert_eq!(decl_errors(src, "Ok"), [(false, false)]);
+        let fu = units_of(src.as_bytes());
+        let rows = [
+            (ScriptBody, "<script>", 1),
+            (Class, "K", 2),
+            (Method, "Ok", 3),
+        ];
+        assert_eq!(unit_rows(&fu), rows);
+        assert_eq!(
+            (fu.units[2].overloaded, fu.units[2].owner),
+            (false, Some(1))
+        );
+    }
+
+    #[test]
+    fn units_scan_whole_file_error_yields_only_script() {
+        let src = "function Keep { }\nGet-A\nfunction F { Get-B\n$x = (1 + \n";
+        assert_error_root(src);
+        let fu = units_of(src.as_bytes());
+        let whole = Span {
+            start: 0,
+            end: src.len(),
+            start_line: 1,
+            end_line: line_count(src),
+        };
+        assert_eq!(fu.file_span, whole);
+        let mut script = unit_at(UnitKind::ScriptBody, "<script>", 0, 0);
+        script.span = whole;
+        script.ordinal = 1;
+        assert_eq!(fu.units, [script]);
+    }
+
+    #[test]
+    fn units_scan_names_feed_export_matcher() {
+        let fu = units_of(b"function global:Get-A { }\nfunction Set-B { }\n");
+        let names = fu
+            .units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Function)
+            .map(|u| u.name.as_str());
+        let spec = ExportSpec::Patterns(vec![s("Get-*")]);
+        assert_eq!(spec.exported(names), ["Get-A"]);
     }
 }
