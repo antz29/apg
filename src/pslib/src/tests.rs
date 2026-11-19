@@ -9,7 +9,8 @@ use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, Manifes
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::resolve::{
-    import_arg, module_category, nameless_key, DepKind, ImportArg, INBOX_MODULES,
+    import_arg, module_category, nameless_key, resolve_site, Dep, DepKind, DepSite, ImportArg,
+    ManifestStems, SiteKind, StemMatch, INBOX_MODULES,
 };
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
@@ -710,6 +711,37 @@ fn rendered_of(recs: &[Rec], key: &str) -> String {
         .find(|(k, _)| k == key)
         .unwrap_or_else(|| panic!("no record keyed {key}"))
         .1
+}
+
+/// The resolution fixture: the scanned paths (`tools/x.dll` absent) assigned with
+/// hand-built manifests — Foo plus two `Bar` manifests sharing a stem — and indexed.
+fn resolve_fixture() -> (ModuleMap, FileIndex, ManifestStems) {
+    let files = [
+        "mods/Foo/Foo.psd1",
+        "mods/Foo/Foo.psm1",
+        "mods/Foo/lib/Helpers.ps1",
+        "mods/Foo/Data.psd1",
+        "mods/Bar/Bar.psd1",
+        "other/Bar/Bar.PSD1",
+        "scripts/a.ps1",
+        "scripts/B.ps1",
+        "scripts/b.ps1",
+    ]
+    .map(s);
+    let foo = mk(
+        Some(st("Foo.psm1", false)),
+        vec![st("lib\\Helpers.ps1", false)],
+        ExportSpec::All,
+    );
+    let bar = || mk(None, vec![], ExportSpec::All).unwrap();
+    let manifests = [
+        (s("mods/Foo/Foo.psd1"), foo.unwrap()),
+        (s("mods/Bar/Bar.psd1"), bar()),
+        (s("other/Bar/Bar.PSD1"), bar()),
+    ];
+    let map = assign(&files, &manifests);
+    let stems = ManifestStems::new(&map);
+    (map, FileIndex::new(files), stems)
 }
 
 /// A script with a top-level statement, class C (a typed property, a constructor, an
@@ -3360,6 +3392,144 @@ mod int {
             assert!(ids.len() >= 2, "{p}");
             assert_eq!(edges, ids.len() - 1, "{p}: one edge per unit");
             assert_eq!(e.records(), want, "{p}");
+        }
+    }
+
+    #[test]
+    fn resolve_manifest_stems_over_assigned_manifests() {
+        let (_, _, stems) = resolve_fixture();
+        let foo = StemMatch::One(s("mods/Foo/Foo.psd1"));
+        assert_eq!(stems.find("foo"), foo);
+        assert_eq!(stems.find("FOO"), foo);
+        // Bar.psd1 and Bar.PSD1 share the stem case-insensitively
+        assert_eq!(stems.find("bar"), StemMatch::Many);
+        // a data .psd1 and a non-manifest file are no stems
+        assert_eq!(stems.find("Data"), StemMatch::None);
+        assert_eq!(stems.find("Helpers"), StemMatch::None);
+    }
+
+    #[test]
+    fn resolve_site_dot_source() {
+        let (_, index, stems) = resolve_fixture();
+        let dep = |arg: PathArg| {
+            let site = DepSite {
+                kind: SiteKind::DotSource(arg),
+                raw_offset: 7,
+            };
+            resolve_site(&site, "scripts/a.ps1", &index, &stems)
+        };
+        let file = |p: &str| Dep::File {
+            path: s(p),
+            kind: DepKind::DotSource,
+        };
+        let nameless = Dep::Unresolved {
+            name: s("<nameless@scripts/a.ps1:7>"),
+            category: "unknown",
+        };
+        // exact case preferred among case variants
+        assert_eq!(dep(st("b.ps1", false)), file("scripts/b.ps1"));
+        // several matches all differing in case
+        assert_eq!(dep(st("B.PS1", false)), nameless);
+        // a single case-insensitive match
+        assert_eq!(
+            dep(st("..\\mods\\Foo\\lib\\helpers.ps1", false)),
+            file("mods/Foo/lib/Helpers.ps1")
+        );
+        assert_eq!(
+            dep(st("..\\mods\\Foo\\Foo.psm1", true)),
+            file("mods/Foo/Foo.psm1")
+        );
+        assert_eq!(
+            dep(st("..\\mods\\Foo\\Data.psd1", false)),
+            file("mods/Foo/Data.psd1")
+        );
+        for text in ["missing.ps1", "..\\..\\x.ps1", "C:\\x.ps1"] {
+            assert_eq!(dep(st(text, false)), nameless, "{text}");
+        }
+        assert_eq!(dep(PathArg::Computed), nameless);
+    }
+
+    #[test]
+    fn resolve_site_import_module_path() {
+        let (_, index, stems) = resolve_fixture();
+        let dep = |arg: ImportArg| {
+            let site = DepSite {
+                kind: SiteKind::Import(arg),
+                raw_offset: 11,
+            };
+            resolve_site(&site, "scripts/a.ps1", &index, &stems)
+        };
+        let path = |t: &str| ImportArg::Path(st(t, false));
+        let file = |p: &str| Dep::File {
+            path: s(p),
+            kind: DepKind::ImportModule,
+        };
+        let nameless = Dep::Unresolved {
+            name: s("<nameless@scripts/a.ps1:11>"),
+            category: "unknown",
+        };
+        assert_eq!(
+            dep(path("..\\mods\\Foo\\Foo.psm1")),
+            file("mods/Foo/Foo.psm1")
+        );
+        assert_eq!(
+            dep(path("..\\mods\\Foo\\Foo.psd1")),
+            file("mods/Foo/Foo.psd1")
+        );
+        // any scanned .psd1, a data file included
+        assert_eq!(
+            dep(path("..\\mods\\Foo\\Data.psd1")),
+            file("mods/Foo/Data.psd1")
+        );
+        for t in [
+            "b.ps1",
+            "..\\tools\\x.dll",
+            "..\\mods\\Foo\\Missing.psm1",
+            "..\\..\\Foo.psm1",
+            "C:\\mods\\Foo\\Foo.psm1",
+        ] {
+            assert_eq!(dep(path(t)), nameless, "{t}");
+        }
+        assert_eq!(dep(ImportArg::Path(PathArg::Computed)), nameless);
+        assert_eq!(dep(ImportArg::Computed), nameless);
+    }
+
+    #[test]
+    fn resolve_site_import_module_name() {
+        let (_, index, stems) = resolve_fixture();
+        let dep = |n: &str| {
+            let site = DepSite {
+                kind: SiteKind::Import(ImportArg::Name(s(n))),
+                raw_offset: 3,
+            };
+            resolve_site(&site, "scripts/a.ps1", &index, &stems)
+        };
+        let unresolved = |n: &str, category| Dep::Unresolved {
+            name: s(n),
+            category,
+        };
+        assert_eq!(
+            dep("foo"),
+            Dep::File {
+                path: s("mods/Foo/Foo.psd1"),
+                kind: DepKind::ImportModule,
+            }
+        );
+        assert_eq!(dep("Bar"), unresolved("Bar", "unknown"));
+        // in-box, the name kept verbatim in any letter case
+        for n in [
+            "Microsoft.PowerShell.Utility",
+            "microsoft.powershell.archive",
+        ] {
+            assert_eq!(dep(n), unresolved(n, "stdlib"), "{n}");
+        }
+        for n in [
+            "Microsoft.PowerShell.SecretManagement",
+            "PSReadLine",
+            "CimCmdlets",
+            "Helpers",
+        ] {
+            assert_eq!(dep(n), unresolved(n, "external"), "{n}");
         }
     }
 }
