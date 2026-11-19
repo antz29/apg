@@ -25,7 +25,7 @@ pub fn path_arg(node: Node, src: &str) -> PathArg {
         node.named_children(&mut c).collect()
     };
     match node.kind() {
-        "bare_word" => fixed(text(node), false),
+        "bare_word" => escaped_or(text(node), |s| fixed(s, false)),
         "single_quoted_string" => {
             let mut c = text(node).chars();
             c.next();
@@ -41,19 +41,17 @@ pub fn path_arg(node: Node, src: &str) -> PathArg {
                 return PathArg::Computed;
             }
             let s: String = rest.iter().map(|n| text(*n)).collect();
-            // A backtick escape is an expansion too; its value is not the literal text.
-            if s.contains('`') {
-                return PathArg::Computed;
-            }
-            if anchored {
-                anchored_rest(&s)
-            } else {
-                fixed(&s, false)
-            }
+            escaped_or(&s, |s| {
+                if anchored {
+                    anchored_rest(s)
+                } else {
+                    fixed(s, false)
+                }
+            })
         }
         "command_argument" => match named.as_slice() {
             [v, f] if is_script_root(v, src) && f.kind() == "argument_fragment" => {
-                anchored_rest(text(*f))
+                escaped_or(text(*f), anchored_rest)
             }
             _ => PathArg::Computed,
         },
@@ -75,9 +73,18 @@ fn unwrap(mut node: Node) -> Node {
 
 fn is_script_root(node: &Node, src: &str) -> bool {
     node.kind() == "variable"
-        && node
-            .utf8_text(src.as_bytes())
-            .is_ok_and(|t| t.eq_ignore_ascii_case("$PSScriptRoot"))
+        && node.utf8_text(src.as_bytes()).is_ok_and(|t| {
+            t.eq_ignore_ascii_case("$PSScriptRoot") || t.eq_ignore_ascii_case("${PSScriptRoot}")
+        })
+}
+
+/// A backtick escape is an expansion too; its value is not the literal text.
+fn escaped_or(s: &str, literal: impl FnOnce(&str) -> PathArg) -> PathArg {
+    if s.contains('`') {
+        PathArg::Computed
+    } else {
+        literal(s)
+    }
 }
 
 fn fixed(text: &str, anchored: bool) -> PathArg {
