@@ -8,6 +8,7 @@ pub mod parse;
 pub mod paths;
 pub mod scan;
 pub mod source;
+pub mod units;
 
 #[cfg(test)]
 mod tests;
