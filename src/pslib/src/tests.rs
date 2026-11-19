@@ -10,10 +10,10 @@ use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, Manifes
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::resolve::{
-    command_target, file_deps, import_arg, module_category, nameless_key, resolve_site,
-    select_member, split_qualified, type_name, type_target, CommandIndex, CommandRes, Dep, DepKind,
-    DepSite, DotSourceMap, ImportArg, ManifestStems, SiteKind, StemMatch, Target, TypeIndex,
-    TypeRes, INBOX_MODULES,
+    call_sites, command_target, enclosing, file_deps, import_arg, module_category, nameless_key,
+    resolve_site, select_member, split_qualified, type_name, type_target, CallKind, CallSite,
+    CommandIndex, CommandRes, Dep, DepKind, DepSite, DotSourceMap, ImportArg, ManifestStems,
+    SiteKind, StemMatch, Target, TypeIndex, TypeRes, INBOX_MODULES,
 };
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
@@ -1125,6 +1125,60 @@ fn inbox_stem(exports: &str) -> Cmds {
         ("main.ps1", ""),
     ];
     cmds(&tree, &[], &[])
+}
+
+/// `call_sites` over `bytes` decoded (source::decode_mapped) and parsed.
+fn calls_of(bytes: &[u8]) -> Vec<CallSite> {
+    let src = decode_mapped(bytes);
+    call_sites(&src, &parse(&src.text))
+}
+
+/// A Command call kind named `name`.
+fn cmd(name: &str) -> CallKind {
+    CallKind::Command { name: s(name) }
+}
+
+/// The sites `want` names in ASCII `src`: each kind at the first occurrence of its
+/// needle at or after the previous site's offset.
+fn expected(src: &str, want: &[(&str, CallKind)]) -> Vec<CallSite> {
+    let mut from = 0;
+    want.iter()
+        .map(|(needle, kind)| {
+            from += src[from..]
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} not in {src:?}"));
+            CallSite {
+                kind: kind.clone(),
+                raw_offset: from,
+            }
+        })
+        .collect()
+}
+
+/// Asserts `src` parses with no ERROR or MISSING node and yields exactly `want`'s sites.
+fn assert_calls(src: &str, want: &[(&str, CallKind)]) {
+    assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+    assert_eq!(calls_of(src.as_bytes()), expected(src, want), "{src:?}");
+}
+
+/// Every command node's name text in `src`'s parse, in tree order, with whether
+/// the node has an ERROR ancestor.
+fn command_ancestry(src: &str) -> Vec<(&str, bool)> {
+    let tree = parse(src);
+    descendants(tree.root_node())
+        .into_iter()
+        .filter(|n| n.kind() == "command")
+        .map(|n| {
+            let name = n.child_by_field_name("name").expect("command name");
+            let mut up = n.parent();
+            let mut inside = false;
+            while let Some(p) = up {
+                inside |= p.is_error();
+                up = p.parent();
+            }
+            (&src[name.byte_range()], inside)
+        })
+        .collect()
 }
 
 mod unit {
@@ -5315,8 +5369,8 @@ mod int {
         assert_eq!(wo, cmd_one(psm, 2));
     }
 
-    /// requirements.requirement.ps-builtin-cmdlet-call — the table cites
-    /// apg/.scratch/ps7-builtin-cmdlets.md (PowerShell 7.6 LTS).
+    /// requirements.requirement.ps-builtin-cmdlet-call — the table follows upstream
+    /// PowerShell v7.6.0: src/Modules manifests, PSGalleryModules.csproj and InitialSessionState.cs.
     #[test]
     fn resolve_command_unmatched_builtin_is_stdlib() {
         let c = cmds(&[("main.ps1", "")], &[], &[]);
@@ -5340,8 +5394,8 @@ mod int {
         }
     }
 
-    /// requirements.requirement.ps-external-command-call — the table cites
-    /// apg/.scratch/ps7-builtin-cmdlets.md (PowerShell 7.6 LTS).
+    /// requirements.requirement.ps-external-command-call — the table follows upstream
+    /// PowerShell v7.6.0: src/Modules manifests, PSGalleryModules.csproj and InitialSessionState.cs.
     #[test]
     fn resolve_command_unmatched_other_is_external() {
         let c = cmds(&[("main.ps1", "")], &[], &[]);
@@ -5370,5 +5424,236 @@ mod int {
             call(&c, "Get-ChildItem", "main.ps1"),
             cmd_one("main.ps1", 1)
         );
+    }
+
+    /// call_sites: a command is a site named verbatim; module imports and DSC keywords are not.
+    #[test]
+    fn resolve_call_sites_commands() {
+        for (src, want) in [
+            ("Get-Foo -X 1", vec![("Get-Foo", cmd("Get-Foo"))]),
+            ("script:Foo", vec![("script:Foo", cmd("script:Foo"))]),
+            (
+                "Microsoft.PowerShell.Utility\\Write-Output x",
+                vec![("M", cmd("Microsoft.PowerShell.Utility\\Write-Output"))],
+            ),
+            ("git status", vec![("git", cmd("git"))]),
+            (".\\lib\\tool.ps1 -X 1", vec![(".", cmd(".\\lib\\tool.ps1"))]),
+            ("./lib/tool.ps1", vec![(".", cmd("./lib/tool.ps1"))]),
+            (
+                "Get-A | Get-B | Get-C",
+                vec![
+                    ("Get-A", cmd("Get-A")),
+                    ("Get-B", cmd("Get-B")),
+                    ("Get-C", cmd("Get-C")),
+                ],
+            ),
+            (
+                "Invoke-X { Get-In }",
+                vec![("Invoke-X", cmd("Invoke-X")), ("Get-In", cmd("Get-In"))],
+            ),
+            ("function F { Get-In }", vec![("Get-In", cmd("Get-In"))]),
+            ("Import-Module Foo", vec![]),
+            ("ipmo Foo", vec![]),
+            ("import-module Foo", vec![]),
+            ("using module Foo", vec![]),
+            (
+                "configuration C { Import-DscResource -ModuleName PSDesiredStateConfiguration; Node x { Get-Inner; File f { DestinationPath = (Get-Path); Ensure = 'Present' } } }",
+                vec![("Get-Inner", cmd("Get-Inner")), ("Get-Path", cmd("Get-Path"))],
+            ),
+            (
+                "configuration D { import-dscresource -ModuleName PSDesiredStateConfiguration; Node y { } }",
+                vec![],
+            ),
+        ] {
+            assert_calls(src, &want);
+        }
+    }
+
+    /// call_sites: `&` on a static operand is a call literal, on anything else (and `.`
+    /// on a script block) a function value; any other `.` is no site.
+    #[test]
+    fn resolve_call_sites_invocation_operators() {
+        let lit = |arg, written| CallKind::CallLiteral {
+            arg,
+            written: s(written),
+        };
+        for (src, want) in [
+            (
+                "& ./lib.ps1",
+                vec![("&", lit(st("./lib.ps1", false), "./lib.ps1"))],
+            ),
+            (
+                "& 'lib.ps1'",
+                vec![("&", lit(st("lib.ps1", false), "lib.ps1"))],
+            ),
+            (
+                r"& $PSScriptRoot\lib.ps1",
+                vec![("&", lit(st("lib.ps1", true), r"$PSScriptRoot\lib.ps1"))],
+            ),
+            (
+                "& Get-Foo",
+                vec![("&", lit(st("Get-Foo", false), "Get-Foo"))],
+            ),
+            ("& { 1 }", vec![("&", CallKind::FuncValue)]),
+            ("& $sb", vec![("&", CallKind::FuncValue)]),
+            ("& $function:Foo", vec![("&", CallKind::FuncValue)]),
+            (
+                "& (Get-X)",
+                vec![("&", CallKind::FuncValue), ("Get-X", cmd("Get-X"))],
+            ),
+            (". { 1 }", vec![(".", CallKind::FuncValue)]),
+            (". ./lib.ps1", vec![]),
+            (". $x", vec![]),
+        ] {
+            assert_calls(src, &want);
+        }
+    }
+
+    /// call_sites: `[T]::m(...)` is Static, `$this.m(...)` (any case) This, any other
+    /// `x.m(...)` Instance; member access without an argument list is no site.
+    #[test]
+    fn resolve_call_sites_member_invocations() {
+        let stat = |t: &str, m: &str, argc| CallKind::Static {
+            type_name: s(t),
+            member: s(m),
+            argc,
+        };
+        let this = |m: &str, argc| CallKind::This { member: s(m), argc };
+        let inst = |m: &str, argc| CallKind::Instance { member: s(m), argc };
+        for (src, want) in [
+            ("[Foo]::Bar(1, 2)", vec![("[", stat("Foo", "Bar", 2))]),
+            ("[Foo]::new()", vec![("[", stat("Foo", "new", 0))]),
+            (
+                "[System.IO.Path]::Combine('a','b')",
+                vec![("[", stat("System.IO.Path", "Combine", 2))],
+            ),
+            (
+                "class K {\n    M() {\n        $this.M()\n        $this.M(1, 2)\n        $THIS.m(1)\n        $this.P.Q()\n        ${this}.M()\n    }\n}\n",
+                vec![
+                    ("$this.M()", this("M", 0)),
+                    ("$this.M(1", this("M", 2)),
+                    ("$THIS", this("m", 1)),
+                    // the receiver is an expression, not `$this`
+                    ("$this.P.Q()", inst("Q", 0)),
+                    // pinned as the code stands: `${this}` is not spelled `$this`
+                    ("${this}", inst("M", 0)),
+                ],
+            ),
+            ("$x.M(1)", vec![("$x", inst("M", 1))]),
+            (
+                "(Get-X).N()",
+                vec![("(", inst("N", 0)), ("Get-X", cmd("Get-X"))],
+            ),
+            // a comment in the argument list is not an argument
+            ("$x.M(1, <# c #> 2)", vec![("$x", inst("M", 2))]),
+            ("$x.P", vec![]),
+            ("[Foo]::P", vec![]),
+            // `::` on a non-type receiver, and a computed member name
+            ("$x::M()", vec![]),
+            ("$x.$name()", vec![]),
+        ] {
+            assert_calls(src, &want);
+        }
+    }
+
+    /// call_sites: raw_offset is the site's first raw byte in every encoding.
+    #[test]
+    fn resolve_call_sites_raw_offsets_across_encodings() {
+        let text = "# é😀 comment\nGet-A\n& ./lib.ps1\nclass K { M() { $this.M() } }\n";
+        assert_eq!(errors(text), Vec::<String>::new());
+        let kinds = [
+            cmd("Get-A"),
+            CallKind::CallLiteral {
+                arg: st("./lib.ps1", false),
+                written: s("./lib.ps1"),
+            },
+            CallKind::This {
+                member: s("M"),
+                argc: 0,
+            },
+        ];
+        let mut offsets = Vec::new();
+        for (bytes, be, width) in [
+            (text.as_bytes().to_vec(), None, 1),
+            (utf8_bom(text), None, 1),
+            (utf16_bytes(text, false), Some(false), 2),
+            (utf16_bytes(text, true), Some(true), 2),
+        ] {
+            let sites = calls_of(&bytes);
+            let got: Vec<CallKind> = sites.iter().map(|c| c.kind.clone()).collect();
+            assert_eq!(got, kinds);
+            let offs: Vec<usize> = sites.iter().map(|c| c.raw_offset).collect();
+            for (off, first) in offs.iter().zip(["G", "&", "$"]) {
+                assert_eq!(raw_text(&bytes, be, *off, off + width), first);
+            }
+            offsets.push(offs);
+        }
+        assert_ne!(offsets[0], offsets[1]);
+        assert_ne!(offsets[1], offsets[2]);
+        assert_eq!(offsets[3], offsets[2]);
+    }
+
+    /// requirements.requirement.ps-error-recovery: sites outside an ERROR region survive.
+    #[test]
+    fn resolve_call_sites_error_recovery() {
+        // (A) a broken statement between two commands
+        let src = "Get-A\n$x = )\nGet-Z\n";
+        assert_source_root(src);
+        assert!(!errors(src).is_empty());
+        let outside = [("Get-A", cmd("Get-A")), ("Get-Z", cmd("Get-Z"))];
+        assert_eq!(calls_of(src.as_bytes()), expected(src, &outside));
+
+        // (B) both inside commands lie in a local ERROR, the outside ones not
+        let broken = "Get-A\nfunction G { function I { Get-InsideA; Get-InsideB } +=\nGet-Z\n}\n";
+        assert_source_root(broken);
+        assert_eq!(
+            command_ancestry(broken),
+            [
+                ("Get-A", false),
+                ("Get-InsideA", true),
+                ("Get-InsideB", true),
+                ("Get-Z", false),
+            ]
+        );
+        assert_eq!(calls_of(broken.as_bytes()), expected(broken, &outside));
+        // without the stray `+=` every site is kept
+        let clean = broken.replacen(" +=", "", 1);
+        assert_eq!(errors(&clean), Vec::<String>::new());
+        assert_eq!(calls_of(clean.as_bytes()).len(), 4);
+
+        // (C) a whole-file ERROR root yields no site
+        let open = "Get-A\nGet-Z\nfunction F { Get-B\n$x = (1 + \n";
+        assert_error_root(open);
+        assert_eq!(calls_of(open.as_bytes()), []);
+    }
+
+    /// enclosing: the innermost function, method or constructor holding a site, else `<script>`.
+    #[test]
+    fn resolve_enclosing_over_scanned_units() {
+        let text = "Get-Top\nfunction F {\n    Get-InF\n    function G { Get-InG }\n}\nclass K {\n    [int]$P = (Get-Init)\n    K() { Get-InCtor }\n    M() { Get-InM }\n}\n";
+        assert_eq!(errors(text), Vec::<String>::new());
+        let fu = units_of(text.as_bytes());
+        let at = |kind: UnitKind, name: Option<&str>| {
+            fu.units
+                .iter()
+                .position(|u| u.kind == kind && name.is_none_or(|n| u.name == n))
+                .unwrap_or_else(|| panic!("no {kind:?} {name:?}"))
+        };
+        let want = [
+            (s("Get-Top"), 0),
+            (s("Get-InF"), at(UnitKind::Function, Some("F"))),
+            (s("Get-InG"), at(UnitKind::Function, Some("G"))),
+            (s("Get-Init"), 0),
+            (s("Get-InCtor"), at(UnitKind::Constructor, None)),
+            (s("Get-InM"), at(UnitKind::Method, Some("M"))),
+        ];
+        let got: Vec<(String, usize)> = calls_of(text.as_bytes())
+            .into_iter()
+            .map(|c| match c.kind {
+                CallKind::Command { name } => (name, enclosing(&fu, c.raw_offset)),
+                k => panic!("not a command: {k:?}"),
+            })
+            .collect();
+        assert_eq!(got, want);
     }
 }
