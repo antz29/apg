@@ -1,7 +1,8 @@
 //! Module manifests (`.psd1`): recognising one, reading its RootModule,
 //! NestedModules and FunctionsToExport keys, and matching exported names.
 
-use crate::paths::{path_arg, PathArg};
+use crate::paths::{path_arg, resolve, FileIndex, PathArg};
+use std::collections::{BTreeSet, HashMap};
 use tree_sitter::{Node, Tree};
 
 /// Which functions a manifest exports.
@@ -200,5 +201,98 @@ fn elements(v: Node) -> Vec<Node> {
                 .collect()
         }
         _ => vec![n],
+    }
+}
+
+/// A module a manifest defines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestModule {
+    /// The manifest's repo-relative path, `.psd1` included: the identity.
+    pub path: String,
+    /// The manifest's directory.
+    pub base: String,
+    /// The member files this manifest claims, in entry order.
+    pub members: Vec<String>,
+    pub exports: ExportSpec,
+}
+
+/// Every file's module: its claiming manifest's, else its directory's.
+#[derive(Debug, Default)]
+pub struct ModuleMap {
+    manifests: Vec<ManifestModule>,
+    owner: HashMap<String, usize>,
+    dirs: BTreeSet<String>,
+}
+
+/// A repo-relative path's directory (`""` at the root).
+fn dir_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(d, _)| d)
+}
+
+/// Assigns every file (scan-root-relative, `/`-joined) to its module, given
+/// every recognised manifest.
+pub fn assign(files: &[String], manifests: &[(String, ManifestKeys)]) -> ModuleMap {
+    let index = FileIndex::new(files.iter().cloned());
+    let mut sorted: Vec<&(String, ManifestKeys)> = manifests.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut map = ModuleMap::default();
+    for (path, keys) in sorted {
+        let i = map.manifests.len();
+        let base = dir_of(path).to_string();
+        map.owner.insert(path.clone(), i);
+        let mut members = Vec::new();
+        for arg in keys.root_module.iter().chain(&keys.nested_modules) {
+            // Anchored text is relative to $PSScriptRoot, the manifest's directory too.
+            let PathArg::Static { text, .. } = arg else {
+                continue;
+            };
+            let Some(found) = resolve(&base, text).and_then(|p| index.find(&p)) else {
+                continue;
+            };
+            let ext = found.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+            if matches!(ext.as_deref(), Some("ps1" | "psm1")) && !map.owner.contains_key(found) {
+                map.owner.insert(found.to_string(), i);
+                members.push(found.to_string());
+            }
+        }
+        map.manifests.push(ManifestModule {
+            path: path.clone(),
+            base,
+            members,
+            exports: keys.exports.clone(),
+        });
+    }
+    for f in files.iter().filter(|f| !map.owner.contains_key(*f)) {
+        map.dirs.insert(dir_of(f).to_string());
+    }
+    map
+}
+
+impl ModuleMap {
+    /// The module identity holding `path` (the directory rule when unmapped).
+    pub fn module(&self, path: &str) -> String {
+        self.manifest_of(path)
+            .map_or_else(|| dir_of(path).to_string(), |m| m.path.clone())
+    }
+
+    /// The base directory of the module holding `path`.
+    pub fn base(&self, path: &str) -> String {
+        self.manifest_of(path)
+            .map_or_else(|| dir_of(path).to_string(), |m| m.base.clone())
+    }
+
+    /// Every module identity, sorted.
+    pub fn modules(&self) -> Vec<String> {
+        let all: BTreeSet<&String> = self
+            .dirs
+            .iter()
+            .chain(self.manifests.iter().map(|m| &m.path))
+            .collect();
+        all.into_iter().cloned().collect()
+    }
+
+    /// The manifest module holding `path`, if any.
+    pub fn manifest_of(&self, path: &str) -> Option<&ManifestModule> {
+        self.owner.get(path).map(|&i| &self.manifests[i])
     }
 }
