@@ -668,6 +668,52 @@ pub fn full_universe(prepared: &Prepared, emitted_fqns: &BTreeSet<String>) -> BT
     universe
 }
 
+/// Whether the delta path must union the reused facts' code FQNs
+/// (`crate::warm::reuse_universe`) into [`full_universe`]. Returns `false` only
+/// when (a) a previous database was captured, (b) its content key and the
+/// shared record's key match under `crate::splice::seed::seed_key_matches`
+/// (both present and equal), and (c) every reused file with a recorded fact
+/// unit (`has_unit(lang, rel, oid)`) has its checkout-relative path — its File
+/// FQN — in `previous.scanned`. These are checked in that order, and the check
+/// stops at the first uncovered file. Otherwise it returns `true`.
+///
+/// `false` means the local database holds the File of every reused file that
+/// has a recorded unit. Because it was built from the same tree content, it also
+/// holds the code FQNs and module scaffolding those units carry. Equal content
+/// keys alone are not enough: a key folds only the HEAD sha and the status
+/// entries, not the scan config. A local database built with a narrower
+/// `--language`/`--module`/`--exclude-path` set than the shared record's scan
+/// lacks those units' FQNs, so check (c) finds them missing.
+///
+/// Edge cases:
+/// - A reused file with no recorded unit adds nothing to `reuse_universe`, so it
+///   is not checked.
+/// - When the scan root is below the git toplevel, a File FQN differs from the
+///   checkout-relative path, so the function returns `true` (the fail-safe
+///   direction).
+/// - Config that neither key includes is not detected: a different blacklist,
+///   COBOL `--std`/`--copy-path`, or Rust `--no-build-scripts`.
+///
+/// The result only gates the `implemented-by` universe, never a graph row. No
+/// filesystem, no database.
+pub fn reuse_universe_needed(
+    previous: Option<&crate::artifacts::PreviousScan>,
+    local_seed_key: Option<&str>,
+    recorded_key: Option<&str>,
+    reused_files: &[(String, String, String)],
+    has_unit: impl Fn(&str, &str, &str) -> bool,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    if !crate::splice::seed::seed_key_matches(local_seed_key, recorded_key) {
+        return true;
+    }
+    reused_files
+        .iter()
+        .any(|(rel, lang, oid)| has_unit(lang, rel, oid) && !previous.scanned.contains(rel))
+}
+
 /// The absolute path of a checkout-relative path.
 pub fn absolute(root: &Path, rel: &str) -> String {
     if Path::new(rel).is_absolute() {
