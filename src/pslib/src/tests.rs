@@ -274,6 +274,42 @@ fn arg_of(src: &str, locate: impl Fn(Node<'_>) -> Option<Node<'_>>) -> PathArg {
     path_arg(node, src)
 }
 
+fn st(text: &str, anchored: bool) -> PathArg {
+    PathArg::Static {
+        text: s(text),
+        anchored,
+    }
+}
+
+/// Operand spellings (after the operator) and their classification.
+fn operand_cells() -> Vec<(&'static str, PathArg)> {
+    vec![
+        ("./lib.ps1", st("./lib.ps1", false)),
+        ("'lib.ps1'", st("lib.ps1", false)),
+        ("\"lib.ps1\"", st("lib.ps1", false)),
+        (r"$PSScriptRoot\lib.ps1", st("lib.ps1", true)),
+        ("\"$PSScriptRoot/lib.ps1\"", st("lib.ps1", true)),
+        ("\"$psscriptroot\\lib.ps1\"", st("lib.ps1", true)),
+        (
+            r"'$PSScriptRoot\lib.ps1'",
+            st(r"$PSScriptRoot\lib.ps1", false),
+        ),
+        ("$path", PathArg::Computed),
+        ("\"$env:X\\lib.ps1\"", PathArg::Computed),
+        ("\"$PSScriptRoot$x.ps1\"", PathArg::Computed),
+        ("(Join-Path $PSScriptRoot lib.ps1)", PathArg::Computed),
+        ("./l`ib.ps1", PathArg::Computed),
+        (r"$PSScriptRoot\l`ib.ps1", PathArg::Computed),
+        ("\"l`ib.ps1\"", PathArg::Computed),
+        ("'`lib.ps1'", st("`lib.ps1", false)),
+        (r"${PSScriptRoot}\x.ps1", st("x.ps1", true)),
+        ("\"${PSScriptRoot}/x.ps1\"", st("x.ps1", true)),
+        (r"${psscriptroot}\x.ps1", st("x.ps1", true)),
+        (r"$PSSCRIPTROOT\x.ps1", st("x.ps1", true)),
+        ("$psscriptroot/x.ps1", st("x.ps1", true)),
+    ]
+}
+
 mod unit {
     use super::*;
 
@@ -1565,42 +1601,6 @@ mod int {
             ]
         );
         assert!(out.ends_with(b"\n"));
-    }
-
-    fn st(text: &str, anchored: bool) -> PathArg {
-        PathArg::Static {
-            text: s(text),
-            anchored,
-        }
-    }
-
-    /// Operand spellings (after the operator) and their classification.
-    fn operand_cells() -> Vec<(&'static str, PathArg)> {
-        vec![
-            ("./lib.ps1", st("./lib.ps1", false)),
-            ("'lib.ps1'", st("lib.ps1", false)),
-            ("\"lib.ps1\"", st("lib.ps1", false)),
-            (r"$PSScriptRoot\lib.ps1", st("lib.ps1", true)),
-            ("\"$PSScriptRoot/lib.ps1\"", st("lib.ps1", true)),
-            ("\"$psscriptroot\\lib.ps1\"", st("lib.ps1", true)),
-            (
-                r"'$PSScriptRoot\lib.ps1'",
-                st(r"$PSScriptRoot\lib.ps1", false),
-            ),
-            ("$path", PathArg::Computed),
-            ("\"$env:X\\lib.ps1\"", PathArg::Computed),
-            ("\"$PSScriptRoot$x.ps1\"", PathArg::Computed),
-            ("(Join-Path $PSScriptRoot lib.ps1)", PathArg::Computed),
-            ("./l`ib.ps1", PathArg::Computed),
-            (r"$PSScriptRoot\l`ib.ps1", PathArg::Computed),
-            ("\"l`ib.ps1\"", PathArg::Computed),
-            ("'`lib.ps1'", st("`lib.ps1", false)),
-            (r"${PSScriptRoot}\x.ps1", st("x.ps1", true)),
-            ("\"${PSScriptRoot}/x.ps1\"", st("x.ps1", true)),
-            (r"${psscriptroot}\x.ps1", st("x.ps1", true)),
-            (r"$PSSCRIPTROOT\x.ps1", st("x.ps1", true)),
-            ("$psscriptroot/x.ps1", st("x.ps1", true)),
-        ]
     }
 
     #[test]
