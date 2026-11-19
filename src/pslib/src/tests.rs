@@ -2,7 +2,9 @@
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
-use crate::identity::{base_relative, emitted_name, is_disambiguated, record_key, render};
+use crate::identity::{
+    self, base_relative, emitted_name, is_disambiguated, record_key, render, Identity,
+};
 use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, ManifestKeys, ModuleMap};
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
@@ -12,6 +14,7 @@ use crate::units::{
     assign_ordinals, bare_name, param_type, property_type_name, scan_units, FileUnits, Unit,
     UnitKind,
 };
+use std::collections::BTreeSet;
 use std::path::Path;
 use tree_sitter::Node;
 
@@ -511,6 +514,91 @@ fn decl_errors(src: &str, name: &str) -> Vec<(bool, bool)> {
             (inside, body)
         })
         .collect()
+}
+
+/// An in-memory tree of `(path, text)`: its ModuleMap (manifests = its parsed
+/// `.psd1` files), every file's units and the claimed paths.
+fn identity_fixture(tree: &[(&str, &str)]) -> (ModuleMap, Vec<FileUnits>, BTreeSet<String>) {
+    let files: Vec<&str> = tree.iter().map(|(p, _)| *p).collect();
+    let psd1: Vec<(&str, &str)> = tree
+        .iter()
+        .filter(|(p, _)| p.ends_with(".psd1"))
+        .copied()
+        .collect();
+    let units = tree
+        .iter()
+        .map(|(p, text)| {
+            let src = decode_mapped(text.as_bytes());
+            scan_units(p, &src, &parse(&src.text))
+        })
+        .collect();
+    let paths = files.iter().map(|p| s(p)).collect();
+    (module_map(&files, &psd1), units, paths)
+}
+
+/// Asserts `id`'s whole-tree invariants: distinct keys, distinct Function
+/// (parent, name) pairs, every parent a key of the right owner, and keys() =
+/// the modules plus record_key(parent, name) of every script and unit.
+fn assert_identity(map: &ModuleMap, files: &[FileUnits], id: &Identity) {
+    let mut keys = id.keys();
+    let distinct: std::collections::HashSet<&String> = keys.iter().collect();
+    assert_eq!(distinct.len(), keys.len(), "duplicate key in {keys:?}");
+    let mut rebuilt = map.modules();
+    let mut functions = std::collections::HashSet::new();
+    for f in files {
+        let p = f.path.as_str();
+        let ext = p.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+        let script = matches!(ext.as_deref(), Some("ps1" | "psm1"));
+        let Some(name) = id.script_name(p) else {
+            assert!(!script, "{p} has no script name");
+            continue;
+        };
+        assert!(script, "{p} named {name}");
+        let parent = id.script_parent(p);
+        assert_eq!(parent, map.module(p), "{p}");
+        assert!(distinct.contains(&parent), "{p} parent {parent}");
+        let script_key = record_key(&parent, name);
+        for (i, u) in f.units.iter().enumerate() {
+            let parent = id.unit_parent(p, i);
+            let owner = u.owner.map_or_else(
+                || script_key.clone(),
+                |o| record_key(&id.unit_parent(p, o), id.unit_name(p, o)),
+            );
+            assert_eq!(parent, owner, "{p} unit {i}");
+            assert!(distinct.contains(&parent), "{p} unit {i} parent {parent}");
+            let name = id.unit_name(p, i);
+            if !matches!(u.kind, UnitKind::Class | UnitKind::Enum) {
+                assert!(
+                    functions.insert((parent.clone(), s(name))),
+                    "{parent} {name}"
+                );
+            }
+            rebuilt.push(record_key(&parent, name));
+        }
+        rebuilt.push(script_key);
+    }
+    keys.sort();
+    rebuilt.sort();
+    assert_eq!(rebuilt, keys);
+}
+
+/// `tree` resolved, its invariants asserted.
+fn resolved(tree: &[(&str, &str)]) -> (ModuleMap, Vec<FileUnits>, Identity) {
+    let (map, files, paths) = identity_fixture(tree);
+    let id = identity::resolve(&map, &files, &paths);
+    assert_identity(&map, &files, &id);
+    (map, files, id)
+}
+
+/// Every unit name of `path`, in unit order.
+fn unit_names<'i>(id: &'i Identity, files: &[FileUnits], path: &str) -> Vec<&'i str> {
+    let n = files
+        .iter()
+        .find(|f| f.path == path)
+        .expect(path)
+        .units
+        .len();
+    (0..n).map(|i| id.unit_name(path, i)).collect()
 }
 
 mod unit {
@@ -2604,5 +2692,183 @@ mod int {
             .map(|u| u.name.as_str());
         let spec = ExportSpec::Patterns(vec![s("Get-*")]);
         assert_eq!(spec.exported(names), ["Get-A"]);
+    }
+
+    #[test]
+    fn identity_resolve_script_names() {
+        let foo = "@{ NestedModules = @('lib\\Helpers.ps1', '..\\Shared\\s.ps1') }\n";
+        let (_, _, id) = resolved(&[
+            ("mods/x/a.ps1", "Get-A\n"),
+            ("mods/Foo/Foo.psd1", foo),
+            ("mods/Foo/lib/Helpers.ps1", "Get-A\n"),
+            ("mods/Shared/s.ps1", "Get-A\n"),
+        ]);
+        let keys = id.keys();
+        let at = |p| (id.script_name(p), id.script_parent(p));
+        assert_eq!(at("mods/x/a.ps1"), (Some("a.ps1"), s("mods/x")));
+        assert!(keys.contains(&s("mods/x.a.ps1")));
+        let foo_mod = s("mods/Foo/Foo.psd1");
+        assert_eq!(
+            at("mods/Foo/lib/Helpers.ps1"),
+            (Some("lib/Helpers.ps1"), foo_mod.clone())
+        );
+        assert!(keys.contains(&s("mods/Foo/Foo.psd1.lib/Helpers.ps1")));
+        // reached through ..\: named by its .. path from the manifest's base
+        assert_eq!(at("mods/Shared/s.ps1"), (Some("../Shared/s.ps1"), foo_mod));
+        assert!(keys.contains(&s("mods/Foo/Foo.psd1.../Shared/s.ps1")));
+        assert_eq!(id.script_name("mods/Foo/Foo.psd1"), None);
+    }
+
+    #[test]
+    fn identity_resolve_unique_script_names() {
+        // root x.a.ps1 and .x/a.ps1 share .x.a.ps1; an unrelated .PSM1 is plain
+        let (_, _, id) = resolved(&[
+            ("x.a.ps1", "Get-A\n"),
+            (".x/a.ps1", "Get-A\n"),
+            ("z/U.PSM1", "Get-A\n"),
+        ]);
+        assert_eq!(id.script_name("x.a.ps1"), Some("x.a.ps1//x.a.ps1"));
+        assert_eq!(id.script_name(".x/a.ps1"), Some("a.ps1//.x/a.ps1"));
+        assert_eq!(id.script_name("z/U.PSM1"), Some("U.PSM1"));
+        // a.b.c.ps1 twice; A.b.c.ps1 differs only in case and stays plain
+        let (_, _, id) = resolved(&[
+            ("a.b/c.ps1", "Get-A\n"),
+            ("a/b.c.ps1", "Get-A\n"),
+            ("A/b.c.ps1", "Get-A\n"),
+        ]);
+        assert_eq!(id.script_name("a.b/c.ps1"), Some("c.ps1//a.b/c.ps1"));
+        assert_eq!(id.script_name("a/b.c.ps1"), Some("b.c.ps1//a/b.c.ps1"));
+        assert_eq!(id.script_name("A/b.c.ps1"), Some("b.c.ps1"));
+        // a script keyed like a directory module yields; the Module does not
+        let (map, _, id) = resolved(&[("a/b.ps1", "Get-A\n"), ("a.b.ps1/f.ps1", "Get-A\n")]);
+        assert_eq!(id.script_name("a/b.ps1"), Some("b.ps1//a/b.ps1"));
+        assert_eq!(id.script_name("a.b.ps1/f.ps1"), Some("f.ps1"));
+        assert_eq!(map.modules(), ["a", "a.b.ps1"]);
+        assert!(id.keys().contains(&s("a.b.ps1")));
+    }
+
+    #[test]
+    fn identity_resolve_root_script_beside_same_named_directory() {
+        let (map, _, id) = resolved(&[
+            ("build.ps1", "function F {}\n"),
+            ("build/x.ps1", "function F {}\n"),
+        ]);
+        assert_eq!(
+            (map.module("build.ps1"), map.base("build.ps1")),
+            (s(""), s(""))
+        );
+        assert_eq!(
+            (map.module("build/x.ps1"), map.base("build/x.ps1")),
+            (s("build"), s("build"))
+        );
+        assert_eq!(map.modules(), ["", "build"]);
+        let keys: BTreeSet<String> = id.keys().into_iter().collect();
+        let want = [
+            "",
+            "build",
+            ".build.ps1",
+            ".build.ps1.<script>",
+            ".build.ps1.F",
+            "build.x.ps1",
+            "build.x.ps1.<script>",
+            "build.x.ps1.F",
+        ];
+        assert_eq!(keys, want.map(s).into_iter().collect());
+        let at = |p| (id.script_name(p), id.script_parent(p));
+        assert_eq!(at("build.ps1"), (Some("build.ps1"), s("")));
+        assert_eq!(at("build/x.ps1"), (Some("x.ps1"), s("build")));
+        for (p, scope) in [("build.ps1", ".build.ps1"), ("build/x.ps1", "build.x.ps1")] {
+            for (i, name) in [(0, "<script>"), (1, "F")] {
+                assert_eq!(id.unit_parent(p, i), scope, "{p} {i}");
+                assert_eq!(id.unit_name(p, i), name, "{p} {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn identity_resolve_type_names() {
+        // class key m.a.ps1.B equals a directory module's; a unique class is plain
+        let (map, files, id) = resolved(&[
+            ("m/a.ps1", "class B { }\n"),
+            ("m.a.ps1.B/f.ps1", "Get-A\n"),
+            ("m/u.ps1", "class U { }\n"),
+        ]);
+        assert_eq!(
+            unit_names(&id, &files, "m/a.ps1"),
+            ["<script>", "B//m/a.ps1:2"]
+        );
+        assert_eq!(unit_names(&id, &files, "m/u.ps1"), ["<script>", "U"]);
+        assert!(map.modules().contains(&s("m.a.ps1.B")));
+        assert!(id.keys().contains(&s("m.a.ps1.B")));
+        // class ps1 keyed like script m/a.ps1.ps1: the type yields, the script not
+        let (_, files, id) =
+            resolved(&[("m/a.ps1.ps1", "Get-A\n"), ("m/a.ps1", "class ps1 { }\n")]);
+        assert_eq!(id.script_name("m/a.ps1.ps1"), Some("a.ps1.ps1"));
+        assert_eq!(id.script_name("m/a.ps1"), Some("a.ps1"));
+        assert_eq!(
+            unit_names(&id, &files, "m/a.ps1"),
+            ["<script>", "ps1//m/a.ps1:2"]
+        );
+        // a class whose key already reads //<scanned path>:<digits>
+        let (map, mut files, paths) = identity_fixture(&[("m/c.ps1", "class C { }\n")]);
+        files[0].units[1].name = s("C//m/c.ps1:9");
+        let id = identity::resolve(&map, &files, &paths);
+        assert_identity(&map, &files, &id);
+        assert_eq!(id.unit_name("m/c.ps1", 1), "C//m/c.ps1:9//m/c.ps1:2");
+    }
+
+    #[test]
+    fn identity_resolve_function_names() {
+        // function C.M and method C.M share m.s.ps1.C.M: both suffixed
+        let lone = "function C.M { }\nclass C {\n    M() { }\n}\n";
+        let (_, files, id) = resolved(&[("m/s.ps1", lone)]);
+        assert_eq!(
+            unit_names(&id, &files, "m/s.ps1"),
+            ["<script>", "C.M//m/s.ps1:2", "C", "M//m/s.ps1:4"]
+        );
+        assert_eq!(id.unit_parent("m/s.ps1", 1), "m.s.ps1");
+        assert_eq!(id.unit_parent("m/s.ps1", 3), "m.s.ps1.C");
+        // functions keyed like a script Struct and a Module yield; those do not
+        let (map, files, id) = resolved(&[
+            (
+                "p/q.ps1",
+                "function r.ps1 { }\nfunction mod { }\nfunction ok { }\n",
+            ),
+            ("p/q.ps1.r.ps1", "Get-A\n"),
+            ("p.q.ps1.mod/f.ps1", "Get-A\n"),
+        ]);
+        assert_eq!(
+            unit_names(&id, &files, "p/q.ps1"),
+            ["<script>", "r.ps1//p/q.ps1:2", "mod//p/q.ps1:3", "ok"]
+        );
+        assert_eq!(id.script_name("p/q.ps1.r.ps1"), Some("q.ps1.r.ps1"));
+        assert!(map.modules().contains(&s("p.q.ps1.mod")));
+        // overloads carry their signature and miss function C.M
+        let over = "function C.M { }\nclass C {\n    M() { }\n    M([int]$x) { }\n}\n";
+        let (_, files, id) = resolved(&[("m/s.ps1", over)]);
+        assert_eq!(
+            unit_names(&id, &files, "m/s.ps1"),
+            ["<script>", "C.M", "C", "M()", "M(int)"]
+        );
+        assert!(id.keys().contains(&s("m.s.ps1.C.M(int)")));
+        // M(int) keyed like a root directory module: signature kept, then suffix
+        let (map, files, id) = resolved(&[
+            ("s.ps1", "class C {\n    M() { }\n    M([int]$x) { }\n}\n"),
+            (".s.ps1.C.M(int)/f.ps1", "Get-A\n"),
+        ]);
+        assert_eq!(
+            unit_names(&id, &files, "s.ps1"),
+            ["<script>", "C", "M()", "M(int)//s.ps1:4"]
+        );
+        assert!(map.modules().contains(&s(".s.ps1.C.M(int)")));
+        // renamed scripts scope their functions; same names across scripts stay
+        let (_, _, id) = resolved(&[
+            ("x.a.ps1", "function G { }\n"),
+            (".x/a.ps1", "function G { }\n"),
+        ]);
+        assert_eq!(id.unit_parent("x.a.ps1", 1), ".x.a.ps1//x.a.ps1");
+        assert_eq!(id.unit_parent(".x/a.ps1", 1), ".x.a.ps1//.x/a.ps1");
+        assert_eq!(id.unit_name("x.a.ps1", 1), "G");
+        assert_eq!(id.unit_name(".x/a.ps1", 1), "G");
     }
 }
