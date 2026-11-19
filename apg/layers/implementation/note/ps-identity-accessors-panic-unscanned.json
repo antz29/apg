@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-identity-accessors-panic-unscanned",
+  "body": "Identity's accessors unit_name, unit_parent and script_parent index straight into the resolved map and panic on a path that was not scanned; only script_name returns an Option. Limit: callers must pass a scanned .ps1/.psm1 path, which finish and every current caller do. Upgrade by returning Option from all accessors when a caller can hold an unscanned path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.identity.Identity",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-units-method-named-new",
+  "body": "members renames a class constructor to new and groups methods by name, so a method explicitly named new joins the constructor's overload group, and one whose parameter types repeat the constructor's is dropped as a repeated signature. Limit: an explicit new method is not kept apart from the constructor. Upgrade by keying constructors separately from methods when a real class declares a method named new.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.units.members",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
