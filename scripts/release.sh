@@ -5,11 +5,10 @@ set -euo pipefail
 #
 # Repoints the 10 Homebrew formulae (Formula/*.rb: scanner, apg-go, apg-java,
 # apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-cobol, apg-sql) at a new
-# tag and
-# creates the annotated release tag — in the CORRECT order, so that when you
-# push the tag the bottle workflow builds bottles of the NEW version, not the
-# previous one (the bottle job builds from the tap formulae on `main`, so they
-# must already point at the new version before the tag is pushed).
+# tag and creates the annotated release tag — in the CORRECT order, so that
+# when you push the tag the bottle workflow builds bottles of the NEW version,
+# not the previous one (the bottle job builds from the tap formulae on `main`,
+# so they must already point at the new version before the tag is pushed).
 #
 # Run AFTER committing the release content with the version bumped in
 # Cargo.toml + Cargo.lock (that commit is the release HEAD). The script
