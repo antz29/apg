@@ -724,6 +724,7 @@ fn win_c_input(base: &Path, scan_root: &Path, targets_rel: &[&str]) -> increment
             planned: BTreeSet::new(),
             kinds: BTreeMap::new(),
             agents: Vec::new(),
+            content_key: None,
         }),
         targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
         removed_fqns: BTreeSet::new(),
