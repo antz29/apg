@@ -1,13 +1,15 @@
 //! File-dependency resolution: dot-source and `Import-Module` sites to the
 //! scanned file they name, or to an unresolved target.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use tree_sitter::{Node, Tree};
 
+use crate::builtins;
 use crate::manifest::ModuleMap;
 use crate::paths::{self, FileIndex, PathArg};
 use crate::source::Decoded;
+use crate::units::{self, FileUnits, UnitKind};
 
 /// The kind a file dependency's uses edge carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,9 +215,10 @@ impl ManifestStems {
     }
 }
 
-/// The PowerShell 7.6 LTS in-box modules named `Microsoft.PowerShell.*`,
-/// transcribed from `apg/.scratch/ps7-builtin-cmdlets.md` (PowerShell source
-/// tag v7.6.0). This is the crate's single in-box module list: the builtins
+/// The PowerShell 7.6 LTS in-box modules named `Microsoft.PowerShell.*`, from
+/// the PowerShell v7.6.0 sources: the `src/Modules/{Windows,Unix,Shared}`
+/// module manifests, `PSGalleryModules.csproj` and `InitialSessionState.cs`
+/// (re-verified 2026-11-19). This is the crate's single in-box module list: the builtins
 /// command table names its modules from it and never redefines it.
 pub const INBOX_MODULES: &[&str] = &[
     "Microsoft.PowerShell.Core",
@@ -293,5 +296,157 @@ pub fn resolve_site(site: &DepSite, file: &str, index: &FileIndex, stems: &Manif
                 category: module_category(n),
             },
         },
+    }
+}
+
+/// A script's repo-relative path to its dot-sourced Files, in first-site order.
+pub type DotSourceMap = BTreeMap<String, Vec<String>>;
+
+/// The name a written type text resolves by: one enclosing `[ ]` pair, trailing
+/// `[]` array suffixes and a trailing generic argument list removed.
+pub fn type_name(written: &str) -> String {
+    let t = written.trim();
+    let t = t
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(t)
+        .trim();
+    let t = units::property_type_name(t).trim_end();
+    generic_base(t).unwrap_or(t).trim_end().to_string()
+}
+
+/// `t` without its trailing balanced `[ ... ]` group, when that group is non-empty.
+fn generic_base(t: &str) -> Option<&str> {
+    let body = t.strip_suffix(']')?;
+    let mut depth = 1usize;
+    for (i, c) in body.char_indices().rev() {
+        match c {
+            ']' => depth += 1,
+            '[' => {
+                depth -= 1;
+                if depth == 0 {
+                    return (!body[i + 1..].trim().is_empty()).then(|| &t[..i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether a [`type_name`] result is a System type; the rule lives in `builtins`.
+pub fn is_system_type(name: &str) -> bool {
+    builtins::is_system_type(name)
+}
+
+/// The outcome of resolving a type name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeRes {
+    One { path: String, index: usize },
+    Many,
+    Outside,
+}
+
+/// Every scanned Class and Enum unit, by file and lowercased name.
+pub struct TypeIndex {
+    by_file: BTreeMap<String, HashMap<String, Vec<usize>>>,
+}
+
+impl TypeIndex {
+    pub fn new(files: &[FileUnits]) -> Self {
+        let mut by_file: BTreeMap<String, HashMap<String, Vec<usize>>> = BTreeMap::new();
+        for f in files {
+            let names = by_file.entry(f.path.clone()).or_default();
+            for (i, u) in f.units.iter().enumerate() {
+                if matches!(u.kind, UnitKind::Class | UnitKind::Enum) {
+                    names.entry(u.name.to_lowercase()).or_default().push(i);
+                }
+            }
+        }
+        TypeIndex { by_file }
+    }
+
+    /// Resolves `name` referenced from `file`: the file itself, then its direct
+    /// dot-sourced scripts, then every scanned file; the first step with a match decides.
+    pub fn resolve_type(&self, name: &str, file: &str, dot: &DotSourceMap) -> TypeRes {
+        let key = type_name(name).to_lowercase();
+        let in_files = |paths: &mut dyn Iterator<Item = &String>| {
+            let mut hits: Vec<(String, usize)> = Vec::new();
+            for p in paths {
+                for &i in self
+                    .by_file
+                    .get(p)
+                    .and_then(|m| m.get(&key))
+                    .into_iter()
+                    .flatten()
+                {
+                    if !hits.iter().any(|(hp, hi)| hp == p && *hi == i) {
+                        hits.push((p.clone(), i));
+                    }
+                }
+            }
+            match hits.as_slice() {
+                [] => None,
+                [(path, index)] => Some(TypeRes::One {
+                    path: path.clone(),
+                    index: *index,
+                }),
+                _ => Some(TypeRes::Many),
+            }
+        };
+        let own = file.to_string();
+        in_files(&mut std::iter::once(&own))
+            .or_else(|| in_files(&mut dot.get(file).into_iter().flatten()))
+            .or_else(|| in_files(&mut self.by_file.keys()))
+            .unwrap_or(TypeRes::Outside)
+    }
+}
+
+/// What a type reference or member call points at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Unit {
+        path: String,
+        index: usize,
+    },
+    Unresolved {
+        name: String,
+        category: &'static str,
+    },
+}
+
+/// The target of a resolved type reference written as `name`.
+pub fn type_target(res: TypeRes, name: &str) -> Target {
+    let n = type_name(name);
+    let category = match res {
+        TypeRes::One { path, index } => return Target::Unit { path, index },
+        TypeRes::Many => "unknown",
+        TypeRes::Outside if is_system_type(&n) => "stdlib",
+        TypeRes::Outside => "external",
+    };
+    Target::Unresolved { name: n, category }
+}
+
+/// The single constructor (or method named `member`) of class unit `class`
+/// taking `argc` parameters, if exactly one does.
+pub fn select_member(
+    file: &FileUnits,
+    class: usize,
+    member: &str,
+    argc: usize,
+    constructor: bool,
+) -> Option<usize> {
+    let mut hits = file.units.iter().enumerate().filter(|(_, u)| {
+        u.owner == Some(class)
+            && u.params.len() == argc
+            && if constructor {
+                u.kind == UnitKind::Constructor
+            } else {
+                u.kind == UnitKind::Method && u.name.to_lowercase() == member.to_lowercase()
+            }
+    });
+    match (hits.next(), hits.next()) {
+        (Some((i, _)), None) => Some(i),
+        _ => None,
     }
 }
