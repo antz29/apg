@@ -1327,6 +1327,37 @@ fn unresolved_of(recs: &[Rec]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Generic-type fixtures: class W's two List[T] properties and class V's nested List.
+const GENERIC_G: &str = "class W {\n    [System.Collections.Generic.List[int]]$a\n    [System.Collections.Generic.List[string]]$b\n}\n";
+const GENERIC_H: &str =
+    "class V {\n    [System.Collections.Generic.List[System.Collections.Generic.List[int]]]$n\n}\n";
+
+/// `tree`, each file asserted to parse clean, emitted; its call, use and Unresolved records
+/// keyed.
+fn generic_facts(tree: &[(&str, &str)]) -> Vec<Rec> {
+    for (p, src) in tree {
+        assert_eq!(errors(src), Vec::<String>::new(), "{p}");
+    }
+    let e = emit_tree(tree);
+    keyed_facts(e.records(), &record_keys(e.records()))
+}
+
+/// An UnresolvedUse record from `from` to `to`.
+fn unresolved_use(from: &str, to: &str) -> Rec {
+    Rec::UnresolvedUse {
+        from: s(from),
+        to: s(to),
+    }
+}
+
+/// An UnresolvedCall record from `from` to `to`.
+fn unresolved_call(from: &str, to: &str) -> Rec {
+    Rec::UnresolvedCall {
+        from: s(from),
+        to: s(to),
+    }
+}
+
 mod unit {
     use super::*;
 
@@ -5912,7 +5943,7 @@ mod int {
             calls(body, &get_p),
         ]);
         // Get-ChildItem (engine-module cmdlet) and ls (Windows-only default alias): the
-        // PowerShell 7.6 table, apg/.scratch/ps7-builtin-cmdlets.md
+        // PowerShell v7.6.0: src/Modules manifests, PSGalleryModules.csproj and InitialSessionState.cs
         for (name, category) in [
             ("Priv-B", "external"),
             ("Get-A", "unknown"),
@@ -6032,7 +6063,8 @@ mod int {
     #[test]
     fn finish_unresolved_category_precedence_across_sites() {
         // sort and where are PowerShell 7.6 default aliases (where cross-platform, of
-        // Where-Object): apg/.scratch/ps7-builtin-cmdlets.md
+        // Where-Object): PowerShell v7.6.0 src/Modules manifests, PSGalleryModules.csproj and
+        // InitialSessionState.cs
         let mpu = "Microsoft.PowerShell.Utility";
         let (import, command) = (
             "Import-Module Microsoft.PowerShell.Utility\n",
@@ -6116,5 +6148,87 @@ mod int {
             });
             assert_eq!(edges.count(), 1, "{target}");
         }
+    }
+
+    /// requirements.requirement.ps-generic-type-name: property types name the generic base.
+    #[test]
+    fn finish_names_generic_property_types_by_their_base() {
+        let list = "System.Collections.Generic.List";
+        let mut want = unresolved_then(list, "stdlib", unresolved_use(".g.ps1.W", list)).to_vec();
+        assert_eq!(generic_facts(&[("g.ps1", GENERIC_G)]), want);
+        want.push(unresolved_use(".h.ps1.V", list));
+        assert_eq!(
+            generic_facts(&[("g.ps1", GENERIC_G), ("h.ps1", GENERIC_H)]),
+            want
+        );
+    }
+
+    /// requirements.requirement.ps-generic-type-name: a generic base type.
+    #[test]
+    fn finish_names_a_generic_base_type_by_its_base() {
+        let list = "System.Collections.Generic.List";
+        let k = "class G : System.Collections.Generic.List[int] { }\n";
+        let want = unresolved_then(list, "stdlib", unresolved_use(".k.ps1.G", list));
+        assert_eq!(generic_facts(&[("k.ps1", k)]), want);
+        let mut want = unresolved_then(list, "stdlib", unresolved_use(".g.ps1.W", list)).to_vec();
+        want.push(unresolved_use(".k.ps1.G", list));
+        assert_eq!(generic_facts(&[("g.ps1", GENERIC_G), ("k.ps1", k)]), want);
+    }
+
+    /// requirements.requirement.ps-generic-type-name: generic static-call targets.
+    #[test]
+    fn finish_names_generic_static_call_targets_by_their_base() {
+        let src = "[System.Collections.Generic.List[int]]::new()\n[System.Collections.Generic.List[string]]::new()\n[System.Collections.Generic.Dictionary[string,int]]::new()\n";
+        let body = ".s.ps1.<script>";
+        let mut want = Vec::new();
+        for to in [
+            "System.Collections.Generic.List.new",
+            "System.Collections.Generic.Dictionary.new",
+        ] {
+            want.extend(unresolved_then(to, "stdlib", unresolved_call(body, to)));
+        }
+        assert_eq!(generic_facts(&[("s.ps1", src)]), want);
+    }
+
+    /// requirements.requirement.ps-generic-type-name: a generic type outside System.
+    #[test]
+    fn finish_names_generic_types_outside_system_by_their_base() {
+        let src = "class J {\n    [Contoso.Bag[int]]$p\n}\nclass K : Contoso.Bag[string] { }\n";
+        let bag = "Contoso.Bag";
+        let mut want = unresolved_then(bag, "external", unresolved_use(".c.ps1.J", bag)).to_vec();
+        want.push(unresolved_use(".c.ps1.K", bag));
+        assert_eq!(generic_facts(&[("c.ps1", src)]), want);
+    }
+
+    /// requirements.requirement.ps-generic-type-name: a scanned generic name resolves
+    /// through its stripped base.
+    #[test]
+    fn finish_resolves_a_scanned_generic_name_by_its_base() {
+        let src = "class Box { }\nclass U {\n    [Box[int]]$p\n}\n[Box[int]]::new()\n";
+        let mut want = vec![type_use(".b.ps1.U", ".b.ps1.Box")];
+        // Box declares no constructor
+        want.extend(unresolved_then(
+            "Box.new",
+            "unknown",
+            unresolved_call(".b.ps1.<script>", "Box.new"),
+        ));
+        assert_eq!(generic_facts(&[("b.ps1", src)]), want);
+    }
+
+    /// requirements.requirement.ps-generic-type-name: --targets keeps the generic name
+    /// and category of the full run.
+    #[test]
+    fn retain_targets_keeps_a_generic_unresolved_use_as_the_full_run_emits_it() {
+        let tree = [("g.ps1", GENERIC_G), ("h.ps1", GENERIC_H)];
+        let full = emit_tree(&tree);
+        let recs = full.records();
+        let (g, h) = (script_at(recs, "/r/g.ps1"), script_at(recs, "/r/h.ps1"));
+        let mut kept = emit_tree(&tree);
+        kept.retain_targets(&[s("/r/g.ps1")].into());
+        let got = keyed_facts(kept.records(), &record_keys(kept.records()));
+        assert_eq!(got, keyed_facts(&recs[g..h], &record_keys(recs)));
+        let list = "System.Collections.Generic.List";
+        let want = unresolved_then(list, "stdlib", unresolved_use(".g.ps1.W", list));
+        assert_eq!(got, want);
     }
 }
