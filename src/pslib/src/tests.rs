@@ -6,7 +6,8 @@ use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, Manifes
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
-use crate::source::{decode, decode_mapped, line_count, position, span};
+use crate::source::{decode, decode_mapped, line_count, position, span, Span};
+use crate::units::{assign_ordinals, bare_name, param_type, property_type_name, Unit, UnitKind};
 use std::path::Path;
 use tree_sitter::Node;
 
@@ -428,6 +429,25 @@ fn operand_cells() -> Vec<(&'static str, PathArg)> {
         (r"$PSSCRIPTROOT\x.ps1", st("x.ps1", true)),
         ("$psscriptroot/x.ps1", st("x.ps1", true)),
     ]
+}
+
+/// A hand-built unit spanning raw bytes `start..end` on line 1, ordinal unset.
+fn unit_at(kind: UnitKind, name: &str, start: usize, end: usize) -> Unit {
+    Unit {
+        kind,
+        name: s(name),
+        params: Vec::new(),
+        overloaded: false,
+        owner: None,
+        span: Span {
+            start,
+            end,
+            start_line: 1,
+            end_line: 1,
+        },
+        ordinal: 0,
+        property_types: Vec::new(),
+    }
 }
 
 mod unit {
@@ -1631,6 +1651,65 @@ mod unit {
         assert_eq!(pats.exported(names), ["Set-Item", "Get-A"]);
         assert_eq!(ExportSpec::Patterns(vec![s("*")]).exported(names), names);
         assert!(ExportSpec::Patterns(vec![]).exported(names).is_empty());
+    }
+
+    #[test]
+    fn units_bare_name_strips_scope_prefixes() {
+        for n in [
+            "global:Foo",
+            "Script:Foo",
+            "LOCAL:Foo",
+            "private:Foo",
+            "GLOBAL:Foo",
+        ] {
+            assert_eq!(bare_name(n), "Foo", "{n:?}");
+        }
+        for n in ["Foo", "env:Foo"] {
+            assert_eq!(bare_name(n), n);
+        }
+    }
+
+    #[test]
+    fn units_param_type_defaults_to_object() {
+        assert_eq!(param_type(Some("int")), "int");
+        let list = "System.Collections.Generic.List[string]";
+        assert_eq!(param_type(Some(list)), list);
+        assert_eq!(param_type(None), "object");
+    }
+
+    #[test]
+    fn units_property_type_name_strips_array_suffixes() {
+        for t in ["Foo", "Foo[]", "Foo[][]"] {
+            assert_eq!(property_type_name(t), "Foo", "{t:?}");
+        }
+        assert_eq!(property_type_name("System.String"), "System.String");
+    }
+
+    #[test]
+    fn units_assign_ordinals_by_start_offset() {
+        use UnitKind::*;
+        // Declaration order: script body, class, its members, then the function.
+        let mut units = vec![
+            unit_at(ScriptBody, "<script>", 0, 100),
+            unit_at(Class, "C", 0, 80),
+            unit_at(Method, "M", 40, 50),
+            unit_at(Constructor, "C", 60, 70),
+            unit_at(Function, "F", 10, 30),
+            unit_at(Function, "Nested", 20, 25),
+        ];
+        assign_ordinals(&mut units);
+        let got: Vec<usize> = units.iter().map(|u| u.ordinal).collect();
+        assert_eq!(got, [1, 2, 5, 6, 3, 4]);
+
+        // Equal start offsets keep declaration order.
+        let mut ties = vec![
+            unit_at(ScriptBody, "<script>", 0, 20),
+            unit_at(Function, "B", 5, 10),
+            unit_at(Function, "A", 5, 15),
+        ];
+        assign_ordinals(&mut ties);
+        let got: Vec<usize> = ties.iter().map(|u| u.ordinal).collect();
+        assert_eq!(got, [1, 2, 3]);
     }
 }
 
