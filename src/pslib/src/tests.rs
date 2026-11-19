@@ -1,6 +1,7 @@
 //! The crate's unit/int test root: pure in-memory tests in inner `unit` and
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
+use crate::builtins::{is_builtin, is_system_type, ACCELERATORS, ALIASES, COMMANDS};
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
 use crate::identity::{
     self, base_relative, emitted_name, is_disambiguated, record_key, render, Identity,
@@ -2304,6 +2305,149 @@ mod unit {
     fn resolve_nameless_key() {
         assert_eq!(nameless_key("dir/a.ps1", 17), "<nameless@dir/a.ps1:17>");
         assert_eq!(nameless_key("a.ps1", 0), "<nameless@a.ps1:0>");
+    }
+
+    // Sample names per PowerShell v7.6.0 InitialSessionState.cs, the src/Modules
+    // manifests and PSGalleryModules.csproj, TypeResolver.cs at v7.6.0, and the
+    // Learn powershell-7.6 module and about_Type_Accelerators pages.
+    #[test]
+    fn builtins_table_invariants() {
+        assert_eq!(COMMANDS.len(), 319);
+        assert_eq!(ALIASES.len(), 148);
+        assert_eq!(ACCELERATORS.len(), 107);
+        let mut per_module = std::collections::BTreeMap::new();
+        for (m, _) in COMMANDS {
+            *per_module.entry(*m).or_insert(0) += 1;
+        }
+        let want: std::collections::BTreeMap<&str, usize> = [
+            ("", 37),
+            ("Microsoft.PowerShell.Core", 61),
+            ("Microsoft.PowerShell.Management", 61),
+            ("Microsoft.PowerShell.Utility", 118),
+            ("Microsoft.PowerShell.Security", 15),
+            ("Microsoft.PowerShell.Host", 2),
+            ("Microsoft.PowerShell.Diagnostics", 3),
+            ("Microsoft.PowerShell.Archive", 2),
+            ("Microsoft.PowerShell.PSResourceGet", 19),
+            ("Microsoft.PowerShell.ThreadJob", 1),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(per_module, want);
+        // Strictly increasing lowercased keys: sorted, no case-insensitive duplicate.
+        let cmd_keys: Vec<_> = COMMANDS
+            .iter()
+            .map(|(m, c)| (c.to_lowercase(), m.to_lowercase()))
+            .collect();
+        assert!(cmd_keys.windows(2).all(|w| w[0] < w[1]), "COMMANDS order");
+        for table in [ALIASES, ACCELERATORS] {
+            let keys: Vec<_> = table.iter().map(|(k, _)| k.to_lowercase()).collect();
+            assert!(keys.windows(2).all(|w| w[0] < w[1]), "{:?} order", table[0]);
+        }
+        for (a, t) in ALIASES {
+            assert!(COMMANDS.iter().any(|(_, c)| c == t), "{a} -> {t}");
+        }
+        let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+        for (m, _) in COMMANDS.iter().filter(|(m, _)| !m.is_empty()) {
+            assert!(INBOX_MODULES.iter().any(|i| eq(i, m)), "{m}");
+        }
+        for i in INBOX_MODULES {
+            assert!(COMMANDS.iter().any(|(m, _)| eq(m, i)), "{i}");
+        }
+        let non_system: Vec<_> = ACCELERATORS
+            .iter()
+            .filter(|(_, t)| !t.starts_with("System."))
+            .collect();
+        assert_eq!(non_system.len(), 6, "{non_system:?}");
+    }
+
+    #[test]
+    fn builtins_is_builtin() {
+        for n in [
+            "Get-ChildItem",
+            "Compress-Archive",
+            "Clear-Host",
+            "Switch-Process",
+            "ls",
+            "gci",
+            "gcb",
+            "cd\\",
+            "Microsoft.PowerShell.Management\\Get-ChildItem",
+            "Microsoft.PowerShell.Utility\\Write-Output",
+            "Microsoft.PowerShell.Archive\\Compress-Archive",
+            "Microsoft.PowerShell.ThreadJob\\Start-ThreadJob",
+            "MICROSOFT.POWERSHELL.ARCHIVE\\compress-archive",
+        ] {
+            assert!(is_builtin(n), "{n:?}");
+        }
+        for (m, c) in COMMANDS {
+            for v in [c.to_string(), c.to_uppercase(), c.to_lowercase()] {
+                assert!(is_builtin(&v), "{v:?}");
+            }
+            if !m.is_empty() {
+                for v in [
+                    format!("{}\\{}", m.to_uppercase(), c.to_lowercase()),
+                    format!("{}\\{}", m.to_lowercase(), c.to_uppercase()),
+                ] {
+                    assert!(is_builtin(&v), "{v:?}");
+                }
+            }
+        }
+        for (a, _) in ALIASES {
+            for v in [a.to_string(), a.to_uppercase(), a.to_lowercase()] {
+                assert!(is_builtin(&v), "{v:?}");
+            }
+        }
+        for n in [
+            "Get-CimInstance",
+            "Set-PSReadLineOption",
+            "CimCmdlets\\Get-CimInstance",
+            "ThreadJob\\Start-ThreadJob",
+            "git",
+            "git.exe",
+            "Get-Foo",
+            "Import-Modules",
+            "",
+            "Contoso.Tools\\Get-Item",
+            "Microsoft.PowerShell.Utility\\Get-ChildItem",
+            "Microsoft.PowerShell.Core\\ls",
+            "Microsoft.PowerShell.Core\\Clear-Host",
+        ] {
+            assert!(!is_builtin(n), "{n:?}");
+        }
+    }
+
+    #[test]
+    fn builtins_is_system_type() {
+        for n in [
+            "string",
+            "STRING",
+            "hashtable",
+            "pscustomobject",
+            "ordered",
+            "adsi",
+            "System",
+            "system",
+            "System.IO.File",
+            "SYSTEM.io.path",
+            "System.Collections.Generic.List[string]",
+        ] {
+            assert!(is_system_type(n), "{n:?}");
+        }
+        for n in [
+            "ciminstance",
+            "CimSession",
+            "pspropertyexpression",
+            "math",
+            "object",
+            "console",
+            "Systems.X",
+            "MySystem.String",
+            "Foo",
+            "",
+        ] {
+            assert!(!is_system_type(n), "{n:?}");
+        }
     }
 }
 
