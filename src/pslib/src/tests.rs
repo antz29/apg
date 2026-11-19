@@ -9,8 +9,8 @@ use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, Manifes
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::resolve::{
-    import_arg, module_category, nameless_key, resolve_site, Dep, DepKind, DepSite, ImportArg,
-    ManifestStems, SiteKind, StemMatch, INBOX_MODULES,
+    file_deps, import_arg, module_category, nameless_key, resolve_site, Dep, DepKind, DepSite,
+    ImportArg, ManifestStems, SiteKind, StemMatch, INBOX_MODULES,
 };
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
@@ -766,6 +766,39 @@ const UNIQUE_TREE: [(&str, &str); 15] = [
     ("q/one.ps1", "function G { }\n"),
     ("q/two.ps1", "function G { }\n"),
 ];
+
+/// `file_deps` over `bytes` decoded (source::decode_mapped) and parsed.
+fn deps_of(bytes: &[u8]) -> Vec<DepSite> {
+    let src = decode_mapped(bytes);
+    file_deps(&src, &parse(&src.text))
+}
+
+/// Every dot-source invocation and `Import-Module` command node of `src`'s parse,
+/// in tree order, as (its text, it has an ERROR ancestor).
+fn site_ancestry(src: &str) -> Vec<(&str, bool)> {
+    let tree = parse(src);
+    descendants(tree.root_node())
+        .into_iter()
+        .filter(|n| match n.kind() {
+            "invocation_operator_command" => n
+                .child_by_field_name("operator")
+                .is_some_and(|o| o.kind() == "."),
+            "command" => n
+                .child_by_field_name("name")
+                .is_some_and(|c| src[c.byte_range()].eq_ignore_ascii_case("Import-Module")),
+            _ => false,
+        })
+        .map(|n| {
+            let mut up = n.parent();
+            let mut inside = false;
+            while let Some(p) = up {
+                inside |= p.is_error();
+                up = p.parent();
+            }
+            (&src[n.byte_range()], inside)
+        })
+        .collect()
+}
 
 mod unit {
     use super::*;
@@ -3531,5 +3564,236 @@ mod int {
         ] {
             assert_eq!(dep(n), unresolved(n, "external"), "{n}");
         }
+    }
+
+    #[test]
+    fn resolve_file_deps_dot_sources() {
+        let dot = |a: PathArg| vec![SiteKind::DotSource(a)];
+        let cases: Vec<(&str, Vec<SiteKind>)> = vec![
+            (". ./lib.ps1", dot(st("./lib.ps1", false))),
+            (". 'lib.ps1'", dot(st("lib.ps1", false))),
+            (r". $PSScriptRoot\lib.ps1", dot(st("lib.ps1", true))),
+            (". $path", dot(PathArg::Computed)),
+            (". (Join-Path $PSScriptRoot x.ps1)", dot(PathArg::Computed)),
+            ("function F { . ./f.ps1 }", dot(st("./f.ps1", false))),
+            ("class C { M() { . ./m.ps1 } }", dot(st("./m.ps1", false))),
+            (". { Get-Date }", vec![]),
+            // the call operator is phase 6's
+            ("& ./lib.ps1", vec![]),
+        ];
+        for (src, want) in cases {
+            assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+            // a lone site starts at its `.` operator
+            let at = src.find('.').unwrap();
+            let want: Vec<DepSite> = want
+                .into_iter()
+                .map(|kind| DepSite {
+                    kind,
+                    raw_offset: at,
+                })
+                .collect();
+            assert_eq!(deps_of(src.as_bytes()), want, "{src:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_file_deps_import_module() {
+        let name = |n: &str| Some(ImportArg::Name(s(n)));
+        let path = |p: &str, anchored| Some(ImportArg::Path(st(p, anchored)));
+        let computed = Some(ImportArg::Computed);
+        let cases: Vec<(&str, Option<ImportArg>)> =
+            vec![
+            ("Import-Module Foo", name("Foo")),
+            ("Import-Module -Name Foo", name("Foo")),
+            ("import-module -name Foo", name("Foo")),
+            ("ipmo Foo", name("Foo")),
+            ("Microsoft.PowerShell.Core\\Import-Module Foo", name("Foo")),
+            ("Import-Module -Force Foo", name("Foo")),
+            ("Import-Module Foo -Global -PassThru", name("Foo")),
+            ("Import-Module -Prefix P Foo", name("Foo")),
+            ("Import-Module .\\Foo.psm1", path(".\\Foo.psm1", false)),
+            ("Import-Module $PSScriptRoot\\Foo.psd1", path("Foo.psd1", true)),
+            ("Import-Module lib/Foo", path("lib/Foo", false)),
+            ("Import-Module Foo.dll", path("Foo.dll", false)),
+            ("Import-Module $m", computed.clone()),
+            ("Import-Module \"$x\\Foo.psm1\"", computed.clone()),
+            // a comma list is one computed site, never its first name
+            ("Import-Module A, B", computed.clone()),
+            ("Import-Module -Name A, B", computed.clone()),
+            ("Import-Module -Force", None),
+            // common switches
+            ("Import-Module -Verbose Foo", name("Foo")),
+            ("Import-Module -Debug Foo", name("Foo")),
+            ("Import-Module -WhatIf -Confirm Foo", name("Foo")),
+            // colon-bound parameters consume nothing further
+            ("Import-Module -Force:$true Foo", name("Foo")),
+            ("Import-Module -Force:$false Foo", name("Foo")),
+            ("Import-Module -Prefix:P Foo", name("Foo")),
+            ("Import-Module -Name:Foo", name("Foo")),
+            ("Import-Module -name:'./x.psm1'", path("./x.psm1", false)),
+            ("Import-Module -Name:$m", computed.clone()),
+            // -FullyQualifiedName
+            ("Import-Module -FullyQualifiedName Foo", name("Foo")),
+            (
+                "Import-Module -FullyQualifiedName './Foo.psd1'",
+                path("./Foo.psd1", false),
+            ),
+            (
+                "Import-Module -FullyQualifiedName @{ModuleName='Foo'; ModuleVersion='1.0'}",
+                computed.clone(),
+            ),
+            (
+                "Import-Module -FullyQualifiedName:@{ModuleName='Foo'}",
+                computed.clone(),
+            ),
+            ("Import-Module -ModuleInfo $mi", computed.clone()),
+            (
+                "Import-Module -Verbose -Force:$true -Prefix:P -Debug -Name:Foo -Global",
+                name("Foo"),
+            ),
+            // abbreviations are not recognised: -Na consumes Foo
+            ("Import-Module -Na Foo", None),
+            ("Get-Module Foo", None),
+            ("using module Foo", None),
+            (
+                "configuration C { Import-DscResource -ModuleName PSDesiredStateConfiguration }",
+                None,
+            ),
+            // a value-taking parameter followed by a parameter binds nothing
+            ("Import-Module -Prefix -Force X", name("X")),
+            // a parameter given twice: the first bound wins
+            ("Import-Module -Name A -Name B", name("A")),
+            // -ModuleInfo and -Assembly share a rank: the first in source wins
+            (
+                "Import-Module -Assembly x.dll -ModuleInfo $mi",
+                path("x.dll", false),
+            ),
+            ("Import-Module -ModuleInfo $mi -Assembly x.dll", computed.clone()),
+        ];
+        for (src, want) in cases {
+            assert_eq!(errors(src), Vec::<String>::new(), "{src:?}");
+            let want: Vec<DepSite> = want
+                .into_iter()
+                .map(|a| DepSite {
+                    kind: SiteKind::Import(a),
+                    raw_offset: 0,
+                })
+                .collect();
+            assert_eq!(deps_of(src.as_bytes()), want, "{src:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_file_deps_dsc_body_in_source_order() {
+        let src = "configuration C { Node x { . ./lib.ps1; Import-Module Foo } }";
+        assert_eq!(errors(src), Vec::<String>::new());
+        let want = [
+            DepSite {
+                kind: SiteKind::DotSource(st("./lib.ps1", false)),
+                raw_offset: src.find(". ./").unwrap(),
+            },
+            DepSite {
+                kind: SiteKind::Import(ImportArg::Name(s("Foo"))),
+                raw_offset: src.find("Import-Module").unwrap(),
+            },
+        ];
+        assert_eq!(deps_of(src.as_bytes()), want);
+    }
+
+    #[test]
+    fn resolve_file_deps_raw_offsets_across_encodings() {
+        let text = "# é😀 comment\n. ./lib.ps1\nImport-Module Foo\n";
+        let mut offsets = Vec::new();
+        for (bytes, be, width) in [
+            (text.as_bytes().to_vec(), None, 1),
+            (utf8_bom(text), None, 1),
+            (utf16_bytes(text, false), Some(false), 2),
+            (utf16_bytes(text, true), Some(true), 2),
+        ] {
+            let deps = deps_of(&bytes);
+            let got: Vec<usize> = deps.iter().map(|d| d.raw_offset).collect();
+            assert_eq!(got.len(), 2, "{deps:?}");
+            for (off, first) in got.iter().zip([".", "I"]) {
+                assert_eq!(raw_text(&bytes, be, *off, off + width), first);
+            }
+            offsets.push(got);
+        }
+        // UTF-8, UTF-8 with BOM and UTF-16 differ; UTF-16LE and BE share a layout
+        assert_eq!(offsets[0], [17, 29]);
+        assert_eq!(offsets[1], [20, 32]);
+        assert_eq!(offsets[2], [30, 54]);
+        assert_eq!(offsets[3], offsets[2]);
+    }
+
+    /// requirements.requirement.ps-error-recovery: sites outside an ERROR region survive.
+    #[test]
+    fn resolve_file_deps_error_recovery() {
+        let dot = |p: &str, at: usize| DepSite {
+            kind: SiteKind::DotSource(st(p, false)),
+            raw_offset: at,
+        };
+        // (A) a broken statement between two dot-sources and an Import-Module
+        let src = ". ./a.ps1\n$x = )\n. ./b.ps1\nImport-Module Foo\n";
+        assert_source_root(src);
+        assert!(!errors(src).is_empty());
+        let foo = DepSite {
+            kind: SiteKind::Import(ImportArg::Name(s("Foo"))),
+            raw_offset: 27,
+        };
+        assert_eq!(
+            deps_of(src.as_bytes()),
+            [dot("./a.ps1", 0), dot("./b.ps1", 17), foo]
+        );
+
+        // (B) both inside sites' command nodes lie in a local ERROR, the outside one not
+        let broken =
+            "function G { function I { . ./inside.ps1; Import-Module InsideMod } +=\n. ./out.ps1\n}\n";
+        assert_source_root(broken);
+        assert_eq!(
+            site_ancestry(broken),
+            [
+                (". ./inside.ps1", true),
+                ("Import-Module InsideMod", true),
+                (". ./out.ps1", false),
+            ]
+        );
+        let out = broken.find(". ./out").unwrap();
+        assert_eq!(deps_of(broken.as_bytes()), [dot("./out.ps1", out)]);
+        // without the stray `+=` every site is kept
+        let clean = broken.replacen(" +=", "", 1);
+        assert_eq!(errors(&clean), Vec::<String>::new());
+        assert_eq!(deps_of(clean.as_bytes()).len(), 3);
+
+        // (C) a whole-file ERROR root yields no site
+        let open = ". ./a.ps1\nImport-Module Foo\nfunction F { Get-B\n$x = (1 + \n";
+        assert_error_root(open);
+        assert_eq!(deps_of(open.as_bytes()), []);
+    }
+
+    #[test]
+    fn resolve_file_deps_feed_resolve_site() {
+        let (_, index, stems) = resolve_fixture();
+        let bytes = utf16_bytes(". ./b.ps1\n. $path\n", false);
+        let deps = deps_of(&bytes);
+        assert_eq!(deps.len(), 2, "{deps:?}");
+        let got: Vec<Dep> = deps
+            .iter()
+            .map(|d| resolve_site(d, "scripts/a.ps1", &index, &stems))
+            .collect();
+        // `. $path` starts after the BOM and ten UTF-16 code units
+        assert_eq!(deps[1].raw_offset, 22);
+        assert_eq!(
+            got,
+            [
+                Dep::File {
+                    path: s("scripts/b.ps1"),
+                    kind: DepKind::DotSource,
+                },
+                Dep::Unresolved {
+                    name: s("<nameless@scripts/a.ps1:22>"),
+                    category: "unknown",
+                },
+            ]
+        );
     }
 }
