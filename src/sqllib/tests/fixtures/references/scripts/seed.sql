@@ -1,0 +1,3 @@
+CREATE TABLE dbo.Seed (Id INT)
+GO
+INSERT INTO dbo.Seed (Id) VALUES (1)

@@ -1,0 +1,1 @@
+CREATE TABLE Extra (id INT)

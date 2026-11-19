@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::{digest_str, kind_str, rel_path_of};
 use crate::graph::{Graph, Location, Node, NodeKind};
+use crate::layers::NodeProperties;
 
 /// One node of a per-file fact unit: the minimal, serde-round-trippable shape
 /// needed to rebuild a [`Node`] without re-running a frontend. FQNs are already
@@ -107,6 +108,22 @@ pub struct FragEdge {
     pub to: String,
     #[serde(default)]
     pub target_type: String,
+    /// A `uses` edge's `graph.edge_properties` (e.g. `{"kind":"copy"}`); empty
+    /// for every other kind and for a unit stored before the field existed.
+    #[serde(default)]
+    pub properties: NodeProperties,
+}
+
+/// The properties a recorded edge carries: only a `uses` edge has any.
+fn edge_props(graph: &Graph, kind: &str, from: &str, to: &str) -> NodeProperties {
+    if kind != "uses" {
+        return NodeProperties::new();
+    }
+    graph
+        .edge_properties
+        .get(&("uses", from.to_string(), to.to_string()))
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Re-bases a stored identity onto the **repo-relative** identity base
@@ -235,6 +252,7 @@ impl FileFragment {
                     from: from.to_string(),
                     to: to.to_string(),
                     target_type: target_type.to_string(),
+                    properties: edge_props(graph, kind, from, to),
                 });
                 inputs.insert(to.to_string());
             }
@@ -259,6 +277,7 @@ impl FileFragment {
                     from: a.clone(),
                     to: b.clone(),
                     target_type: String::new(),
+                    properties: NodeProperties::new(),
                 });
                 inputs.insert(a.clone());
             }
@@ -390,6 +409,7 @@ impl FileFragment {
                 from: rebase(stored_root, reader_root, &e.from),
                 to: rebase(stored_root, reader_root, &e.to),
                 target_type: e.target_type.clone(),
+                properties: e.properties.clone(),
             })
             .collect();
         (self.modules.clone(), nodes, edges)
@@ -466,6 +486,7 @@ impl FileIndex {
                     from: a.clone(),
                     to: b.clone(),
                     target_type: String::new(),
+                    properties: NodeProperties::new(),
                 });
             } else if graph
                 .nodes
@@ -483,6 +504,7 @@ impl FileIndex {
                         from: a.clone(),
                         to: b.clone(),
                         target_type: String::new(),
+                        properties: NodeProperties::new(),
                     });
             } else if graph
                 .nodes
@@ -501,6 +523,7 @@ impl FileIndex {
                         from: a.clone(),
                         to: b.clone(),
                         target_type: String::new(),
+                        properties: NodeProperties::new(),
                     });
             }
         }
@@ -547,6 +570,7 @@ impl FileIndex {
                 from: from.to_string(),
                 to: to.to_string(),
                 target_type: target_type.to_string(),
+                properties: edge_props(graph, kind, from, to),
             });
         }
     }

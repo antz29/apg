@@ -1151,6 +1151,60 @@ fn cs_records(
     out
 }
 
+/// One candidate `apg` invocation in `dir` with an isolated `HOME`; fails
+/// loudly on a non-zero exit and returns the output.
+fn apg_ok(dir: &Path, home: &str, args: &[&str]) -> std::process::Output {
+    let out = apg::testutil::ApgCommand::new(args)
+        .cwd(dir)
+        .env("HOME", home)
+        .output();
+    assert!(
+        out.status.success(),
+        "{args:?} in {}: {}{}",
+        dir.display(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out
+}
+
+/// A scratch HOME beside (outside) `repo`, with the suite's plugin dir
+/// pre-created so `apg init` skips `bun install`.
+fn sibling_home(repo: &apg::testutil::Repo, tag: &str) -> PathBuf {
+    let home = repo
+        .root
+        .parent()
+        .unwrap()
+        .join(format!("apg-{tag}-home-{}", std::process::id()));
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
+    home
+}
+
+/// `cypher`'s `a`/`b`/`p` columns as sorted `"<a> -> <b> <p>"` lines; `p` is
+/// the raw JSON value (`"{}"`, `null`, …), never decoded or re-encoded.
+fn edge_lines(dir: &Path, home: &str, cypher: &str) -> Vec<String> {
+    let out = apg_ok(dir, home, &["query", "--json", cypher]);
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).expect("json rows");
+    let mut lines: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let s = |k: &str| r[k].as_str().unwrap_or_default().to_string();
+            format!("{} -> {} {}", s("a"), s("b"), r["p"])
+        })
+        .collect();
+    lines.sort();
+    lines
+}
+
+/// Every `sql.` Function/Struct → Struct Uses edge with its properties.
+fn sql_uses_rows(dir: &Path, home: &str) -> Vec<String> {
+    edge_lines(
+        dir,
+        home,
+        "MATCH (a)-[r:Uses]->(b:Struct) WHERE a.fqn STARTS WITH 'sql.' AND (label(a) = 'Function' OR label(a) = 'Struct') RETURN a.fqn AS a, b.fqn AS b, r.properties AS p",
+    )
+}
+
 /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files
 /// and writes node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -5160,6 +5214,273 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Task 8.14 (e2e): a program Struct's Struct-to-File `copy` Uses edge to
+    /// a statement-only copybook survives the cached-fact reassembly: a
+    /// spec-only delta skips the cobol frontend, the splice guard refuses, and
+    /// the full-load fallback (`ingest_with_reuse` → `splice_cached`) restores
+    /// each edge's cached `{"kind":"copy"}` property from the fact store alone,
+    /// equal to the full scan and to a `--force` rebuild.
+    ///
+    /// Scratch /tmp repo + candidate binary + spawned cobol frontend: real I/O,
+    /// so this is `#[ignore]`d e2e.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/cobol frontend/db.lbug); run via cargo test-e2e"]
+    fn copy_uses_edge_survives_a_warm_full_load_reassembly() {
+        use apg::testutil::Repo;
+
+        const PROG_A: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGA.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+        const PROG_B: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGB.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+        let scan = |dir: &Path, home: &str, extra: &[&str]| -> String {
+            let mut args = vec!["scan", ".", "--language", "cobol", "--copy-path", "lib"];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_ok(dir, home, &args).stderr).into_owned()
+        };
+        let copy_rows = |dir: &Path, home: &str| {
+            edge_lines(
+                dir,
+                home,
+                "MATCH (a:Struct)-[r:Uses]->(b:File) RETURN a.fqn AS a, b.fqn AS b, r.properties AS p",
+            )
+        };
+        let copy_p = serde_json::json!("{\"kind\":\"copy\"}").to_string();
+        let assert_copy = |label: &str, rows: &[String]| {
+            assert_eq!(
+                rows.len(),
+                2,
+                "{label}: one copy edge per program: {rows:#?}"
+            );
+            for prog in ["PROGA", "PROGB"] {
+                assert!(
+                    rows.iter().any(|r| r.contains(prog)
+                        && r.contains(" -> lib/STMTS.cpy ")
+                        && r.ends_with(&copy_p)),
+                    "{label}: {prog} -> lib/STMTS.cpy kind=copy: {rows:#?}"
+                );
+            }
+            assert!(
+                rows.iter().all(|r| !r.ends_with(" null")),
+                "{label}: NULL properties: {rows:#?}"
+            );
+        };
+
+        let repo = Repo::new("cobol-warm-copy");
+        let home = sibling_home(&repo, "cobol-warm-copy");
+        let home_s = home.to_str().unwrap().to_string();
+        repo.write(
+            ".gitignore",
+            "/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write("A.cob", PROG_A);
+        repo.write("B.cob", PROG_B);
+        repo.write("lib/STMTS.cpy", "           DISPLAY 'S'.\n");
+        repo.commit_all("init source");
+        apg_ok(&repo.root, &home_s, &["init", "."]);
+        repo.commit_all("apg init");
+        scan(&repo.root, &home_s, &[]);
+        apg_ok(&repo.root, &home_s, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+
+        // (1) Full scan: both programs hold their kind=copy edge.
+        scan(&wt, &home_s, &["--force"]);
+        let full = copy_rows(&wt, &home_s);
+        assert_copy("(1) full scan", &full);
+
+        // (2) A spec-only delta (one hand-written durable node file, no COBOL
+        // change): cobol is skipped, the splice guard refuses the unrepresented
+        // authored row, and the full-load fallback re-assembles from the fact
+        // store — so the copy edges can only come from the cached facts.
+        let layers_dir = wt.join("apg/layers/global/constraint");
+        std::fs::create_dir_all(&layers_dir).unwrap();
+        std::fs::write(
+            layers_dir.join("cobol-warm-copy.json"),
+            "{\n  \"layer\": \"global\",\n  \"type\": \"constraint\",\n  \"name\": \"cobol-warm-copy\",\n  \"body\": \"A spec-only rescan re-assembles from cached facts.\"\n}\n",
+        )
+        .unwrap();
+        let log2 = scan(&wt, &home_s, &[]);
+        for line in [
+            "[scan] incremental:",
+            "[scan] cobol: no changed targets — frontend skipped (facts reused)",
+            "does not represent the assembled graph's authored/transient rows",
+            "[load] full-load fallback: re-assembling the full graph",
+        ] {
+            assert!(log2.contains(line), "(2) log must contain `{line}`: {log2}");
+        }
+        assert!(
+            !log2.contains("running cobol frontend"),
+            "(2) cobol must not re-run: {log2}"
+        );
+        let warm = copy_rows(&wt, &home_s);
+        assert_copy("(2) warm reassembly", &warm);
+        assert_eq!(warm, full, "(2) warm rows equal the full scan");
+        scan(&wt, &home_s, &["--force"]);
+        assert_eq!(copy_rows(&wt, &home_s), warm, "(2) --force rows");
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Task 8.13 (e2e): SQL Uses-edge `kind` properties survive a splice
+    /// re-scan and the warm cached-fact reassembly (`splice_cached` behind a
+    /// missing seed db.lbug), each equal to the full scan and a `--force`
+    /// rebuild; and a property-less Rust Uses edge stores exactly `"{}"`
+    /// (never `""`/NULL) after a splice, byte-equal to a `--force` rebuild.
+    ///
+    /// Scratch /tmp repos + candidate binary + spawned sql/rust frontends:
+    /// real I/O, so this is `#[ignore]`d e2e.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/sql frontend/db.lbug); run via cargo test-e2e"]
+    fn sql_uses_edge_properties_survive_splice_and_warm_reassembly() {
+        use apg::testutil::{Repo, wt_commit};
+
+        const SQLPROJ: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Project DefaultTargets=\"Build\" ToolsVersion=\"4.0\" xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">\n  <PropertyGroup>\n    <Name>Db</Name>\n    <DefaultSchema>dbo</DefaultSchema>\n  </PropertyGroup>\n  <ItemGroup>\n    <Build Include=\"*.sql\" />\n  </ItemGroup>\n</Project>\n";
+        let spliced = |log: &str| log.contains("full load skipped");
+        let sql_scan = |dir: &Path, home: &str, extra: &[&str]| -> String {
+            let mut args = vec!["scan", ".", "--language", "sql"];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_ok(dir, home, &args).stderr).into_owned()
+        };
+        // An edge line `<from> -> <to> <p>` whose ends match and whose raw
+        // properties are the JSON string `{"kind":"<kind>"}`.
+        let has = |rows: &[String], from: &str, to: &str, kind: &str| {
+            let p = serde_json::json!(format!("{{\"kind\":\"{kind}\"}}")).to_string();
+            rows.iter().any(|r| {
+                r.split_once(" -> ")
+                    .and_then(|(a, rest)| rest.split_once(' ').map(|(b, q)| (a, b, q)))
+                    .is_some_and(|(a, b, q)| a.ends_with(from) && b.ends_with(to) && q == p)
+            })
+        };
+
+        // ---- SQL ----
+        let repo = Repo::new("sql-splice-props");
+        let home = sibling_home(&repo, "sql-splice-props");
+        let home_s = home.to_str().unwrap().to_string();
+        repo.write(
+            ".gitignore",
+            "/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        repo.write("Db/Db.sqlproj", SQLPROJ);
+        repo.write(
+            "Db/Orders.sql",
+            "CREATE TABLE dbo.Orders\n(\n    Id INT NOT NULL,\n    Total INT NULL\n)\nGO\n",
+        );
+        repo.write(
+            "Db/AddOrder.sql",
+            "CREATE PROCEDURE dbo.AddOrder\nAS\n    INSERT INTO dbo.Orders (Id, Total) VALUES (1, 2)\nGO\n",
+        );
+        repo.write(
+            "Db/vOrders.sql",
+            "CREATE VIEW dbo.vOrders\nAS\n    SELECT Id, Total FROM dbo.Orders\nGO\n",
+        );
+        repo.write("Db/Other.sql", "CREATE TABLE dbo.Other (Id INT)\nGO\n");
+        repo.commit_all("init source");
+        apg_ok(&repo.root, &home_s, &["init", "."]);
+        repo.commit_all("apg init");
+        sql_scan(&repo.root, &home_s, &[]);
+        apg_ok(&repo.root, &home_s, &["project", "start", "demo"]);
+        let wt = repo.root.join("apg").join(".worktrees").join("demo");
+
+        // (1) Full scan: the write and read edges carry their kind.
+        sql_scan(&wt, &home_s, &["--force"]);
+        let full = sql_uses_rows(&wt, &home_s);
+        assert!(
+            has(&full, ".dbo.AddOrder", ".dbo.Orders", "write"),
+            "(1) AddOrder -> Orders kind=write: {full:#?}"
+        );
+        assert!(
+            has(&full, ".dbo.vOrders", ".dbo.Orders", "read"),
+            "(1) vOrders -> Orders kind=read: {full:#?}"
+        );
+        assert!(
+            full.iter().all(|r| !r.ends_with(" null")),
+            "(1) NULL properties: {full:#?}"
+        );
+
+        // (2) Other.sql-only edit: the splice keeps every edge's properties.
+        std::fs::write(
+            wt.join("Db/Other.sql"),
+            "CREATE TABLE dbo.Other (Id INT, Name INT)\nGO\n",
+        )
+        .unwrap();
+        wt_commit(&wt, &["Db/Other.sql"], "edit only Other.sql");
+        let log2 = sql_scan(&wt, &home_s, &[]);
+        assert!(spliced(&log2), "(2) must take the splice path: {log2}");
+        assert_eq!(sql_uses_rows(&wt, &home_s), full, "(2) spliced rows");
+        sql_scan(&wt, &home_s, &["--force"]);
+        assert_eq!(sql_uses_rows(&wt, &home_s), full, "(2) --force rows");
+
+        // (3) Drop the seed db.lbug, keep the fact store: the cached-fact
+        // reassembly full-loads with the same properties.
+        std::fs::remove_file(wt.join("apg/.trans/db.lbug")).unwrap();
+        let log3 = sql_scan(&wt, &home_s, &[]);
+        assert!(
+            log3.contains("[scan] warm cache:")
+                || log3.contains("[scan] incremental: 0 target file(s)"),
+            "(3) must assemble from the warm fact store: {log3}"
+        );
+        assert!(
+            log3.contains("[load] splice: no previous db.lbug to seed from — full load"),
+            "(3) the dropped seed must force the full load: {log3}"
+        );
+        let warm = sql_uses_rows(&wt, &home_s);
+        assert_eq!(warm, full, "(3) warm reassembly rows");
+        assert!(
+            warm.iter().all(|r| !r.ends_with(" null")),
+            "(3) NULL properties: {warm:#?}"
+        );
+
+        // ---- Rust: a property-less Uses edge is exactly "{}" ----
+        let rrepo = Repo::new("rust-splice-props");
+        let rhome = sibling_home(&rrepo, "rust-splice-props");
+        let rhome_s = rhome.to_str().unwrap().to_string();
+        rrepo.write(
+            ".gitignore",
+            "Cargo.lock\n/target\n**/target\napg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        );
+        rrepo.write(
+            "Cargo.toml",
+            "[package]\nname = \"splice-props\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        let lib = "pub struct Item;\n\npub fn make() -> Item {\n    Item\n}\n";
+        rrepo.write("src/lib.rs", lib);
+        rrepo.commit_all("init source");
+        apg_ok(&rrepo.root, &rhome_s, &["init", "."]);
+        rrepo.commit_all("apg init");
+        let rscan = |dir: &Path, extra: &[&str]| -> String {
+            let mut args = vec!["scan", ".", "--language", "rust"];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_ok(dir, &rhome_s, &args).stderr).into_owned()
+        };
+        rscan(&rrepo.root, &[]);
+        apg_ok(&rrepo.root, &rhome_s, &["project", "start", "demo"]);
+        let rwt = rrepo.root.join("apg").join(".worktrees").join("demo");
+        rscan(&rwt, &["--force"]);
+        std::fs::write(
+            rwt.join("src/lib.rs"),
+            lib.replace("    Item\n", "    let item = Item;\n    item\n"),
+        )
+        .unwrap();
+        wt_commit(&rwt, &["src/lib.rs"], "body-only edit of make");
+        let rlog = rscan(&rwt, &[]);
+        assert!(spliced(&rlog), "(4) must take the splice path: {rlog}");
+        let raw = "MATCH (a:Function)-[r:Uses]->(b:Struct) WHERE a.fqn STARTS WITH 'rust.' RETURN a.fqn AS a, b.fqn AS b, r.properties AS p";
+        let rows = edge_lines(&rwt, &rhome_s, raw);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains(".make -> ") && r.contains(".Item ")),
+            "(4) make -> Item Uses edge: {rows:#?}"
+        );
+        assert!(
+            rows.iter().all(|r| r.ends_with(" \"{}\"")),
+            "(4) every property-less value must be exactly \"{{}}\": {rows:#?}"
+        );
+        rscan(&rwt, &["--force"]);
+        assert_eq!(edge_lines(&rwt, &rhome_s, raw), rows, "(4) --force rows");
+
+        for p in [&repo.root, &home, &rrepo.root, &rhome] {
+            let _ = std::fs::remove_dir_all(p);
+        }
     }
 
     /// Phase-01 task-13 (e2e): the CROSS-CUT reference lifecycle. A delta scan

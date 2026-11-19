@@ -1,0 +1,106 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "sql-schema-scanning",
+  "body": "The capability that turns the schema objects and columns each .sql file declares into graph units under their database scope's schema modules.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "calls",
+      "target": "domain.service.sql-project-reading",
+      "properties": {}
+    },
+    {
+      "kind": "calls",
+      "target": "domain.service.sql-source-reading",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-column-structs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-declaration-span",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-declaring-statements",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-fqn-collision",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-function-objects",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-identity-case",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-module-collision",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-object-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-one-part-schema",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-repeat-declaration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-schema-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-struct-objects",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-trigger-schema",
+      "properties": {}
+    },
+    {
+      "kind": "reads",
+      "target": "domain.entity.database-project",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-schema-emitter",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-batch-recovery",
+  "body": "A batch with a syntax error contributes its diagnostic alone while every other batch of its file contributes its facts, and the file keeps its File node.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ]
+}

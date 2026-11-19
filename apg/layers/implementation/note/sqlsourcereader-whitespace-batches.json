@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlsourcereader-whitespace-batches",
+  "body": "SplitBatches keeps a whitespace-only batch (the text before the first GO or after the last), which Read still parses into an empty fragment, and it treats only \\r\\n and \\n as line ends (a lone \\r is not one). Filter empty batches in the caller if they cause noise in the emitted stream, and add lone-\\r handling if a classic-Mac line-ending source is ever scanned.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SqlSourceReader.SplitBatches",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

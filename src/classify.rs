@@ -188,6 +188,20 @@ fn cobol_code_type(filename_lower: &str, has_seg: impl Fn(&[&str]) -> bool) -> &
     "src"
 }
 
+/// SQL: path segments only (no filename marker); `obj` is SSDT build output.
+fn sql_code_type(has_seg: impl Fn(&[&str]) -> bool) -> &'static str {
+    if has_seg(&["test", "tests"]) {
+        return "test";
+    }
+    if has_seg(&["gen", "generated", "obj"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", "third_party", "thirdparty"]) {
+        return "external";
+    }
+    "src"
+}
+
 fn builtin_code_type(path: &str, language: &str) -> &'static str {
     let segments: Vec<&str> = path.split('/').collect();
     let has_seg = |names: &[&str]| segments.iter().any(|s| names.contains(s));
@@ -255,6 +269,7 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             "src"
         }
         "cobol" => cobol_code_type(&filename_lower, has_seg),
+        "sql" => sql_code_type(has_seg),
         "ts" => {
             if filename_lower.ends_with("_test.ts")
                 || filename_lower.ends_with("_test.tsx")

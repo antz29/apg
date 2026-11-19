@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schemaemitter-temp-tables-declare",
+  "body": "Declare treats every CreateTableStatement as a declaring statement, so a top-level CREATE TABLE #temp or ##temp is emitted as a table struct under the file's default schema, as requirements.requirement.sql-declaring-statements states (a CREATE statement declares any object other than a view, procedure, function or trigger). Upgrade with a leading-# check in Declare if temporary tables are to declare nothing.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Declare",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

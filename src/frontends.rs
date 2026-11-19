@@ -82,6 +82,9 @@ pub fn available_languages() -> Vec<String> {
         if dir.join("cobolfrontend").exists() {
             langs.push("cobol".into());
         }
+        if dir.join("sqlfrontend").exists() || dir.join("sqlfrontend.exe").exists() {
+            langs.push("sql".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -151,6 +154,14 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
                 };
                 return Some(bin.display().to_string());
             }
+            "sql" if dir.join("sqlfrontend").exists() || dir.join("sqlfrontend.exe").exists() => {
+                let bin = if dir.join("sqlfrontend").exists() {
+                    dir.join("sqlfrontend")
+                } else {
+                    dir.join("sqlfrontend.exe")
+                };
+                return Some(bin.display().to_string());
+            }
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
@@ -181,6 +192,7 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         "py" => option_env!("APG_FRONTEND_PY"),
         "cobol" => option_env!("APG_FRONTEND_COBOL"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
+        "sql" => option_env!("APG_FRONTEND_SQL"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
         // JS/TS frontend under the `js` id.
@@ -225,6 +237,9 @@ const PY_DETECTOR_SKIP: &[&str] = &[
 
 /// True when extension `ext` (no leading dot) is one of `exts` (each with its
 /// leading dot). `case_insensitive` ignores letter case; otherwise it is exact.
+/// Only the C#, COBOL and SQL candidates pass `case_insensitive = true` (SQL:
+/// `.sql` in any letter case, like sqlfrontend's own discovery and
+/// `language_of`); every other language matches exact-case.
 fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
     let dotted = format!(".{ext}");
     exts.iter().any(|x| {
@@ -248,6 +263,13 @@ fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
 /// in addition to the set, so callers pass only the non-hidden exclusions they
 /// need. The exclusion set — not `depth` — is the safety bound: an excluded
 /// dependency/generated tree is never entered.
+///
+/// SQL: a tree is detected by a `.sql` file in any letter case under the
+/// default skip set (`target`, `node_modules`), with the hidden dot-name rule
+/// still in force. Detection is a presence test only: the files sqlfrontend
+/// reads and emits are exactly the tracked `.sql`/`.sqlproj` paths of its
+/// `--targets` list (`sql_stream_targets`), so a gitignored `.sql` under `bin/`
+/// or `obj/` is never graphed.
 pub fn has_extension(
     dir: &std::path::Path,
     exts: &[&str],
@@ -301,7 +323,7 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
     // Every candidate shares the ONE generalised `has_extension` walker; each
     // names only the non-hidden directories it must not descend into
     // (`skip_set`), and the depth bound is explicit per candidate rather than a
-    // shared magic literal. Matching is exact-case except C# and COBOL.
+    // shared magic literal. Matching is exact-case except C#, COBOL and SQL.
     let candidates = vec![
         (
             "java",
@@ -357,6 +379,8 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             true,
         ),
+        // SQL claims `.sql` sources in any letter case.
+        ("sql", &[".sql"], 5, DEFAULT_DETECTOR_SKIP, true),
     ];
     let mut out = Vec::new();
     for (lang, exts, depth, skip, ci) in &candidates {
@@ -423,6 +447,7 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "misc" => "mi",
         "py" => "py",
         "cobol" => "cb",
+        "sql" => "sq",
         // The agent-definition frontend's stream keeps its own prefix, distinct
         // from `x` (the unknown-id fallback) so a merged agent stream cannot
         // collide opaque ids.
@@ -442,6 +467,8 @@ pub fn id_prefix_for(language: &str) -> &'static str {
 ///   of absolute source-file paths, one per line, no header, blanks ignored. An
 ///   absent flag or an empty file means "no emission filter". A language whose
 ///   target set is unchanged and empty is skipped entirely (phase-03 task-5).
+///   For `sql` the list is ALWAYS present (full scan and no-store scan alike)
+///   and is the emission universe: an empty list emits no `.sql` file.
 /// * `--cache-dir <abs dir>`: the shared content-addressed store root
 ///   (`<git-common-dir>/apg/facts`).
 /// * `--cache-key <key>`: the global cache key (`domain.value.cache-key`),
@@ -480,7 +507,7 @@ impl FrontendHandoff {
 
     /// Appends the handoff flags to a frontend `Command` for `lang`.
     pub fn append(&self, child: &mut Command, tmp: &Path, lang: &str, targets: &[String]) {
-        if self.targets_enabled {
+        if passes_targets_flag(lang, self.targets_enabled) {
             let path = self.write_targets(tmp, lang, targets);
             child.arg("--targets").arg(path);
         }
@@ -491,6 +518,12 @@ impl FrontendHandoff {
             child.arg("--cache-key").arg(key);
         }
     }
+}
+
+/// Whether `lang`'s spawn carries `--targets <file>`: whenever the target filter
+/// is enabled, and always for `sql`, whose list is its emission universe.
+pub fn passes_targets_flag(lang: &str, targets_enabled: bool) -> bool {
+    targets_enabled || lang == "sql"
 }
 
 /// The `incremental::language_of` bucket a **scan language id** belongs to.///
@@ -518,9 +551,70 @@ pub fn targets_for_language(
     language: &str,
 ) -> Vec<String> {
     let bucket = language_bucket(language);
+    // For sql this list drives only the spawn verdict (sqlfrontend's --targets
+    // is the whole tracked sql set); a .sqlproj stays xml in language_of.
+    let is_sqlproj = |rel: &str| {
+        Path::new(rel)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("sqlproj"))
+    };
     let mut out: Vec<String> = targets_rel
         .iter()
-        .filter(|rel| incremental::language_of(rel) == bucket)
+        .filter(|rel| {
+            incremental::language_of(rel) == bucket || (bucket == "sql" && is_sqlproj(rel))
+        })
+        .map(|rel| scan_root.join(rel).to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+/// The whole-stream sql widening: every tracked path whose `language_of` is
+/// `"sql"` when any changed path's extension is `sql` or `sqlproj` (any letter
+/// case), else empty. Pure — no I/O; relative paths in, relative paths out.
+///
+/// Every sql spawn emits every tracked `.sql` file its `--targets` list names,
+/// so once any `.sql`/`.sqlproj` file is added, modified or removed, every
+/// tracked `.sql` file must be a re-emission target and none may be reused
+/// from the fact store. A removed `.sql` is not tracked, so it is not returned
+/// here; it stays in the caller's changed set so the splice deletes its rows.
+pub fn whole_language_targets<'a>(
+    changed_rel: &std::collections::BTreeSet<String>,
+    tracked_rel: impl IntoIterator<Item = &'a String>,
+) -> std::collections::BTreeSet<String> {
+    let touches_sql = changed_rel.iter().any(|rel| {
+        Path::new(rel)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("sql") || e.eq_ignore_ascii_case("sqlproj"))
+    });
+    if !touches_sql {
+        return std::collections::BTreeSet::new();
+    }
+    tracked_rel
+        .into_iter()
+        .filter(|rel| incremental::language_of(rel) == "sql")
+        .cloned()
+        .collect()
+}
+
+/// sqlfrontend's `--targets` universe on every spawn (full, incremental phase 1
+/// and phase 2 alike): sorted absolute paths (the `targets_for_language` form)
+/// of every manifest path whose `language_of` is `"sql"` or whose extension is
+/// `sqlproj` in any letter case. The git-based `Manifest::build` lists only
+/// git-visible paths (tracked, or untracked and not ignored), so a gitignored
+/// file such as `bin/Debug/<Db>.publish.sql` is never in it. Pure — no I/O.
+pub fn sql_stream_targets<'a>(
+    manifest_rel: impl IntoIterator<Item = &'a String>,
+    scan_root: &Path,
+) -> Vec<String> {
+    let mut out: Vec<String> = manifest_rel
+        .into_iter()
+        .filter(|rel| {
+            incremental::language_of(rel) == "sql"
+                || Path::new(rel.as_str())
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("sqlproj"))
+        })
         .map(|rel| scan_root.join(rel).to_string_lossy().into_owned())
         .collect();
     out.sort();
@@ -593,9 +687,9 @@ pub fn should_spawn_language(
 /// The scan-time tools a selected language's frontend requires on `PATH` when
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
 /// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`,
-/// `agent`) and the bundled structural scanner's every stream id (`md`, `sh`,
+/// `agent`, `sql`) and the bundled structural scanner's every stream id (`md`, `sh`,
 /// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `sln`, `misc`)
-/// require nothing — the structural and agent arms are explicit so the
+/// require nothing — the structural, agent and sql arms are explicit so the
 /// exemption is intentional, not the unknown-id catch-all — and neither does an
 /// unknown language id (never a false refusal). `ts`/`js` share the one unified
 /// frontend and its `node` runtime.
@@ -613,6 +707,8 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
         // The agent-definition frontend is self-contained too: it reads
         // `.opencode/agents/` itself and never shells out.
         "agent" => &[],
+        // The self-contained single-file sqlfrontend needs no tool on `PATH`.
+        "sql" => &[],
         _ => &[],
     }
 }
@@ -638,7 +734,7 @@ pub fn scan_time_tool_error(language: &str, tool: &str) -> String {
 /// Probes `PATH` for every tool `language`'s frontend needs and returns
 /// [`scan_time_tool_error`] for the first miss. This is the I/O unit (a real
 /// `PATH` probe); a tool-less language probes nothing and succeeds — the
-/// self-contained `cpp`/`csharp`/`py`/`agent` frontends and every structural
+/// self-contained `cpp`/`csharp`/`py`/`agent`/`sql` frontends and every structural
 /// stream id of the bundled scanner (`md`, `sh`, `yaml`, `json`, `toml`, `xml`,
 /// `dockerfile`, `makefile`, `ini`, `misc`) are all tool-less.
 pub fn scan_time_preflight(language: &str) -> anyhow::Result<()> {
@@ -754,8 +850,13 @@ pub fn spawn_frontend_args(
     // set — so a full scan (`targets_enabled == false`) passes the cache flags
     // and NO `--targets`, and the incremental argv is unchanged in flags AND
     // order (AC (b)). With no hand-off at all (no store / `NotAGitRepo`) nothing
-    // is appended (AC (c)).
-    if handoff.targets_enabled || handoff.cache_dir.is_some() || handoff.cache_key.is_some() {
+    // is appended (AC (c)) — except for `sql`, whose `--targets` list is always
+    // present (even empty, even with no store) as its emission universe: an
+    // empty list emits no `.sql` file.
+    if passes_targets_flag(lang, handoff.targets_enabled)
+        || handoff.cache_dir.is_some()
+        || handoff.cache_key.is_some()
+    {
         handoff.append(&mut child, tmp, lang, targets);
     }
     child

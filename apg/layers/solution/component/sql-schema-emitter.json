@@ -1,0 +1,41 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-schema-emitter",
+  "body": "The schema emitter and sqlfrontend entry point: module, file, object and column declarations streamed as the unified JSONL schema on stdout, with diagnostics on stderr.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.Program",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-schema-scanning",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

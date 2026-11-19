@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schemaemitter-empty-schema-part",
+  "body": "Schema takes the SchemaObjectName's SchemaIdentifier and falls back to the file's default schema when it is null, which assumes ScriptDom returns a null SchemaIdentifier for a name written with an empty schema part such as db..obj; that case is untested. Upgrade by adding a db..obj declaration to the emitter tests and handling an empty-valued SchemaIdentifier if ScriptDom returns one.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Schema",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

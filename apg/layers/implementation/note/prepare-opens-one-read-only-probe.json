@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "prepare-opens-one-read-only-probe",
-  "body": "`prepare` now opens a read-only probe of `db.lbug` (`db_has_pending_state`) on every targeted scan whose database exists, in addition to the capture `cmd_scan` takes later. It is one cheap open in a path that already walks the tree and reads the fact store; upgrade to a cheaper pending-state check (or thread the capture's verdict through) only if a scan-time profile ever shows that read-only open dominating.",
+  "body": "`prepare` opens a read-only probe of `db.lbug` (`db_has_pending_state`) on every targeted scan whose database exists, in addition to the capture `cmd_scan` takes later. It is one cheap open in a path that already walks the tree and reads the fact store; upgrade to a cheaper pending-state check (or thread the capture's verdict through) only if a scan-time profile ever shows that read-only open dominating. Its not-a-git-repo branch (FullScanReason::NotAGitRepo) builds `Manifest::build(scan_root)`, which outside a repository walks and hashes every file of the tree outside .git, .worktrees, target and node_modules (no gitignore rules, so apg/.trans and its db.lbug are hashed too), on every not-a-git-repo scan whatever the selected languages, only so `sql_stream_targets` can list the plain directory's .sql/.sqlproj files; the manifest is never recorded or reused. Upgrade to a .sql/.sqlproj-only walk without hashing, run only when sql is selected, if not-a-git-repo scans of large trees appear.",
   "properties": {},
   "out": [
     {

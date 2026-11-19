@@ -1,0 +1,15 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "sql-database-owner",
+  "body": "A developer or team whose repository holds SQL Server or Azure SQL database projects and T-SQL scripts, and who scans them to read their schema and dependency graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.sql-frontend",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-source-claim",
+  "body": "The SQL code-type classification arm: the test, generated (obj included) and external path-segment rules that assign each .sql file its code type.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.classify.sql_code_type",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

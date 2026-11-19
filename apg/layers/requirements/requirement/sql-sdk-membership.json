@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-sdk-membership",
+  "body": "An SDK-style project, Microsoft.Build.Sql or any other SDK, has as members every tracked .sql file under its directory outside bin and obj or named by its Build Include items, minus its Build Remove, None, PreDeploy and PostDeploy items.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-project-model",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-project-reading",
+      "properties": {}
+    }
+  ]
+}

@@ -147,6 +147,14 @@ impl FactStore {
         Some((frag, entry.root.clone()))
     }
 
+    /// True when the index holds a unit for `(lang, rel, oid)` under
+    /// `cache_key`, whatever its inputs digest — [`Self::candidate`]'s
+    /// selection without reading the unit file.
+    pub fn has_unit(&self, lang: &str, rel: &str, oid: &str, cache_key: &CacheKey) -> bool {
+        self.index
+            .contains_key(&Self::index_key(lang, rel, oid, cache_key))
+    }
+
     /// Writes a unit. The unit's file name is a digest over content OID +
     /// resolution-inputs digest + the global cache key, so identical
     /// content+inputs+key always maps to the same stored unit (content

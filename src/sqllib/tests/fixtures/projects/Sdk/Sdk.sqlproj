@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.Build.Sql/0.2.0-preview">
+  <PropertyGroup>
+    <Name>Sdk</Name>
+  </PropertyGroup>
+  <ItemGroup>
+    <Build Include="..\Shared\Common.sql;..\Shared\Extra.sql" />
+    <None Include="Notes\Readme.sql" />
+  </ItemGroup>
+</Project>

@@ -29,7 +29,8 @@ pub enum CodeRefStatus {
 /// The complete scan `Language` vocabulary a code FQN can be rooted under —
 /// every id `available_languages`/`id_prefix_for` recognise: the code frontend
 /// ids (`ts` and `js` are the unified JS/TS frontend's two ids; a JS-only repo
-/// scans under `js`), `agent` (the agent-definition frontend's id, whose code
+/// scans under `js`; `sql` is the SQL frontend's id), `agent` (the
+/// agent-definition frontend's id, whose code
 /// FQNs are `agent.<file-stem>`), and the bundled structural scanner's stream
 /// ids (`md` plus the per-format structural streams — `sln` among them, the
 /// .NET solution-file stream — and the residual `misc`).
@@ -40,7 +41,7 @@ pub enum CodeRefStatus {
 /// This literal mirrors [`crate::frontends::STRUCTURAL_LANGUAGES`] plus the
 /// code/agent ids; a `const` array cannot concatenate that slice, so the ids
 /// are repeated here and the two lists must move together.
-pub const LANGUAGE_ROOTS: [&str; 21] = [
+pub const LANGUAGE_ROOTS: [&str; 22] = [
     "rust",
     "java",
     "go",
@@ -50,6 +51,7 @@ pub const LANGUAGE_ROOTS: [&str; 21] = [
     "js",
     "py",
     "cobol",
+    "sql",
     "md",
     "agent",
     "sh",

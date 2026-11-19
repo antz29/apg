@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "sql-static-input",
+  "body": "The SQL frontend reads .sql and .sqlproj files as text alone: it never connects to a database, executes SQL, evaluates MSBuild conditions or imports, or reaches the network during a scan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

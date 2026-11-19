@@ -443,6 +443,10 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let full_scan_path = incremental.full_scan.is_some();
     let mut phase = 1u32;
     let mut targets_rel = incremental.targets_rel.clone();
+    // Every sql spawn lists the manifest's whole tracked .sql/.sqlproj set, so
+    // a gitignored .sql is never emitted.
+    let sql_targets =
+        crate::frontends::sql_stream_targets(incremental.manifest.entries.keys(), &project_dir);
     loop {
         // The scan as a whole has work to re-emit (the PARTIAL case). When it
         // does not, phase-02 runs every frontend unfiltered instead of skipping
@@ -487,7 +491,11 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 multi,
                 &handoff,
                 &tmp,
-                &targets,
+                if lang == "sql" {
+                    &sql_targets
+                } else {
+                    &targets
+                },
                 phase,
                 &cobol_args,
                 &mut log,
@@ -537,6 +545,11 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             extra.len()
         ));
         targets_rel.extend(extra);
+        let whole_sql = crate::frontends::whole_language_targets(
+            &targets_rel,
+            incremental.manifest.entries.keys(),
+        );
+        targets_rel.extend(whole_sql);
         // Phase 2 re-spawns the languages that gained targets over the UNION
         // (stage-1 ∪ cascade), with the spools accumulated above: a language
         // that gained targets is dropped and re-spawned so its stream covers
@@ -700,7 +713,27 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // union in the reused units' own code FQNs — otherwise a reused file
         // newer than the local database would drop out of the universe and
         // falsely trip `spec drift`.
-        if let Some(plan) = &reuse_plan {
+        // Skipped when the local seed matches the store and every reused unit is
+        // already in the local database (the one-file rescan's O(files) decode).
+        // The index is loaded only once the keys match; an empty (or unreadable)
+        // index fails safe to the full union.
+        let store = std::cell::OnceCell::new();
+        if let Some(plan) = &reuse_plan
+            && incremental::reuse_universe_needed(
+                incremental.previous.as_ref(),
+                incremental
+                    .previous
+                    .as_ref()
+                    .and_then(|p| p.content_key.as_deref()),
+                incremental.recorded_content_key.as_deref(),
+                &plan.files,
+                |lang, rel, oid| {
+                    let store: &cache::FactStore =
+                        store.get_or_init(|| cache::FactStore::at(plan.store_root.clone()).load());
+                    store.is_empty() || store.has_unit(lang, rel, oid, &plan.cache_key)
+                },
+            )
+        {
             universe.extend(reuse_universe(
                 &plan.store_root,
                 &plan.cache_key,

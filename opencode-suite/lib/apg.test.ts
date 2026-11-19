@@ -945,3 +945,9 @@ test("apg_scan declares a string dialect input and lists cobol as a language", a
   expect(tool.input?.properties?.dialect?.description).toContain("--std")
   expect(tool.input?.properties?.language?.description).toContain("cobol")
 })
+
+// sql-frontend P6 task-24: the `apg_scan` language list names `sql` as a list item.
+test("apg_scan lists sql as a language", async () => {
+  const tool = await registeredTool(apgScan)
+  expect(tool.input?.properties?.language?.description ?? "").toMatch(/[:,]\s*sql\s*,/)
+})

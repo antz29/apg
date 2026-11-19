@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-project-reader",
+  "body": "The .sqlproj reader: static XML reading of each legacy project and each SDK-style project, whatever SDK it names, into its database scope's member files and default schema.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.SqlProjectReader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-project-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-other-dialects",
+  "body": "A .sql file written in another SQL dialect parses as T-SQL, each batch the T-SQL parser rejects contributing its diagnostic alone.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ]
+}

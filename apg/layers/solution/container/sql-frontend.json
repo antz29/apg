@@ -1,0 +1,48 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "sql-frontend",
+  "body": "The T-SQL frontend artifact: build-time a .NET SDK plus NuGet for net9.0, zero scan-time tools, and an engine pin of Microsoft.SqlServer.TransactSql.ScriptDom 180.140.0, its TSql170Parser setting a SQL Server 2025 and Azure SQL ceiling.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.sql-project-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.sql-reference-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.sql-schema-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.sql-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.sql-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg",
+      "properties": {}
+    }
+  ]
+}

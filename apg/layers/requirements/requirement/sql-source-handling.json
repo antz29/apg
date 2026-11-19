@@ -1,0 +1,48 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-source-handling",
+  "body": "Each .sql file is read through SQLCMD neutralisation, GO batch splitting and batch-level error recovery into facts located in the original text.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-batch-recovery",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-error-report",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-go-batches",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-other-dialects",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-sqlcmd-neutralisation",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ]
+}

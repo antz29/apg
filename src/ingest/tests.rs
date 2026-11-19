@@ -781,6 +781,7 @@ mod unit {
             .into_iter()
             .collect(),
             agents: Vec::new(),
+            content_key: None,
         };
 
         finalize_delta_graph(&mut graph, Some(&previous));
@@ -917,6 +918,7 @@ mod unit {
             .map(|(fqn, kind)| (fqn.to_string(), kind.to_string()))
             .collect(),
             agents: Vec::new(),
+            content_key: None,
         };
 
         finalize_delta_graph(&mut graph, Some(&previous));
@@ -1728,6 +1730,7 @@ mod int {
             .map(|(fqn, kind)| (fqn.to_string(), kind.to_string()))
             .collect(),
             agents: Vec::new(),
+            content_key: None,
         };
 
         finalize_delta_graph(&mut graph, Some(&previous));

@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-test-suite",
+  "body": "The SQL test suites: the frontend's own test project and the root crate's SQL scan end-to-end tests over legacy SSDT, SDK-style and loose-script fixtures.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.SqlFrontend.Tests",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.sql_scan_e2e",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-conformance",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

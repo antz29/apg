@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "default-schema",
+  "body": "The schema a one-part object name takes in a database scope: the project's unconditioned DefaultSchema property, or dbo.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.database-project",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Name>Legacy</Name>
+    <DefaultSchema>app</DefaultSchema>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DefaultSchema>dev</DefaultSchema>
+  </PropertyGroup>
+  <Import Project="$(MSBuildProjectDirectory)\DoesNotExist.targets" />
+  <ItemGroup>
+    <Build Include="Tables\*.sql" />
+    <Build Remove="Tables\Old.sql" />
+    <Build Include="..\Shared\Common.sql" />
+  </ItemGroup>
+  <ItemGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <Build Include="Views\V.sql" />
+  </ItemGroup>
+  <ItemGroup>
+    <PreDeploy Include="Scripts\Pre.sql" />
+    <PostDeploy Include="Scripts\Post.sql" />
+  </ItemGroup>
+</Project>

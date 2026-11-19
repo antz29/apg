@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-sqlcmd-neutralisation",
+  "body": "Before parsing, each SQLCMD command line such as :r or :setvar becomes blank and each $(var) becomes a same-length placeholder, so every line and column stays unchanged.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ]
+}

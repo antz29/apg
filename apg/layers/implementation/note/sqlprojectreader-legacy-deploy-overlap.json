@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlprojectreader-legacy-deploy-overlap",
+  "body": "BuildScopes takes a legacy project's members as exactly its Build Include items minus its Build Remove items, so a file a legacy project lists both as Build and as PreDeploy or PostDeploy stays a project member; only an SDK-style project subtracts its None, PreDeploy and PostDeploy items. Upgrade if deployment scripts must be loose even when a legacy project also builds them.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SqlProjectReader.BuildScopes",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

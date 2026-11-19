@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlfrontend-spike-main-limits",
+  "body": "Program.Main accepts --cache-dir and --cache-key and ignores them, so sqlfrontend keeps no per-language artifact cache of its own, unlike csharpfrontend; and a flag given without a following value is ignored as in the C# frontend, so a trailing --targets with no file reports missing --targets. Upgrade if the sql stream ever needs cached artifacts or a valueless flag must be its own usage error.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.Program.Main",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

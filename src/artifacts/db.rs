@@ -972,6 +972,11 @@ pub struct PreviousScan {
     /// [`crate::splice::seed`]'s record identity), the roster the rebuild must
     /// re-emit.
     pub agents: Vec<Record>,
+    /// The content-identity key of the previous database's single `Scan` row —
+    /// the tree the local `db.lbug` was built from — or `None` when the
+    /// database carries no `Scan` row or an empty key (the shape
+    /// [`crate::splice::seed::recorded_content_key`] reads).
+    pub content_key: Option<String>,
 }
 
 impl PreviousScan {
@@ -1032,11 +1037,15 @@ impl PreviousScan {
                 end_line: cell(&row, 3).parse().unwrap_or(0),
             });
         }
+        let (_, rows) =
+            query_rows(&conn, "MATCH (s:Scan) RETURN s.content_key AS content_key").ok()?;
+        let content_key = rows.first().map(|r| cell(r, 0)).filter(|s| !s.is_empty());
         Some(PreviousScan {
             scanned,
             planned,
             kinds,
             agents,
+            content_key,
         })
     }
 }

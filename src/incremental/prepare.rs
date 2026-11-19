@@ -419,6 +419,9 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     let store_root = match FactStore::resolve(apg_root) {
         Ok(s) => s.root,
         Err(_) => {
+            // Not a git repository: no store, so nothing is recorded or reused,
+            // but the walked manifest still lists the tree's files (the sql
+            // stream's universe).
             return Prepared {
                 store_root: PathBuf::new(),
                 cache_key,
@@ -427,7 +430,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
                 changed_rel: BTreeSet::new(),
                 removed_fqns: BTreeSet::new(),
                 reuse_candidates: Vec::new(),
-                manifest: Manifest::default(),
+                manifest: Manifest::build(scan_root),
                 recorded_content_key: None,
                 previous: None,
             };
@@ -507,6 +510,11 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     for f in &changed_rel {
         targets_rel.extend(state.overloads.peer_files(f));
     }
+    // The sql stream is whole-project: any .sql/.sqlproj change re-targets
+    // every tracked .sql file (a removed one stays here as delete scope).
+    let sql_targets =
+        crate::frontends::whole_language_targets(&targets_rel, manifest.entries.keys());
+    targets_rel.extend(sql_targets);
 
     // FULL-UNIVERSE SEAM (feedback-92): the incremental path derives the full
     // code-FQN universe from the PREVIOUS database. With a non-empty target set
@@ -658,6 +666,52 @@ pub fn full_universe(prepared: &Prepared, emitted_fqns: &BTreeSet<String>) -> BT
     }
     universe.extend(emitted_fqns.iter().cloned());
     universe
+}
+
+/// Whether the delta path must union the reused facts' code FQNs
+/// (`crate::warm::reuse_universe`) into [`full_universe`]. Returns `false` only
+/// when (a) a previous database was captured, (b) its content key and the
+/// shared record's key match under `crate::splice::seed::seed_key_matches`
+/// (both present and equal), and (c) every reused file with a recorded fact
+/// unit (`has_unit(lang, rel, oid)`) has its checkout-relative path — its File
+/// FQN — in `previous.scanned`. These are checked in that order, and the check
+/// stops at the first uncovered file. Otherwise it returns `true`.
+///
+/// `false` means the local database holds the File of every reused file that
+/// has a recorded unit. Because it was built from the same tree content, it also
+/// holds the code FQNs and module scaffolding those units carry. Equal content
+/// keys alone are not enough: a key folds only the HEAD sha and the status
+/// entries, not the scan config. A local database built with a narrower
+/// `--language`/`--module`/`--exclude-path` set than the shared record's scan
+/// lacks those units' FQNs, so check (c) finds them missing.
+///
+/// Edge cases:
+/// - A reused file with no recorded unit adds nothing to `reuse_universe`, so it
+///   is not checked.
+/// - When the scan root is below the git toplevel, a File FQN differs from the
+///   checkout-relative path, so the function returns `true` (the fail-safe
+///   direction).
+/// - Config that neither key includes is not detected: a different blacklist,
+///   COBOL `--std`/`--copy-path`, or Rust `--no-build-scripts`.
+///
+/// The result only gates the `implemented-by` universe, never a graph row. No
+/// filesystem, no database.
+pub fn reuse_universe_needed(
+    previous: Option<&crate::artifacts::PreviousScan>,
+    local_seed_key: Option<&str>,
+    recorded_key: Option<&str>,
+    reused_files: &[(String, String, String)],
+    has_unit: impl Fn(&str, &str, &str) -> bool,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    if !crate::splice::seed::seed_key_matches(local_seed_key, recorded_key) {
+        return true;
+    }
+    reused_files
+        .iter()
+        .any(|(rel, lang, oid)| has_unit(lang, rel, oid) && !previous.scanned.contains(rel))
 }
 
 /// The absolute path of a checkout-relative path.

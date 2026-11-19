@@ -105,6 +105,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.language-registry",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.library-surface",
       "properties": {}
     },
@@ -231,6 +236,11 @@
     {
       "kind": "is-role",
       "source": "solution.component.splice-equivalence-tests",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.sql-source-claim",
       "properties": {}
     },
     {

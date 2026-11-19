@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "sql-reference-resolver",
+  "body": "The T-SQL reference resolver: a per-unit visit of executions, function calls and object references, resolved in the database scope into calls, kinded uses and categorised unresolved targets.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.ReferenceResolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.sql-frontend",
+      "properties": {}
+    }
+  ]
+}

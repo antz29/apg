@@ -24,6 +24,11 @@
       "kind": "realises",
       "target": "domain.service.csharp-source-classification",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
     }
   ],
   "in": [

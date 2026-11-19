@@ -510,14 +510,16 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
             stage("Calls", from, to, "")?;
         }
         for (from, to) in &delta.graph.uses {
-            // A Struct→File `uses` is the copybook copy edge: its `kind=copy`
-            // properties ride the payload into the rel's `properties` column.
+            // Every `uses` carries its properties exactly as the full load's
+            // `rel_props` renders them (an absent entry is the empty object).
             let props = delta
                 .graph
                 .edge_properties
                 .get(&("uses", from.clone(), to.clone()))
                 .map(crate::layers::properties_json)
-                .unwrap_or_default();
+                .unwrap_or_else(|| {
+                    crate::layers::properties_json(&crate::layers::NodeProperties::new())
+                });
             stage("Uses", from, to, &props)?;
         }
         for (from, to, tt) in &delta.graph.unresolved_calls {
@@ -538,7 +540,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                         lit(to),
                         lit(payload)
                     )
-                } else if table == "Uses" && to_label == "File" {
+                } else if table == "Uses" {
                     format!(
                         "{{from: {}, to: {}, props: {}}}",
                         lit(from),
@@ -557,7 +559,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                  (b:{to_label} {{fqn: row.to}}) MERGE (a)-[r:UnresolvedCall]->(b) \
                  SET r.target_type = row.tt"
             ))?;
-        } else if table == "Uses" && to_label == "File" {
+        } else if table == "Uses" {
             conn.query(&format!(
                 "UNWIND [{rows}] AS row MATCH (a:{from_label} {{fqn: row.from}}), \
                  (b:{to_label} {{fqn: row.to}}) MERGE (a)-[r:Uses]->(b) \

@@ -1,0 +1,26 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "sql-conformance",
+  "body": "The capability that proves the SQL frontend against legacy SSDT, SDK-style and loose-script fixtures and end-to-end scans of scratch repositories.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.sql-test-suite",
+      "properties": {}
+    }
+  ]
+}

@@ -95,6 +95,31 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.sql-project-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.sql-reference-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.sql-schema-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.sql-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.sql-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.ts-package-rooting",
       "properties": {}
     },

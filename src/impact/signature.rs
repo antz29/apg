@@ -23,6 +23,8 @@ pub enum Granularity {
     Project,
     /// Python: a package or a flat module re-emits.
     PackageOrModule,
+    /// SQL: the whole language stream re-emits.
+    Language,
 }
 
 /// The DECIDED granularity for a language id. Unknown/unlisted languages fall
@@ -38,6 +40,7 @@ pub fn granularity(language: &str) -> Granularity {
         "cpp" | "c++" | "c" => Granularity::File,
         "cobol" => Granularity::File,
         "md" | "markdown" => Granularity::File,
+        "sql" => Granularity::Language,
         _ => Granularity::File,
     }
 }

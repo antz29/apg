@@ -1,0 +1,71 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "language-registry",
+  "body": "The scan driver's per-language registration tables: the source-extension matching, the opaque-id prefixes, the scan-time tool map, and the impact granularity with its per-language target selection, sql re-targeting its whole stream.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.ext_matches",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.has_extension",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.id_prefix_for",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.scan_time_tools",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.sql_stream_targets",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.targets_for_language",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.whole_language_targets",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.impact.signature.granularity",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

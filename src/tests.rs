@@ -115,6 +115,17 @@ mod unit {
             force_line.contains("re-run every frontend") && force_line.contains("fact cache"),
             "the --force line names the frontend re-run over the shared fact cache: {force_line}"
         );
+        // sql-frontend phase-06 task-11: the --language line names sql after cobol.
+        let language_line = scan_options
+            .lines()
+            .skip_while(|l| !l.contains("--language"))
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            language_line.contains("csharp, py, cobol, sql"),
+            "the --language line names sql after cobol: {language_line}"
+        );
     }
 
     /// Phase-03 task-5: the per-language spawn verdict. On the incremental

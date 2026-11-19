@@ -601,4 +601,80 @@ mod unit {
             assert!(!has(f, "csharp", "csharp.Lib"), "{:?}", f.edges);
         }
     }
+
+    /// sql-frontend phase-08 task-12: a `uses` edge's properties ride its
+    /// fact unit — both extraction paths, the serde round-trip and `project`
+    /// keep them; a property-less edge (or a stored edge predating the
+    /// field) carries the empty map.
+    #[test]
+    fn uses_edge_properties_ride_the_fact_unit() {
+        use crate::layers::NodeProperties;
+        let kind = |k: &str| NodeProperties::from([("kind".to_string(), k.to_string())]);
+        let (sql, cob, cpy) = ("/r/p.sql", "/r/A.cob", "/r/lib/STMTS.cpy");
+        let mut g = Graph::default();
+        for (fqn, k, path) in [
+            (sql, NodeKind::File, sql),
+            ("sql.db.AddOrder", NodeKind::Function, sql),
+            ("sql.db.Orders", NodeKind::Struct, sql),
+            ("sql.db.OrderRow", NodeKind::Struct, sql),
+            ("sql.db.Plain", NodeKind::Function, sql),
+            (cob, NodeKind::File, cob),
+            ("cobol.A", NodeKind::Struct, cob),
+            (cpy, NodeKind::File, cpy),
+        ] {
+            g.nodes.insert(fqn.into(), located_node(k, path));
+        }
+        let props = [
+            ("sql.db.AddOrder", "sql.db.Orders", kind("write")),
+            ("sql.db.OrderRow", "sql.db.Orders", kind("type")),
+            ("cobol.A", cpy, kind("copy")),
+            ("sql.db.Plain", "sql.db.Orders", NodeProperties::new()),
+        ];
+        for (from, to, p) in &props {
+            g.uses.insert((from.to_string(), to.to_string()));
+            if !p.is_empty() {
+                g.edge_properties
+                    .insert(("uses", from.to_string(), to.to_string()), p.clone());
+            }
+        }
+
+        let index = FileIndex::build(&g);
+        let units: Vec<FileFragment> = [sql, cob]
+            .into_iter()
+            .map(|abs| {
+                let got = FileFragment::from_index(&index, abs, "rel", "oid", "sql");
+                assert_eq!(got, FileFragment::from_graph(&g, abs, "rel", "oid", "sql"));
+                let reread: FileFragment =
+                    serde_json::from_str(&serde_json::to_string(&got).expect("serializes"))
+                        .expect("deserializes");
+                assert_eq!(reread, got);
+                got
+            })
+            .collect();
+        for (from, to, p) in &props {
+            let carried = |edges: &[FragEdge]| {
+                edges
+                    .iter()
+                    .find(|e| e.kind == "uses" && e.from == *from && e.to == *to)
+                    .map(|e| e.properties.clone())
+            };
+            let unit = units
+                .iter()
+                .find(|u| carried(&u.edges).is_some())
+                .unwrap_or_else(|| panic!("no unit carries {from} -> {to}"));
+            assert_eq!(carried(&unit.edges).as_ref(), Some(p), "{from} -> {to}");
+            let (_, _, projected) = unit.project("", "");
+            assert_eq!(
+                carried(&projected).as_ref(),
+                Some(p),
+                "projected {from} -> {to}"
+            );
+        }
+
+        // A stored-unit edge predating the `properties` field reads as empty.
+        let legacy: FragEdge =
+            serde_json::from_str(r#"{"kind":"uses","from":"a","to":"b","target_type":""}"#)
+                .expect("a legacy edge deserializes");
+        assert!(legacy.properties.is_empty());
+    }
 }

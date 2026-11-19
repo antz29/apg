@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schemaemitter-line-conventions",
+  "body": "Emit gives a file record end_line = its line count with a trailing newline ending the last line rather than opening an empty one (so \"a\\n\" is 1 line, an empty file 1 line), unlike SqlSourceReader's own line split; an object's or column's end_line is the line of its fragment's last character, which differs from the last token's start line only when that token (a multi-line string literal) spans lines. Upgrade if the ingestor's file-span or the declaration-span requirement needs either other convention.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Emit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

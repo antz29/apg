@@ -27,8 +27,10 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// projection version changes the cache-key token, every `1` unit and its
 /// missing scaffolding miss, and the drift forces one correctness full scan
 /// that records the scaffolding before any reuse can happen. v3: Struct→File
-/// kind=copy `uses` edges are admitted, so `2` projections lack them.
-pub const PROJECTION_RULES_VERSION: &str = "3";
+/// kind=copy `uses` edges are admitted, so `2` projections lack them. v4: a
+/// stored `FragEdge` carries the `uses` edge properties, so a `3` unit, whose
+/// `uses` edges load property-less, never composes.
+pub const PROJECTION_RULES_VERSION: &str = "4";
 
 /// The scan config identity folded into the global cache key: the exact set of
 /// languages, path excludes, and module restrictions a scan ran with, plus the

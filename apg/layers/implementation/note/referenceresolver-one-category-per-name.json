@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "referenceresolver-one-category-per-name",
+  "body": "Unresolved keys each unresolved target by its upper-cased name and keeps the category and spelling of the name's earliest site in path-then-source order, so one name reached both as a builtin and as an external target (sys.fn_x() and EXEC sys.fn_x, or XML methods on similarly named columns) yields a single record whose category is the earliest site's. Upgrade if per-category records are needed for one name.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.ReferenceResolver.Unresolved",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

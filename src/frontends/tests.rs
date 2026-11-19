@@ -117,6 +117,128 @@ mod unit {
         assert!(!ext_matches("JAVA", &java, false));
     }
 
+    /// sql-frontend phase-06 task-19: `sql` is a language root whose `sq`
+    /// opaque-id prefix collides with no other root's nor the `x` fallback, it
+    /// needs no scan-time tool on PATH, and `.sql` matches in any letter case
+    /// only when the candidate asks for it.
+    #[test]
+    fn sql_registration_is_distinct_tool_less_and_case_insensitive() {
+        let roots = crate::layers::LANGUAGE_ROOTS;
+        assert!(roots.contains(&"sql"), "sql is not a language root");
+        let prefix = id_prefix_for("sql");
+        assert_eq!(prefix, "sq");
+        assert_ne!(prefix, id_prefix_for("not-a-language"), "sql vs fallback");
+        for language in roots.iter().filter(|l| **l != "sql") {
+            assert_ne!(prefix, id_prefix_for(language), "sql vs {language}");
+        }
+        assert!(scan_time_tools("sql").is_empty());
+        assert!(ext_matches("SQL", &[".sql"], true));
+        assert!(ext_matches("Sql", &[".sql"], true));
+        assert!(!ext_matches("SQL", &[".sql"], false));
+    }
+
+    /// sql-frontend phase-06 task-30: `sql` always carries `--targets` (its
+    /// list is its emission universe); every other language only when enabled.
+    #[test]
+    fn passes_targets_flag_is_always_on_for_sql() {
+        assert!(passes_targets_flag("sql", false));
+        assert!(passes_targets_flag("sql", true));
+        assert!(!passes_targets_flag("go", false));
+        assert!(!passes_targets_flag("xml", false));
+        assert!(!passes_targets_flag("csharp", false));
+        assert!(passes_targets_flag("go", true));
+    }
+
+    /// sql-frontend phase-06 task-20: any `.sql`/`.sqlproj` change (any case)
+    /// widens to every tracked `.sql` path; the sql target list carries `.sql`
+    /// and `.sqlproj` paths only, while `.sqlproj` stays in the xml list too.
+    #[test]
+    fn sql_targets_cover_the_whole_stream() {
+        use std::collections::BTreeSet;
+        let set =
+            |paths: &[&str]| -> BTreeSet<String> { paths.iter().map(|p| p.to_string()).collect() };
+        let tracked = set(&[
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "scripts/c.Sql",
+            "Db/Db.sqlproj",
+            "main.go",
+            "App/App.cs",
+            "pom.xml",
+        ]);
+        let all_sql = set(&["Db/Tables/A.sql", "Db/Views/B.SQL", "scripts/c.Sql"]);
+        for changed in [
+            set(&["Db/Views/B.SQL"]),
+            set(&["Db/Db.sqlproj"]),
+            set(&["Other/Other.SQLPROJ"]),
+        ] {
+            assert_eq!(
+                whole_language_targets(&changed, &tracked),
+                all_sql,
+                "{changed:?}"
+            );
+        }
+        let non_sql = set(&["main.go", "App/App.cs", "pom.xml"]);
+        assert!(whole_language_targets(&non_sql, &tracked).is_empty());
+
+        let root = Path::new("/root");
+        let abs = |rel: &str| root.join(rel).to_string_lossy().into_owned();
+        let mut expected: Vec<String> = [
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "scripts/c.Sql",
+            "Db/Db.sqlproj",
+        ]
+        .iter()
+        .map(|r| abs(r))
+        .collect();
+        expected.sort();
+        let sql = targets_for_language(&tracked, root, "sql");
+        assert_eq!(sql, expected);
+        assert!(!sql.contains(&abs("main.go")));
+        assert!(!targets_for_language(&set(&["Db/Db.sqlproj"]), root, "sql").is_empty());
+        let xml = targets_for_language(&tracked, root, "xml");
+        assert!(xml.contains(&abs("Db/Db.sqlproj")));
+        let go = targets_for_language(&tracked, root, "go");
+        for rel in all_sql.iter() {
+            assert!(!go.contains(&abs(rel)), "{rel} reached go");
+            assert!(!xml.contains(&abs(rel)), "{rel} reached xml");
+        }
+    }
+
+    /// sql-frontend phase-06 task-29: the sqlfrontend `--targets` universe is
+    /// every manifest `.sql`/`.sqlproj` path (any case), absolute and sorted;
+    /// non-sql keys contribute nothing.
+    #[test]
+    fn sql_stream_targets_list_every_tracked_sql_file() {
+        use std::collections::BTreeSet;
+        let set =
+            |paths: &[&str]| -> BTreeSet<String> { paths.iter().map(|p| p.to_string()).collect() };
+        let root = Path::new("/root");
+        let keys = set(&[
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "scripts/c.Sql",
+            "Db/Db.sqlproj",
+            "Legacy/L.SQLPROJ",
+            "main.go",
+            "Db/x.xml",
+        ]);
+        let expected: Vec<String> = [
+            "Db/Db.sqlproj",
+            "Db/Tables/A.sql",
+            "Db/Views/B.SQL",
+            "Legacy/L.SQLPROJ",
+            "scripts/c.Sql",
+        ]
+        .iter()
+        .map(|rel| root.join(rel).to_string_lossy().into_owned())
+        .collect();
+        assert_eq!(sql_stream_targets(keys.iter(), root), expected);
+        assert!(sql_stream_targets(set(&[]).iter(), root).is_empty());
+        assert!(sql_stream_targets(set(&["main.go", "Db/x.xml"]).iter(), root).is_empty());
+    }
+
     /// schema-alignment phase-02 task-17: the agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural

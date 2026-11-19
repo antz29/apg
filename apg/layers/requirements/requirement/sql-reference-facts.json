@@ -1,0 +1,128 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "sql-reference-facts",
+  "body": "View, procedure, function and trigger bodies and declared tables, table types and synonyms yield exactly the call and use edges, to scope declarations or unresolved targets, that its child requirements state.",
+  "properties": {
+    "feature": "sql-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-alias-write-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-builtin-targets",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-catalog-targets",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-dynamic-sql",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-exec-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-external-target-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-external-targets",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-function-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-local-names",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-name-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-object-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-external-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-external-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-routine-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-synonym-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-top-level-statements",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-trigger-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-type-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-uses-kind",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.sql-view-function-calls",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.sql-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.sql-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

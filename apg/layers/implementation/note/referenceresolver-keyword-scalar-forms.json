@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "referenceresolver-keyword-scalar-forms",
+  "body": "Walker graphs the ScriptDom keyword-node scalar calls LEFT and RIGHT (LeftFunctionCall, RightFunctionCall) as builtin unresolved calls through Visit overrides of their own, while CAST, TRY_CAST, CONVERT, TRY_CONVERT, PARSE, TRY_PARSE, IIF, COALESCE and NULLIF, which ScriptDom models as dedicated expression nodes rather than named function calls, yield no builtin record. Upgrade with matching Visit overrides if those keyword forms are to count as schema-less scalar function calls.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.ReferenceResolver.Walker.Visit(LeftFunctionCall)",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

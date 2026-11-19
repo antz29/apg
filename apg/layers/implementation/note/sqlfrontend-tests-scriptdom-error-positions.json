@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sqlfrontend-tests-scriptdom-error-positions",
+  "body": "TestMiddleBatchErrorRecovers asserts the exact original-file position ScriptDom 180.140.0's TSql170Parser reports for its stray ')' (line 4, column 23), and TestMySqlDialectRejected asserts line 3 for each MySQL batch; these positions are the parser's current behaviour, not a contract. Recheck and update the expected positions whenever the ScriptDom package version changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.SqlFrontend.Tests.TestMain.TestMiddleBatchErrorRecovers",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -32,6 +32,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.sql-project-file-ownership",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.structural-file-graphing",
       "properties": {}
     },

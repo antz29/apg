@@ -1,0 +1,25 @@
+:setvar Env Dev
+CREATE TABLE Orders (
+  Id INT,
+  ContactPhone Phone,
+  Total DECIMAL(10, 2)
+)
+GO
+CREATE TABLE app.OrderLog (Id INT, Note NVARCHAR(50))
+GO
+CREATE TABLE Customers (Id INT)
+GO
+CREATE SEQUENCE OrderIds START WITH 1
+GO
+CREATE TYPE Phone FROM NVARCHAR(20)
+GO
+CREATE TYPE OrderLines AS TABLE (Sku INT, Qty INT)
+GO
+CREATE VIEW OrderView AS
+SELECT o.Id, o.Total FROM Orders o
+GO
+CREATE SYNONYM OrdersSyn FOR Orders
+GO
+CREATE SYNONYM HelperSyn FOR Helper
+GO
+CREATE SYNONYM FarSyn FOR Archive.dbo.Orders

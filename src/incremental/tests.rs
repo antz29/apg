@@ -90,6 +90,15 @@ mod unit {
         assert_eq!(language_of("App.CSPROJ"), "xml");
         assert_eq!(language_of("Web.Config"), "xml");
         assert_eq!(language_of("Strings.ResX"), "xml");
+        // `.sql` is the SQL frontend's claim in any case; `.sqlproj` stays XML
+        // and look-alike extensions stay residual.
+        assert_eq!(language_of("dbo/Tables/Orders.sql"), "sql");
+        assert_eq!(language_of("X.SQL"), "sql");
+        assert_eq!(language_of("y.Sql"), "sql");
+        assert_eq!(language_of("App.sqlproj"), "xml");
+        assert_eq!(language_of("Legacy.SQLPROJ"), "xml");
+        assert_eq!(language_of("q.sqlx"), "misc");
+        assert_eq!(language_of("q.psql"), "misc");
         assert_eq!(language_of("App.sln"), "sln");
         assert_eq!(language_of("Legacy.SLN"), "sln");
         assert_eq!(language_of("Dockerfile"), "dockerfile");
@@ -270,5 +279,77 @@ mod unit {
             BTreeSet::from(["m.S".to_string()])
         );
         assert!(!state.overloads.file_scopes.contains_key("gone.go"));
+    }
+
+    #[test]
+    fn reuse_universe_runs_only_when_the_local_seed_is_not_the_recorded_scan() {
+        let previous = |scanned: &[&str]| crate::artifacts::PreviousScan {
+            scanned: scanned.iter().map(|s| s.to_string()).collect(),
+            planned: BTreeSet::new(),
+            kinds: Default::default(),
+            agents: Vec::new(),
+            content_key: Some("k".to_string()),
+        };
+        let full = previous(&["a.rs", "b.go"]);
+        let rust_only = previous(&["a.rs"]);
+        let files: Vec<(String, String, String)> = [
+            ("a.rs", "rust", "o1"),
+            ("b.go", "go", "o2"),
+            ("README.md", "md", "o3"),
+        ]
+        .iter()
+        .map(|(r, l, o)| (r.to_string(), l.to_string(), o.to_string()))
+        .collect();
+        let has_unit = |_: &str, rel: &str, _: &str| rel != "README.md";
+        let k = Some("k");
+
+        // Same scan, every recorded unit already local: skip the union.
+        assert!(!reuse_universe_needed(Some(&full), k, k, &files, has_unit));
+        assert!(!reuse_universe_needed(Some(&full), k, k, &[], has_unit));
+        // Stale/absent keys or no captured previous database: union.
+        assert!(reuse_universe_needed(
+            Some(&full),
+            Some("a"),
+            Some("b"),
+            &files,
+            has_unit
+        ));
+        assert!(reuse_universe_needed(
+            Some(&full),
+            None,
+            k,
+            &files,
+            has_unit
+        ));
+        assert!(reuse_universe_needed(
+            Some(&full),
+            k,
+            None,
+            &files,
+            has_unit
+        ));
+        assert!(reuse_universe_needed(
+            Some(&full),
+            None,
+            None,
+            &files,
+            has_unit
+        ));
+        assert!(reuse_universe_needed(None, k, k, &files, has_unit));
+        // Equal keys but coverage missing (narrower local scan / README.md unit).
+        assert!(reuse_universe_needed(
+            Some(&rust_only),
+            k,
+            k,
+            &files,
+            has_unit
+        ));
+        assert!(reuse_universe_needed(
+            Some(&full),
+            k,
+            k,
+            &files,
+            |_: &str, _: &str, _: &str| true
+        ));
     }
 }

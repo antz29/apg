@@ -1,0 +1,48 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "sql-frontend",
+  "body": "The T-SQL scanning domain: database projects, their schema objects and columns, and the calls and table references between them, turned into graph facts.",
+  "properties": {
+    "attribute": "supporting",
+    "root": "database-project"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.database-project",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.sql-conformance",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.sql-project-reading",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.sql-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.sql-schema-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.sql-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

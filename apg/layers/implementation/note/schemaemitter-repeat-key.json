@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "schemaemitter-repeat-key",
+  "body": "Emission.EmitFile detects a repeated declaration on the joined Schema.Name text, case-insensitively, so dotted bracketed names such as [a.b].c and a.[b.c] count as one identity (both render the same FQN, so the later one is dropped either way, with a repeat rather than a collision diagnostic); and it records an object as its scope's first declaration before the FQN-collision check, so a later repeat of an object that was itself dropped as a collision names the dropped declaration in its diagnostic. Upgrade to a (schema, name) key and record firsts only for emitted objects if either diagnostic must be exact.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Emission.EmitFile",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

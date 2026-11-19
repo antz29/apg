@@ -69,6 +69,16 @@
       "kind": "driven-by",
       "target": "requirements.requirement.sln-language-root",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-language-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.sql-language-root",
+      "properties": {}
     }
   ],
   "in": [
@@ -85,6 +95,11 @@
     {
       "kind": "realises",
       "source": "solution.component.java-package-hierarchy",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-registry",
       "properties": {}
     },
     {

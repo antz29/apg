@@ -37,6 +37,7 @@ mod unit {
         assert_eq!(granularity("cpp"), Granularity::File);
         assert_eq!(granularity("markdown"), Granularity::File);
         assert_eq!(granularity("cobol"), Granularity::File);
+        assert_eq!(granularity("sql"), Granularity::Language);
         assert_eq!(granularity("unknown-lang"), Granularity::File);
     }
 

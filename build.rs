@@ -3,14 +3,14 @@ use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
-/// `struct`, `py`, `agent`, `cobol`); `0`/`none`/empty skips all.
+/// `struct`, `py`, `agent`, `cobol`, `sql`); `0`/`none`/empty skips all.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
 /// `agent` is the standalone `agentfrontend` binary serving the
 /// `.opencode/agents/` definition stream.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-cobol` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-cobol`/`apg-sql` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
@@ -28,6 +28,7 @@ fn build_frontends() -> Vec<String> {
             "py".into(),
             "agent".into(),
             "cobol".into(),
+            "sql".into(),
         ],
     }
 }
@@ -64,6 +65,7 @@ fn watch_frontend_sources() {
         "src/pylib",
         "src/agentlib",
         "src/cobollib",
+        "src/sqllib",
     ];
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     while let Some(dir) = stack.pop() {
@@ -98,12 +100,15 @@ fn watch_frontend_sources() {
 /// <target>/<profile>/frontends. Also populated by `apg`'s runtime lookup
 /// (see `frontend_dir` in main.rs) so dev builds and the brew formula can
 /// both resolve frontends from a known spot. Created here (best effort).
+/// The profile dir is the parent of OUT_DIR's nearest `build` ancestor, which
+/// covers both cargo layouts: `<profile>/build/apg-<hash>/out` (old) and
+/// `<profile>/build/apg/<hash>/out` (new build-dir layout).
 fn stage_dir() -> PathBuf {
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    let profile_dir = PathBuf::from(&out_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let profile_dir = out_dir
+        .ancestors()
+        .find(|p| p.file_name() == Some(std::ffi::OsStr::new("build")))
+        .and_then(|b| b.parent())
         .expect("OUT_DIR has unexpected shape")
         .to_path_buf();
     let stage_dir = profile_dir.join("frontends");
@@ -145,6 +150,9 @@ fn main() {
     }
     if enabled(&frontends, "csharp") {
         languages.extend(stage_csharp(&out_dir, &stage_dir));
+    }
+    if enabled(&frontends, "sql") {
+        languages.extend(stage_sql(&out_dir, &stage_dir));
     }
     if enabled(&frontends, "agent") {
         // Agent frontend (standalone Rust crate, compiled in isolation). Fail-closed
@@ -679,6 +687,44 @@ fn stage_csharp(out_dir: &str, stage_dir: &Path) -> Vec<String> {
         );
         let _ = std::fs::copy(&csharpfrontend, stage_dir.join(exe_name));
         return vec!["csharp".into()];
+    }
+
+    Vec::new()
+}
+
+/// T-SQL frontend (ScriptDom, published as self-contained single-file, untrimmed).
+fn stage_sql(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    let rid = csharp_rid();
+
+    let sql_dist = Path::new(out_dir).join("sql-dist");
+    let mut cmd = Command::new("dotnet");
+    cmd.arg("publish")
+        .arg("src/sqllib/SqlFrontend.csproj")
+        .arg("-c")
+        .arg("Release")
+        .arg("-r")
+        .arg(rid)
+        .arg("--self-contained")
+        .arg("true")
+        .arg("-p:PublishSingleFile=true")
+        .arg("-p:PublishReadyToRun=true")
+        .arg("-o")
+        .arg(sql_dist.to_str().unwrap());
+
+    let exe_name = if target_os == "windows" {
+        "sqlfrontend.exe"
+    } else {
+        "sqlfrontend"
+    };
+    let sqlfrontend = sql_dist.join(exe_name);
+
+    let sql_ok = cmd.status().is_ok_and(|s| s.success()) && sqlfrontend.exists();
+    if sql_ok {
+        println!("cargo:rustc-env=APG_FRONTEND_SQL={}", sqlfrontend.display());
+        let _ = std::fs::copy(&sqlfrontend, stage_dir.join(exe_name));
+        return vec!["sql".into()];
     }
 
     Vec::new()

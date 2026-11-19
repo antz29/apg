@@ -42,6 +42,11 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.sql-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.structural-file-graphing",
       "properties": {}
     }

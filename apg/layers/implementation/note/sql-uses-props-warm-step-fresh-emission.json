@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sql-uses-props-warm-step-fresh-emission",
+  "body": "Step 3 (db.lbug removed, fact store kept) accepts either `[scan] warm cache:` or `[scan] incremental: 0 target file(s)`; the observed route is the incremental one, which still spawns every frontend, and the sql frontend always receives the full tracked .sql set as its --targets list, so its Uses properties arrive on fresh records rather than through splice_cached's restore of cached FragEdge properties. The step therefore proves the SQL rows equal a full scan after that rebuild, not the cached-property restore for sql; the cached-restore route is exercised by the COBOL copy-edge warm reassembly test. Upgrade by asserting `running sql frontend` is absent (or that the warm-cache line appears) if this test must prove cached SQL properties are restored.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.sql_uses_edge_properties_survive_splice_and_warm_reassembly",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
