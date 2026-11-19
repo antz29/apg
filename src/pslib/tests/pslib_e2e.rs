@@ -406,9 +406,13 @@ mod e2e {
         let run = psfrontend(&[&root]);
         assert!(run.ok, "{:?}", run.stderr);
         let recs = records(&run.stdout);
-        assert!(recs
-            .iter()
-            .all(|r| r["type"] == "module" || r["type"] == "file"));
+        // a script Struct, its <script> Function and their contains edge per .ps1/.psm1, none per .psd1
+        let count = |t: &str| recs.iter().filter(|r| r["type"] == t).count();
+        assert_eq!(
+            ["module", "file", "struct", "function", "contains"].map(count),
+            [3, 4, 3, 3, 3]
+        );
+        assert_eq!(recs.len(), 16);
         let file = |p: &str, m: &str| (format!("{root}/{p}"), m.to_string(), 1, 1);
         assert_eq!(
             file_recs(&recs),
@@ -487,17 +491,24 @@ mod e2e {
         dir.write("sub/b.ps1", b"Get-B\nGet-C\n");
         let root = dir.root();
         let b = format!("{root}/sub/b.ps1");
-        let only_b = format!(
-            "{{\"type\":\"module\",\"fqn\":\"sub\"}}\n\
-             {{\"type\":\"file\",\"path\":\"{b}\",\"parent\":\"sub\",\"start_line\":1,\"end_line\":2}}\n"
-        );
+        // b.ps1's records, its script Struct and <script> Function ids `n{s}`/`n{f}`
+        let only_b = |s: usize, f: usize| {
+            format!(
+                "{{\"type\":\"module\",\"fqn\":\"sub\"}}\n\
+                 {{\"type\":\"file\",\"path\":\"{b}\",\"parent\":\"sub\",\"start_line\":1,\"end_line\":2}}\n\
+                 {{\"type\":\"struct\",\"id\":\"n{s}\",\"parent\":\"sub\",\"name\":\"b.ps1\",\"path\":\"{b}\",\"start\":0,\"end\":12,\"start_line\":1,\"end_line\":2}}\n\
+                 {{\"type\":\"function\",\"id\":\"n{f}\",\"parent\":\"sub.b.ps1\",\"name\":\"<script>\",\"file\":\"{b}\",\"path\":\"{b}\",\"start\":0,\"end\":12,\"start_line\":1,\"end_line\":2}}\n\
+                 {{\"type\":\"contains\",\"from\":\"n{s}\",\"to\":\"n{f}\"}}\n"
+            )
+        };
         let side = Scratch::new("bin-tgt-side");
         let list = side.write("targets.txt", format!("{b}\n").as_bytes());
         let list = list.to_str().expect("UTF-8 path");
 
         let run = psfrontend(&[&root, "--targets", list]);
         assert!(run.ok, "{:?}", run.stderr);
-        assert_eq!(run.stdout, only_b);
+        // ids are assigned over the whole tree (a.ps1 and broken.ps1 first) before filtering
+        assert_eq!(run.stdout, only_b(5, 6));
         assert_eq!(
             run.stderr.last().map(String::as_str),
             Some("ps: 1 file had syntax errors")
@@ -505,7 +516,7 @@ mod e2e {
 
         let run = psfrontend(&[&root, "--module", "sub"]);
         assert!(run.ok, "{:?}", run.stderr);
-        assert_eq!(run.stdout, only_b);
+        assert_eq!(run.stdout, only_b(1, 2));
         assert_eq!(run.stderr, ["ps: 0 files had syntax errors"]);
 
         let plain = psfrontend(&[&root]);
@@ -520,7 +531,17 @@ mod e2e {
             "k",
         ]);
         assert!(plain.ok && run.ok, "{:?}", run.stderr);
-        assert_eq!(run.stdout, plain.stdout);
+        assert!(run.stdout.contains("\"id\":\"p1\""), "{}", run.stdout);
+        // the plain run's records with every id re-prefixed `p`
+        let mut expected = records(&plain.stdout);
+        for r in &mut expected {
+            for k in ["id", "from", "to"] {
+                if let Some(v) = r.get_mut(k) {
+                    *v = v.as_str().expect("id").replacen('n', "p", 1).into();
+                }
+            }
+        }
+        assert_eq!(records(&run.stdout), expected);
         assert_eq!(run.stderr, plain.stderr);
     }
 

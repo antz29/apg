@@ -1,14 +1,17 @@
 //! Facts for the unified JSONL stream: a Module per manifest or scan-root-relative directory and a File
-//! per claimed PowerShell source, with each file's syntax-error regions reported to stderr.
+//! per claimed PowerShell source, a script Struct plus its units (contains-linked) per
+//! `.ps1`/`.psm1`, with each file's syntax-error regions reported to stderr.
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::diag::{self, write_diagnostic, Diagnostic};
+use crate::identity;
 use crate::manifest::{self, ModuleMap};
 use crate::parse::parse;
 use crate::source;
+use crate::units::{self, FileUnits, UnitKind};
 
 /// Unified JSONL records (SPEC §2), the `ps` stream's wire shapes.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -46,6 +49,10 @@ pub enum Rec {
         start_line: usize,
         end_line: usize,
     },
+    Contains {
+        from: String,
+        to: String,
+    },
 }
 
 /// Accumulates one scan's records. Ids are `<prefix>1`, `<prefix>2`, ... in emission order;
@@ -55,6 +62,10 @@ pub struct Emitter {
     recs: Vec<Rec>,
     modules: BTreeSet<String>,
     map: ModuleMap,
+    /// Every scanned file's base-relative path.
+    paths: BTreeSet<String>,
+    /// Each scanned script's record path and its (base-relative) units, in scan order.
+    units: Vec<(String, FileUnits)>,
     /// How many scanned files held at least one error region.
     errored: usize,
     next_id: usize,
@@ -84,6 +95,8 @@ impl Emitter {
             recs: Vec::new(),
             modules: BTreeSet::new(),
             map: ModuleMap::default(),
+            paths: BTreeSet::new(),
+            units: Vec::new(),
             errored: 0,
             next_id: 0,
             base: base.to_path_buf(),
@@ -105,13 +118,23 @@ impl Emitter {
     /// Scans one PowerShell file: `path` is the identity its records carry, `bytes` its raw
     /// content. Returns its syntax-error diagnostics, which are not emitted as records.
     pub fn scan_file(&mut self, path: &str, bytes: &[u8]) -> Vec<Diagnostic> {
-        let text = source::decode(bytes);
-        let tree = parse(&text);
-        let diags = diag::error_regions(path, &text, &tree);
+        let decoded = source::decode_mapped(bytes);
+        let text = &decoded.text;
+        let tree = parse(text);
+        let diags = diag::error_regions(path, text, &tree);
         if !diags.is_empty() {
             self.errored += 1;
         }
-        let module = self.map.module(&rel_of(&self.base, Path::new(path)));
+        let rel = rel_of(&self.base, Path::new(path));
+        let script = Path::new(path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("ps1") || e.eq_ignore_ascii_case("psm1"));
+        if script {
+            self.units
+                .push((path.to_string(), units::scan_units(&rel, &decoded, &tree)));
+        }
+        let module = self.map.module(&rel);
+        self.paths.insert(rel);
         if self.modules.insert(module.clone()) {
             self.recs.push(Rec::Module {
                 fqn: module.clone(),
@@ -121,9 +144,76 @@ impl Emitter {
             path: path.to_string(),
             parent: module,
             start_line: 1,
-            end_line: source::line_count(&text),
+            end_line: source::line_count(text),
         });
         diags
+    }
+
+    /// Names every scanned script's units over the whole tree, then emits per script (scan
+    /// order) its Struct and each unit in ordinal order, each contained by its script (a
+    /// Method/Constructor by its class).
+    pub fn finish(&mut self) {
+        let (paths, files): (Vec<String>, Vec<FileUnits>) =
+            std::mem::take(&mut self.units).into_iter().unzip();
+        let id = identity::resolve(&self.map, &files, &self.paths);
+        for (path, fu) in paths.iter().zip(&files) {
+            let rel = fu.path.as_str();
+            let script = self.fresh_id();
+            let span = fu.file_span;
+            self.recs.push(Rec::Struct {
+                id: script.clone(),
+                parent: id.script_parent(rel),
+                name: id.script_name(rel).expect("scanned script").to_string(),
+                path: path.clone(),
+                start: span.start,
+                end: span.end,
+                start_line: span.start_line,
+                end_line: span.end_line,
+            });
+            let mut order: Vec<usize> = (0..fu.units.len()).collect();
+            order.sort_by_key(|&i| fu.units[i].ordinal);
+            let mut ids: Vec<Option<String>> = vec![None; fu.units.len()];
+            for i in order {
+                let u = &fu.units[i];
+                let uid = self.fresh_id();
+                let (parent, name) = (id.unit_parent(rel, i), id.unit_name(rel, i).to_string());
+                let s = u.span;
+                self.recs.push(match u.kind {
+                    UnitKind::Class | UnitKind::Enum => Rec::Struct {
+                        id: uid.clone(),
+                        parent,
+                        name,
+                        path: path.clone(),
+                        start: s.start,
+                        end: s.end,
+                        start_line: s.start_line,
+                        end_line: s.end_line,
+                    },
+                    _ => Rec::Function {
+                        id: uid.clone(),
+                        parent,
+                        name,
+                        params: u.params.clone(),
+                        file: path.clone(),
+                        path: path.clone(),
+                        start: s.start,
+                        end: s.end,
+                        start_line: s.start_line,
+                        end_line: s.end_line,
+                    },
+                });
+                // A class precedes its members in ordinal order, so its id is set.
+                let from = u.owner.map_or_else(
+                    || script.clone(),
+                    |o| ids[o].clone().expect("class before member"),
+                );
+                self.recs.push(Rec::Contains {
+                    from,
+                    to: uid.clone(),
+                });
+                ids[i] = Some(uid);
+            }
+        }
     }
 
     /// The records emitted so far, in order.
@@ -137,13 +227,26 @@ impl Emitter {
     }
 
     /// Keeps only the facts of the `targets` files (File records and the Struct/Function
-    /// records located in them); a Module stays when a kept File sits in it.
+    /// records located in them); a Module stays when a kept File sits in it, a Contains edge
+    /// when both its ends are kept.
     pub fn retain_targets(&mut self, targets: &HashSet<String>) {
         self.recs.retain(|r| match r {
             Rec::File { path, .. } | Rec::Struct { path, .. } | Rec::Function { path, .. } => {
                 targets.contains(path)
             }
-            Rec::Module { .. } => true,
+            Rec::Module { .. } | Rec::Contains { .. } => true,
+        });
+        let ids: HashSet<String> = self
+            .recs
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Struct { id, .. } | Rec::Function { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        self.recs.retain(|r| match r {
+            Rec::Contains { from, to } => ids.contains(from) && ids.contains(to),
+            _ => true,
         });
         let parents: BTreeSet<String> = self
             .recs
@@ -343,6 +446,8 @@ pub fn run(argv: &[String]) -> Result<(), String> {
             write_diagnostic(&mut err, &diag).map_err(|e| e.to_string())?;
         }
     }
+    // Ids, ordinals and names over the whole claimed tree, before any --targets filter.
+    emitter.finish();
 
     writeln!(err, "{}", emitter.error_summary()).map_err(|e| e.to_string())?;
     if let Some(set) = &targets {
