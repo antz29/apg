@@ -192,6 +192,78 @@ fn parse_clean(src: &str) -> Tree {
     tree
 }
 
+/// Writes the nine-file module-identity tree; the manifests UTF-16LE-with-BOM when `wide`.
+fn module_tree(dir: &Scratch, wide: bool) {
+    let manifest = |text: &str| {
+        if wide {
+            utf16le_bom(text)
+        } else {
+            text.as_bytes().to_vec()
+        }
+    };
+    dir.write(
+        "mods/Foo/Foo.psd1",
+        &manifest(
+            "@{\n    RootModule = 'Foo.psm1'\n    NestedModules = @('.\\lib\\Helpers.ps1', 'sub/../Other.ps1', 'NotAFile')\n    FunctionsToExport = @('Get-*')\n}\n",
+        ),
+    );
+    dir.write("mods/Foo/Foo.psm1", b"function Get-Foo {}\n");
+    dir.write("mods/Foo/lib/Helpers.ps1", b"function Get-Help1 {}\n");
+    dir.write("mods/Foo/Other.ps1", b"function Get-Other {}\n");
+    dir.write("mods/Foo/loose.ps1", b"Get-Foo\n");
+    dir.write("mods/Foo/Data.psd1", &manifest("@{ Setting = 1 }\n"));
+    dir.write(
+        "mods/Bar/Bar.psd1",
+        &manifest("@{\n    NestedModules = '..\\Foo\\Other.ps1'\n}\n"),
+    );
+    dir.write("mods/Bar/Bar.psm1", b"function Get-Bar {}\n");
+    dir.write("root.ps1", b"Get-Bar\n");
+}
+
+/// The sorted `(path, parent)` of every File record.
+fn file_parents(recs: &[serde_json::Value]) -> Vec<(String, String)> {
+    file_recs(recs)
+        .into_iter()
+        .map(|(p, m, _, _)| (p, m))
+        .collect()
+}
+
+/// The sorted fqns of every Module record (duplicates kept).
+fn sorted_modules(recs: &[serde_json::Value]) -> Vec<String> {
+    let mut out = module_recs(recs);
+    out.sort();
+    out
+}
+
+/// Asserts the whole module-identity tree's Module set and File parents under `root`.
+fn assert_module_tree(root: &str, recs: &[serde_json::Value]) {
+    assert_eq!(
+        sorted_modules(recs),
+        [
+            "",
+            "mods/Bar",
+            "mods/Bar/Bar.psd1",
+            "mods/Foo",
+            "mods/Foo/Foo.psd1"
+        ]
+    );
+    let file = |p: &str, m: &str| (format!("{root}/{p}"), m.to_string());
+    assert_eq!(
+        file_parents(recs),
+        [
+            file("mods/Bar/Bar.psd1", "mods/Bar/Bar.psd1"),
+            file("mods/Bar/Bar.psm1", "mods/Bar"),
+            file("mods/Foo/Data.psd1", "mods/Foo"),
+            file("mods/Foo/Foo.psd1", "mods/Foo/Foo.psd1"),
+            file("mods/Foo/Foo.psm1", "mods/Foo/Foo.psd1"),
+            file("mods/Foo/Other.ps1", "mods/Bar/Bar.psd1"),
+            file("mods/Foo/lib/Helpers.ps1", "mods/Foo/Foo.psd1"),
+            file("mods/Foo/loose.ps1", "mods/Foo"),
+            file("root.ps1", ""),
+        ]
+    );
+}
+
 mod e2e {
     use super::*;
 
@@ -450,6 +522,47 @@ mod e2e {
         assert!(plain.ok && run.ok, "{:?}", run.stderr);
         assert_eq!(run.stdout, plain.stdout);
         assert_eq!(run.stderr, plain.stderr);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_module_identity() {
+        let dir = Scratch::new("bin-mod");
+        module_tree(&dir, false);
+        let root = dir.root();
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        assert_module_tree(&root, &records(&run.stdout));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_module_identity_utf16_manifests() {
+        let dir = Scratch::new("bin-mod-wide");
+        module_tree(&dir, true);
+        let root = dir.root();
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        assert_module_tree(&root, &records(&run.stdout));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_module_identity_targets() {
+        let dir = Scratch::new("bin-mod-tgt");
+        module_tree(&dir, false);
+        let root = dir.root();
+        let helpers = format!("{root}/mods/Foo/lib/Helpers.ps1");
+        let side = Scratch::new("bin-mod-tgt-side");
+        let list = side.write("targets.txt", format!("{helpers}\n").as_bytes());
+        let run = psfrontend(&[&root, "--targets", list.to_str().expect("UTF-8 path")]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let recs = records(&run.stdout);
+        assert_eq!(sorted_modules(&recs), ["mods/Foo/Foo.psd1"]);
+        assert_eq!(
+            file_parents(&recs),
+            [(helpers, "mods/Foo/Foo.psd1".to_string())]
+        );
     }
 
     #[test]
