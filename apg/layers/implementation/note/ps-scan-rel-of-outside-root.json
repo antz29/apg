@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-scan-rel-of-outside-root",
+  "body": "rel_of turns a path outside the scan root into its bare file name, so such a file lands in the root's empty-identity module. Limit: scan_file is public but correct only for paths under the scan root, which is all run ever passes. Upgrade by refusing or rejecting an outside path when another caller of scan_file appears.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.scan.rel_of",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

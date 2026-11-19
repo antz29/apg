@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-scan-run-unreadable-files",
+  "body": "run reads every claimed file's bytes before module assignment, warns about and drops a file it cannot read, and holds all bytes until the scan ends. Limits: an unreadable file is neither emitted nor claimable, so a manifest naming it claims nothing; memory grows with the size of the claimed tree. Upgrade by reading the .psd1 files first and the rest one at a time when large trees make memory a concern.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.scan.run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

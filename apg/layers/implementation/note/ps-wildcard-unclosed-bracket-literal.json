@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-wildcard-unclosed-bracket-literal",
+  "body": "wildcard_match treats an unclosed [ in a pattern as a literal [, where PowerShell rejects the pattern as invalid. Limit: an invalid FunctionsToExport pattern still matches names instead of matching nothing. Upgrade by making an invalid pattern match nothing when a manifest with such a pattern appears in practice.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.manifest.wildcard_match",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

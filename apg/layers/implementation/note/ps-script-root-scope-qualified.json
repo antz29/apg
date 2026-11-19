@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-script-root-scope-qualified",
+  "body": "is_script_root accepts only $PSScriptRoot and ${PSScriptRoot} (case-insensitive), so a scope-qualified spelling such as $script:PSScriptRoot or ${script:PSScriptRoot} is Computed and its path stays unresolved. Limit: scope-qualified anchors are not recognised. Upgrade by accepting the script: scope qualifier when real scripts use it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.paths.is_script_root",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

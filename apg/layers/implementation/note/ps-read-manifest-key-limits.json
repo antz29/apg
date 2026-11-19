@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-read-manifest-key-limits",
+  "body": "read_manifest keeps the first of a repeated key (e.g. 'RootModule' then rootmodule), where PowerShell rejects such a manifest, and reads only the hashtable's direct hash_entry children, so an entry the grammar folds into an ERROR node is skipped — a broken entry can pull the valid entry before it into that ERROR and silently drop its key. Limit: duplicate-key and broken-manifest handling follow the grammar, not PowerShell's own refusal. Upgrade by reporting duplicate keys and dropped entries as diagnostics when manifest errors need surfacing.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.manifest.read_manifest",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
