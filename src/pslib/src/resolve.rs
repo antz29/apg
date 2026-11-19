@@ -450,3 +450,190 @@ pub fn select_member(
         _ => None,
     }
 }
+
+/// `Some((module, command))` for a module-qualified `Q\N` (split at the last
+/// `\`, both sides non-empty).
+pub fn split_qualified(name: &str) -> Option<(&str, &str)> {
+    name.rsplit_once('\\')
+        .filter(|(m, c)| !m.is_empty() && !c.is_empty())
+}
+
+/// The outcome of resolving a command name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandRes {
+    One { path: String, index: usize },
+    Many,
+    Builtin,
+    External,
+}
+
+/// A function unit: its file and unit index.
+type Func = (String, usize);
+
+/// Every scanned function, and each manifest module's candidate and export sets.
+pub struct CommandIndex {
+    /// Each file's Function units: index and name.
+    funcs: BTreeMap<String, Vec<(usize, String)>>,
+    /// Manifest path to its members' (and their dot-sourced scripts') functions.
+    candidates: BTreeMap<String, Vec<Func>>,
+    /// Manifest path to the candidates its export spec matches.
+    exports: BTreeMap<String, Vec<Func>>,
+    /// Lowercased `.psd1` stem to the manifests sharing it.
+    by_stem: HashMap<String, Vec<String>>,
+}
+
+impl CommandIndex {
+    pub fn new(files: &[FileUnits], map: &ModuleMap, dot: &DotSourceMap) -> Self {
+        let funcs: BTreeMap<String, Vec<(usize, String)>> = files
+            .iter()
+            .map(|f| {
+                let fs = f.units.iter().enumerate();
+                let fs = fs.filter(|(_, u)| u.kind == UnitKind::Function);
+                (
+                    f.path.clone(),
+                    fs.map(|(i, u)| (i, u.name.clone())).collect(),
+                )
+            })
+            .collect();
+        let by_stem = ManifestStems::new(map).by_stem;
+        let mut idx = CommandIndex {
+            funcs,
+            candidates: BTreeMap::new(),
+            exports: BTreeMap::new(),
+            by_stem: HashMap::new(),
+        };
+        for id in by_stem.values().flatten() {
+            let Some(m) = map.manifest_of(id) else {
+                continue;
+            };
+            let srcs = m
+                .members
+                .iter()
+                .flat_map(|mb| std::iter::once(mb).chain(dot.get(mb).into_iter().flatten()));
+            let cands = dedup(srcs.flat_map(|p| idx.file_funcs(p)));
+            let ex: Vec<Func> = cands
+                .iter()
+                .filter(|(p, i)| m.exports.matches(idx.name(p, *i)))
+                .cloned()
+                .collect();
+            idx.exports.insert(id.clone(), ex);
+            idx.candidates.insert(id.clone(), cands);
+        }
+        idx.by_stem = by_stem;
+        idx
+    }
+
+    /// The export set of the manifest module `manifest` (its `.psd1` path).
+    pub fn exports(&self, manifest: &str) -> Vec<(String, usize)> {
+        self.exports.get(manifest).cloned().unwrap_or_default()
+    }
+
+    /// Resolves command `name` called from `file`: a path command, else a
+    /// module-qualified lookup, else the unqualified four-step lookup.
+    pub fn resolve_command(
+        &self,
+        name: &str,
+        file: &str,
+        dot: &DotSourceMap,
+        map: &ModuleMap,
+        index: &FileIndex,
+    ) -> CommandRes {
+        let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
+        if name.contains(['\\', '/']) {
+            let found = paths::resolve(dir, name).and_then(|p| index.find(&p));
+            if let Some(p) = found.filter(|p| p.to_ascii_lowercase().ends_with(".ps1")) {
+                return CommandRes::One {
+                    path: p.to_string(),
+                    index: 0,
+                };
+            }
+        }
+        let unmatched = |n: &str| {
+            if builtins::is_builtin(n) {
+                CommandRes::Builtin
+            } else {
+                CommandRes::External
+            }
+        };
+        if let Some((m, n)) = split_qualified(name) {
+            let ids = self.by_stem.get(&m.to_lowercase()).into_iter().flatten();
+            let pool = ids.flat_map(|id| self.exports.get(id).into_iter().flatten().cloned());
+            return self.pick(pool, n).unwrap_or_else(|| unmatched(name));
+        }
+        let bare = units::bare_name(name);
+        let dotted = || {
+            dot.get(file)
+                .into_iter()
+                .flatten()
+                .flat_map(|p| self.file_funcs(p))
+        };
+        let own_module = || {
+            let m = map.manifest_of(file);
+            m.and_then(|m| self.candidates.get(&m.path))
+                .into_iter()
+                .flatten()
+                .cloned()
+        };
+        let all_exports = || self.exports.values().flatten().cloned();
+        self.pick(self.file_funcs(file), bare)
+            .or_else(|| self.pick(dotted(), bare))
+            .or_else(|| self.pick(own_module(), bare))
+            .or_else(|| self.pick(all_exports(), bare))
+            .unwrap_or_else(|| unmatched(bare))
+    }
+
+    fn file_funcs<'a>(&'a self, path: &'a str) -> impl Iterator<Item = Func> + 'a {
+        let fs = self.funcs.get(path).into_iter().flatten();
+        fs.map(move |(i, _)| (path.to_string(), *i))
+    }
+
+    fn name(&self, path: &str, index: usize) -> &str {
+        let mut fs = self.funcs.get(path).into_iter().flatten();
+        fs.find(|(i, _)| *i == index).map_or("", |(_, n)| n)
+    }
+
+    /// The functions of `pool` named `name` (case-insensitive), deduplicated:
+    /// `None` when there are none.
+    fn pick(&self, pool: impl Iterator<Item = Func>, name: &str) -> Option<CommandRes> {
+        let key = name.to_lowercase();
+        let hits = dedup(pool.filter(|(p, i)| self.name(p, *i).to_lowercase() == key));
+        match hits.as_slice() {
+            [] => None,
+            [(path, index)] => Some(CommandRes::One {
+                path: path.clone(),
+                index: *index,
+            }),
+            _ => Some(CommandRes::Many),
+        }
+    }
+}
+
+/// `funcs` deduplicated by (path, index), first occurrence kept.
+fn dedup(funcs: impl Iterator<Item = Func>) -> Vec<Func> {
+    let mut out: Vec<Func> = Vec::new();
+    for f in funcs {
+        if !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    out
+}
+
+/// The target of a command written as `name` and resolved to `res`.
+pub fn command_target(res: CommandRes, name: &str) -> Target {
+    let n = if split_qualified(name).is_some() {
+        name
+    } else {
+        units::bare_name(name)
+    };
+    let category = match res {
+        CommandRes::One { path, index } => return Target::Unit { path, index },
+        CommandRes::Many => "unknown",
+        CommandRes::Builtin => "stdlib",
+        CommandRes::External => "external",
+    };
+    Target::Unresolved {
+        name: n.to_string(),
+        category,
+    }
+}
