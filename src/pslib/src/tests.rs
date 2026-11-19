@@ -237,6 +237,56 @@ fn module_fixture() -> ModuleMap {
     assign(&files, &manifests)
 }
 
+/// The scan-root-relative files of the module-record fixture, in scan order.
+const MODULE_FILES: [&str; 6] = [
+    "mods/Foo/Foo.psd1",
+    "mods/Foo/Foo.psm1",
+    "mods/Foo/lib/Helpers.ps1",
+    "mods/Foo/loose.ps1",
+    "mods/Foo/Data.psd1",
+    "root.ps1",
+];
+
+/// A module-record fixture file's source: the [`MANIFEST`], a data `.psd1` or a script.
+fn module_source(path: &str) -> &'static str {
+    match path {
+        "mods/Foo/Foo.psd1" => MANIFEST,
+        "mods/Foo/Data.psd1" => "@{ Setting = 1 }\n",
+        _ => "Get-A\n",
+    }
+}
+
+/// `files` assigned with the parsed keys of each `(path, source)` manifest candidate.
+fn module_map(files: &[&str], psd1: &[(&str, &str)]) -> ModuleMap {
+    let manifests: Vec<(String, ManifestKeys)> = psd1
+        .iter()
+        .filter_map(|(p, src)| Some((s(p), keys_of(src)?)))
+        .collect();
+    let files: Vec<String> = files.iter().map(|p| s(p)).collect();
+    assign(&files, &manifests)
+}
+
+/// An Emitter over `/r` (with `map` set, when given) that scanned `files` under `/r`.
+fn module_emitter(map: Option<ModuleMap>, files: &[&str]) -> Emitter {
+    let mut e = Emitter::new(Path::new("/r"), "n");
+    if let Some(map) = map {
+        e.set_modules(map);
+    }
+    for p in files {
+        e.scan_file(&format!("/r/{p}"), module_source(p).as_bytes());
+    }
+    e
+}
+
+/// The File record of fixture file `path` under `/r`, parented to `parent`.
+fn module_file(path: &str, parent: &str) -> Rec {
+    file(
+        &format!("/r/{path}"),
+        parent,
+        line_count(module_source(path)),
+    )
+}
+
 /// `src`'s error regions as `(line, col, message)`.
 fn regions(src: &str) -> Vec<(usize, usize, String)> {
     error_regions("f.ps1", src, &parse(src))
@@ -1935,5 +1985,111 @@ mod int {
         );
         assert_eq!(map.module("elsewhere/deep/x.ps1"), "elsewhere/deep");
         assert_eq!(map.module("x.ps1"), "");
+    }
+
+    #[test]
+    fn scan_file_parents_files_to_manifest_and_directory_modules() {
+        let psd1 = MODULE_FILES.map(|p| (p, module_source(p)));
+        let map = module_map(&MODULE_FILES, &psd1);
+        let e = module_emitter(Some(map), &MODULE_FILES);
+        let foo = "mods/Foo/Foo.psd1";
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s(foo) },
+                module_file("mods/Foo/Foo.psd1", foo),
+                module_file("mods/Foo/Foo.psm1", foo),
+                module_file("mods/Foo/lib/Helpers.ps1", foo),
+                Rec::Module { fqn: s("mods/Foo") },
+                module_file("mods/Foo/loose.ps1", "mods/Foo"),
+                module_file("mods/Foo/Data.psd1", "mods/Foo"),
+                Rec::Module { fqn: s("") },
+                module_file("root.ps1", ""),
+            ]
+        );
+        // every File once, under exactly one emitted Module
+        let modules: Vec<&str> = e
+            .records()
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Module { fqn } => Some(fqn.as_str()),
+                _ => None,
+            })
+            .collect();
+        let files: Vec<&str> = e
+            .records()
+            .iter()
+            .filter_map(|r| match r {
+                Rec::File { path, parent, .. } => {
+                    assert_eq!(modules.iter().filter(|m| **m == parent).count(), 1);
+                    Some(path.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        let want: Vec<String> = MODULE_FILES.iter().map(|p| format!("/r/{p}")).collect();
+        assert_eq!(files, want);
+    }
+
+    #[test]
+    fn scan_file_parents_a_doubly_claimed_member_to_the_earlier_manifest() {
+        let alt = "@{ RootModule = 'Foo.psm1' }\n";
+        let files = [
+            "mods/Foo/Foo.psd1",
+            "mods/Foo/Alt.psd1",
+            "mods/Foo/Foo.psm1",
+        ];
+        // listed after Foo.psd1, but sorting first
+        let map = module_map(
+            &files,
+            &[("mods/Foo/Foo.psd1", MANIFEST), ("mods/Foo/Alt.psd1", alt)],
+        );
+        let e = module_emitter(Some(map), &["mods/Foo/Foo.psm1"]);
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module {
+                    fqn: s("mods/Foo/Alt.psd1")
+                },
+                module_file("mods/Foo/Foo.psm1", "mods/Foo/Alt.psd1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn retain_targets_keeps_a_target_files_manifest_module() {
+        let psd1 = MODULE_FILES.map(|p| (p, module_source(p)));
+        let mut e = module_emitter(Some(module_map(&MODULE_FILES, &psd1)), &MODULE_FILES);
+        e.retain_targets(&[s("/r/mods/Foo/lib/Helpers.ps1")].into());
+        let foo = "mods/Foo/Foo.psd1";
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s(foo) },
+                module_file("mods/Foo/lib/Helpers.ps1", foo),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_file_without_set_modules_keeps_directory_parents() {
+        let e = module_emitter(None, &MODULE_FILES);
+        let foo = "mods/Foo";
+        assert_eq!(
+            e.records(),
+            [
+                Rec::Module { fqn: s(foo) },
+                module_file("mods/Foo/Foo.psd1", foo),
+                module_file("mods/Foo/Foo.psm1", foo),
+                Rec::Module {
+                    fqn: s("mods/Foo/lib")
+                },
+                module_file("mods/Foo/lib/Helpers.ps1", "mods/Foo/lib"),
+                module_file("mods/Foo/loose.ps1", foo),
+                module_file("mods/Foo/Data.psd1", foo),
+                Rec::Module { fqn: s("") },
+                module_file("root.ps1", ""),
+            ]
+        );
     }
 }
