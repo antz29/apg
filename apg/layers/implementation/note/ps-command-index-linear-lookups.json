@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-command-index-linear-lookups",
+  "body": "CommandIndex resolves a command by linear scans: export-set deduplication uses Vec::contains, a name lookup scans candidates by index, and every candidate name is lower-cased per comparison, so an unmatched command such as a builtin walks every module export before falling through. Limit: lookup cost grows with the total export count; it is fine at dbatools scale (about 700 exports). Upgrade to a lower-cased name map (HashMap) when scans of very large module sets become slow.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.resolve.CommandIndex",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
