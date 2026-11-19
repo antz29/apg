@@ -18,12 +18,82 @@ impl Scratch {
         Scratch(dir)
     }
 
-    /// Writes `bytes` to `name` inside the scratch dir and returns its path.
+    /// Writes `bytes` to `name` (parents created) inside the scratch dir and returns its path.
     fn write(&self, name: &str, bytes: &[u8]) -> PathBuf {
         let path = self.0.join(name);
+        fs::create_dir_all(path.parent().expect("parent")).expect("create fixture dir");
         fs::write(&path, bytes).expect("write fixture");
         path
     }
+
+    /// The scratch dir, symlink-resolved: the identity the binary's records carry.
+    fn root(&self) -> String {
+        fs::canonicalize(&self.0)
+            .expect("canonical scratch")
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+/// One `psfrontend` run: stdout, stderr lines and whether it exited 0.
+struct Run {
+    stdout: String,
+    stderr: Vec<String>,
+    ok: bool,
+}
+
+/// Runs the built `psfrontend` binary with `args`.
+fn psfrontend(args: &[&str]) -> Run {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_psfrontend"))
+        .args(args)
+        .output()
+        .expect("spawn psfrontend");
+    Run {
+        stdout: String::from_utf8(out.stdout).expect("UTF-8 stdout"),
+        stderr: String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        ok: out.status.success(),
+    }
+}
+
+/// Every stdout line parsed as one JSON object.
+fn records(stdout: &str) -> Vec<serde_json::Value> {
+    stdout
+        .lines()
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).expect("one JSON value per line");
+            assert!(v.is_object(), "{l}");
+            v
+        })
+        .collect()
+}
+
+/// The `(path, parent, start_line, end_line)` of every File record, sorted.
+fn file_recs(recs: &[serde_json::Value]) -> Vec<(String, String, u64, u64)> {
+    let mut out: Vec<_> = recs
+        .iter()
+        .filter(|r| r["type"] == "file")
+        .map(|r| {
+            (
+                r["path"].as_str().expect("path").to_string(),
+                r["parent"].as_str().expect("parent").to_string(),
+                r["start_line"].as_u64().expect("start_line"),
+                r["end_line"].as_u64().expect("end_line"),
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The fqn of every Module record, in emission order.
+fn module_recs(recs: &[serde_json::Value]) -> Vec<String> {
+    recs.iter()
+        .filter(|r| r["type"] == "module")
+        .map(|r| r["fqn"].as_str().expect("fqn").to_string())
+        .collect()
 }
 
 impl Drop for Scratch {
@@ -41,6 +111,13 @@ fn read_utf8(path: &Path) -> String {
 fn utf16le_bom(text: &str) -> Vec<u8> {
     let mut out = vec![0xFF, 0xFE];
     out.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+    out
+}
+
+/// `text` as UTF-16BE bytes behind an FE FF byte-order mark.
+fn utf16be_bom(text: &str) -> Vec<u8> {
+    let mut out = vec![0xFE, 0xFF];
+    out.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
     out
 }
 
@@ -233,5 +310,154 @@ mod e2e {
             texts(&t16, &utf16, "invocation_operator_command"),
             [". ./lib.ps1"]
         );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_claims_and_walks() {
+        let dir = Scratch::new("bin-walk");
+        for name in [
+            "a.ps1",
+            "sub/B.PSM1",
+            "sub/c.Psd1",
+            "sub/apg/q.ps1",
+            "notes.txt",
+            "x.ps",
+            "target/t.ps1",
+            "node_modules/n.ps1",
+            ".git/g.ps1",
+            "apg/p.ps1",
+        ] {
+            dir.write(name, b"Get-A\n");
+        }
+        let root = dir.root();
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let recs = records(&run.stdout);
+        assert!(recs
+            .iter()
+            .all(|r| r["type"] == "module" || r["type"] == "file"));
+        let file = |p: &str, m: &str| (format!("{root}/{p}"), m.to_string(), 1, 1);
+        assert_eq!(
+            file_recs(&recs),
+            [
+                file("a.ps1", ""),
+                file("sub/B.PSM1", "sub"),
+                file("sub/apg/q.ps1", "sub/apg"),
+                file("sub/c.Psd1", "sub"),
+            ]
+        );
+        let mut modules = module_recs(&recs);
+        modules.sort();
+        assert_eq!(modules, ["", "sub", "sub/apg"]);
+        assert_eq!(run.stderr, ["ps: 0 files had syntax errors"]);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_decodes_encodings() {
+        let dir = Scratch::new("bin-enc");
+        let text = "# café ünïcødé\nWrite-Output 'héllo 😀'\n$x = 'ß'\n";
+        dir.write("u8.ps1", text.as_bytes());
+        dir.write("bom.ps1", &[b"\xEF\xBB\xBF", text.as_bytes()].concat());
+        dir.write("le.ps1", &utf16le_bom(text));
+        dir.write("be.ps1", &utf16be_bom(text));
+        let root = dir.root();
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let file = |p: &str| (format!("{root}/{p}"), String::new(), 1, 3);
+        assert_eq!(
+            file_recs(&records(&run.stdout)),
+            [
+                file("be.ps1"),
+                file("bom.ps1"),
+                file("le.ps1"),
+                file("u8.ps1")
+            ]
+        );
+        assert_eq!(run.stderr, ["ps: 0 files had syntax errors"]);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_reports_syntax_errors() {
+        let dir = Scratch::new("bin-err");
+        let broken = "Get-A\n$x = )\nfunction f {\n";
+        dir.write("broken.ps1", broken.as_bytes());
+        dir.write("clean.ps1", b"Get-B\n");
+        let root = dir.root();
+        let path = format!("{root}/broken.ps1");
+        let mut expected: Vec<String> =
+            psfrontend::diag::error_regions(&path, broken, &parse(broken))
+                .iter()
+                .map(|d| format!("ps: {d}"))
+                .collect();
+        assert!(!expected.is_empty());
+        expected.push("ps: 1 file had syntax errors".to_string());
+        let run = psfrontend(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        assert_eq!(run.stderr, expected);
+        assert_eq!(
+            file_recs(&records(&run.stdout)),
+            [
+                (path, String::new(), 1, 3),
+                (format!("{root}/clean.ps1"), String::new(), 1, 1)
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_targets_module_and_handoff_flags() {
+        let dir = Scratch::new("bin-tgt");
+        dir.write("a.ps1", b"Get-A\n");
+        dir.write("broken.ps1", b"$x = )\n");
+        dir.write("sub/b.ps1", b"Get-B\nGet-C\n");
+        let root = dir.root();
+        let b = format!("{root}/sub/b.ps1");
+        let only_b = format!(
+            "{{\"type\":\"module\",\"fqn\":\"sub\"}}\n\
+             {{\"type\":\"file\",\"path\":\"{b}\",\"parent\":\"sub\",\"start_line\":1,\"end_line\":2}}\n"
+        );
+        let side = Scratch::new("bin-tgt-side");
+        let list = side.write("targets.txt", format!("{b}\n").as_bytes());
+        let list = list.to_str().expect("UTF-8 path");
+
+        let run = psfrontend(&[&root, "--targets", list]);
+        assert!(run.ok, "{:?}", run.stderr);
+        assert_eq!(run.stdout, only_b);
+        assert_eq!(
+            run.stderr.last().map(String::as_str),
+            Some("ps: 1 file had syntax errors")
+        );
+
+        let run = psfrontend(&[&root, "--module", "sub"]);
+        assert!(run.ok, "{:?}", run.stderr);
+        assert_eq!(run.stdout, only_b);
+        assert_eq!(run.stderr, ["ps: 0 files had syntax errors"]);
+
+        let plain = psfrontend(&[&root]);
+        let cache = side.root();
+        let run = psfrontend(&[
+            &root,
+            "--id-prefix",
+            "p",
+            "--cache-dir",
+            &cache,
+            "--cache-key",
+            "k",
+        ]);
+        assert!(plain.ok && run.ok, "{:?}", run.stderr);
+        assert_eq!(run.stdout, plain.stdout);
+        assert_eq!(run.stderr, plain.stderr);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real process; run via cargo test e2e:: -- --ignored"]
+    fn bin_fails_without_arguments() {
+        let run = psfrontend(&[]);
+        assert!(!run.ok);
+        let last = run.stderr.last().expect("a stderr line");
+        assert!(last.starts_with("psfrontend: usage: "), "{last}");
     }
 }
