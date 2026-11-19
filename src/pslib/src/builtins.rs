@@ -1,0 +1,870 @@
+//! Fixed PowerShell 7.6 LTS knowledge: the stdlib command and alias tables and
+//! the type-accelerator table. This is the crate's one static table module; the
+//! in-box module list is [`INBOX_MODULES`], defined in `resolve` and reused here.
+//!
+//! Basis: PowerShell 7.6 LTS, the all-platform union (Windows-only and
+//! Linux/macOS-only entries are both included; `#if !CORECLR` Windows
+//! PowerShell 5.1 entries are excluded), retrieved 2026-11-16 and re-fetched
+//! 2026-11-19 from the PowerShell repository at tag `v7.6.0`:
+//! `src/System.Management.Automation/engine/InitialSessionState.cs`
+//! (`InitializeCoreCmdletsAndProviders`, `BuiltInFunctions`, `BuiltInAliases`),
+//! the `src/Modules/{Windows,Unix,Shared}/*/*.psd1` manifests and
+//! `src/Modules/PSGalleryModules.csproj` with the PowerShell Gallery manifests
+//! it pins (Microsoft.PowerShell.Archive 1.2.5, Microsoft.PowerShell.PSResourceGet
+//! 1.2.0, Microsoft.PowerShell.ThreadJob 2.2.0), plus
+//! `src/System.Management.Automation/engine/parser/TypeResolver.cs` and the
+//! Learn `powershell-7.6` module and `about_Type_Accelerators` pages.
+//!
+//! The tables are fixed snapshots: an unmatched unqualified command outside
+//! them classes external (ps-external-command-call); an unmatched `M\N` whose
+//! module does not export `N` in them classes external
+//! (ps-unmatched-qualified-command); a type name outside them and outside
+//! `System`/`System.*` is not a System type. Because the tables are the
+//! all-platform union, a Windows-only alias such as `ls` classes stdlib on
+//! every platform.
+//!
+//! Limits of the snapshot:
+//! - v7.6.0 is not diffed against the 7.6.6 servicing release.
+//! - The module-declared alias targets were read from the `[Alias(...)]`
+//!   attributes: `gcb`, `gin`, `gtz`, `scb`, `stz` and `fhx` in the PowerShell
+//!   v7.6.0 cmdlet sources, and the PSResourceGet aliases in the PSResourceGet
+//!   repository at tag `v1.2.0`; the Gallery 1.2.0 package is assumed, not
+//!   verified, to be built from that tag.
+//! - Core cmdlets are not audited for `[Alias]` attributes outside
+//!   `BuiltInAliases`.
+//! - The Unix and Windows module manifests are compared only for Management,
+//!   Utility and Security; Host's Shared and Diagnostics' Windows-only
+//!   placement rest on the source directory layout, not a manifest comparison.
+//! - At v7.6.0 the `Get-PSSubsystem` registration carries no conditional, so
+//!   COMMANDS includes it; its guard in earlier releases is not read.
+//! - The PSResourceGet Learn page is labelled v1.2.0-preview5 and lists the
+//!   function `Import-PSGetRepository` as a cmdlet, so the PSResourceGet
+//!   entries rest on the v1.2.0 GA manifest.
+//! - The accelerator source was read at tags v7.4.6, v7.5.4 and v7.6.0 and
+//!   compared by eye, not by a mechanical diff; the Learn 7.6 table matches it.
+//! - No table is checked against a live `pwsh` (no `Get-Command` or
+//!   `TypeAccelerators::Get` dump).
+//! - Accelerator full names that the source writes as a short name (not a C#
+//!   keyword or a qualified `typeof`) are taken from Learn, not from each
+//!   type's declaring source file. Among them:
+//!   `NoRunspaceAffinity` → `System.Management.Automation.Language.NoRunspaceAffinityAttribute`
+//!   (this makes it a System type), and `cimconverter` →
+//!   `Microsoft.Management.Infrastructure.CimConverter` and
+//!   `pspropertyexpression` → `Microsoft.PowerShell.Commands.PSPropertyExpression`
+//!   (the last makes `pspropertyexpression` not a System type).
+
+use crate::resolve::INBOX_MODULES;
+
+const CORE: &str = INBOX_MODULES[0];
+const MGMT: &str = INBOX_MODULES[1];
+const UTIL: &str = INBOX_MODULES[2];
+const SEC: &str = INBOX_MODULES[3];
+const HOST: &str = INBOX_MODULES[4];
+const DIAG: &str = INBOX_MODULES[5];
+const ARCH: &str = INBOX_MODULES[6];
+const PSRG: &str = INBOX_MODULES[7];
+const TJOB: &str = INBOX_MODULES[8];
+
+/// `(module, command)` pairs, sorted by lowercased command then lowercased
+/// module: 319 entries. The 282 module commands (cmdlets and functions) belong
+/// to the in-box `Microsoft.PowerShell.*` modules, named from
+/// [`INBOX_MODULES`] and keyed by module for the `M\N` stdlib rule: Core 61
+/// (InitialSessionState.cs `InitializeCoreCmdletsAndProviders`, without the
+/// hidden `Out-LineOutput`/`Format-Default`), Management 61, Utility 118,
+/// Security 15, Host 2 and Diagnostics 3 (the v7.6.0 `src/Modules` manifests),
+/// Archive 1.2.5 2, PSResourceGet 1.2.0 19 and ThreadJob 2.2.0 1 (the Gallery
+/// manifests `PSGalleryModules.csproj` pins). The other 37 are the engine
+/// `BuiltInFunctions`, under the empty module `""` because a session function
+/// takes no module qualifier. In-box modules not named `Microsoft.PowerShell.*`
+/// (CimCmdlets, Microsoft.WSMan.Management, PSDiagnostics, PSReadLine,
+/// PowerShellGet, PackageManagement) are absent, so their commands class external.
+pub static COMMANDS: &[(&str, &str)] = &[
+    ("", "A:"),
+    (MGMT, "Add-Content"),
+    (CORE, "Add-History"),
+    (UTIL, "Add-Member"),
+    (UTIL, "Add-Type"),
+    ("", "B:"),
+    ("", "C:"),
+    ("", "cd.."),
+    ("", "cd\\"),
+    ("", "cd~"),
+    (MGMT, "Clear-Content"),
+    (CORE, "Clear-History"),
+    ("", "Clear-Host"),
+    (MGMT, "Clear-Item"),
+    (MGMT, "Clear-ItemProperty"),
+    (MGMT, "Clear-RecycleBin"),
+    (UTIL, "Clear-Variable"),
+    (UTIL, "Compare-Object"),
+    (ARCH, "Compress-Archive"),
+    (PSRG, "Compress-PSResource"),
+    (CORE, "Connect-PSSession"),
+    (MGMT, "Convert-Path"),
+    (UTIL, "ConvertFrom-CliXml"),
+    (UTIL, "ConvertFrom-Csv"),
+    (UTIL, "ConvertFrom-Json"),
+    (UTIL, "ConvertFrom-Markdown"),
+    (UTIL, "ConvertFrom-SddlString"),
+    (SEC, "ConvertFrom-SecureString"),
+    (UTIL, "ConvertFrom-StringData"),
+    (UTIL, "ConvertTo-CliXml"),
+    (UTIL, "ConvertTo-Csv"),
+    (UTIL, "ConvertTo-Html"),
+    (UTIL, "ConvertTo-Json"),
+    (SEC, "ConvertTo-SecureString"),
+    (UTIL, "ConvertTo-Xml"),
+    (MGMT, "Copy-Item"),
+    (MGMT, "Copy-ItemProperty"),
+    ("", "D:"),
+    (CORE, "Debug-Job"),
+    (MGMT, "Debug-Process"),
+    (UTIL, "Debug-Runspace"),
+    (CORE, "Disable-ExperimentalFeature"),
+    (UTIL, "Disable-PSBreakpoint"),
+    (CORE, "Disable-PSRemoting"),
+    (CORE, "Disable-PSSessionConfiguration"),
+    (UTIL, "Disable-RunspaceDebug"),
+    (CORE, "Disconnect-PSSession"),
+    ("", "E:"),
+    (CORE, "Enable-ExperimentalFeature"),
+    (UTIL, "Enable-PSBreakpoint"),
+    (CORE, "Enable-PSRemoting"),
+    (CORE, "Enable-PSSessionConfiguration"),
+    (UTIL, "Enable-RunspaceDebug"),
+    (CORE, "Enter-PSHostProcess"),
+    (CORE, "Enter-PSSession"),
+    ("", "exec"),
+    (CORE, "Exit-PSHostProcess"),
+    (CORE, "Exit-PSSession"),
+    (ARCH, "Expand-Archive"),
+    (UTIL, "Export-Alias"),
+    (UTIL, "Export-Clixml"),
+    (UTIL, "Export-Csv"),
+    (UTIL, "Export-FormatData"),
+    (CORE, "Export-ModuleMember"),
+    (UTIL, "Export-PSSession"),
+    ("", "F:"),
+    (PSRG, "Find-PSResource"),
+    (CORE, "ForEach-Object"),
+    (UTIL, "Format-Custom"),
+    (UTIL, "Format-Hex"),
+    (UTIL, "Format-List"),
+    (UTIL, "Format-Table"),
+    (UTIL, "Format-Wide"),
+    ("", "G:"),
+    (SEC, "Get-Acl"),
+    (UTIL, "Get-Alias"),
+    (SEC, "Get-AuthenticodeSignature"),
+    (MGMT, "Get-ChildItem"),
+    (MGMT, "Get-Clipboard"),
+    (SEC, "Get-CmsMessage"),
+    (CORE, "Get-Command"),
+    (MGMT, "Get-ComputerInfo"),
+    (MGMT, "Get-Content"),
+    (DIAG, "Get-Counter"),
+    (SEC, "Get-Credential"),
+    (UTIL, "Get-Culture"),
+    (UTIL, "Get-Date"),
+    (UTIL, "Get-Error"),
+    (UTIL, "Get-Event"),
+    (UTIL, "Get-EventSubscriber"),
+    (SEC, "Get-ExecutionPolicy"),
+    (CORE, "Get-ExperimentalFeature"),
+    (UTIL, "Get-FileHash"),
+    (UTIL, "Get-FormatData"),
+    (CORE, "Get-Help"),
+    (CORE, "Get-History"),
+    (UTIL, "Get-Host"),
+    (MGMT, "Get-HotFix"),
+    (PSRG, "Get-InstalledPSResource"),
+    (MGMT, "Get-Item"),
+    (MGMT, "Get-ItemProperty"),
+    (MGMT, "Get-ItemPropertyValue"),
+    (CORE, "Get-Job"),
+    (MGMT, "Get-Location"),
+    (UTIL, "Get-MarkdownOption"),
+    (UTIL, "Get-Member"),
+    (CORE, "Get-Module"),
+    (SEC, "Get-PfxCertificate"),
+    (MGMT, "Get-Process"),
+    (UTIL, "Get-PSBreakpoint"),
+    (UTIL, "Get-PSCallStack"),
+    (MGMT, "Get-PSDrive"),
+    (CORE, "Get-PSHostProcessInfo"),
+    (MGMT, "Get-PSProvider"),
+    (PSRG, "Get-PSResourceRepository"),
+    (PSRG, "Get-PSScriptFileInfo"),
+    (CORE, "Get-PSSession"),
+    (CORE, "Get-PSSessionCapability"),
+    (CORE, "Get-PSSessionConfiguration"),
+    (CORE, "Get-PSSubsystem"),
+    (UTIL, "Get-Random"),
+    (UTIL, "Get-Runspace"),
+    (UTIL, "Get-RunspaceDebug"),
+    (UTIL, "Get-SecureRandom"),
+    (MGMT, "Get-Service"),
+    (MGMT, "Get-TimeZone"),
+    (UTIL, "Get-TraceSource"),
+    (UTIL, "Get-TypeData"),
+    (UTIL, "Get-UICulture"),
+    (UTIL, "Get-Unique"),
+    (UTIL, "Get-Uptime"),
+    (UTIL, "Get-Variable"),
+    (UTIL, "Get-Verb"),
+    (DIAG, "Get-WinEvent"),
+    (UTIL, "Group-Object"),
+    ("", "H:"),
+    ("", "help"),
+    ("", "I:"),
+    (UTIL, "Import-Alias"),
+    (UTIL, "Import-Clixml"),
+    (UTIL, "Import-Csv"),
+    (UTIL, "Import-LocalizedData"),
+    (CORE, "Import-Module"),
+    (UTIL, "Import-PowerShellDataFile"),
+    (PSRG, "Import-PSGetRepository"),
+    (UTIL, "Import-PSSession"),
+    (PSRG, "Install-PSResource"),
+    (CORE, "Invoke-Command"),
+    (UTIL, "Invoke-Expression"),
+    (CORE, "Invoke-History"),
+    (MGMT, "Invoke-Item"),
+    (UTIL, "Invoke-RestMethod"),
+    (UTIL, "Invoke-WebRequest"),
+    ("", "J:"),
+    (MGMT, "Join-Path"),
+    (UTIL, "Join-String"),
+    ("", "K:"),
+    ("", "L:"),
+    ("", "M:"),
+    (UTIL, "Measure-Command"),
+    (UTIL, "Measure-Object"),
+    ("", "mkdir"),
+    (MGMT, "Move-Item"),
+    (MGMT, "Move-ItemProperty"),
+    ("", "N:"),
+    (UTIL, "New-Alias"),
+    (UTIL, "New-Event"),
+    (SEC, "New-FileCatalog"),
+    (UTIL, "New-Guid"),
+    (MGMT, "New-Item"),
+    (MGMT, "New-ItemProperty"),
+    (CORE, "New-Module"),
+    (CORE, "New-ModuleManifest"),
+    (UTIL, "New-Object"),
+    (MGMT, "New-PSDrive"),
+    (CORE, "New-PSRoleCapabilityFile"),
+    (PSRG, "New-PSScriptFileInfo"),
+    (CORE, "New-PSSession"),
+    (CORE, "New-PSSessionConfigurationFile"),
+    (CORE, "New-PSSessionOption"),
+    (CORE, "New-PSTransportOption"),
+    (MGMT, "New-Service"),
+    (UTIL, "New-TemporaryFile"),
+    (UTIL, "New-TimeSpan"),
+    (UTIL, "New-Variable"),
+    (DIAG, "New-WinEvent"),
+    ("", "O:"),
+    ("", "oss"),
+    (CORE, "Out-Default"),
+    (UTIL, "Out-File"),
+    (UTIL, "Out-GridView"),
+    (CORE, "Out-Host"),
+    (CORE, "Out-Null"),
+    (UTIL, "Out-Printer"),
+    (UTIL, "Out-String"),
+    ("", "P:"),
+    ("", "Pause"),
+    (MGMT, "Pop-Location"),
+    ("", "prompt"),
+    (SEC, "Protect-CmsMessage"),
+    (PSRG, "Publish-PSResource"),
+    (MGMT, "Push-Location"),
+    ("", "Q:"),
+    ("", "R:"),
+    (UTIL, "Read-Host"),
+    (CORE, "Receive-Job"),
+    (CORE, "Receive-PSSession"),
+    (CORE, "Register-ArgumentCompleter"),
+    (UTIL, "Register-EngineEvent"),
+    (UTIL, "Register-ObjectEvent"),
+    (PSRG, "Register-PSResourceRepository"),
+    (CORE, "Register-PSSessionConfiguration"),
+    (UTIL, "Remove-Alias"),
+    (UTIL, "Remove-Event"),
+    (MGMT, "Remove-Item"),
+    (MGMT, "Remove-ItemProperty"),
+    (CORE, "Remove-Job"),
+    (CORE, "Remove-Module"),
+    (UTIL, "Remove-PSBreakpoint"),
+    (MGMT, "Remove-PSDrive"),
+    (CORE, "Remove-PSSession"),
+    (MGMT, "Remove-Service"),
+    (UTIL, "Remove-TypeData"),
+    (UTIL, "Remove-Variable"),
+    (MGMT, "Rename-Computer"),
+    (MGMT, "Rename-Item"),
+    (MGMT, "Rename-ItemProperty"),
+    (PSRG, "Reset-PSResourceRepository"),
+    (MGMT, "Resolve-Path"),
+    (MGMT, "Restart-Computer"),
+    (MGMT, "Restart-Service"),
+    (MGMT, "Resume-Service"),
+    ("", "S:"),
+    (CORE, "Save-Help"),
+    (PSRG, "Save-PSResource"),
+    (UTIL, "Select-Object"),
+    (UTIL, "Select-String"),
+    (UTIL, "Select-Xml"),
+    (UTIL, "Send-MailMessage"),
+    (SEC, "Set-Acl"),
+    (UTIL, "Set-Alias"),
+    (SEC, "Set-AuthenticodeSignature"),
+    (MGMT, "Set-Clipboard"),
+    (MGMT, "Set-Content"),
+    (UTIL, "Set-Date"),
+    (SEC, "Set-ExecutionPolicy"),
+    (MGMT, "Set-Item"),
+    (MGMT, "Set-ItemProperty"),
+    (MGMT, "Set-Location"),
+    (UTIL, "Set-MarkdownOption"),
+    (UTIL, "Set-PSBreakpoint"),
+    (CORE, "Set-PSDebug"),
+    (PSRG, "Set-PSResourceRepository"),
+    (CORE, "Set-PSSessionConfiguration"),
+    (MGMT, "Set-Service"),
+    (CORE, "Set-StrictMode"),
+    (MGMT, "Set-TimeZone"),
+    (UTIL, "Set-TraceSource"),
+    (UTIL, "Set-Variable"),
+    (UTIL, "Show-Command"),
+    (UTIL, "Show-Markdown"),
+    (UTIL, "Sort-Object"),
+    (MGMT, "Split-Path"),
+    (CORE, "Start-Job"),
+    (MGMT, "Start-Process"),
+    (MGMT, "Start-Service"),
+    (UTIL, "Start-Sleep"),
+    (TJOB, "Start-ThreadJob"),
+    (HOST, "Start-Transcript"),
+    (MGMT, "Stop-Computer"),
+    (CORE, "Stop-Job"),
+    (MGMT, "Stop-Process"),
+    (MGMT, "Stop-Service"),
+    (HOST, "Stop-Transcript"),
+    (MGMT, "Suspend-Service"),
+    (CORE, "Switch-Process"),
+    ("", "T:"),
+    ("", "TabExpansion2"),
+    (UTIL, "Tee-Object"),
+    (MGMT, "Test-Connection"),
+    (SEC, "Test-FileCatalog"),
+    (UTIL, "Test-Json"),
+    (CORE, "Test-ModuleManifest"),
+    (MGMT, "Test-Path"),
+    (PSRG, "Test-PSScriptFileInfo"),
+    (CORE, "Test-PSSessionConfigurationFile"),
+    (UTIL, "Trace-Command"),
+    ("", "U:"),
+    (UTIL, "Unblock-File"),
+    (PSRG, "Uninstall-PSResource"),
+    (SEC, "Unprotect-CmsMessage"),
+    (UTIL, "Unregister-Event"),
+    (PSRG, "Unregister-PSResourceRepository"),
+    (CORE, "Unregister-PSSessionConfiguration"),
+    (UTIL, "Update-FormatData"),
+    (CORE, "Update-Help"),
+    (UTIL, "Update-List"),
+    (PSRG, "Update-PSModuleManifest"),
+    (PSRG, "Update-PSResource"),
+    (PSRG, "Update-PSScriptFileInfo"),
+    (UTIL, "Update-TypeData"),
+    ("", "V:"),
+    ("", "W:"),
+    (UTIL, "Wait-Debugger"),
+    (UTIL, "Wait-Event"),
+    (CORE, "Wait-Job"),
+    (MGMT, "Wait-Process"),
+    (CORE, "Where-Object"),
+    (UTIL, "Write-Debug"),
+    (UTIL, "Write-Error"),
+    (UTIL, "Write-Host"),
+    (UTIL, "Write-Information"),
+    (UTIL, "Write-Output"),
+    (UTIL, "Write-Progress"),
+    (UTIL, "Write-Verbose"),
+    (UTIL, "Write-Warning"),
+    ("", "X:"),
+    ("", "Y:"),
+    ("", "Z:"),
+];
+
+/// `(alias, target command)` pairs, sorted by lowercased alias: 148 entries.
+/// The first 134 are the v7.6.0 InitialSessionState.cs `BuiltInAliases` of every
+/// platform (27 are Windows-only, including `ls`, `cat`, `sort` and `kill`; the 12
+/// `#if !CORECLR` aliases are excluded). The other 14 are module-declared:
+/// Management `gcb`, `gin`, `gtz`, `scb`, `stz`; Utility `fhx`; PSResourceGet
+/// `Get-PSResource`, `fdres`, `gres`, `isres`, `pbres`, `svres`, `udres`,
+/// `usres`. Every target is a [`COMMANDS`] command (`md` → `mkdir`, `man` →
+/// `help`, `cls`/`clear` → `Clear-Host`).
+pub static ALIASES: &[(&str, &str)] = &[
+    ("%", "ForEach-Object"),
+    ("?", "Where-Object"),
+    ("ac", "Add-Content"),
+    ("cat", "Get-Content"),
+    ("cd", "Set-Location"),
+    ("chdir", "Set-Location"),
+    ("clc", "Clear-Content"),
+    ("clear", "Clear-Host"),
+    ("clhy", "Clear-History"),
+    ("cli", "Clear-Item"),
+    ("clp", "Clear-ItemProperty"),
+    ("cls", "Clear-Host"),
+    ("clv", "Clear-Variable"),
+    ("cnsn", "Connect-PSSession"),
+    ("compare", "Compare-Object"),
+    ("copy", "Copy-Item"),
+    ("cp", "Copy-Item"),
+    ("cpi", "Copy-Item"),
+    ("cpp", "Copy-ItemProperty"),
+    ("cvpa", "Convert-Path"),
+    ("dbp", "Disable-PSBreakpoint"),
+    ("del", "Remove-Item"),
+    ("diff", "Compare-Object"),
+    ("dir", "Get-ChildItem"),
+    ("dnsn", "Disconnect-PSSession"),
+    ("ebp", "Enable-PSBreakpoint"),
+    ("echo", "Write-Output"),
+    ("epal", "Export-Alias"),
+    ("epcsv", "Export-Csv"),
+    ("erase", "Remove-Item"),
+    ("etsn", "Enter-PSSession"),
+    ("exsn", "Exit-PSSession"),
+    ("fc", "Format-Custom"),
+    ("fdres", "Find-PSResource"),
+    ("fhx", "Format-Hex"),
+    ("fl", "Format-List"),
+    ("foreach", "ForEach-Object"),
+    ("ft", "Format-Table"),
+    ("fw", "Format-Wide"),
+    ("gal", "Get-Alias"),
+    ("gbp", "Get-PSBreakpoint"),
+    ("gc", "Get-Content"),
+    ("gcb", "Get-Clipboard"),
+    ("gci", "Get-ChildItem"),
+    ("gcm", "Get-Command"),
+    ("gcs", "Get-PSCallStack"),
+    ("gdr", "Get-PSDrive"),
+    ("gerr", "Get-Error"),
+    ("Get-PSResource", "Get-InstalledPSResource"),
+    ("ghy", "Get-History"),
+    ("gi", "Get-Item"),
+    ("gin", "Get-ComputerInfo"),
+    ("gjb", "Get-Job"),
+    ("gl", "Get-Location"),
+    ("gm", "Get-Member"),
+    ("gmo", "Get-Module"),
+    ("gp", "Get-ItemProperty"),
+    ("gps", "Get-Process"),
+    ("gpv", "Get-ItemPropertyValue"),
+    ("gres", "Get-InstalledPSResource"),
+    ("group", "Group-Object"),
+    ("gsn", "Get-PSSession"),
+    ("gsv", "Get-Service"),
+    ("gtz", "Get-TimeZone"),
+    ("gu", "Get-Unique"),
+    ("gv", "Get-Variable"),
+    ("h", "Get-History"),
+    ("history", "Get-History"),
+    ("icm", "Invoke-Command"),
+    ("iex", "Invoke-Expression"),
+    ("ihy", "Invoke-History"),
+    ("ii", "Invoke-Item"),
+    ("ipal", "Import-Alias"),
+    ("ipcsv", "Import-Csv"),
+    ("ipmo", "Import-Module"),
+    ("irm", "Invoke-RestMethod"),
+    ("isres", "Install-PSResource"),
+    ("iwr", "Invoke-WebRequest"),
+    ("kill", "Stop-Process"),
+    ("ls", "Get-ChildItem"),
+    ("man", "help"),
+    ("md", "mkdir"),
+    ("measure", "Measure-Object"),
+    ("mi", "Move-Item"),
+    ("mount", "New-PSDrive"),
+    ("move", "Move-Item"),
+    ("mp", "Move-ItemProperty"),
+    ("mv", "Move-Item"),
+    ("nal", "New-Alias"),
+    ("ndr", "New-PSDrive"),
+    ("ni", "New-Item"),
+    ("nmo", "New-Module"),
+    ("nsn", "New-PSSession"),
+    ("nv", "New-Variable"),
+    ("ogv", "Out-GridView"),
+    ("oh", "Out-Host"),
+    ("pbres", "Publish-PSResource"),
+    ("popd", "Pop-Location"),
+    ("ps", "Get-Process"),
+    ("pushd", "Push-Location"),
+    ("pwd", "Get-Location"),
+    ("r", "Invoke-History"),
+    ("rbp", "Remove-PSBreakpoint"),
+    ("rcjb", "Receive-Job"),
+    ("rcsn", "Receive-PSSession"),
+    ("rd", "Remove-Item"),
+    ("rdr", "Remove-PSDrive"),
+    ("ren", "Rename-Item"),
+    ("ri", "Remove-Item"),
+    ("rjb", "Remove-Job"),
+    ("rm", "Remove-Item"),
+    ("rmdir", "Remove-Item"),
+    ("rmo", "Remove-Module"),
+    ("rni", "Rename-Item"),
+    ("rnp", "Rename-ItemProperty"),
+    ("rp", "Remove-ItemProperty"),
+    ("rsn", "Remove-PSSession"),
+    ("rv", "Remove-Variable"),
+    ("rvpa", "Resolve-Path"),
+    ("sajb", "Start-Job"),
+    ("sal", "Set-Alias"),
+    ("saps", "Start-Process"),
+    ("sasv", "Start-Service"),
+    ("sbp", "Set-PSBreakpoint"),
+    ("scb", "Set-Clipboard"),
+    ("select", "Select-Object"),
+    ("set", "Set-Variable"),
+    ("shcm", "Show-Command"),
+    ("si", "Set-Item"),
+    ("sl", "Set-Location"),
+    ("sleep", "Start-Sleep"),
+    ("sls", "Select-String"),
+    ("sort", "Sort-Object"),
+    ("sp", "Set-ItemProperty"),
+    ("spjb", "Stop-Job"),
+    ("spps", "Stop-Process"),
+    ("spsv", "Stop-Service"),
+    ("start", "Start-Process"),
+    ("stz", "Set-TimeZone"),
+    ("sv", "Set-Variable"),
+    ("svres", "Save-PSResource"),
+    ("tee", "Tee-Object"),
+    ("type", "Get-Content"),
+    ("udres", "Update-PSResource"),
+    ("usres", "Uninstall-PSResource"),
+    ("where", "Where-Object"),
+    ("wjb", "Wait-Job"),
+    ("write", "Write-Output"),
+];
+
+/// `(accelerator, full type name)` pairs, sorted by lowercased accelerator:
+/// 107 entries, from `TypeResolver.cs` `TypeAccelerators.builtinTypeAccelerators`
+/// (the `CoreTypes.Items` names and the explicit adds in the static constructor)
+/// at tags v7.4.6, v7.5.4 and v7.6.0, and Learn `about_Type_Accelerators`
+/// (`powershell-7.6` view). There are 102 cross-platform entries plus 5
+/// Windows-only ones (`adsi`, `adsisearcher`, `wmi`, `wmiclass`, `wmisearcher`).
+/// 101 full names begin `System.`; 6 do not (`ciminstance`, `cimclass`, `cimtype`,
+/// `cimconverter`, `CimSession` → `Microsoft.Management.Infrastructure.*`,
+/// `pspropertyexpression` → `Microsoft.PowerShell.Commands.PSPropertyExpression`).
+pub static ACCELERATORS: &[(&str, &str)] = &[
+    ("adsi", "System.DirectoryServices.DirectoryEntry"),
+    ("adsisearcher", "System.DirectoryServices.DirectorySearcher"),
+    ("Alias", "System.Management.Automation.AliasAttribute"),
+    (
+        "AllowEmptyCollection",
+        "System.Management.Automation.AllowEmptyCollectionAttribute",
+    ),
+    (
+        "AllowEmptyString",
+        "System.Management.Automation.AllowEmptyStringAttribute",
+    ),
+    (
+        "AllowNull",
+        "System.Management.Automation.AllowNullAttribute",
+    ),
+    (
+        "ArgumentCompleter",
+        "System.Management.Automation.ArgumentCompleterAttribute",
+    ),
+    (
+        "ArgumentCompletions",
+        "System.Management.Automation.ArgumentCompletionsAttribute",
+    ),
+    ("array", "System.Array"),
+    ("bigint", "System.Numerics.BigInteger"),
+    ("bool", "System.Boolean"),
+    ("byte", "System.Byte"),
+    ("char", "System.Char"),
+    ("cimclass", "Microsoft.Management.Infrastructure.CimClass"),
+    (
+        "cimconverter",
+        "Microsoft.Management.Infrastructure.CimConverter",
+    ),
+    (
+        "ciminstance",
+        "Microsoft.Management.Infrastructure.CimInstance",
+    ),
+    (
+        "CimSession",
+        "Microsoft.Management.Infrastructure.CimSession",
+    ),
+    ("cimtype", "Microsoft.Management.Infrastructure.CimType"),
+    (
+        "CmdletBinding",
+        "System.Management.Automation.CmdletBindingAttribute",
+    ),
+    ("cultureinfo", "System.Globalization.CultureInfo"),
+    ("datetime", "System.DateTime"),
+    ("decimal", "System.Decimal"),
+    ("double", "System.Double"),
+    (
+        "DscLocalConfigurationManager",
+        "System.Management.Automation.DscLocalConfigurationManagerAttribute",
+    ),
+    (
+        "DscProperty",
+        "System.Management.Automation.DscPropertyAttribute",
+    ),
+    (
+        "DscResource",
+        "System.Management.Automation.DscResourceAttribute",
+    ),
+    (
+        "ExperimentAction",
+        "System.Management.Automation.ExperimentAction",
+    ),
+    (
+        "Experimental",
+        "System.Management.Automation.ExperimentalAttribute",
+    ),
+    (
+        "ExperimentalFeature",
+        "System.Management.Automation.ExperimentalFeature",
+    ),
+    ("float", "System.Single"),
+    ("guid", "System.Guid"),
+    ("hashtable", "System.Collections.Hashtable"),
+    (
+        "initialsessionstate",
+        "System.Management.Automation.Runspaces.InitialSessionState",
+    ),
+    ("int", "System.Int32"),
+    ("int16", "System.Int16"),
+    ("int32", "System.Int32"),
+    ("int64", "System.Int64"),
+    ("ipaddress", "System.Net.IPAddress"),
+    ("IPEndpoint", "System.Net.IPEndPoint"),
+    ("long", "System.Int64"),
+    ("mailaddress", "System.Net.Mail.MailAddress"),
+    (
+        "NoRunspaceAffinity",
+        "System.Management.Automation.Language.NoRunspaceAffinityAttribute",
+    ),
+    (
+        "NullString",
+        "System.Management.Automation.Language.NullString",
+    ),
+    (
+        "ObjectSecurity",
+        "System.Security.AccessControl.ObjectSecurity",
+    ),
+    (
+        "ordered",
+        "System.Collections.Specialized.OrderedDictionary",
+    ),
+    (
+        "OutputType",
+        "System.Management.Automation.OutputTypeAttribute",
+    ),
+    (
+        "Parameter",
+        "System.Management.Automation.ParameterAttribute",
+    ),
+    (
+        "PhysicalAddress",
+        "System.Net.NetworkInformation.PhysicalAddress",
+    ),
+    ("powershell", "System.Management.Automation.PowerShell"),
+    (
+        "psaliasproperty",
+        "System.Management.Automation.PSAliasProperty",
+    ),
+    ("pscredential", "System.Management.Automation.PSCredential"),
+    ("pscustomobject", "System.Management.Automation.PSObject"),
+    (
+        "PSDefaultValue",
+        "System.Management.Automation.PSDefaultValueAttribute",
+    ),
+    (
+        "pslistmodifier",
+        "System.Management.Automation.PSListModifier",
+    ),
+    ("psmoduleinfo", "System.Management.Automation.PSModuleInfo"),
+    (
+        "psnoteproperty",
+        "System.Management.Automation.PSNoteProperty",
+    ),
+    ("psobject", "System.Management.Automation.PSObject"),
+    (
+        "psprimitivedictionary",
+        "System.Management.Automation.PSPrimitiveDictionary",
+    ),
+    (
+        "pspropertyexpression",
+        "Microsoft.PowerShell.Commands.PSPropertyExpression",
+    ),
+    (
+        "psscriptmethod",
+        "System.Management.Automation.PSScriptMethod",
+    ),
+    (
+        "psscriptproperty",
+        "System.Management.Automation.PSScriptProperty",
+    ),
+    (
+        "PSTypeNameAttribute",
+        "System.Management.Automation.PSTypeNameAttribute",
+    ),
+    ("psvariable", "System.Management.Automation.PSVariable"),
+    (
+        "psvariableproperty",
+        "System.Management.Automation.PSVariableProperty",
+    ),
+    ("ref", "System.Management.Automation.PSReference"),
+    ("regex", "System.Text.RegularExpressions.Regex"),
+    (
+        "runspace",
+        "System.Management.Automation.Runspaces.Runspace",
+    ),
+    (
+        "runspacefactory",
+        "System.Management.Automation.Runspaces.RunspaceFactory",
+    ),
+    ("sbyte", "System.SByte"),
+    ("scriptblock", "System.Management.Automation.ScriptBlock"),
+    ("securestring", "System.Security.SecureString"),
+    ("semver", "System.Management.Automation.SemanticVersion"),
+    ("short", "System.Int16"),
+    ("single", "System.Single"),
+    ("string", "System.String"),
+    (
+        "SupportsWildcards",
+        "System.Management.Automation.SupportsWildcardsAttribute",
+    ),
+    ("switch", "System.Management.Automation.SwitchParameter"),
+    ("timespan", "System.TimeSpan"),
+    ("type", "System.Type"),
+    ("uint", "System.UInt32"),
+    ("uint16", "System.UInt16"),
+    ("uint32", "System.UInt32"),
+    ("uint64", "System.UInt64"),
+    ("ulong", "System.UInt64"),
+    ("uri", "System.Uri"),
+    ("ushort", "System.UInt16"),
+    (
+        "ValidateCount",
+        "System.Management.Automation.ValidateCountAttribute",
+    ),
+    (
+        "ValidateDrive",
+        "System.Management.Automation.ValidateDriveAttribute",
+    ),
+    (
+        "ValidateLength",
+        "System.Management.Automation.ValidateLengthAttribute",
+    ),
+    (
+        "ValidateNotNull",
+        "System.Management.Automation.ValidateNotNullAttribute",
+    ),
+    (
+        "ValidateNotNullOrEmpty",
+        "System.Management.Automation.ValidateNotNullOrEmptyAttribute",
+    ),
+    (
+        "ValidateNotNullOrWhiteSpace",
+        "System.Management.Automation.ValidateNotNullOrWhiteSpaceAttribute",
+    ),
+    (
+        "ValidatePattern",
+        "System.Management.Automation.ValidatePatternAttribute",
+    ),
+    (
+        "ValidateRange",
+        "System.Management.Automation.ValidateRangeAttribute",
+    ),
+    (
+        "ValidateScript",
+        "System.Management.Automation.ValidateScriptAttribute",
+    ),
+    (
+        "ValidateSet",
+        "System.Management.Automation.ValidateSetAttribute",
+    ),
+    (
+        "ValidateTrustedData",
+        "System.Management.Automation.ValidateTrustedDataAttribute",
+    ),
+    (
+        "ValidateUserDrive",
+        "System.Management.Automation.ValidateUserDriveAttribute",
+    ),
+    ("version", "System.Version"),
+    ("void", "System.Void"),
+    (
+        "WildcardPattern",
+        "System.Management.Automation.WildcardPattern",
+    ),
+    ("wmi", "System.Management.ManagementObject"),
+    ("wmiclass", "System.Management.ManagementClass"),
+    ("wmisearcher", "System.Management.ManagementObjectSearcher"),
+    (
+        "X500DistinguishedName",
+        "System.Security.Cryptography.X509Certificates.X500DistinguishedName",
+    ),
+    (
+        "X509Certificate",
+        "System.Security.Cryptography.X509Certificates.X509Certificate",
+    ),
+    ("xml", "System.Xml.XmlDocument"),
+];
+
+/// Whether `command` is a PowerShell 7.6 builtin. The whole name is checked
+/// first (so `cd\` matches as written): it is builtin when it equals a
+/// [`COMMANDS`] command or an [`ALIASES`] alias, case-insensitively
+/// (ps-builtin-cmdlet-call). Otherwise a module-qualified `Q\N` (split at the
+/// last `\`, both sides non-empty) is builtin when `Q` is an [`INBOX_MODULES`]
+/// entry and `N` is a [`COMMANDS`] command of that same module, both
+/// case-insensitively (ps-unmatched-qualified-command). Aliases and engine
+/// functions are never module-qualified.
+pub fn is_builtin(command: &str) -> bool {
+    let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    if COMMANDS.iter().any(|(_, c)| eq(c, command)) || ALIASES.iter().any(|(a, _)| eq(a, command)) {
+        return true;
+    }
+    let Some((q, n)) = command.rsplit_once('\\') else {
+        return false;
+    };
+    !q.is_empty()
+        && !n.is_empty()
+        && INBOX_MODULES.iter().any(|m| eq(m, q))
+        && COMMANDS.iter().any(|(m, c)| eq(m, q) && eq(c, n))
+}
+
+/// Whether a `type_name`-normalised `name` is a System type (ps-system-type).
+/// It is one when, case-insensitively, it is `System`, begins with `System.`,
+/// or is an [`ACCELERATORS`] accelerator whose full name begins with `System.`.
+/// Every other name is not, including `[math]`, `[object]` and other names
+/// PowerShell reaches through its implicit `using namespace System`: there is
+/// no `System.<name>` fallback.
+pub fn is_system_type(name: &str) -> bool {
+    name.eq_ignore_ascii_case("System")
+        || name
+            .get(..7)
+            .is_some_and(|p| p.eq_ignore_ascii_case("System."))
+        || ACCELERATORS
+            .iter()
+            .any(|(a, t)| a.eq_ignore_ascii_case(name) && t.starts_with("System."))
+}

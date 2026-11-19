@@ -2,6 +2,7 @@
 //! with the pinned woodruffw-trough-tree-sitter-powershell grammar and emits
 //! unified JSONL facts.
 
+pub mod builtins;
 pub mod diag;
 pub mod identity;
 pub mod manifest;
