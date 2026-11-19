@@ -5217,8 +5217,10 @@ mod e2e {
     }
 
     /// Task 8.14 (e2e): a program Struct's Struct-to-File `copy` Uses edge to
-    /// a statement-only copybook survives the warm cached-fact reassembly
-    /// (`splice_cached` + `finalize_graph` behind a missing seed db.lbug),
+    /// a statement-only copybook survives the cached-fact reassembly: a
+    /// spec-only delta skips the cobol frontend, the splice guard refuses, and
+    /// the full-load fallback (`ingest_with_reuse` → `splice_cached`) restores
+    /// each edge's cached `{"kind":"copy"}` property from the fact store alone,
     /// equal to the full scan and to a `--force` rebuild.
     ///
     /// Scratch /tmp repo + candidate binary + spawned cobol frontend: real I/O,
@@ -5285,18 +5287,29 @@ mod e2e {
         let full = copy_rows(&wt, &home_s);
         assert_copy("(1) full scan", &full);
 
-        // (2) Drop the seed db.lbug, keep the fact store: the cached-fact
-        // reassembly full-loads with the same copy edges.
-        std::fs::remove_file(wt.join("apg/.trans/db.lbug")).unwrap();
+        // (2) A spec-only delta (one hand-written durable node file, no COBOL
+        // change): cobol is skipped, the splice guard refuses the unrepresented
+        // authored row, and the full-load fallback re-assembles from the fact
+        // store — so the copy edges can only come from the cached facts.
+        let layers_dir = wt.join("apg/layers/global/constraint");
+        std::fs::create_dir_all(&layers_dir).unwrap();
+        std::fs::write(
+            layers_dir.join("cobol-warm-copy.json"),
+            "{\n  \"layer\": \"global\",\n  \"type\": \"constraint\",\n  \"name\": \"cobol-warm-copy\",\n  \"body\": \"A spec-only rescan re-assembles from cached facts.\"\n}\n",
+        )
+        .unwrap();
         let log2 = scan(&wt, &home_s, &[]);
+        for line in [
+            "[scan] incremental:",
+            "[scan] cobol: no changed targets — frontend skipped (facts reused)",
+            "does not represent the assembled graph's authored/transient rows",
+            "[load] full-load fallback: re-assembling the full graph",
+        ] {
+            assert!(log2.contains(line), "(2) log must contain `{line}`: {log2}");
+        }
         assert!(
-            log2.contains("[scan] warm cache:")
-                || log2.contains("[scan] incremental: 0 target file(s)"),
-            "(2) must assemble from the warm fact store: {log2}"
-        );
-        assert!(
-            log2.contains("[load] splice: no previous db.lbug to seed from — full load"),
-            "(2) the dropped seed must force the full load: {log2}"
+            !log2.contains("running cobol frontend"),
+            "(2) cobol must not re-run: {log2}"
         );
         let warm = copy_rows(&wt, &home_s);
         assert_copy("(2) warm reassembly", &warm);
