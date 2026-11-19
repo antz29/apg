@@ -7,6 +7,7 @@ pub mod identity;
 pub mod manifest;
 pub mod parse;
 pub mod paths;
+pub mod resolve;
 pub mod scan;
 pub mod source;
 pub mod units;
