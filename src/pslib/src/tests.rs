@@ -2,6 +2,7 @@
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
 use crate::parse::parse;
+use crate::source::{decode, decode_mapped, line_count, position, span};
 use tree_sitter::Node;
 
 /// A dot-sourcing script: an anchored and a relative operand.
@@ -133,6 +134,34 @@ fn lock_packages(lock: &str) -> Vec<(&str, &str)> {
         .skip(1)
         .map(|e| (field(e, "name"), field(e, "version")))
         .collect()
+}
+
+/// `s` as UTF-16 bytes with a BOM, big-endian when `be`.
+fn utf16_bytes(s: &str, be: bool) -> Vec<u8> {
+    let bom = if be { [0xFE, 0xFF] } else { [0xFF, 0xFE] };
+    let units = s
+        .encode_utf16()
+        .flat_map(|u| if be { u.to_be_bytes() } else { u.to_le_bytes() });
+    bom.into_iter().chain(units).collect()
+}
+
+/// The raw bytes `[start, end)` decoded strictly: UTF-8 when `be` is `None`,
+/// else UTF-16 in that byte order.
+fn raw_text(bytes: &[u8], be: Option<bool>, start: usize, end: usize) -> String {
+    let raw = &bytes[start..end];
+    let Some(be) = be else {
+        return std::str::from_utf8(raw).expect("valid UTF-8").to_owned();
+    };
+    let (units, odd) = raw.as_chunks::<2>();
+    assert!(odd.is_empty(), "odd UTF-16 slice {raw:?}");
+    let order = if be {
+        u16::from_be_bytes
+    } else {
+        u16::from_le_bytes
+    };
+    char::decode_utf16(units.iter().map(|&u| order(u)))
+        .collect::<Result<String, _>>()
+        .expect("valid UTF-16")
 }
 
 mod unit {
@@ -948,5 +977,117 @@ mod unit {
         assert_eq!(ps, [&("woodruffw-trough-tree-sitter-powershell", "0.1.6")]);
         assert!(pkgs.contains(&("tree-sitter", "0.26.13")));
         assert!(!pkgs.iter().any(|(n, _)| *n == "tree-sitter-powershell"));
+    }
+
+    #[test]
+    fn source_decodes_four_encodings() {
+        for s in ["Get-A\n$x = 1\n", "é😀x\n"] {
+            let plain = s.as_bytes().to_vec();
+            let bom8 = [&[0xEF, 0xBB, 0xBF][..], s.as_bytes()].concat();
+            assert_eq!(decode(&plain), s);
+            assert_eq!(decode(&bom8), decode(&plain), "UTF-8 BOM dropped");
+            assert_eq!(decode(&utf16_bytes(s, false)), s, "UTF-16LE");
+            assert_eq!(decode(&utf16_bytes(s, true)), s, "UTF-16BE");
+        }
+    }
+
+    #[test]
+    fn source_decodes_lossily() {
+        let r = '\u{FFFD}';
+        // (bytes, text, decoded range of the U+FFFD, its raw invalid bytes)
+        let cases: [(&[u8], String, usize, &[u8]); 4] = [
+            (b"a\xE2\x82b", format!("a{r}b"), 1, b"\xE2\x82"),
+            (b"\xFF\xFEa\x00\x62", format!("a{r}"), 1, b"\x62"),
+            (
+                b"\xFF\xFEa\x00\x00\xD8b\x00",
+                format!("a{r}b"),
+                1,
+                b"\x00\xD8",
+            ),
+            (
+                b"\xFE\xFF\x00a\xD8\x00\x00b",
+                format!("a{r}b"),
+                1,
+                b"\xD8\x00",
+            ),
+        ];
+        for (bytes, text, at, invalid) in cases {
+            assert_eq!(decode(bytes), text, "{bytes:?}");
+            let d = decode_mapped(bytes);
+            assert_eq!(d.raw_offset(d.text.len()), bytes.len());
+            // start = the invalid run's start; end = the next char's raw start
+            // (or the raw length), i.e. the byte right after the run
+            let sp = span(&d, at, at + r.len_utf8());
+            assert_eq!(&bytes[sp.start..sp.end], invalid, "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn source_line_count() {
+        for (text, n) in [
+            ("", 1),
+            ("a", 1),
+            ("a\n", 1),
+            ("a\nb", 2),
+            ("a\nb\n", 2),
+            ("a\r\nb\r\n", 2),
+            ("a\r\nb\nc", 3),
+        ] {
+            assert_eq!(line_count(text), n, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn source_spans_are_raw_offsets() {
+        // bytes: "ab\n" 0..3, c 3, é 4..6, 😀 6..10, d 10, \n 11, x 12, \n 13
+        let s = "ab\ncé😀d\nx\n";
+        let encodings = [
+            (s.as_bytes().to_vec(), None),
+            ([&[0xEF, 0xBB, 0xBF][..], s.as_bytes()].concat(), None),
+            (utf16_bytes(s, false), Some(false)),
+            (utf16_bytes(s, true), Some(true)),
+        ];
+        // (start, end, start_line, end_line)
+        let ranges = [
+            (0, 2, 1, 1),   // single line
+            (1, 11, 1, 2),  // multi-line
+            (0, 3, 1, 1),   // ends just past a newline
+            (4, 6, 2, 2),   // the non-ASCII char
+            (6, 10, 2, 2),  // the astral char
+            (10, 11, 2, 2), // after the astral char
+            (6, 13, 2, 3),
+            (12, 14, 3, 3),
+        ];
+        for (i, (bytes, be)) in encodings.iter().enumerate() {
+            let d = decode_mapped(bytes);
+            assert_eq!(d.text, s);
+            let raw = |b: usize| match (i, be) {
+                (0, _) => b,
+                (_, None) => b + 3,
+                _ => 2 + 2 * s[..b].encode_utf16().count(),
+            };
+            for (a, b, sl, el) in ranges {
+                let sp = span(&d, a, b);
+                assert_eq!((sp.start, sp.end), (raw(a), raw(b)), "enc {i} {a}..{b}");
+                assert_eq!((sp.start_line, sp.end_line), (sl, el), "enc {i} {a}..{b}");
+                assert_eq!(raw_text(bytes, *be, sp.start, sp.end), &s[a..b]);
+            }
+            assert_eq!(d.raw_offset(s.len()), bytes.len());
+        }
+        // anchors: after é / after 😀 (2 units = 4 bytes) in UTF-16
+        let le = decode_mapped(&utf16_bytes(s, false));
+        assert_eq!((le.raw_offset(6), le.raw_offset(10)), (12, 16));
+        let bom = decode_mapped(&encodings[1].0);
+        assert_eq!((bom.raw_offset(6), bom.raw_offset(10)), (9, 13));
+    }
+
+    #[test]
+    fn source_position_counts_chars() {
+        let s = "ab\ncé😀d";
+        assert_eq!(position(s, 0), (1, 1));
+        assert_eq!(position(s, 2), (1, 3));
+        assert_eq!(position(s, 3), (2, 1));
+        assert_eq!(position(s, 6), (2, 3)); // after é (2 bytes, 1 char)
+        assert_eq!(position(s, 10), (2, 4)); // after 😀 (4 bytes, 1 char)
     }
 }
