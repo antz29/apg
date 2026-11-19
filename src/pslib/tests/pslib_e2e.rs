@@ -460,6 +460,113 @@ fn sentinel_offset(fqn: &str, rel: &str) -> usize {
         .unwrap_or_else(|| panic!("not a {rel} sentinel: {fqn}"))
 }
 
+/// The call tree's main.ps1: dot-sources, class W, and every command/call/type form.
+const CALL_MAIN: &str = r#". ./lib/util.ps1
+. ./types.ps1
+class W : Base {
+    [Color]$c
+    [System.String]$s
+    [string]$t
+    [ciminstance]$ci
+}
+Util
+global:Util
+Get-P
+Hide-B
+Get-A
+Get-ChildItem
+Compress-Archive
+Get-CimInstance
+git
+sort
+.\types.ps1
+Foo\Get-A
+Foo\Hide-B
+Microsoft.PowerShell.Archive\Compress-Archive
+CimCmdlets\Get-CimInstance
+& ./lib/util.ps1
+& { 1 }
+[Pair]::new(1)
+[Color]::Red()
+[System.IO.Path]::GetTempPath()
+[math]::Round(1.5)
+"#;
+
+/// The call tree's syntax-error script: a dot-source and a call before a local error.
+const CALL_BROKEN: &str = ". ./lib/util.ps1\nUtil\n$q = 1 )\n";
+
+/// Writes the command/call/type tree into a fresh scratch dir and runs the binary over it.
+fn call_scan(tag: &str) -> (Scratch, String, Run) {
+    let dir = Scratch::new(tag);
+    dir.write(
+        "mods/Foo/Foo.psd1",
+        b"@{\n    RootModule = 'Foo.psm1'\n    FunctionsToExport = @('Get-*')\n}\n",
+    );
+    dir.write(
+        "mods/Foo/Foo.psm1",
+        b". $PSScriptRoot\\priv.ps1\nfunction Get-A {}\nfunction Hide-B {}\n",
+    );
+    dir.write("mods/Foo/priv.ps1", b"function Get-P {}\n");
+    dir.write("mods/Bar/Bar.psd1", b"@{\n    RootModule = 'Bar.psm1'\n}\n");
+    dir.write("mods/Bar/Bar.psm1", b"function Get-A {}\n");
+    dir.write(
+        "lib/util.ps1",
+        b"function Util {}\nclass Shape {}\n$x.sort()\n",
+    );
+    dir.write(
+        "types.ps1",
+        b"class Base {}\nenum Color { Red; Green }\nclass Pair {\n    Pair([int]$a) {}\n    [void] Run() { $this.Run() }\n}\n",
+    );
+    dir.write("main.ps1", CALL_MAIN.as_bytes());
+    dir.write("u.ps1", &utf16le_bom("# ünï 😀\n& $sb\n"));
+    dir.write("broken.ps1", CALL_BROKEN.as_bytes());
+    let root = dir.root();
+    let run = psfrontend(&[&root]);
+    assert!(run.ok, "{:?}", run.stderr);
+    (dir, root, run)
+}
+
+/// The id of the one Struct/Function record named `name` located at `path`.
+fn unit_id<'r>(recs: &'r [serde_json::Value], path: &str, name: &str) -> &'r str {
+    let ids: Vec<&str> = recs
+        .iter()
+        .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
+        .filter(|r| str_of(r, "path") == path && str_of(r, "name") == name)
+        .map(|r| str_of(r, "id"))
+        .collect();
+    assert_eq!(ids.len(), 1, "{path} {name}");
+    ids[0]
+}
+
+/// The identity key `ps_rendered` gives the Struct/Function record `id`.
+fn key_of(recs: &[serde_json::Value], id: &str) -> String {
+    recs.iter()
+        .filter(|r| matches!(str_of(r, "type"), "module" | "struct" | "function"))
+        .zip(ps_rendered(recs))
+        .find(|(r, _)| r["id"] == id)
+        .map(|(_, (k, _))| k)
+        .unwrap_or_else(|| panic!("no record {id}"))
+}
+
+/// The sorted, deduplicated `to` of the `ty` records leaving `from`.
+fn edges_from(recs: &[serde_json::Value], ty: &str, from: &str) -> Vec<String> {
+    let mut out: Vec<String> = recs
+        .iter()
+        .filter(|r| r["type"] == ty && r["from"] == from)
+        .map(|r| str_of(r, "to").to_string())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The category of the unresolved record `fqn`.
+fn category<'r>(recs: &'r [serde_json::Value], fqn: &str) -> &'r str {
+    recs.iter()
+        .find(|r| r["type"] == "unresolved" && r["fqn"] == fqn)
+        .map_or("<none>", |r| str_of(r, "category"))
+}
+
 mod e2e {
     use super::*;
 
@@ -735,12 +842,19 @@ mod e2e {
         ]);
         assert!(plain.ok && run.ok, "{:?}", run.stderr);
         assert!(run.stdout.contains("\"id\":\"p1\""), "{}", run.stdout);
-        // the plain run's records with every id re-prefixed `p`
+        // the plain run's records with every id re-prefixed `p`; unresolved names and paths kept
         let mut expected = records(&plain.stdout);
+        let ids: Vec<String> = expected
+            .iter()
+            .filter_map(|r| r["id"].as_str().map(str::to_string))
+            .collect();
         for r in &mut expected {
             for k in ["id", "from", "to"] {
-                if let Some(v) = r.get_mut(k) {
-                    *v = v.as_str().expect("id").replacen('n', "p", 1).into();
+                if let Some(v) = r
+                    .get_mut(k)
+                    .filter(|v| ids.iter().any(|i| v.as_str() == Some(i)))
+                {
+                    *v = format!("p{}", &v.as_str().expect("id")[1..]).into();
                 }
             }
         }
@@ -1199,5 +1313,278 @@ mod e2e {
                 "{s}"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_main() {
+        let (_dir, root, run) = call_scan("bin-call-main");
+        let recs = records(&run.stdout);
+        let p = |rel: &str| format!("{root}/{rel}");
+        let main = p("main.ps1");
+        let script = unit_id(&recs, &main, "<script>");
+        // Foo\Get-A is stem Foo's export, Bar's Get-A ignored; .\types.ps1 a path command
+        let mut want = vec![
+            unit_id(&recs, &p("lib/util.ps1"), "Util"),
+            unit_id(&recs, &p("mods/Foo/priv.ps1"), "Get-P"),
+            unit_id(&recs, &p("lib/util.ps1"), "<script>"),
+            unit_id(&recs, &p("types.ps1"), "<script>"),
+            unit_id(&recs, &p("mods/Foo/Foo.psm1"), "Get-A"),
+            unit_id(&recs, &p("types.ps1"), "new"),
+        ];
+        want.sort();
+        assert_eq!(edges_from(&recs, "calls", script), want);
+        let called = edges_from(&recs, "unresolved_call", script);
+        let named: Vec<(&str, &str)> = called
+            .iter()
+            .filter(|to| !to.starts_with("<nameless@"))
+            .map(|to| (to.as_str(), category(&recs, to)))
+            .collect();
+        // Get-ChildItem (engine module) and Compress-Archive (in-box Microsoft.PowerShell.Archive)
+        // per the PowerShell v7.6.0 src/Modules manifests and InitialSessionState.cs
+        let mut want = vec![
+            ("Hide-B", "external"),
+            ("Get-A", "unknown"),
+            ("Get-ChildItem", "stdlib"),
+            ("Compress-Archive", "stdlib"),
+            ("Get-CimInstance", "external"),
+            ("git", "external"),
+            ("sort", "unknown"),
+            ("Foo\\Hide-B", "external"),
+            ("Microsoft.PowerShell.Archive\\Compress-Archive", "stdlib"),
+            ("CimCmdlets\\Get-CimInstance", "external"),
+            ("Color.Red", "unknown"),
+            ("System.IO.Path.GetTempPath", "stdlib"),
+            ("math.Round", "external"),
+        ];
+        want.sort();
+        assert_eq!(named, want);
+        let sentinels: Vec<&String> = called
+            .iter()
+            .filter(|to| to.starts_with("<nameless@"))
+            .collect();
+        assert_eq!(sentinels.len(), 1, "{sentinels:?}");
+        assert_eq!(category(&recs, sentinels[0]), "func-value");
+        let raw = fs::read(&main).expect("read main.ps1");
+        assert!(raw[sentinel_offset(sentinels[0], "main.ps1")..].starts_with(b"&"));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_class_type_uses() {
+        let (_dir, root, run) = call_scan("bin-call-type");
+        let recs = records(&run.stdout);
+        let p = |rel: &str| format!("{root}/{rel}");
+        let main = p("main.ps1");
+        let w = unit_id(&recs, &main, "W");
+        let uses: Vec<_> = recs
+            .iter()
+            .filter(|r| r["type"] == "uses" && r["from"] == w)
+            .collect();
+        assert!(
+            uses.iter().all(|r| r.get("properties").is_none()),
+            "{uses:?}"
+        );
+        let mut want = vec![
+            unit_id(&recs, &p("types.ps1"), "Base"),
+            unit_id(&recs, &p("types.ps1"), "Color"),
+        ];
+        want.sort();
+        assert_eq!(edges_from(&recs, "uses", w), want);
+        // string is the accelerator for System.String
+        let u = |n: &str, c: &str| (n.to_string(), c.to_string());
+        assert_eq!(
+            unresolved_of(&recs, w),
+            [
+                u("System.String", "stdlib"),
+                u("ciminstance", "external"),
+                u("string", "stdlib")
+            ]
+        );
+        let dot = |rel: &str| (p(rel), "dot-source".to_string());
+        assert_eq!(
+            uses_of(&recs, script_id(&recs, &main)),
+            [dot("lib/util.ps1"), dot("types.ps1")]
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_this_recursion() {
+        let (_dir, root, run) = call_scan("bin-call-this");
+        let recs = records(&run.stdout);
+        let run_id = unit_id(&recs, &format!("{root}/types.ps1"), "Run");
+        assert_eq!(edges_from(&recs, "calls", run_id), [run_id]);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_utf16_sentinel() {
+        let (_dir, root, run) = call_scan("bin-call-wide");
+        let recs = records(&run.stdout);
+        let path = format!("{root}/u.ps1");
+        let called = edges_from(&recs, "unresolved_call", unit_id(&recs, &path, "<script>"));
+        assert_eq!(called.len(), 1, "{called:?}");
+        assert_eq!(category(&recs, &called[0]), "func-value");
+        let raw = fs::read(&path).expect("read u.ps1");
+        let units: Vec<u16> = raw[sentinel_offset(&called[0], "u.ps1")..]
+            .chunks(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        let tail = String::from_utf16(&units).expect("UTF-16 slice");
+        assert!(tail.starts_with("& $sb"), "{tail:?}");
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_syntax_error() {
+        let (_dir, root, run) = call_scan("bin-call-err");
+        let path = format!("{root}/broken.ps1");
+        let mut expected: Vec<String> =
+            psfrontend::diag::error_regions(&path, CALL_BROKEN, &parse(CALL_BROKEN))
+                .iter()
+                .map(|d| format!("ps: {d}"))
+                .collect();
+        assert!(!expected.is_empty());
+        expected.push("ps: 1 file had syntax errors".to_string());
+        assert_eq!(run.stderr, expected);
+        let recs = records(&run.stdout);
+        let util = format!("{root}/lib/util.ps1");
+        assert_eq!(
+            uses_of(&recs, script_id(&recs, &path)),
+            [(util.clone(), "dot-source".to_string())]
+        );
+        // resolution step 2, the dot-sourced file's functions, under error recovery
+        assert_eq!(
+            edges_from(&recs, "calls", unit_id(&recs, &path, "<script>")),
+            [unit_id(&recs, &util, "Util")]
+        );
+        assert!(
+            !recs
+                .iter()
+                .any(|r| r["type"] == "unresolved_call" && r["to"] == "Util"),
+            "{recs:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_records_valid() {
+        let (_dir, _root, run) = call_scan("bin-call-valid");
+        let recs = records(&run.stdout);
+        let types = [
+            "module",
+            "file",
+            "struct",
+            "function",
+            "contains",
+            "calls",
+            "uses",
+            "unresolved_call",
+            "unresolved_use",
+            "unresolved",
+        ];
+        assert!(
+            recs.iter().all(|r| types.contains(&str_of(r, "type"))),
+            "{recs:?}"
+        );
+        let fqns: Vec<&str> = recs
+            .iter()
+            .filter(|r| r["type"] == "unresolved")
+            .map(|r| str_of(r, "fqn"))
+            .collect();
+        let unique: std::collections::HashSet<&&str> = fqns.iter().collect();
+        assert_eq!(unique.len(), fqns.len(), "{fqns:?}");
+        let ids: Vec<&str> = recs
+            .iter()
+            .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
+            .map(|r| str_of(r, "id"))
+            .collect();
+        let files: Vec<String> = file_recs(&recs).into_iter().map(|f| f.0).collect();
+        for r in &recs {
+            let to = str_of(r, "to");
+            match str_of(r, "type") {
+                "calls" => assert!(ids.contains(&to), "{r}"),
+                "uses" if r["properties"]["kind"] == "dot-source" => {
+                    assert!(files.iter().any(|f| f == to), "{r}")
+                }
+                "uses" => assert!(ids.contains(&to), "{r}"),
+                "unresolved_call" | "unresolved_use" => assert!(fqns.contains(&to), "{r}"),
+                _ => {}
+            }
+        }
+        // stdlib at main.ps1's command site, unknown at lib/util.ps1's instance call
+        let sort: Vec<_> = recs
+            .iter()
+            .filter(|r| r["type"] == "unresolved" && r["fqn"] == "sort")
+            .collect();
+        assert_eq!(sort.len(), 1);
+        assert_eq!(str_of(sort[0], "category"), "unknown");
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_calls_targets_parity() {
+        let (_dir, root, full) = call_scan("bin-call-tgt");
+        let full = records(&full.stdout);
+        let main = format!("{root}/main.ps1");
+        let kept: Vec<&str> = full
+            .iter()
+            .filter(|r| {
+                matches!(str_of(r, "type"), "struct" | "function") && str_of(r, "path") == main
+            })
+            .map(|r| str_of(r, "id"))
+            .collect();
+        let all: Vec<&str> = full
+            .iter()
+            .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
+            .map(|r| str_of(r, "id"))
+            .collect();
+        let edge_types = ["calls", "unresolved_call", "uses", "unresolved_use"];
+        let named: Vec<&str> = full
+            .iter()
+            .filter(|r| matches!(str_of(r, "type"), "unresolved_call" | "unresolved_use"))
+            .filter(|r| kept.contains(&str_of(r, "from")))
+            .map(|r| str_of(r, "to"))
+            .collect();
+        // main.ps1's records, each `to` naming a dropped record rewritten to its identity key
+        let want: Vec<serde_json::Value> = full
+            .iter()
+            .filter(|r| match str_of(r, "type") {
+                "unresolved" => named.contains(&str_of(r, "fqn")),
+                t => edge_types.contains(&t) && kept.contains(&str_of(r, "from")),
+            })
+            .map(|r| {
+                let mut r = r.clone();
+                let to = str_of(&r, "to").to_string();
+                if all.contains(&to.as_str()) && !kept.contains(&to.as_str()) {
+                    r["to"] = key_of(&full, &to).into();
+                }
+                r
+            })
+            .collect();
+        let side = Scratch::new("bin-call-tgt-side");
+        let list = side.write("targets.txt", format!("{main}\n").as_bytes());
+        let run = psfrontend(&[&root, "--targets", list.to_str().expect("UTF-8 path")]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let got: Vec<serde_json::Value> = records(&run.stdout)
+            .into_iter()
+            .filter(|r| edge_types.contains(&str_of(r, "type")) || r["type"] == "unresolved")
+            .collect();
+        // no broken.ps1 edge survives: every kept edge leaves main.ps1
+        assert_eq!(got, want);
+        // the rewrite pinned: Util's and Base's full-run keys
+        let script = unit_id(&full, &main, "<script>");
+        let util = unit_id(&full, &format!("{root}/lib/util.ps1"), "Util");
+        assert!(
+            edges_from(&got, "calls", script).contains(&key_of(&full, util)),
+            "{got:?}"
+        );
+        let base = unit_id(&full, &format!("{root}/types.ps1"), "Base");
+        assert!(
+            edges_from(&got, "uses", unit_id(&full, &main, "W")).contains(&key_of(&full, base)),
+            "{got:?}"
+        );
+        assert_eq!(category(&got, "sort"), "unknown");
     }
 }
