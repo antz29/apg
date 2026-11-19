@@ -10,8 +10,9 @@ use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, Manifes
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
 use crate::resolve::{
-    file_deps, import_arg, module_category, nameless_key, resolve_site, Dep, DepKind, DepSite,
-    ImportArg, ManifestStems, SiteKind, StemMatch, INBOX_MODULES,
+    command_target, file_deps, import_arg, module_category, nameless_key, resolve_site,
+    select_member, split_qualified, CommandRes, Dep, DepKind, DepSite, ImportArg, ManifestStems,
+    SiteKind, StemMatch, Target, INBOX_MODULES,
 };
 use crate::scan::{is_ps_source, parse_args, Emitter, Rec};
 use crate::source::{decode, decode_mapped, line_count, position, span, Span};
@@ -460,6 +461,36 @@ fn unit_at(kind: UnitKind, name: &str, start: usize, end: usize) -> Unit {
         ordinal: 0,
         property_types: Vec::new(),
         bases: vec![],
+    }
+}
+
+/// A hand-built member of class unit `owner` with parameter types `params`.
+fn member(kind: UnitKind, name: &str, owner: usize, params: &[&str]) -> Unit {
+    Unit {
+        owner: Some(owner),
+        params: argv(params),
+        ..unit_at(kind, name, 0, 0)
+    }
+}
+
+/// A hand-built file: `<script>`, class `C` (unit 1) with methods M() (2),
+/// M(int) (3), M(int,string) (4), N(object) (5) and constructors new() (6),
+/// new(int) (7).
+fn class_file() -> FileUnits {
+    use UnitKind::*;
+    FileUnits {
+        path: s("c.ps1"),
+        file_span: unit_at(ScriptBody, "", 0, 0).span,
+        units: vec![
+            unit_at(ScriptBody, "<script>", 0, 0),
+            unit_at(Class, "C", 0, 0),
+            member(Method, "M", 1, &[]),
+            member(Method, "M", 1, &["int"]),
+            member(Method, "M", 1, &["int", "string"]),
+            member(Method, "N", 1, &["object"]),
+            member(Constructor, "C", 1, &[]),
+            member(Constructor, "C", 1, &["int"]),
+        ],
     }
 }
 
@@ -2249,7 +2280,8 @@ mod unit {
         assert_eq!(DepKind::ImportModule.as_str(), "import-module");
     }
 
-    // In-box list per apg/.scratch/ps7-builtin-cmdlets.md (PowerShell 7.6 LTS, source tag v7.6.0).
+    // In-box list per upstream PowerShell v7.6.0: src/Modules manifests,
+    // PSGalleryModules.csproj and InitialSessionState.cs.
     #[test]
     fn resolve_inbox_modules_and_category() {
         let suffixes = [
@@ -2306,6 +2338,67 @@ mod unit {
     fn resolve_nameless_key() {
         assert_eq!(nameless_key("dir/a.ps1", 17), "<nameless@dir/a.ps1:17>");
         assert_eq!(nameless_key("a.ps1", 0), "<nameless@a.ps1:0>");
+    }
+
+    #[test]
+    fn resolve_select_member_by_name_and_arity() {
+        let f = class_file();
+        assert_eq!(select_member(&f, 1, "M", 1, false), Some(3));
+        assert_eq!(select_member(&f, 1, "m", 0, false), Some(2));
+        assert_eq!(select_member(&f, 1, "M", 3, false), None);
+        assert_eq!(select_member(&f, 1, "X", 0, false), None);
+        assert_eq!(select_member(&f, 1, "new", 1, true), Some(7));
+        assert_eq!(select_member(&f, 1, "new", 2, true), None);
+        // A method is never selected for a constructor call: M(int,string) has
+        // two parameters, M(int) one (that slot goes to new(int)).
+        assert_eq!(select_member(&f, 1, "M", 2, true), None);
+        assert_eq!(select_member(&f, 1, "M", 1, true), Some(7));
+        // Two members with the same name and parameter count are ambiguous.
+        let mut dup = class_file();
+        dup.units
+            .push(member(UnitKind::Method, "M", 1, &["string"]));
+        assert_eq!(select_member(&dup, 1, "M", 1, false), None);
+    }
+
+    #[test]
+    fn resolve_split_qualified() {
+        assert_eq!(
+            split_qualified(r"Microsoft.PowerShell.Utility\Write-Output"),
+            Some(("Microsoft.PowerShell.Utility", "Write-Output"))
+        );
+        for n in ["Get-Foo", r"\x", r"x\", r"cd\"] {
+            assert_eq!(split_qualified(n), None, "{n:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_command_target_keeps_qualified_name() {
+        let q = r"M\Foo";
+        let one = CommandRes::One {
+            path: s("p.ps1"),
+            index: 2,
+        };
+        assert_eq!(
+            command_target(one, q),
+            Target::Unit {
+                path: s("p.ps1"),
+                index: 2
+            }
+        );
+        for (res, category) in [
+            (CommandRes::Many, "unknown"),
+            (CommandRes::Builtin, "stdlib"),
+            (CommandRes::External, "external"),
+        ] {
+            assert_eq!(
+                command_target(res, q),
+                Target::Unresolved {
+                    name: s(q),
+                    category
+                },
+                "{category}"
+            );
+        }
     }
 
     // Sample names per PowerShell v7.6.0 InitialSessionState.cs, the src/Modules
