@@ -3,6 +3,7 @@
 //! unified JSONL facts.
 
 pub mod diag;
+pub mod identity;
 pub mod manifest;
 pub mod parse;
 pub mod paths;
