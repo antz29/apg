@@ -2,6 +2,7 @@
 //! `int` tier submodules, with shared fixtures and helpers at this root.
 
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
+use crate::identity::{base_relative, emitted_name, is_disambiguated, record_key, render};
 use crate::manifest::{assign, read_manifest, wildcard_match, ExportSpec, ManifestKeys, ModuleMap};
 use crate::parse::parse;
 use crate::paths::{normalise, path_arg, resolve, FileIndex, PathArg};
@@ -1772,6 +1773,72 @@ mod unit {
         assign_ordinals(&mut ties);
         let got: Vec<usize> = ties.iter().map(|u| u.ordinal).collect();
         assert_eq!(got, [1, 2, 3]);
+    }
+
+    #[test]
+    fn identity_base_relative() {
+        assert_eq!(
+            base_relative("mods/Foo/lib/Helpers.ps1", "mods/Foo"),
+            "lib/Helpers.ps1"
+        );
+        assert_eq!(base_relative("a.ps1", ""), "a.ps1");
+        assert_eq!(
+            base_relative("mods/Foo/Other.ps1", "mods/Bar"),
+            "../Foo/Other.ps1"
+        );
+    }
+
+    #[test]
+    fn identity_emitted_name() {
+        let p = vec!["int".to_string(), "string".to_string()];
+        assert_eq!(emitted_name("M", &p, true), "M(int,string)");
+        assert_eq!(emitted_name("M", &[], true), "M()");
+        assert_eq!(emitted_name("M", &p, false), "M");
+        assert_eq!(emitted_name("M", &[], false), "M");
+    }
+
+    #[test]
+    fn identity_record_key() {
+        assert_eq!(record_key("", "build.ps1"), ".build.ps1");
+        assert_eq!(record_key(".build.ps1", "F"), ".build.ps1.F");
+        assert_eq!(record_key("build", "x.ps1"), "build.x.ps1");
+        assert_ne!(record_key("", "build.ps1"), "build");
+    }
+
+    #[test]
+    fn identity_render() {
+        let p = vec!["int".to_string(), "string".to_string()];
+        assert_eq!(render("scope", "F", &[], false), "scope.F");
+        assert_eq!(render("scope", "M", &p, true), "scope.M(int,string)");
+        assert_eq!(render("scope", "M", &[], true), "scope.M()");
+        assert_eq!(render("scope", "M", &p, false), "scope.M");
+        assert_eq!(render(".a.ps1", "F", &[], false), ".a.ps1.F");
+    }
+
+    #[test]
+    fn identity_is_disambiguated() {
+        let paths: std::collections::BTreeSet<String> =
+            ["dir/a.ps1", "x.ps1"].map(String::from).into();
+        for f in [
+            "m.s.F//dir/a.ps1:3",
+            "m.s.F//x.ps1:12",
+            "m.s.C.M(int)//dir/a.ps1:3",
+        ] {
+            assert!(is_disambiguated(f, &paths), "{f:?}");
+        }
+        for f in [
+            "m.s.F//dir/a.ps1:",
+            "m.s.F//dir/a.ps1:3x",
+            "m.s.F//other.ps1:3",
+            "m.s.F/dir/a.ps1:3",
+            "m.s.C.M(int)",
+            "m.s.F",
+        ] {
+            assert!(!is_disambiguated(f, &paths), "{f:?}");
+        }
+        let odd: std::collections::BTreeSet<String> = ["d.(x)/a.ps1".to_string()].into();
+        assert!(is_disambiguated("m.s.F//d.(x)/a.ps1:7", &odd));
+        assert!(!is_disambiguated("m.s.F//(x)/a.ps1:7", &odd));
     }
 }
 
