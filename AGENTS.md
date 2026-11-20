@@ -473,12 +473,17 @@ against a scratch `/tmp` git repo, never a real project (see below).
 **The repo gate is `scripts/gate.sh`** — the single gate command. It runs,
 stopping at the first failure: `actionlint` over `.github/workflows/*.yml`
 (skipped with a warning where the dev-machine tool is absent), a per-file
-`ruby -c` over `Formula/*.rb`, `cargo fmt --check` → `cargo check
---all-targets` → `cargo clippy --all-targets -- -D warnings` → `cargo build` →
-`cargo test` (the default unit+int suite) → the `opencode-suite/node_modules`
-bootstrap from the committed `opencode-suite/bun.lock` (skipped when the
-directory is present) → `bun test` (in `opencode-suite/`) → `node --test` (in
-`src/tslib/`); `scripts/gate.sh --e2e` appends
+`ruby -c` over `Formula/*.rb`, the shell syntax check (`sh -n install.sh`
+plus `bash -n` over each `scripts/*.sh`, the shell chosen per file by its
+shebang), `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
+--all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
+unit+int suite) → the `opencode-suite/node_modules` bootstrap from the
+committed `opencode-suite/bun.lock` (run when the directory is absent or lacks
+the type-check toolchain — typescript 5.9.3, @types/bun 1.4.5; skipped when
+the toolchain is present) → the type check (the suite-local `tsc --noEmit -p
+opencode-suite/tsconfig.json` over `opencode-suite/tools/**`) → `bun test` (in
+`opencode-suite/`) → `node --test` (in `src/tslib/`); `scripts/gate.sh --e2e`
+appends
 the cargo e2e tier (`cargo test e2e:: -- --ignored`, thread-bounded by
 `E2E_THREADS`, default 1) and the opencode-suite boundary e2e
 (`bun test tests/boundary.e2e.test.ts` against the `cargo build` candidate;
@@ -640,15 +645,21 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    variants of a step match no allow rule). It provisions the untracked
    `opencode-suite/node_modules` — which the `bun test` step's
    `@opencode/plugin` dependency needs — from the committed
-   `opencode-suite/bun.lock` when the directory is absent, so no prior install
-   is required; to run the JS suites outside the gate, `bun install` inside
-   `opencode-suite/` is the documented alternative. The gate runs, stopping at
-   the first failure: `actionlint` over `.github/workflows/*.yml` (skipped with
-   a warning where the dev-machine tool is absent) → a per-file `ruby -c` over
-   `Formula/*.rb` → `cargo fmt --check` → `cargo check --all-targets` → `cargo
-   clippy --all-targets -D warnings` → `cargo build` → `cargo test` (the
-   unit+int default suite) → the `opencode-suite/node_modules` bootstrap →
-   `bun test` (in `opencode-suite/`) → `node --test` (in `src/tslib/`), and
+   `opencode-suite/bun.lock` when the directory is absent or lacks the
+   type-check toolchain (typescript 5.9.3, @types/bun 1.4.5), so no prior
+   install is required; to run the JS suites outside the gate, `bun install`
+   inside `opencode-suite/` is the documented alternative. The gate runs,
+   stopping at the first failure: `actionlint` over `.github/workflows/*.yml`
+   (skipped with a warning where the dev-machine tool is absent) → a per-file
+   `ruby -c` over `Formula/*.rb` → the shell syntax check (`sh -n install.sh`
+   plus `bash -n` over each `scripts/*.sh`, per shebang) → `cargo fmt --check`
+   → `cargo check --all-targets` → `cargo clippy --all-targets -D warnings` →
+   `cargo build` → `cargo test` (the unit+int default suite) → the
+   `opencode-suite/node_modules` bootstrap (when the directory is absent or
+   lacks the type-check toolchain) → the type check (the suite-local
+   `tsc --noEmit -p opencode-suite/tsconfig.json` over
+   `opencode-suite/tools/**`) → `bun test` (in `opencode-suite/`) →
+   `node --test` (in `src/tslib/`), and
    `--e2e` appends the cargo e2e tier and the opencode-suite boundary e2e. In
    practice that means `cargo build` first, then **`cargo test` AND
    `cargo test-e2e`** pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
