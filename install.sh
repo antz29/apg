@@ -15,7 +15,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user go rust
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,rust
 #
-#   # Install everything (scanner + all 9 frontends):
+#   # Install everything (scanner + all frontends):
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 #
 # Layout (mirrors the brew formula): the real binary lives in
@@ -42,7 +42,7 @@ raw_frontends=""
 install_all=0
 components=""
 
-ALL_FRONTENDS="cpp go rust csharp java ts py cobol sql"
+ALL_FRONTENDS="cpp go rust csharp java ts py cobol sql ps"
 
 usage() {
     cat <<'EOF'
@@ -62,6 +62,7 @@ Components:
   py              Python scanner frontend (pyfrontend)
   cobol           COBOL scanner frontend (cobolfrontend)
   sql             T-SQL scanner frontend (sqlfrontend)
+  ps              PowerShell scanner frontend (psfrontend)
   all             Core scanner + all frontends
 
 Options:
@@ -109,8 +110,9 @@ normalize_component() {
         py | python | apg-py) echo "py" ;;
         cobol | apg-cobol) echo "cobol" ;;
         sql | tsql | apg-sql) echo "sql" ;;
+        ps | powershell | apg-ps) echo "ps" ;;
         all) echo "all" ;;
-        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, cobol, sql, all)" ;;
+        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, cobol, sql, ps, all)" ;;
     esac
 }
 
@@ -224,6 +226,10 @@ if [ "$uninstall" -eq 1 ]; then
             sql)
                 rm -f "$frontends_dir/sqlfrontend"
                 echo "Removed T-SQL frontend."
+                ;;
+            ps)
+                rm -f "$frontends_dir/psfrontend"
+                echo "Removed PowerShell frontend."
                 ;;
         esac
     done
@@ -447,6 +453,10 @@ for f in $target_frontends; do
             [ -x "$work/extract_${f}/sqlfrontend" ] || die "${tarball} does not contain 'sqlfrontend'"
             install -m 0755 "$work/extract_${f}/sqlfrontend" "$frontends_dir/sqlfrontend"
             ;;
+        ps)
+            [ -x "$work/extract_${f}/psfrontend" ] || die "${tarball} does not contain 'psfrontend'"
+            install -m 0755 "$work/extract_${f}/psfrontend" "$frontends_dir/psfrontend"
+            ;;
     esac
 
     installed_components="${installed_components}${installed_components:+, }${f}"
@@ -485,6 +495,7 @@ for lang in $ALL_FRONTENDS; do
         py) [ -x "$frontends_dir/pyfrontend" ] && present=1 ;;
         cobol) [ -x "$frontends_dir/cobolfrontend" ] && present=1 ;;
         sql) [ -x "$frontends_dir/sqlfrontend" ] && present=1 ;;
+        ps) [ -x "$frontends_dir/psfrontend" ] && present=1 ;;
     esac
     if [ "$present" -eq 1 ]; then
         installed_langs="${installed_langs}${installed_langs:+ }$lang"
