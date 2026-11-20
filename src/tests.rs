@@ -476,6 +476,28 @@ mod unit {
             vec!["-std=ibm", "--copy-path", "copy", "--copy-path", "lib/cpy"]
         );
     }
+
+    /// ps file-edge kinds: exactly `dot-source` / `import-module`, case- and
+    /// whitespace-exact; COBOL `copy` is not one of them.
+    #[test]
+    fn ps_file_edge_kinds_are_dot_source_and_import_module() {
+        assert!(ps::is_file_edge_kind("dot-source"));
+        assert!(ps::is_file_edge_kind("import-module"));
+        for kind in [
+            "copy",
+            "",
+            "Dot-Source",
+            "IMPORT-MODULE",
+            "dot_source",
+            "import",
+            "dot-source ",
+        ] {
+            assert!(
+                !ps::is_file_edge_kind(kind),
+                "{kind:?} is not a file-edge kind"
+            );
+        }
+    }
 }
 
 // -----------------------------------------------------------------------
