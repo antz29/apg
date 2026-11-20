@@ -23,7 +23,9 @@ files — the system of record at rest).
   COBOL parser, T-SQL: `src/sqllib/Program.cs` — a standalone single-file
   `sqlfrontend` binary built on `Microsoft.SqlServer.TransactSql.ScriptDom`
   (`TSql170Parser`), claiming `.sql` in any letter case and reading `.sqlproj`
-  membership statically, the bundled
+  membership statically, PowerShell: `src/pslib` — a standalone `psfrontend`
+  binary on the pinned `woodruffw-trough-tree-sitter-powershell` grammar,
+  claiming `.ps1`/`.psm1`/`.psd1` in any letter case, the bundled
   structural scanner: `src/structlib` — a standalone `structfrontend` binary
   that graphs every tracked text/config/packaging file the code frontends don't
   claim, serving the Markdown stream (absorbing the retired `src/mdlib`
@@ -48,19 +50,20 @@ files — the system of record at rest).
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
   tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
-  the Python (`src/pylib`), COBOL (`src/cobollib`), bundled structural
+  the Python (`src/pylib`), COBOL (`src/cobollib`), PowerShell (`src/pslib`),
+  bundled structural
   (`src/structlib`) and bundled agent (`src/agentlib`) crates, `dotnet publish`
   (self-contained single-file) for the T-SQL frontend — `src/sqllib`) and stages them to
   `target/<profile>/frontends`. The base `apg` binary itself is
   built against a prebuilt static liblbug plus `openssl@3` (no bundled
   LadybugDB and no `cmake`); the Homebrew `scanner` formula installs it together
-  with the bundled `structfrontend` and `agentfrontend`, while the nine
+  with the bundled `structfrontend` and `agentfrontend`, while the
   per-language frontends ship as their own formulae. Run a scan with
   `apg scan <dir>` (or the `apg_scan` tool). `apg` resolves frontends at
   runtime relative to the binary (`<exe_dir>/frontends` or
   `<exe_dir>/../libexec/frontends`) or via `APG_FRONTEND_DIR`.
   `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`, `cpp`, `rust`, `ts`,
-  `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`; `0` to skip) limits what build.rs
+  `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`, `ps`; `0` to skip) limits what build.rs
   compiles — `struct` and `agent` are the bundled structural and
   agent-definition scanners.
 - **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
@@ -103,7 +106,16 @@ files — the system of record at rest).
   `cobol2014`, `ibm`, with `cobol2023` refused; T-SQL (`src/sqllib`) builds
   with a .NET SDK (`net9.0`) + NuGet, is self-contained at scan time (it never
   runs MSBuild, `dotnet` or a database), and is bounded by ScriptDom
-  `180.140.0`'s `TSql170Parser` (the SQL Server 2025 / Azure SQL ceiling). The bundled structural scanner (`structfrontend`,
+  `180.140.0`'s `TSql170Parser` (the SQL Server 2025 / Azure SQL ceiling);
+  PowerShell (`src/pslib`) builds with stable Rust `1.98.1` + crates.io + a C
+  compiler (which compiles the tree-sitter runtime and the woodruffw-trough
+  grammar's generated C sources), needs nothing at scan time (the parser is
+  statically linked, it never shells out, and its preflight tool set is
+  empty), links exactly one crate exporting the C symbol
+  `tree_sitter_powershell`, and is bounded by
+  `woodruffw-trough-tree-sitter-powershell =0.1.6` on `tree-sitter =0.26.13`
+  at parser ABI 15 (the grammar's PowerShell 7.5 syntax, workflow and DSC
+  configuration syntax included). The bundled structural scanner (`structfrontend`,
   `src/structlib`, absorbing the retired `src/mdlib` Markdown frontend) builds
   with stable Rust + crates.io and needs nothing at scan time (it never shells
   out), bounded by `serde`/`serde_json`/`unicode-normalization` 0.1 with no
@@ -115,9 +127,9 @@ files — the system of record at rest).
   per-language formula — the base `scanner` package ships it. The build
   toolchains are pinned in repo-visible files consumed by every
   frontend-compiling path, exact where the mechanism can enforce it: Rust
-  `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and all
-  five cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`,
-  `src/agentlib`, `src/cobollib`) and Node on the `26.x` line
+  `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and every
+  cargo frontend crate — `src/rustlib`, `src/pylib`, `src/structlib`,
+  `src/agentlib`, `src/cobollib`, `src/pslib`) and Node on the `26.x` line
   (`src/tslib/package.json` `engines.node` range `>=26.8.1 <27`, enforced
   fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the exact
   `26.9.0`). Go is exact on the release Linux CI path (`GOTOOLCHAIN` +
@@ -193,7 +205,7 @@ The project builds a single `apg` binary (package `apg`):
   — run the pipeline; produces `apg/.trans/db.lbug` (derived from the durable
   `apg/layers/**` node files and the scanned code) and
   `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
-  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`, `sql`); when omitted, `apg` auto-detects **every** language present and
+  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`, `sql`, `ps`); when omitted, `apg` auto-detects **every** language present and
   scans them all, merging their graphs into one database (a multi-language repo
   like a Go backend + TS frontend gets a single `apg/.trans/db.lbug`). Each frontend's
   opaque ids are namespaced per language (`--id-prefix`), and the ingestor
@@ -203,7 +215,8 @@ The project builds a single `apg` binary (package `apg`):
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
   is always skipped; C# claims `.cs`, `.csx`, `.cshtml` and `.razor` sources;
-  COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources in any case; SQL claims `.sql` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
+  COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources in any case; SQL claims `.sql` sources in any case; PowerShell claims
+  `.ps1`, `.psm1` and `.psd1` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
   `cobol2002`, `cobol2014` or `ibm` (overrides `cobol.dialect` in
   `apg/config.json`; `cobol2023` is refused); `--copy-path <dir>` is a COBOL
   copybook search directory (repeatable). `--force` is a true rebuild: it discards `db.lbug` (with
@@ -326,9 +339,9 @@ opencode **v2** only — the `~/.config/opencode/` layout and the
 
 The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): the base `scanner` formula (the binary
-plus the bundled structural scanner), and nine per-language frontend formulae —
+plus the bundled structural scanner), and the per-language frontend formulae —
 `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`,
-`apg-cobol`, `apg-sql` —
+`apg-cobol`, `apg-sql`, `apg-ps` —
 each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
 `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
@@ -405,17 +418,19 @@ Every test in the repo belongs to exactly one of three tiers, defined by the law
 (or `src/tests.rs` for the crate root), reached by a `#[cfg(test)] mod tests;`
 declaration in the production module — the frontend crates' library roots
 included (`src/structlib/src/tests.rs`, `src/pylib/src/tests.rs`,
-`src/agentlib/src/tests.rs`, `src/cobollib/src/tests.rs`). Every
+`src/agentlib/src/tests.rs`, `src/cobollib/src/tests.rs`,
+`src/pslib/src/tests.rs`). Every
 unit/int test still sits in an inner `unit` or `int` submodule, so libtest's
 path filter selects a tier (`…::tests::unit::`, `…::tests::int::`). The **e2e**
 tier moved OUT of the production module tree into the crate's own top-level
 `tests/<module>_e2e.rs` integration crate — the root crate's `tests/*_e2e.rs`
 (e.g. `tests/main_e2e.rs`, `tests/splice_e2e.rs`) plus the frontend crates'
 `src/structlib/tests/structlib_e2e.rs`, `src/pylib/tests/pylib_e2e.rs`,
-`src/agentlib/tests/agentlib_e2e.rs` and `src/cobollib/tests/*_e2e.rs`. Each
+`src/agentlib/tests/agentlib_e2e.rs`, `src/cobollib/tests/*_e2e.rs` and
+`src/pslib/tests/pslib_e2e.rs`. Each
 is wrapped in `mod e2e`, so its libtest paths are `e2e::…` (no longer
 `tests::e2e::…`); the root, structlib and pylib e2e files share their crate's
-`tests/common/mod.rs`, while the agentlib and cobollib e2e files hold their
+`tests/common/mod.rs`, while the agentlib, cobollib and pslib e2e files hold their
 helpers in the same file, outside `mod e2e`. Every **e2e** test also
 carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
 `cargo test` can never reach it. Each tier submodule starts with `use super::*;`.
@@ -426,7 +441,7 @@ duplicated per tier; a helper that sibling tiers — or the relocated e2e
 integration crate — must reach now lives on the shared public library harness
 `apg::testutil` (`src/testutil.rs`, an unconditional public module) or — for
 the root, structlib and pylib crates — the crate's `tests/common/mod.rs`, and —
-for the agentlib and cobollib crates — the e2e file itself, outside `mod e2e`;
+for the agentlib, cobollib and pslib crates — the e2e file itself, outside `mod e2e`;
 never stranded in a production module's inline
 `mod tests`. Clippy `-D warnings` is what catches a stranded or unused helper.
 
@@ -445,8 +460,7 @@ cargo test-e2e      # e2e tier only, opt-in (= cargo test e2e:: -- --ignored --t
 
 The `--test-threads=4` bound is **required**, not cosmetic: lbug reserves ~8 TiB
 of virtual address space per `Database`, and the heavy `tests/splice_e2e.rs`
-(19 e2e tests) exhausts the process address space at libtest's default thread
-count (`Buffer manager exception: Mmap for size 8796093022208 failed`) while
+exhausts the process address space at libtest's default thread count (`Buffer manager exception: Mmap for size 8796093022208 failed`) while
 passing at `--test-threads=4` with byte-identical test bodies.
 
 `cargo test` runs **unit+int only** and stays seconds-fast: the e2e tests are
@@ -477,9 +491,11 @@ gate beneath itself while it is running.
 `[workspace]`), so their tiers are run from their own directories, never by the
 root gate: `(cd src/structlib && cargo test)` /
 `(cd src/structlib && cargo test e2e:: -- --ignored --test-threads=4)`, and
-likewise `src/pylib`, `src/agentlib` and `src/cobollib`
+likewise `src/pylib`, `src/agentlib`, `src/cobollib` and `src/pslib`
 (`cargo test --manifest-path src/cobollib/Cargo.toml` /
-`cargo test --manifest-path src/cobollib/Cargo.toml e2e:: -- --ignored --test-threads=4`).
+`cargo test --manifest-path src/cobollib/Cargo.toml e2e:: -- --ignored --test-threads=4`,
+and `cargo test --manifest-path src/pslib/Cargo.toml` /
+`cargo test --manifest-path src/pslib/Cargo.toml e2e:: -- --ignored --test-threads=4`).
 The opt-in COBOL cobc agreement and budget e2e
 (`src/cobollib/tests/cobollib_cobc_e2e.rs`) needs
 `cargo build --release --manifest-path src/cobollib/Cargo.toml` first (it
@@ -658,8 +674,9 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    blocks otherwise).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
-4. **Repoint all 10 formulae (the base `scanner` plus the nine per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
-   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`, `apg-sql`):
+4. **Repoint every formula (the base `scanner` plus each per-language formula)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`, `apg-sql`,
+   `apg-ps`):
    `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
    `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
@@ -723,9 +740,9 @@ Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
 `Language` node per `lang_switch` stream (its FQN is the bare language id, e.g.
 `rust`) and roots every module FQN under it. `<language-id>` is the stream's
 declared id verbatim: the code frontends' `go`/`java`/`cpp`/`rust`/`ts`/`js`/
-`csharp`/`py`/`cobol`/`sql`, the agent frontend's `agent`, and the bundled structural
+`csharp`/`py`/`cobol`/`sql`/`ps`, the agent frontend's `agent`, and the bundled structural
 scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
-`sln`/`misc` — the twenty-two ids `layers::LANGUAGE_ROOTS` names (see
+`sln`/`misc` — the twenty-three ids `layers::LANGUAGE_ROOTS` names (see
 `src/layers/code_refs.rs`, mirrored by `src/ingest/` and
 `src/incremental/language.rs`).
 
@@ -739,6 +756,7 @@ scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
 | Go `init` | `parent.init#<file-basename>` |
 | TypeScript | `<language-id>.<pkg.relpath.name>` — the rooted npm package + dot-path prefix per ES-module file (`ts.@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
 | C# | solution module `csharp.<repo-relative .sln path>`; project module `csharp.<repo-relative project path>` (path kept whole, contained by every listing solution; an unlisted project sits at the `csharp` root); declarations keep namespace-based FQNs, a cross-project duplicate only taking the collision-qualified `csharp.<project path>.<Namespace>.<Type>`; a global-namespace type is `csharp.<Type>` (members `csharp.<Type>.<member>`), and one declared in more than one compilation is qualified directly under its project module as `csharp.<repo-relative project path>.<Type>`, no namespace segment (projectless members keep `csharp.<Type>`); a file several projects compile is emitted once under one owning project; a namespace-less C# file (declaring no namespace, owned by no project module) is contained directly by the `csharp` Language root; the first listed target framework is compiled |
+| PowerShell | module `ps.<identity>` rendered verbatim — a manifest module is its whole repo-relative `.psd1` path, extension included; any other file's module is its repo-relative directory, the repository root rendering as `ps.`, so a script Struct directly in the root module is `ps..<name>`; each `.ps1`/`.psm1` file is one script Struct named by its path relative to its module's base directory, and a script Struct whose base-relative FQN equals another script Struct's or a PowerShell Module's is named `<base-relative path>//<repo-relative path>`; a script's top-level statements are one Function named `<script>` under its script Struct; each function/filter/workflow is a Function and each class/enum a Struct under the script Struct, a class method a Function under its class Struct and a constructor its Function named `new`; every member of a same-name class-member group of two or more renders the overloaded form `M(T1,T2)` — each typed parameter as the type written inside its brackets, an untyped parameter as `object`; a Function or class/enum Struct whose FQN collides with another PowerShell unit's (or already ends in `//<repo-relative path>:<digits>`) appends `//<repo-relative path>:<unit ordinal>`, the unit ordinal being its 1-based position among its file's class/enum Structs and Functions (methods included) by start offset, with `<script>` first |
 | agent | `agent.<file-stem>` — one per `.opencode/agents/` definition file, at its repo-relative path and line span |
 
 A `File` FQN is its repo-relative path (relative to the git toplevel, or the
@@ -834,7 +852,13 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
     trait. Struct→File is present only for a COBOL `COPY` (one per program and
     copybook, from the program Struct to the copybook File, rel property
     `properties` = `{"kind":"copy"}`): the file dependency through which a
-    copybook change reaches each program that COPYs it. SQL `Uses` edges
+    copybook change reaches each program that COPYs it — and for a PowerShell
+    dot-source or import-module (from the script Struct to the File, whose FQN
+    is the unrooted repo-relative path, `properties` =
+    `{"kind":"dot-source"}` or `{"kind":"import-module"}`): a script holds at
+    most one `Uses` edge to a given File, of kind `dot-source` when any of its
+    sites dot-sources that File and `import-module` otherwise, whatever the
+    order and count of its sites. SQL `Uses` edges
     carry `properties` = `{"kind":"read"|"write"|"trigger"|"type"}`:
     `read`/`write` from a procedure/function/trigger (Function) or view
     (Struct) to the table/view/sequence/synonym (Struct) it reads or writes,
@@ -874,7 +898,7 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 
 ### `UnresolvedTarget.category`
 
-One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` (call through a function-valued variable or IIFE), `interface-method` (method on a universe-scope interface, e.g. `error.Error`), or `unknown` (fallback / frontend omitted it). Go populates this exactly from the type checker; Java classifies stdlib (`java.*`/`javax.*`/`jdk.*`) vs `external`; C++ is heuristic (`external` for qualified names, `func-value` for bare identifiers). Rust classifies a resolved declaration or macro by crate origin (sysroot `std`/`core`/`alloc` → `stdlib`, dependency crates → `external`, project `macro_rules!` → `unknown`), and a nameless callee — a closure or other non-path expression — gets a site-keyed `<nameless@repo-relative:offset>` sentinel categorized `unknown`, never `func-value`.
+One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` (call through a function-valued variable or IIFE), `interface-method` (method on a universe-scope interface, e.g. `error.Error`), or `unknown` (fallback / frontend omitted it). Go populates this exactly from the type checker; Java classifies stdlib (`java.*`/`javax.*`/`jdk.*`) vs `external`; C++ is heuristic (`external` for qualified names, `func-value` for bare identifiers). Rust classifies a resolved declaration or macro by crate origin (sysroot `std`/`core`/`alloc` → `stdlib`, dependency crates → `external`, project `macro_rules!` → `unknown`), and a nameless callee — a closure or other non-path expression — gets a site-keyed `<nameless@repo-relative:offset>` sentinel categorized `unknown`, never `func-value`. PowerShell classifies on a PowerShell 7.6 basis: `stdlib` for a command of the 7.6 engine or the in-box `Microsoft.PowerShell.*` modules or a 7.6 default alias of any platform, an in-box `Microsoft.PowerShell.*` module, and a System type (`System`, `System.*`, or a 7.6 type accelerator whose full name begins with `System.`); `external` for any other out-of-scan command, module or type; `unknown` for an ambiguous match, an unresolvable instance/static method call, and a dynamic dot-source/`Import-Module` keyed `<nameless@repo-relative:offset>`; `func-value` for a `&` on a script block/variable/computed expression or a `.` on a script block, keyed `<nameless@repo-relative:offset>`; each name is emitted once per scan carrying the first of `unknown`, `func-value`, `external`, `stdlib` that any site assigns.
 
 Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are routed to `Uses`/`UnresolvedUse` edges, not `UnresolvedCall`. The `target_type` property only carries data on `UnresolvedCall` edges whose target is `func-value`.
 
@@ -1030,6 +1054,7 @@ Built-in defaults (per language):
 - **Rust**: `test` = `*_test.rs` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`; else `src`.
 - **COBOL**: `test` = a `test`/`tests` path segment or a `test_*`, `*_test.*` or `*-test.*` filename (case-insensitive); `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src` — copybooks (`.cpy`) included.
 - **SQL**: `test` = `test`/`tests` segment; `generated` = `gen`/`generated`/`obj` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src`.
+- **PowerShell**: `test` = a `test`/`tests` segment or a Pester `*.Tests.ps1` filename; `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src` — case-insensitive.
 
 An `apg/config.json` at the project root **replaces** the defaults. Shape:
 
