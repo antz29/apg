@@ -466,6 +466,7 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "py" => "py",
         "cobol" => "cb",
         "sql" => "sq",
+        "ps" => "ps",
         // The agent-definition frontend's stream keeps its own prefix, distinct
         // from `x` (the unknown-id fallback) so a merged agent stream cannot
         // collide opaque ids.
@@ -705,9 +706,9 @@ pub fn should_spawn_language(
 /// The scan-time tools a selected language's frontend requires on `PATH` when
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
 /// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`,
-/// `agent`, `sql`) and the bundled structural scanner's every stream id (`md`, `sh`,
+/// `agent`, `sql`, `ps`) and the bundled structural scanner's every stream id (`md`, `sh`,
 /// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `sln`, `misc`)
-/// require nothing — the structural, agent and sql arms are explicit so the
+/// require nothing — the structural, agent, sql and ps arms are explicit so the
 /// exemption is intentional, not the unknown-id catch-all — and neither does an
 /// unknown language id (never a false refusal). `ts`/`js` share the one unified
 /// frontend and its `node` runtime.
@@ -727,6 +728,8 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
         "agent" => &[],
         // The self-contained single-file sqlfrontend needs no tool on `PATH`.
         "sql" => &[],
+        // The self-contained psfrontend needs no tool on `PATH` either.
+        "ps" => &[],
         _ => &[],
     }
 }
@@ -752,7 +755,7 @@ pub fn scan_time_tool_error(language: &str, tool: &str) -> String {
 /// Probes `PATH` for every tool `language`'s frontend needs and returns
 /// [`scan_time_tool_error`] for the first miss. This is the I/O unit (a real
 /// `PATH` probe); a tool-less language probes nothing and succeeds — the
-/// self-contained `cpp`/`csharp`/`py`/`agent`/`sql` frontends and every structural
+/// self-contained `cpp`/`csharp`/`py`/`agent`/`sql`/`ps` frontends and every structural
 /// stream id of the bundled scanner (`md`, `sh`, `yaml`, `json`, `toml`, `xml`,
 /// `dockerfile`, `makefile`, `ini`, `misc`) are all tool-less.
 pub fn scan_time_preflight(language: &str) -> anyhow::Result<()> {
@@ -825,7 +828,7 @@ pub fn spawn_frontend_args(
     // required tool is absent fails the whole scan here, before any spawn, with
     // the named actionable error — never the cryptic panic this replaces, never
     // a silent skip, never an empty graph. The tool-less frontends
-    // (`cpp`, `csharp`, `py`, `agent`) and every structural stream id of the
+    // (`cpp`, `csharp`, `py`, `agent`, `sql`, `ps`) and every structural stream id of the
     // bundled scanner (`md`, `sh`, …) probe nothing and are unaffected.
     scan_time_preflight(lang)?;
     let cmd = frontend_cmd(lang)
