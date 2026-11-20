@@ -202,6 +202,25 @@ fn sql_code_type(has_seg: impl Fn(&[&str]) -> bool) -> &'static str {
     "src"
 }
 
+/// PowerShell: every comparison is case-insensitive (Windows-born trees mix
+/// `Tests`/`tests`); a Pester `*.Tests.ps1` filename marks a test.
+fn ps_code_type(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    let segments: Vec<&str> = lower.split('/').collect();
+    let (filename, dirs) = segments.split_last().unwrap_or((&"", &[]));
+    let has_seg = |names: &[&str]| dirs.iter().any(|s| names.contains(s));
+    if filename.ends_with(".tests.ps1") || has_seg(&["test", "tests"]) {
+        return "test";
+    }
+    if has_seg(&["gen", "generated"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", "third_party", "thirdparty"]) {
+        return "external";
+    }
+    "src"
+}
+
 fn builtin_code_type(path: &str, language: &str) -> &'static str {
     let segments: Vec<&str> = path.split('/').collect();
     let has_seg = |names: &[&str]| segments.iter().any(|s| names.contains(s));
@@ -270,6 +289,7 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
         }
         "cobol" => cobol_code_type(&filename_lower, has_seg),
         "sql" => sql_code_type(has_seg),
+        "ps" => ps_code_type(path),
         "ts" => {
             if filename_lower.ends_with("_test.ts")
                 || filename_lower.ends_with("_test.tsx")
