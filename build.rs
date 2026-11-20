@@ -3,7 +3,7 @@ use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
-/// `struct`, `py`, `agent`, `cobol`, `sql`); `0`/`none`/empty skips all.
+/// `struct`, `py`, `agent`, `cobol`, `sql`, `ps`); `0`/`none`/empty skips all.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
@@ -29,6 +29,7 @@ fn build_frontends() -> Vec<String> {
             "agent".into(),
             "cobol".into(),
             "sql".into(),
+            "ps".into(),
         ],
     }
 }
@@ -66,6 +67,7 @@ fn watch_frontend_sources() {
         "src/agentlib",
         "src/cobollib",
         "src/sqllib",
+        "src/pslib",
     ];
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     while let Some(dir) = stack.pop() {
@@ -153,6 +155,9 @@ fn main() {
     }
     if enabled(&frontends, "sql") {
         languages.extend(stage_sql(&out_dir, &stage_dir));
+    }
+    if enabled(&frontends, "ps") {
+        languages.extend(stage_ps(&stage_dir));
     }
     if enabled(&frontends, "agent") {
         // Agent frontend (standalone Rust crate, compiled in isolation). Fail-closed
@@ -483,6 +488,31 @@ fn stage_cobol(stage_dir: &Path) -> Vec<String> {
         );
         let _ = std::fs::copy(&cobolfrontend, stage_dir.join("cobolfrontend"));
         return vec!["cobol".into()];
+    }
+
+    Vec::new()
+}
+
+/// PowerShell frontend (standalone Rust crate, compiled in isolation).
+fn stage_ps(stage_dir: &Path) -> Vec<String> {
+    // Same shape as stage_cobol: always `--release` into src/pslib/target,
+    // staged into the active profile's frontends dir; skip on failure.
+    let psfrontend = Path::new("src/pslib")
+        .join("target")
+        .join("release")
+        .join("psfrontend");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--manifest-path")
+        .arg("src/pslib/Cargo.toml")
+        .arg("--release")
+        .arg("--bin")
+        .arg("psfrontend");
+    let ps_ok = cmd.status().is_ok_and(|s| s.success()) && psfrontend.exists();
+    if ps_ok {
+        println!("cargo:rustc-env=APG_FRONTEND_PS={}", psfrontend.display());
+        let _ = std::fs::copy(&psfrontend, stage_dir.join("psfrontend"));
+        return vec!["ps".into()];
     }
 
     Vec::new()
