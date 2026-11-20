@@ -110,6 +110,33 @@ mod unit {
         }
     }
 
+    /// powershell-frontend phase-07 task-3: a PowerShell file's code type
+    /// follows directory segments and the Pester `*.Tests.ps1` filename,
+    /// case-insensitively; a segment check never matches the filename itself.
+    #[test]
+    fn ps_code_type_follows_segments_and_pester_filename() {
+        for (p, want) in [
+            ("Build.Tests.ps1", "test"),
+            ("src/x/Mod.TESTS.PS1", "test"),
+            ("test/a.ps1", "test"),
+            ("Tests/b.psm1", "test"),
+            ("a/TEST/c.psd1", "test"),
+            ("gen/a.ps1", "generated"),
+            ("Generated/b.psm1", "generated"),
+            ("vendor/a.ps1", "external"),
+            ("Third_Party/b.ps1", "external"),
+            ("thirdparty/c.psd1", "external"),
+            ("a.ps1", "src"),
+            ("src/Tester.ps1", "src"),
+            ("Mod.Tests.psm1", "src"),
+            ("contest/a.ps1", "src"),
+            ("test.ps1", "src"),
+            ("vendor.psm1", "src"),
+        ] {
+            assert_eq!(builtin_code_type(p, "ps"), want, "{p} must be {want}");
+        }
+    }
+
     /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in
