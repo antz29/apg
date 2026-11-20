@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "overload-key-ps-suffix",
+  "body": "Limit: overload_key splits a function FQN on its last '(' and then its last '.', unaware of PowerShell's //<repo-relative path>:<ordinal> suffix or dotted function names, so a ps FQN can be given a wrong parent scope or miss overload grouping. It is sound because every ps-derived scope is 'ps' or starts with 'ps.' and never equals another language's scope, and rust.apg.ps.widen_targets re-emits every ps file whenever any ps file is targeted, so ps overload peers are never needed. Upgrade if ps incremental impact ever relies on overload grouping alone.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.impact.signature.overload_key",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
