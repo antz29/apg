@@ -456,11 +456,13 @@ mod unit {
         // stays residual `misc` (the C++ frontend does not claim it). The COBOL
         // extensions are skipped in any letter case. The C# frontend claims
         // `.cs/.csx/.cshtml/.razor`, so none of them reach a structural stream.
+        // The PowerShell frontend claims `.ps1/.psm1/.psd1` in any letter case;
+        // near misses like `.ps`/`.ps1xml` stay residual `misc`.
         let code = [
             "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
             "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor",
             "py", "pyi", "cob", "cbl", "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy", "sql", "SQL",
-            "Sql",
+            "Sql", "ps1", "psm1", "psd1", "PS1", "Psm1", "PSD1",
         ];
         for ext in code {
             assert_eq!(
@@ -507,6 +509,8 @@ mod unit {
             ("LICENSE", Some("misc")),
             (".gitignore", Some("misc")),
             ("a.c", Some("misc")),
+            ("a.ps", Some("misc")),
+            ("a.ps1xml", Some("misc")),
         ];
         for (path, want) in routed {
             assert_eq!(stream_for_path(Path::new(path)), want, "routing for {path}");
