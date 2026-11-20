@@ -10,20 +10,36 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// The just-built `pyfrontend` beside the test executable's profile dir.
+/// Locates the built `pyfrontend` binary: the compile-time
+/// `CARGO_BIN_EXE_pyfrontend` when Cargo provided it, else the first
+/// `pyfrontend` found walking up from the test harness executable — the
+/// artifact `cargo build` leaves in the profile dir.
 pub(super) fn frontend_bin() -> PathBuf {
-    let exe = std::env::current_exe().expect("current exe");
-    let profile_dir = exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("target profile dir")
-        .to_path_buf();
-    let unix = profile_dir.join("pyfrontend");
-    if unix.is_file() {
-        unix
-    } else {
-        profile_dir.join("pyfrontend.exe")
+    if let Some(p) = option_env!("CARGO_BIN_EXE_pyfrontend") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return p;
+        }
     }
+    let exe = std::env::current_exe().expect("current exe");
+    let name = if cfg!(windows) {
+        "pyfrontend.exe"
+    } else {
+        "pyfrontend"
+    };
+    let mut dir = exe.parent();
+    while let Some(d) = dir {
+        let candidate = d.join(name);
+        if candidate.is_file() {
+            return candidate;
+        }
+        dir = d.parent();
+    }
+    panic!(
+        "could not locate the built `pyfrontend` binary from {} — run \
+         `cargo build --manifest-path src/pylib/Cargo.toml` first",
+        exe.display()
+    );
 }
 
 pub(super) fn scratch_dir(name: &str) -> PathBuf {
