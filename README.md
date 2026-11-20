@@ -2,7 +2,7 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, COBOL, T-SQL), builds
+`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, COBOL, T-SQL, PowerShell), builds
 a program graph of its types, functions, and call/use relationships, and
 stores it in a LadybugDB graph database that you can query with Cypher from
 inside opencode. The bundled structural scanner also graphs the tracked
@@ -19,9 +19,10 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
 
 - **Per-language scanner frontends** installed separately via brew — install
   only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python,
-  COBOL, T-SQL; the C# frontend is project-aware and Razor-compiling, claiming
-  `.cs`/`.csx`/`.cshtml`/`.razor`; the T-SQL frontend claims `.sql` in any
-  letter case and reads `.sqlproj` membership statically),
+  COBOL, T-SQL, PowerShell; the C# frontend is project-aware and Razor-compiling,
+  claiming `.cs`/`.csx`/`.cshtml`/`.razor`; the T-SQL frontend claims `.sql` in
+  any letter case and reads `.sqlproj` membership statically; the PowerShell
+  frontend claims `.ps1`/`.psm1`/`.psd1` in any letter case),
   plus a **bundled structural scanner** in the base package that graphs the
   tracked text/config/packaging files the code frontends don't claim (Markdown,
   shell, YAML, JSON, TOML, XML — MSBuild `.csproj`/`.vbproj`/`.vcxproj`/
@@ -58,12 +59,12 @@ The `scanner` formula builds the `apg` binary and ships the bundled
 **structural scanner** (`structfrontend`) and the bundled **agent-definition
 frontend** (`agentfrontend`); the per-language frontends are separate formulae
 (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`,
-`apg-py`, `apg-cobol`, `apg-sql`). Install the base plus the frontends for the
+`apg-py`, `apg-cobol`, `apg-sql`, `apg-ps`). Install the base plus the frontends for the
 languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
-Homebrew falls back to building from source. Four frontends carry a
-**scan-time** dependency — the tool must be on your `PATH` when you run
+Homebrew falls back to building from source. The Go, Java, TypeScript and Rust
+frontends carry a **scan-time** dependency — the tool must be on your `PATH` when you run
 `apg scan`, because the frontend shells out to it: Go projects need `go`; Java
 projects need `java` (JDK 21+, see [below](#java-projects)); TypeScript
 projects need `node`; and Rust projects need `cargo` **and** `rustc`. Rust
@@ -73,7 +74,7 @@ stable toolchain (see [Building from source](#building-from-source)). A
 TypeScript repo's `node_modules` is always skipped, and workspace-package
 imports resolve even before `npm install`.
 
-The other five frontends need no runtime at scan time: the C++ frontend is a
+The remaining frontends need no runtime at scan time: the C++ frontend is a
 native tree-sitter binary, the C# frontend (`apg-csharp`) is a self-contained
 single-file publish (its .NET SDK is build-time only) that never runs MSBuild,
 `dotnet` or NuGet — it reads restored references offline, in order
@@ -94,9 +95,10 @@ dotnet root lacking a matching `Microsoft.NETCore.App` pack falls back to the
 embedded set; unset or empty keeps the default lookup. The Python
 (`apg-py`) frontend resolves from filesystem markers and never shells out, and
 the COBOL frontend (`apg-cobol`) is a self-contained binary that never shells
-out, and the T-SQL frontend (`apg-sql`) is a self-contained single-file publish
+out, the T-SQL frontend (`apg-sql`) is a self-contained single-file publish
 (its .NET SDK is build-time only) that never runs MSBuild, `dotnet`, a database
-or the network. The
+or the network, and the PowerShell frontend (`apg-ps`) is a self-contained
+binary, its parser statically linked, that never shells out. The
 bundled structural scanner and agent-definition frontend are likewise
 self-contained and never shell out — they need nothing on `PATH`. On Linux the
 base `apg` binary links OpenSSL dynamically, so `libssl.so.3` must be present
@@ -120,6 +122,7 @@ ceiling.
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
 | COBOL (`apg-cobol`) | stable Rust `1.98.1` + crates.io (`serde`, `serde_json`) | none (self-contained binary, never shells out) | no engine pin (hand-written parser); ceiling = the dialect table: `cobol85` (default), `cobol2002`, `cobol2014`, `ibm` (`cobol2023` is refused) |
 | T-SQL (`apg-sql`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file ReadyToRun publish; reads `.sqlproj` files statically, never runs MSBuild, `dotnet` or a database) | `Microsoft.SqlServer.TransactSql.ScriptDom 180.140.0` (`TSql170Parser`); ceiling = the SQL Server 2025 / Azure SQL T-SQL grammar |
+| PowerShell (`apg-ps`) | stable Rust `1.98.1` + crates.io + a C compiler (compiles the tree-sitter runtime and the woodruffw-trough grammar's generated C sources) | none (self-contained binary, parser statically linked, never shells out, no network) | `woodruffw-trough-tree-sitter-powershell =0.1.6` on the `tree-sitter =0.26.13` runtime, parser ABI 15; ceiling = the grammar's PowerShell 7.5 syntax, workflow and DSC configuration syntax included |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
 | Agent definitions (`agentfrontend`) | stable Rust + crates.io | none (self-contained binary reading `.opencode/agents/`, never shells out) | `serde` / `serde_json` 1 (no language-version ceiling) |
 | opencode chat plugin (`apg init`) | `bun install` (`@opencode/plugin`) | opencode 2.x (tool plugins into `~/.config/opencode/plugins/`) | `@opencode/plugin` (opencode 2.x plugin API) |
@@ -137,7 +140,8 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-csharp \
              antz29/apg/apg-py \
              antz29/apg/apg-cobol \
-             antz29/apg/apg-sql
+             antz29/apg/apg-sql \
+             antz29/apg/apg-ps
 ```
 
 Install only the frontends you need:
@@ -183,7 +187,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 # Or use the --frontends flag:
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,ts
 
-# Install everything (scanner + all 9 frontends):
+# Install everything (scanner + all frontends):
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 ```
 
@@ -193,7 +197,7 @@ Options:
 - `--version 0.29.x`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
-- `--frontends L,L...`: comma-separated list of frontends to install (`go`, `rust`, `cpp`, `csharp`, `java`, `ts`, `py`, `cobol`, `sql`)
+- `--frontends L,L...`: comma-separated list of frontends to install (`go`, `rust`, `cpp`, `csharp`, `java`, `ts`, `py`, `cobol`, `sql`, `ps`)
 - `--all`: install scanner and all frontends
 - `--force`: overwrite existing files without prompting
 - `--uninstall [component...]`: remove specific components or the entire install
@@ -277,7 +281,10 @@ present** in a multi-language repo is scanned and merged into one graph. A scan
 always includes the bundled structural streams when `structfrontend` is
 installed, and an auto-detected scan (no `--language`) also includes every
 `.opencode/agents/` definition when `agentfrontend` is installed — the
-definitions landing as `Agent` nodes.
+definitions landing as `Agent` nodes. `--language` accepts one or more
+comma-separated values: `java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`,
+`cobol`, `sql`, `ps`; PowerShell (`ps`) claims `.ps1`/`.psm1`/`.psd1` in any
+letter case.
 
 ```
 apg scan
@@ -678,9 +685,13 @@ Requires: a Rust toolchain and the native build deps — `gcc`/`g++` (the C++
 frontend), Go ≥ 1.25 (the Go frontend), `javac` 21 (the Java frontend),
 `node`/`npm` (the TypeScript frontend; `build.rs` runs `npm ci` in
 `src/tslib`), and a .NET SDK (the C# and T-SQL frontends; `build.rs` runs
-`dotnet publish` for `src/csharplib` and `src/sqllib`). Network is needed at
+`dotnet publish` for `src/csharplib` and `src/sqllib`), plus a C compiler for
+the PowerShell frontend (`src/pslib` compiles the tree-sitter runtime and the
+grammar's generated C sources). Network is needed at
 build time to fetch the pinned rust-analyzer and Ruff/ty engine crates,
-`golang.org/x/tools`, the structural scanner's crates.io dependencies, and
+`golang.org/x/tools`, the structural scanner's crates.io dependencies, the
+PowerShell frontend's crates.io tree-sitter crates (`tree-sitter` and
+`woodruffw-trough-tree-sitter-powershell`), and
 NuGet packages (including `Microsoft.SqlServer.TransactSql.ScriptDom
 180.140.0`).
 
@@ -696,9 +707,9 @@ is equally self-contained at scan time.
 The toolchains that compile or stage a frontend are pinned in repo-visible
 files consumed by every build path that compiles a frontend, exact where the
 mechanism can enforce it: Rust `1.98.1` (the repo-root `rust-toolchain.toml`,
-whose `channel` rustup's parent-walk applies to the main crate and all five
-cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`,
-`src/agentlib`, `src/cobollib`), Node on the
+whose `channel` rustup's parent-walk applies to the main crate and every
+cargo frontend crate — `src/rustlib`, `src/pylib`, `src/structlib`,
+`src/agentlib`, `src/cobollib`, `src/pslib`), Node on the
 `26.x` line (`src/tslib/package.json`'s `engines.node` range `>=26.8.1 <27`,
 enforced fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the
 exact `26.9.0`), and Go on the release Linux CI path (`GOTOOLCHAIN` +
@@ -721,7 +732,7 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`;
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`, `ps`;
 `0` to skip all; `struct` is the bundled structural scanner and `agent` the
 agent-definition frontend) to
 limit what build.rs compiles — the split brew formulae rely on this.
@@ -785,6 +796,7 @@ src/csharplib/       C# scanner — .cs/.csx/.cshtml/.razor (Roslyn + Razor; pro
 src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
 src/cobollib/        COBOL scanner (hand-written COBOL parser; separate Cargo project)
 src/sqllib/          T-SQL scanner (ScriptDom; separate .NET project)
+src/pslib/           PowerShell scanner (woodruffw-trough-tree-sitter-powershell; separate Cargo project)
 src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML (incl. MSBuild .csproj/.vbproj/.vcxproj/.sqlproj/.props/.targets, .config/.resx)/sln/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
 src/agentlib/        bundled agent-definition frontend — `.opencode/agents/*.md` → Agent nodes (standalone non-workspace Rust crate)
 opencode-suite/      install template for `apg init` (plugins/, lib/, agents/; embedded in src/main.rs)
@@ -799,6 +811,7 @@ Formula/apg-csharp.rb  C# scanner frontend
 Formula/apg-py.rb      Python scanner frontend
 Formula/apg-cobol.rb   COBOL scanner frontend
 Formula/apg-sql.rb     T-SQL scanner frontend
+Formula/apg-ps.rb      PowerShell scanner frontend
 ```
 
 ## License
