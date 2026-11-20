@@ -9912,6 +9912,48 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// powershell-frontend phase-07 task-7 (e2e): `auto_detect_languages`
+    /// detects `ps` from `.ps1`/`.psm1`/`.psd1` in any letter case and at
+    /// depth, never from a bare `.ps` or a pruned `target/`, and only when
+    /// `ps` is available (`available` is passed in, so no staged psfrontend).
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir fs); run via cargo test-e2e"]
+    fn auto_detect_languages_detects_ps_any_case() {
+        let base = std::env::temp_dir().join(format!("apg-ps-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let available = ["ps".to_string()];
+        let tree_with = |name: &str, file: &str| {
+            let tree = base.join(name);
+            let path = tree.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "# ps\n").unwrap();
+            tree
+        };
+        for (name, file) in [
+            ("ps1", "build.ps1"),
+            ("psm1", "Util.PSM1"),
+            ("psd1", "Mod.Psd1"),
+            ("nested", "sub/dir/x.ps1"),
+        ] {
+            assert_eq!(
+                auto_detect_languages(&tree_with(name, file), &available),
+                vec!["ps".to_string()],
+                "a tree holding only {file} must detect ps"
+            );
+        }
+        for (name, file) in [("bare-ps", "x.ps"), ("pruned", "target/a.ps1")] {
+            assert!(
+                auto_detect_languages(&tree_with(name, file), &available).is_empty(),
+                "a tree holding only {file} must detect nothing"
+            );
+        }
+        assert!(
+            auto_detect_languages(&tree_with("unavailable", "build.ps1"), &[]).is_empty(),
+            "ps must not be detected when it is not available"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// schema-alignment phase-03 task-12 (e2e, scratch /tmp repo, CANDIDATE
     /// binary only — `global.constraint.no-real-project-test`): a REAL scan of
     /// a checkout carrying agent definitions yields one tier-4 Agent node per
