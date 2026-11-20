@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "dotnet-stage-best-effort-copy",
+  "body": "stage_dotnet_frontend (the shared staging path stage_csharp and stage_sql both call) treats the dotnet publish as the success test (exit status ok and the published exe exists) and copies the exe into the frontends stage dir best-effort (`let _ = std::fs::copy`), so a failed copy still returns the language name (`csharp`/`sql`) into APG_LANGUAGES while its env var (APG_FRONTEND_CSHARP/APG_FRONTEND_SQL) points at the published path under OUT_DIR/<dist_dir>. Upgrade to a fail-closed copy (return nothing when the copy fails) if staged-dir presence must ever be verified at build time.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.build_script_build.stage_dotnet_frontend",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
