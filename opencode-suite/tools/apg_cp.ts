@@ -3,6 +3,8 @@ import fs from "node:fs"
 import path from "node:path"
 import { fsScopeDecision, type ToolContext } from "../lib/apg.ts"
 
+type ApgCpInput = { directory?: string; from: string; to: string }
+
 export default Plugin.define({
   id: "apg_cp",
   async setup(ctx) {
@@ -32,7 +34,8 @@ export default Plugin.define({
           required: ["from", "to"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgCpInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

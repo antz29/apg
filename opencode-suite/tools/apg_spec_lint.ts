@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { apgBinary, findApgRoot, NO_DB_ERROR, type ToolContext } from "../lib/apg.ts"
 
+type ApgSpecLintInput = { directory?: string; tier?: "requirements" | "domain" | "solution" }
+
 export default Plugin.define({
   id: "apg_spec_lint",
   async setup(ctx) {
@@ -26,7 +28,8 @@ export default Plugin.define({
           required: [],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgSpecLintInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

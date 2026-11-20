@@ -2,6 +2,8 @@ import { Plugin } from "@opencode/plugin"
 import path from "node:path"
 import { runCypher, lit, findApgRoot, resolveProjectPath, type ToolContext } from "../lib/apg.ts"
 
+type ApgUnresolvedInput = { directory?: string; fqn?: string; path?: string; limit?: string }
+
 export default Plugin.define({
   id: "apg_unresolved",
   async setup(ctx) {
@@ -24,7 +26,8 @@ export default Plugin.define({
           },
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgUnresolvedInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

@@ -36,6 +36,30 @@ function appendOperations(
   return null
 }
 
+type ApgPlanAddInput = {
+  directory?: string
+  action?: string
+  project: string
+  kind?: string
+  number?: string
+  phaseNumber?: string
+  taskNumber?: string
+  title?: string
+  strategy?: string
+  deliverable?: string
+  prereq?: string[]
+  satisfies?: string[]
+  assignedTo?: string
+  implements?: string
+  operations?: { kind: string; verb: string; target: string }[]
+  target?: string
+  fqn?: string
+  plannedKind?: string
+  name?: string
+  parent?: string
+  force?: boolean
+}
+
 export default Plugin.define({
   id: "apg_plan_add",
   async setup(ctx) {
@@ -135,7 +159,8 @@ export default Plugin.define({
           required: ["project"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanAddInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

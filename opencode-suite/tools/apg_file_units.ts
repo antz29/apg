@@ -2,6 +2,8 @@ import { Plugin } from "@opencode/plugin"
 import path from "node:path"
 import { runCypher, lit, findApgRoot, resolveProjectPath, type ToolContext } from "../lib/apg.ts"
 
+type ApgFileUnitsInput = { directory?: string; path: string; limit?: string }
+
 export default Plugin.define({
   id: "apg_file_units",
   async setup(ctx) {
@@ -24,7 +26,8 @@ export default Plugin.define({
           required: ["path"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgFileUnitsInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

@@ -61,6 +61,8 @@ function operationQuery(): string {
   ].join(" UNION ALL ")
 }
 
+type ApgPlanTasksInput = { directory?: string; project: string; status?: string; limit?: string }
+
 export default Plugin.define({
   id: "apg_plan_tasks",
   async setup(ctx) {
@@ -87,7 +89,8 @@ export default Plugin.define({
           required: ["project"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanTasksInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

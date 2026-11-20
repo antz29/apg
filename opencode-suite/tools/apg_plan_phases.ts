@@ -10,6 +10,8 @@ import {
   type ToolContext,
 } from "../lib/apg.ts"
 
+type ApgPlanPhasesInput = { directory?: string; project: string }
+
 export default Plugin.define({
   id: "apg_plan_phases",
   async setup(ctx) {
@@ -31,7 +33,8 @@ export default Plugin.define({
           required: ["project"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanPhasesInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

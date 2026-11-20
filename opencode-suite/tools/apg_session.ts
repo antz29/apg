@@ -6,6 +6,8 @@ import {
   type ToolContext,
 } from "../lib/apg.ts"
 
+type ApgSessionInput = { action?: "start" | "save" | "end" | "abort"; directory?: string }
+
 export default Plugin.define({
   id: "apg_session",
   async setup(ctx) {
@@ -31,7 +33,8 @@ export default Plugin.define({
           required: [],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgSessionInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

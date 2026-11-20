@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { runCli, type ToolContext } from "../lib/apg.ts"
 
+type ApgPlanVerifyInput = { directory?: string; project: string }
+
 export default Plugin.define({
   id: "apg_plan_verify",
   async setup(ctx) {
@@ -22,7 +24,8 @@ export default Plugin.define({
           required: ["project"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanVerifyInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

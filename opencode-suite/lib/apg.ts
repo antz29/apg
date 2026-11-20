@@ -380,7 +380,7 @@ export interface FsScopeDecision {
  * `mainAnchoredResource` alone is the pure unit tier.
  */
 export async function fsScopeDecision(
-  permission: { assert: (args: unknown) => Promise<void> } | undefined,
+  permission: { assert: (args: FsAssertArgs) => Promise<void> } | undefined,
   context: ToolContext,
   resources: readonly string[],
   save?: readonly string[],
@@ -405,14 +405,7 @@ export async function fsScopeDecision(
       reason: "main checkout root unavailable (fail-closed): refusing every path",
     }
   }
-  const args: {
-    sessionID: string
-    agent?: string
-    source: { type: "tool"; messageID: string; id: string }
-    action: "edit"
-    resources: readonly string[]
-    save?: readonly string[]
-  } = {
+  const args: FsAssertArgs = {
     sessionID: context.sessionID,
     source: { type: "tool", messageID: context.messageID, id: context.id },
     action: "edit",
@@ -439,6 +432,15 @@ export async function fsScopeDecision(
   } catch (err) {
     return { allowed: false, reason: assertFailureReason(err) }
   }
+}
+
+type FsAssertArgs = {
+  sessionID: string
+  agent?: string
+  source: { type: "tool"; messageID: string; id: string }
+  action: "edit"
+  resources: readonly string[]
+  save?: readonly string[]
 }
 
 /** The refusal reason from a `permission.assert` rejection: the thrown error's

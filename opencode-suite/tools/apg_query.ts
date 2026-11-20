@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { runCypher, type ToolContext } from "../lib/apg.ts"
 
+type ApgQueryInput = { directory?: string; query: string }
+
 export default Plugin.define({
   id: "apg_query",
   async setup(ctx) {
@@ -26,7 +28,8 @@ export default Plugin.define({
           required: ["query"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgQueryInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

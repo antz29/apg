@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
 
+type ApgPlanDoneInput = { directory?: string; project: string; task: string }
+
 export default Plugin.define({
   id: "apg_plan_done",
   async setup(ctx) {
@@ -27,7 +29,8 @@ export default Plugin.define({
           required: ["project", "task"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanDoneInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

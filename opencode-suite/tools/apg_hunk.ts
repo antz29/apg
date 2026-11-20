@@ -2,6 +2,15 @@ import { Plugin } from "@opencode/plugin"
 import path from "node:path"
 import { runCypher, lit, findApgRoot, resolveProjectPath, type ToolContext } from "../lib/apg.ts"
 
+type ApgHunkInput = {
+  directory?: string
+  path: string
+  startLine: string
+  endLine: string
+  kind?: string
+  limit?: string
+}
+
 export default Plugin.define({
   id: "apg_hunk",
   async setup(ctx) {
@@ -30,7 +39,8 @@ export default Plugin.define({
           required: ["path", "startLine", "endLine"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgHunkInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

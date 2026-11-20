@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { runCypher, lit, codeTypeCondition, findSymbolRebaseColumns, type ToolContext } from "../lib/apg.ts"
 
+type ApgFindSymbolInput = { directory?: string; name: string; kind?: string; codeType?: string; limit?: string }
+
 export default Plugin.define({
   id: "apg_find_symbol",
   async setup(ctx) {
@@ -31,7 +33,8 @@ export default Plugin.define({
           required: ["name"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgFindSymbolInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

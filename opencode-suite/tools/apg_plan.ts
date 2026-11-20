@@ -26,6 +26,8 @@ function taskEdgeQuery(): string {
   ].join(" UNION ALL ")
 }
 
+type ApgPlanInput = { directory?: string; project?: string }
+
 export default Plugin.define({
   id: "apg_plan",
   async setup(ctx) {
@@ -50,7 +52,8 @@ export default Plugin.define({
           required: [],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

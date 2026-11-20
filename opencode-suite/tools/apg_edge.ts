@@ -1,6 +1,16 @@
 import { Plugin } from "@opencode/plugin"
 import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
 
+type ApgEdgeInput = {
+  directory?: string
+  action: string
+  kind: string
+  from: string
+  to: string
+  properties?: string[]
+  unsetProperties?: string[]
+}
+
 export default Plugin.define({
   id: "apg_edge",
   async setup(ctx) {
@@ -44,7 +54,8 @@ export default Plugin.define({
           required: ["action", "kind", "from", "to"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgEdgeInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

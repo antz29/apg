@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { runCli, type ToolContext } from "../lib/apg.ts"
 
+type ApgPlanRenderInput = { directory?: string; project: string; out?: string }
+
 export default Plugin.define({
   id: "apg_plan_render",
   async setup(ctx) {
@@ -27,7 +29,8 @@ export default Plugin.define({
           required: ["project"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgPlanRenderInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

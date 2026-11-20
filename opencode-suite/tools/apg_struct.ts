@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { runCypher, lit, type ToolContext } from "../lib/apg.ts"
 
+type ApgStructInput = { directory?: string; fqn: string }
+
 export default Plugin.define({
   id: "apg_struct",
   async setup(ctx) {
@@ -26,7 +28,8 @@ export default Plugin.define({
           required: ["fqn"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgStructInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

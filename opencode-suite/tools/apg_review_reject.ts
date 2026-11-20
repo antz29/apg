@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
 
+type ApgReviewRejectInput = { directory?: string; feedback: string }
+
 export default Plugin.define({
   id: "apg_review_reject",
   async setup(ctx) {
@@ -25,7 +27,8 @@ export default Plugin.define({
           required: ["feedback"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgReviewRejectInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

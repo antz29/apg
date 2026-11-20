@@ -3,6 +3,8 @@ import fs from "node:fs"
 import path from "node:path"
 import { fsScopeDecision, type ToolContext } from "../lib/apg.ts"
 
+type ApgRmInput = { directory?: string; paths: string[]; recursive?: boolean }
+
 export default Plugin.define({
   id: "apg_rm",
   async setup(ctx) {
@@ -33,7 +35,8 @@ export default Plugin.define({
           required: ["paths"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgRmInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

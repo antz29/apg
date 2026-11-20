@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import { runCypher, lit, type ToolContext } from "../lib/apg.ts"
 
+type ApgModulesInput = { directory?: string; prefix?: string; limit?: string }
+
 export default Plugin.define({
   id: "apg_modules",
   async setup(ctx) {
@@ -23,7 +25,8 @@ export default Plugin.define({
           required: [],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgModulesInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

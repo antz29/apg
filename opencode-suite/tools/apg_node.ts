@@ -1,6 +1,17 @@
 import { Plugin } from "@opencode/plugin"
 import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
 
+type ApgNodeInput = {
+  directory?: string
+  action: string
+  layer: string
+  type: string
+  name: string
+  body?: string
+  properties?: string[]
+  unsetProperties?: string[]
+}
+
 export default Plugin.define({
   id: "apg_node",
   async setup(ctx) {
@@ -48,7 +59,8 @@ export default Plugin.define({
           required: ["action", "layer", "type", "name"],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgNodeInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,

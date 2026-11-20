@@ -19,6 +19,16 @@ function findProjectRoot(context: ToolContext): string | null {
   return null
 }
 
+type ApgScanInput = {
+  directory?: string
+  language?: string
+  dialect?: string
+  blacklist?: string
+  excludePath?: string
+  modules?: string
+  force?: boolean
+}
+
 export default Plugin.define({
   id: "apg_scan",
   async setup(ctx) {
@@ -64,7 +74,8 @@ export default Plugin.define({
           required: [],
           additionalProperties: false,
         },
-        async execute(input, context) {
+        async execute(raw, context) {
+          const input = raw as ApgScanInput
           const merged: ToolContext = {
             agent: context.agent,
             sessionID: context.sessionID,
@@ -75,7 +86,7 @@ export default Plugin.define({
           const root = findProjectRoot(merged) ?? input.directory
           const dir = input.directory ?? root
 
-          const spawnArgs: string[] = [apgBinary(), "scan", dir]
+          const spawnArgs: string[] = [apgBinary(), "scan", dir as string]
 
           if (input.force) {
             spawnArgs.push("--force")
