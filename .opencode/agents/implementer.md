@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib,agentlib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Works under the Ponytail discipline (fixed level ultra). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites); removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
+description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib,agentlib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Works under the Ponytail discipline (fixed level ultra). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites, and the suite-local `opencode-suite/node_modules/.bin/tsc` type check); removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
 mode: subagent
 hidden: true
 permissions:
@@ -140,6 +140,8 @@ permissions:
   - { action: shell, resource: "bun test *", effect: allow }
   - { action: shell, resource: "node --test", effect: allow }
   - { action: shell, resource: "node --test *", effect: allow }
+  - { action: shell, resource: "opencode-suite/node_modules/.bin/tsc", effect: allow }
+  - { action: shell, resource: "opencode-suite/node_modules/.bin/tsc *", effect: allow }
   - { action: shell, resource: "scripts/gate.sh", effect: allow }
   - { action: shell, resource: "scripts/gate.sh *", effect: allow }
   - { action: apg_rm, resource: "*", effect: deny }
@@ -505,7 +507,9 @@ reviewer:    apg_review_reject <f>                               → status = op
   `cargo test-unit` / `cargo test-int` / `cargo test-e2e` (granted by name — a
   hyphenated alias is NOT matched by `cargo test *`), `bun test` (in
   `opencode-suite/`), `bun install`/`bun add`/`bun remove` (suite deps),
-  `node --test` (in `src/tslib/`), and the run-only `scripts/gate.sh`.
+  `node --test` (in `src/tslib/`), the suite-local type check
+  `opencode-suite/node_modules/.bin/tsc --noEmit -p opencode-suite/tsconfig.json`
+  (run from the worktree root), and the run-only `scripts/gate.sh`.
 - **Deletion / rename / move**: `apg_rm`, `apg_mv`, `apg_cp` — each call passes
   TWO checks: the tool's own action rules, then the tool's `edit`-scope assert
   (`edit` is the operative write scope; both rule sets name the same owned
