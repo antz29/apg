@@ -84,7 +84,7 @@ jobs:
       # reproducible: the Rust compiler (also builds the apg binary and the
       # Rust/Py/Md frontends), Go (the Go frontend's type-checker IS its
       # compiler), and Node/npm (stages the TypeScript frontend).
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-go@v7
         with:
