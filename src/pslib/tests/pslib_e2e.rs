@@ -698,8 +698,6 @@ type Bytes = std::ops::Range<usize>;
 
 /// The region oracle's report on one fixture text, walked from the parse tree itself.
 #[derive(Debug)]
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 struct Regions {
     /// The root node's kind.
     root: &'static str,
@@ -712,11 +710,11 @@ struct Regions {
     /// Each function_definition/class_definition inside an ERROR node: (kind, declared name,
     /// index of the region holding it).
     inside: Vec<(&'static str, String, usize)>,
+    /// The byte range of each `source_file` child statement.
+    stmts: Vec<Bytes>,
 }
 
 /// 1-based (line, character column) of `byte` in `src`.
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 fn line_col(src: &str, byte: usize) -> (usize, usize) {
     let before = &src[..byte];
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
@@ -727,8 +725,6 @@ fn line_col(src: &str, byte: usize) -> (usize, usize) {
 }
 
 /// Parses `src` through `psfrontend::parse` and reports its error regions (see `Regions`).
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 fn regions(src: &str) -> Regions {
     fn walk(n: Node, src: &str, region: Option<usize>, out: &mut Regions) {
         // the source_file child holding `n` (the root itself when `n` is the root)
@@ -763,41 +759,36 @@ fn regions(src: &str) -> Regions {
         errors: Vec::new(),
         missing: Vec::new(),
         inside: Vec::new(),
+        stmts: Vec::new(),
     };
+    if root.kind() == "source_file" {
+        let mut cur = root.walk();
+        out.stmts = root.children(&mut cur).map(|c| c.byte_range()).collect();
+    }
     walk(root, src, None, &mut out);
     out
 }
 
 /// The recovery tree's first broken statement: an until with no condition. The pinned grammar
 /// reduces the do body (its declarations included) before failing, so the ERROR holds them.
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 const RECOVERY_BROKEN_1: &str = "do {\n. ./inside.ps1\nImport-Module InsideMod\nInside-Cmd\nfunction Inside-Fn { Helper-Fn }\nclass InsideClass { [int] Go() { return 1 } }\n} until";
 
 /// The recovery tree's second broken statement: a stray closing parenthesis.
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 const RECOVERY_BROKEN_2: &str = "$q = 1 )";
 
 /// err.ps1 with `b1`/`b2` as its two broken statements (both empty in the clean twin).
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 fn recovery_err(b1: &str, b2: &str) -> String {
     format!(
         ". ./helper.ps1\n\nImport-Module Dep\n\nfunction Before-Fn {{ param($a) Helper-Fn; Get-ChildItem }}\n\nfilter Before-Filter {{ $_ }}\n\nclass BeforeClass : HelperBase {{ [BeforeEnum]$e; [int] Run() {{ return $this.Run() }} }}\n\nenum BeforeEnum {{ A; B }}\n\n& {{ 1 }}\n\nExt-Before\n\n{b1}\n\nworkflow Mid-Flow {{ param($w) Before-Fn }}\n\nExt-Mid\n\n{b2}\n\nfunction After-Fn {{ Helper-Fn; git }}\n\nclass AfterClass {{ AfterClass() {{ }} }}\n\nenum AfterEnum {{ X }}\n\n[AfterClass]::new()\n\nImport-Module ./mods/Dep/Dep.psm1\n\n. $x\n\nExt-After\n"
     )
 }
 
-/// missing.ps1 with `close` ending its unclosed parenthesis (`)` in the clean twin).
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
+/// missing.ps1 with `close` before the `;` ending its unclosed parenthesis (`)` in the clean twin).
 fn recovery_missing(close: &str) -> String {
-    format!("function Miss-Before {{ }}\n\n$y = (1 + 2{close}\n\nfunction Miss-After {{ Miss-Before }}\n")
+    format!("function Miss-Before {{ }}\n\n$y = (1 + 2{close};\n\nfunction Miss-After {{ Miss-Before }}\n")
 }
 
 /// The recovery tree's clean files: (name, text).
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 const RECOVERY_CLEAN: [(&str, &str); 6] = [
     ("a_before.ps1", "function Early { }\n"),
     (
@@ -815,8 +806,6 @@ const RECOVERY_CLEAN: [(&str, &str); 6] = [
 
 /// Writes the recovery tree (its clean twin when `twin`, err.ps1 UTF-16LE with BOM when `wide`)
 /// into a fresh scratch dir and runs the binary over it.
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 fn recovery_scan(tag: &str, twin: bool, wide: bool) -> (Scratch, String, Run) {
     let dir = Scratch::new(tag);
     for (name, text) in RECOVERY_CLEAN {
@@ -843,8 +832,6 @@ fn recovery_scan(tag: &str, twin: bool, wide: bool) -> (Scratch, String, Run) {
 }
 
 /// Normalised lines grouped by their record `type`.
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 fn by_kind(lines: &[String]) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for l in lines {
@@ -858,20 +845,29 @@ fn by_kind(lines: &[String]) -> std::collections::BTreeMap<String, Vec<String>> 
 
 /// The whole-file-region tree: whole.ps1 ends inside an unclosed block holding a further
 /// unclosed construct.
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 const WHOLE_PS1: &str =
     ". ./a_first.ps1\nImport-Module Dep\nfunction Keep { }\nGet-A\nfunction F { Get-B\n$x = (1 + \n";
 
 /// The whole-file-region tree's other files: (name, text).
-// WIP phase 10 task 2: used by the recovery tests still to be written
-#[allow(dead_code)]
 const WHOLE_OTHERS: [(&str, &str); 4] = [
     ("a_first.ps1", "function Early-W { }\n"),
     ("mods/Dep/Dep.psd1", "@{\n    RootModule = 'Dep.psm1'\n}\n"),
     ("mods/Dep/Dep.psm1", "function Get-Dep { }\n"),
     ("z_next.ps1", "function Late { }\nLate\nEarly-W\n"),
 ];
+
+/// The byte range of `s`'s first occurrence in `text`.
+fn span(text: &str, s: &str) -> Bytes {
+    let n = text
+        .find(s)
+        .unwrap_or_else(|| panic!("{s:?} not in fixture"));
+    n..n + s.len()
+}
+
+/// Whether `inner` lies within `outer`.
+fn within(inner: &Bytes, outer: &Bytes) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
 
 mod e2e {
     use super::*;
@@ -2110,5 +2106,362 @@ mod e2e {
         }
         want.sort();
         assert_eq!(normalise_records(&recs, &root, false), want);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn recovery_oracle_preconditions() {
+        let err = recovery_err(RECOVERY_BROKEN_1, RECOVERY_BROKEN_2);
+        let missing = recovery_missing("");
+        // every clean fixture, both twins included, parses error-free under a source_file root
+        let mut clean: Vec<(&str, String)> = RECOVERY_CLEAN
+            .iter()
+            .map(|(n, t)| (*n, t.to_string()))
+            .collect();
+        clean.push(("err.ps1 twin", recovery_err("", "")));
+        clean.push(("missing.ps1 twin", recovery_missing(")")));
+        for (name, text) in &clean {
+            let r = regions(text);
+            assert_eq!(r.root, "source_file", "{name}: {r:?}");
+            assert!(r.errors.is_empty() && r.missing.is_empty(), "{name}: {r:?}");
+        }
+        // err.ps1: two local ERROR regions, each within its own broken statement
+        let r = regions(&err);
+        println!("err.ps1 oracle: {r:?}");
+        assert_eq!(r.root, "source_file", "{r:?}");
+        assert!(r.missing.is_empty(), "{r:?}");
+        let broken = [span(&err, RECOVERY_BROKEN_1), span(&err, RECOVERY_BROKEN_2)];
+        assert_eq!(r.errors.len(), 2, "{r:?}");
+        for ((range, _, stmt), b) in r.errors.iter().zip(&broken) {
+            // the statement holding the region is the broken one: past its text only blank space
+            let tail = &err[b.end..stmt.end.max(b.end)];
+            assert!(
+                within(range, stmt) && stmt.start >= b.start && tail.trim().is_empty(),
+                "{r:?}"
+            );
+        }
+        // missing.ps1: one MISSING ) within its statement, no ERROR
+        let m = regions(&missing);
+        println!("missing.ps1 oracle: {m:?}");
+        assert_eq!(m.root, "source_file", "{m:?}");
+        assert!(m.errors.is_empty(), "{m:?}");
+        assert_eq!(m.missing.len(), 1, "{m:?}");
+        assert_eq!(m.missing[0].0, ")", "{m:?}");
+        let mb = span(&missing, "$y = (1 + 2;");
+        assert!(within(&m.missing[0].2, &mb), "{m:?}");
+        // every site outside the broken statements sits in an intact source_file child
+        let intact = |r: &Regions, text: &str, s: &str| {
+            let n = span(text, s).start;
+            let stmt = r
+                .stmts
+                .iter()
+                .find(|st| st.contains(&n))
+                .unwrap_or_else(|| panic!("{s:?} in no statement: {r:?}"));
+            assert!(
+                !r.errors.iter().any(|e| &e.2 == stmt) && !r.missing.iter().any(|e| &e.2 == stmt),
+                "{s:?} shares a statement with a region: {r:?}"
+            );
+            n
+        };
+        let sites = [
+            ". ./helper.ps1",
+            "Import-Module Dep\n",
+            "function Before-Fn",
+            "filter Before-Filter",
+            "class BeforeClass",
+            "enum BeforeEnum",
+            "& { 1 }",
+            "Ext-Before",
+            "workflow Mid-Flow",
+            "Ext-Mid",
+            "function After-Fn",
+            "class AfterClass",
+            "enum AfterEnum",
+            "[AfterClass]::new()",
+            "Import-Module ./mods/Dep/Dep.psm1",
+            ". $x",
+            "Ext-After",
+        ];
+        let (mut before, mut between, mut after) = (0, 0, 0);
+        for s in sites {
+            let n = intact(&r, &err, s);
+            assert!(!broken.iter().any(|b| b.contains(&n)), "{s:?}");
+            match n {
+                n if n < broken[0].start => before += 1,
+                n if n < broken[1].start => between += 1,
+                _ => after += 1,
+            }
+        }
+        assert!(before > 0 && between > 0 && after > 0);
+        assert!(intact(&m, &missing, "function Miss-Before") < mb.start);
+        assert!(intact(&m, &missing, "function Miss-After") > mb.end);
+        // the inside items, their declaration nodes included, lie in the first region
+        for s in [". ./inside.ps1", "Import-Module InsideMod", "Inside-Cmd"] {
+            assert!(within(&span(&err, s), &r.errors[0].0), "{s:?}: {r:?}");
+        }
+        for (kind, name) in [
+            ("function_definition", "Inside-Fn"),
+            ("class_definition", "InsideClass"),
+        ] {
+            assert!(
+                r.inside.contains(&(kind, name.to_string(), 0)),
+                "{kind} {name}: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn recovery_diagnostics() {
+        let (_dir, root, run) = recovery_scan("rec-diag", false, false);
+        assert!(run.ok, "{:?}", run.stderr);
+        let r = regions(&recovery_err(RECOVERY_BROKEN_1, RECOVERY_BROKEN_2));
+        let m = regions(&recovery_missing(""));
+        assert_eq!((r.errors.len(), m.missing.len()), (2, 1));
+        let mut want: Vec<String> = r
+            .errors
+            .iter()
+            .map(|(_, (l, c), _)| format!("ps: {root}/err.ps1:{l}:{c}: syntax error"))
+            .collect();
+        want.extend(
+            m.missing
+                .iter()
+                .map(|(k, (l, c), _)| format!("ps: {root}/missing.ps1:{l}:{c}: missing {k}")),
+        );
+        want.push("ps: 2 files had syntax errors".to_string());
+        assert_eq!(run.stderr, want);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn recovery_completeness() {
+        use serde_json::json;
+        let (_dir, root, run) = recovery_scan("rec-full", false, false);
+        let (_twin, troot, twin) = recovery_scan("rec-twin", true, false);
+        assert!(run.ok, "{:?}", run.stderr);
+        assert!(twin.ok, "{:?}", twin.stderr);
+        assert_eq!(
+            twin.stderr.last().map(String::as_str),
+            Some("ps: 0 files had syntax errors")
+        );
+        let got = normalise_records(&records(&run.stdout), &root, true);
+        let want = normalise_records(&records(&twin.stdout), &troot, true);
+        assert_eq!(by_kind(&got), by_kind(&want));
+        // the equality is not vacuous: the listed records are in it
+        let j = |v: serde_json::Value| v.to_string();
+        let f = |parent: &str, name: &str, path: &str| {
+            j(json!({"type": "function", "parent": parent, "name": name, "path": path}))
+        };
+        let edge = |t: &str, from: &str, to: &str| j(json!({"type": t, "from": from, "to": to}));
+        let (e, ms) = (".err.ps1", ".missing.ps1");
+        let mut listed = vec![
+            f(e, "Before-Fn", "err.ps1"),
+            f(e, "Before-Filter", "err.ps1"),
+            f(e, "Mid-Flow", "err.ps1"),
+            f(e, "After-Fn", "err.ps1"),
+            f(".err.ps1.BeforeClass", "Run", "err.ps1"),
+            f(".err.ps1.AfterClass", "new", "err.ps1"),
+            f(ms, "Miss-Before", "missing.ps1"),
+            f(ms, "Miss-After", "missing.ps1"),
+            f(".a_before.ps1", "Early", "a_before.ps1"),
+            edge("calls", ".err.ps1.Before-Fn", ".helper.ps1.Helper-Fn"),
+            edge(
+                "calls",
+                ".err.ps1.BeforeClass.Run",
+                ".err.ps1.BeforeClass.Run",
+            ),
+            edge("calls", ".err.ps1.Mid-Flow", ".err.ps1.Before-Fn"),
+            edge("calls", ".err.ps1.After-Fn", ".helper.ps1.Helper-Fn"),
+            edge(
+                "calls",
+                ".missing.ps1.Miss-After",
+                ".missing.ps1.Miss-Before",
+            ),
+            edge("calls", ".err.ps1.<script>", ".err.ps1.AfterClass.new"),
+            edge("calls", ".z_after.ps1.<script>", ".err.ps1.After-Fn"),
+            edge("calls", ".z_after.ps1.<script>", ".err.ps1.Mid-Flow"),
+            edge("calls", ".z_after.ps1.<script>", ".err.ps1.AfterClass.new"),
+            edge("uses", ".err.ps1.BeforeClass", ".helper.ps1.HelperBase"),
+            edge("uses", ".err.ps1.BeforeClass", ".err.ps1.BeforeEnum"),
+            edge("unresolved_call", ".err.ps1.Before-Fn", "Get-ChildItem"),
+            edge("unresolved_call", ".err.ps1.After-Fn", "git"),
+            edge(
+                "unresolved_call",
+                ".err.ps1.<script>",
+                "<nameless@err.ps1:#>",
+            ),
+            edge("unresolved_use", e, "<nameless@err.ps1:#>"),
+        ];
+        for (to, kind) in [
+            ("helper.ps1", "dot-source"),
+            ("mods/Dep/Dep.psd1", "import-module"),
+            ("mods/Dep/Dep.psm1", "import-module"),
+        ] {
+            listed.push(j(
+                json!({"type": "uses", "from": e, "to": to, "properties": {"kind": kind}}),
+            ));
+        }
+        for (fqn, cat) in [
+            ("Get-ChildItem", "stdlib"),
+            ("git", "external"),
+            ("Ext-Before", "external"),
+            ("Ext-Mid", "external"),
+            ("Ext-After", "external"),
+            ("<nameless@err.ps1:#>", "func-value"),
+            ("<nameless@err.ps1:#>", "unknown"),
+        ] {
+            listed.push(j(
+                json!({"type": "unresolved", "fqn": fqn, "category": cat}),
+            ));
+        }
+        for ext in ["Ext-Before", "Ext-Mid", "Ext-After"] {
+            listed.push(edge("unresolved_call", ".err.ps1.<script>", ext));
+        }
+        for l in &listed {
+            assert!(got.contains(l), "missing {l}\n{got:#?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn recovery_inside_region_skipped() {
+        // non-vacuous: the oracle puts the inside declarations and sites in the first region
+        let err = recovery_err(RECOVERY_BROKEN_1, RECOVERY_BROKEN_2);
+        let r = regions(&err);
+        assert!(
+            r.inside
+                .contains(&("function_definition", "Inside-Fn".to_string(), 0)),
+            "{r:?}"
+        );
+        assert!(
+            r.inside
+                .contains(&("class_definition", "InsideClass".to_string(), 0)),
+            "{r:?}"
+        );
+        for s in [". ./inside.ps1", "Import-Module InsideMod", "Inside-Cmd"] {
+            assert!(within(&span(&err, s), &r.errors[0].0), "{s:?}: {r:?}");
+        }
+        let (_dir, root, run) = recovery_scan("rec-inside", false, false);
+        assert!(run.ok, "{:?}", run.stderr);
+        let recs = records(&run.stdout);
+        for u in recs
+            .iter()
+            .filter(|u| matches!(str_of(u, "type"), "struct" | "function"))
+        {
+            assert!(
+                !["Inside-Fn", "InsideClass", "Go"].contains(&str_of(u, "name")),
+                "{u}"
+            );
+        }
+        let got = normalise_records(&recs, &root, false);
+        for l in &got {
+            for name in ["Inside-Fn", "InsideClass", "Inside-Cmd", "InsideMod"] {
+                assert!(!l.contains(name), "{l}");
+            }
+        }
+        let file = serde_json::json!({"type": "file", "path": "inside.ps1", "parent": ""});
+        assert!(got.contains(&file.to_string()), "{got:#?}");
+        for r in &recs {
+            assert!(
+                !(r["type"] == "uses" && str_of(r, "to") == format!("{root}/inside.ps1")),
+                "{r}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn recovery_utf16le_bom_matches_utf8() {
+        let (_a, root, utf8) = recovery_scan("rec-u8", false, false);
+        let (_b, wroot, wide) = recovery_scan("rec-wide", false, true);
+        assert!(utf8.ok, "{:?}", utf8.stderr);
+        assert!(wide.ok, "{:?}", wide.stderr);
+        assert_eq!(
+            by_kind(&normalise_records(&records(&wide.stdout), &wroot, true)),
+            by_kind(&normalise_records(&records(&utf8.stdout), &root, true))
+        );
+        let strip = |run: &Run, root: &str| -> Vec<String> {
+            let prefix = format!("{root}/");
+            run.stderr.iter().map(|l| l.replace(&prefix, "")).collect()
+        };
+        let lines = strip(&utf8, &root);
+        let errs = lines.iter().filter(|l| l.starts_with("ps: err.ps1:"));
+        assert_eq!(errs.count(), 2, "{lines:?}");
+        assert_eq!(strip(&wide, &wroot), lines);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn recovery_whole_file_region() {
+        // precondition: whole.ps1 is one ERROR root holding its earlier statements
+        let w = regions(WHOLE_PS1);
+        println!("whole.ps1 oracle: {w:?}");
+        assert_eq!(w.root, "ERROR", "{w:?}");
+        assert_eq!(w.errors.len(), 1, "{w:?}");
+        assert_eq!(w.errors[0].0, 0..WHOLE_PS1.len(), "{w:?}");
+        for s in [
+            ". ./a_first.ps1",
+            "Import-Module Dep",
+            "function Keep",
+            "Get-A",
+        ] {
+            assert!(within(&span(WHOLE_PS1, s), &w.errors[0].0), "{s:?}");
+        }
+        for (name, text) in WHOLE_OTHERS {
+            let r = regions(text);
+            assert_eq!(r.root, "source_file", "{name}: {r:?}");
+            assert!(r.errors.is_empty() && r.missing.is_empty(), "{name}: {r:?}");
+        }
+        let scan = |tag: &str, whole: bool| {
+            let dir = Scratch::new(tag);
+            for (name, text) in WHOLE_OTHERS {
+                dir.write(name, text.as_bytes());
+            }
+            if whole {
+                dir.write("whole.ps1", WHOLE_PS1.as_bytes());
+            }
+            let root = dir.root();
+            let run = psfrontend(&[&root]);
+            assert!(run.ok, "{:?}", run.stderr);
+            (dir, root, run)
+        };
+        let (_d, root, run) = scan("rec-whole", true);
+        let (l, c) = w.errors[0].1;
+        assert_eq!(
+            run.stderr,
+            [
+                format!("ps: {root}/whole.ps1:{l}:{c}: syntax error"),
+                "ps: 1 file had syntax errors".to_string()
+            ]
+        );
+        let got = normalise_records(&records(&run.stdout), &root, false);
+        let is_whole = |l: &String| {
+            let v: serde_json::Value = serde_json::from_str(l).expect("normalised JSON");
+            str_of(&v, "path") == "whole.ps1" || str_of(&v, "from").starts_with(".whole.ps1")
+        };
+        let mut whole: Vec<String> = got.iter().filter(|l| is_whole(l)).cloned().collect();
+        whole.sort();
+        let j = |v: serde_json::Value| v.to_string();
+        use serde_json::json;
+        let mut want = vec![
+            j(json!({"type": "file", "path": "whole.ps1", "parent": ""})),
+            j(json!({"type": "struct", "parent": "", "name": "whole.ps1", "path": "whole.ps1"})),
+            j(
+                json!({"type": "function", "parent": ".whole.ps1", "name": "<script>", "path": "whole.ps1"}),
+            ),
+            j(json!({"type": "contains", "from": ".whole.ps1", "to": ".whole.ps1.<script>"})),
+        ];
+        want.sort();
+        assert_eq!(whole, want);
+        // the scan continued past the whole-file region unaffected
+        let (_e, rroot, rest) = scan("rec-whole-rest", false);
+        assert_eq!(rest.stderr, ["ps: 0 files had syntax errors"]);
+        let others: Vec<String> = got.into_iter().filter(|l| !is_whole(l)).collect();
+        assert_eq!(
+            others,
+            normalise_records(&records(&rest.stdout), &rroot, false)
+        );
+        let late = json!({"type": "function", "parent": ".z_next.ps1", "name": "Late", "path": "z_next.ps1"});
+        assert!(others.contains(&late.to_string()), "{others:#?}");
     }
 }
