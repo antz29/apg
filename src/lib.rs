@@ -28,6 +28,7 @@ pub mod pipeline;
 pub mod plan_cmd;
 pub mod progress;
 pub mod project_cmd;
+pub mod ps;
 pub mod query;
 pub mod review_cmd;
 pub mod scan;
