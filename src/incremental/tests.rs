@@ -99,6 +99,16 @@ mod unit {
         assert_eq!(language_of("Legacy.SQLPROJ"), "xml");
         assert_eq!(language_of("q.sqlx"), "misc");
         assert_eq!(language_of("q.psql"), "misc");
+        // `.ps1`/`.psm1`/`.psd1` are the PowerShell frontend's claim in any
+        // case; near-miss extensions stay residual.
+        assert_eq!(language_of("build.ps1"), "ps");
+        assert_eq!(language_of("mod/Util.psm1"), "ps");
+        assert_eq!(language_of("mod/Mod.psd1"), "ps");
+        assert_eq!(language_of("LEGACY.PS1"), "ps");
+        assert_eq!(language_of("x/Y.Psm1"), "ps");
+        assert_eq!(language_of("Z.PSD1"), "ps");
+        assert_eq!(language_of("x.ps"), "misc");
+        assert_eq!(language_of("x.ps1xml"), "misc");
         assert_eq!(language_of("App.sln"), "sln");
         assert_eq!(language_of("Legacy.SLN"), "sln");
         assert_eq!(language_of("Dockerfile"), "dockerfile");
