@@ -2100,7 +2100,8 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
                     && graph
                         .edge_properties
                         .get(&("uses", a.clone(), b.clone()))
-                        .is_some_and(|p| p.get("kind").map(String::as_str) == Some("copy"))))
+                        .and_then(|p| p.get("kind"))
+                        .is_some_and(|k| k == "copy" || crate::ps::is_file_edge_kind(k))))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)

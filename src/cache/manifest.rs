@@ -29,8 +29,13 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// that records the scaffolding before any reuse can happen. v3: Struct→File
 /// kind=copy `uses` edges are admitted, so `2` projections lack them. v4: a
 /// stored `FragEdge` carries the `uses` edge properties, so a `3` unit, whose
-/// `uses` edges load property-less, never composes.
-pub const PROJECTION_RULES_VERSION: &str = "4";
+/// `uses` edges load property-less, never composes. v5: Struct→File `uses`
+/// edges of kind dot-source and import-module are admitted and
+/// .ps1/.psm1/.psd1 files are claimed by the ps stream rather than the
+/// structural misc stream, so a `4` projection lacks the ps file edges and
+/// holds misc units for PowerShell files (the cache-key token changes, older
+/// units miss and one correctness full scan re-records them).
+pub const PROJECTION_RULES_VERSION: &str = "5";
 
 /// The scan config identity folded into the global cache key: the exact set of
 /// languages, path excludes, and module restrictions a scan ran with, plus the
