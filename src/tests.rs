@@ -500,4 +500,74 @@ mod unit {
     }
 }
 
+/// An in-memory manifest holding `paths` (OIDs irrelevant to widening).
+fn ps_manifest(paths: &[&str]) -> cache::Manifest {
+    cache::Manifest {
+        root: String::new(),
+        entries: paths
+            .iter()
+            .map(|p| (p.to_string(), "oid".to_string()))
+            .collect(),
+    }
+}
+
+/// Owned target set from string literals.
+fn set_of(paths: &[&str]) -> BTreeSet<String> {
+    paths.iter().map(|p| p.to_string()).collect()
+}
+
+/// The manifest the `ps::widen_targets` int tests share.
+const PS_MANIFEST: &[&str] = &[
+    "build.ps1",
+    "LEGACY.PS1",
+    "sub/Util.Psm1",
+    "data/Settings.psd1",
+    "a.go",
+    "README.md",
+    "x.ps1xml",
+];
+
+/// int tier -- two or more units wired together, still pure in-memory.
+mod int {
+    use super::*;
+
+    /// `ps::widen_targets` (with the real `incremental::language_of`) leaves a
+    /// set holding no ps file exactly as given, the empty set included.
+    #[test]
+    fn ps_widen_targets_leaves_a_ps_free_set_unchanged() {
+        let manifest = ps_manifest(PS_MANIFEST);
+        for given in [set_of(&["a.go", "README.md"]), set_of(&[])] {
+            let mut targets = given.clone();
+            ps::widen_targets(&mut targets, &manifest);
+            assert_eq!(targets, given);
+        }
+    }
+
+    /// One ps target widens to every manifest ps file in any letter case;
+    /// non-ps targets and a deleted ps path absent from the manifest are kept,
+    /// and no non-ps manifest file (nor `x.ps1xml`) is added.
+    #[test]
+    fn ps_widen_targets_widens_one_ps_file_to_every_manifest_ps_file() {
+        let manifest = ps_manifest(PS_MANIFEST);
+        let ps_files = [
+            "build.ps1",
+            "LEGACY.PS1",
+            "sub/Util.Psm1",
+            "data/Settings.psd1",
+        ];
+
+        let mut targets = set_of(&["a.go", "sub/Util.Psm1"]);
+        ps::widen_targets(&mut targets, &manifest);
+        let mut want = set_of(&ps_files);
+        want.insert("a.go".to_string());
+        assert_eq!(targets, want);
+
+        let mut targets = set_of(&["gone.ps1"]);
+        ps::widen_targets(&mut targets, &manifest);
+        let mut want = set_of(&ps_files);
+        want.insert("gone.ps1".to_string());
+        assert_eq!(targets, want);
+    }
+}
+
 // -----------------------------------------------------------------------
