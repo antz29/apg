@@ -20,6 +20,58 @@ fn put(g: &mut Graph, fqn: &str, kind: NodeKind, path: &str) {
     g.nodes.insert(fqn.to_string(), node(kind, path));
 }
 
+/// The mixed rust/py/ps overload fixture; `ps_f` is the unique-form `//`
+/// function in `/r/a/b.ps1` (renamed between graphs by the rename test).
+fn mixed_overload_graph(ps_f: &str) -> Graph {
+    let mut g = Graph::default();
+    for (fqn, path) in [
+        ("rust.apg.x.f", "/r/src/x.rs"),
+        ("rust.apg.T.m(i32)", "/r/src/x.rs"),
+        ("py.pkg.mod.g", "/r/pkg/mod.py"),
+        ("ps.m.s.ps1.C.M(int)//d.(x)/c.ps1:3", "/r/d.(x)/c.ps1"),
+        ("ps..s.ps1.F//a.b/c.ps1:3", "/r/a.b/c.ps1"),
+        ("ps.m.s.ps1.C.M", "/r/m/s.ps1"),
+        (ps_f, "/r/a/b.ps1"),
+    ] {
+        put(&mut g, fqn, NodeKind::Function, path);
+    }
+    g
+}
+
+fn is_ps_root(s: &str) -> bool {
+    s == "ps" || s.starts_with("ps.")
+}
+
+/// Asserts the ps/non-ps overload scopes and peer files never cross languages.
+fn assert_ps_peers_sound(idx: &crate::impact::OverloadIndex, ps_files: &[&str]) {
+    let (ps, other): (Vec<_>, Vec<_>) = idx
+        .scopes
+        .iter()
+        .partition(|(_, fqns)| fqns.iter().any(|f| f.starts_with("ps.")));
+    assert!(!ps.is_empty() && !other.is_empty());
+    for (scope, _) in &ps {
+        assert!(is_ps_root(scope), "ps scope {scope} is not ps-rooted");
+        assert!(
+            other.iter().all(|(o, _)| o != scope),
+            "ps scope {scope} collides with a non-ps scope"
+        );
+    }
+    for f in ps_files {
+        let peers = idx.peer_files(f);
+        assert!(peers.contains(*f), "{f} must be its own peer");
+        for p in &peers {
+            assert_eq!(crate::incremental::language_of(p), "ps", "{f} peer {p}");
+        }
+    }
+    for f in ["src/x.rs", "pkg/mod.py"] {
+        let peers = idx.peer_files(f);
+        assert!(peers.contains(f));
+        for p in &peers {
+            assert_ne!(crate::incremental::language_of(p), "ps", "{f} peer {p}");
+        }
+    }
+}
+
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 /// (This module has no e2e test: every test operates on in-memory graphs, so
 /// no `e2e` submodule exists.)
@@ -137,5 +189,30 @@ mod unit {
         let mut new2 = Graph::default();
         put(&mut new2, "m.C.foo(int)", NodeKind::Function, "/r/a.go");
         assert!(!signature_unchanged(&old2, &new2, "/r/a.go"));
+    }
+
+    #[test]
+    fn ps_overload_scopes_are_ps_rooted_and_disjoint() {
+        // overload_key's plain string split may mis-parent a ps FQN (a `(`
+        // or `.` inside the `//` suffix); that is sound while every derived
+        // scope stays ps-rooted and so never meets a rust/py scope.
+        let g = mixed_overload_graph("ps.a/b.ps1//a/b.ps1.F");
+        let idx = OverloadIndex::from_graph(&g, std::path::Path::new("/r"));
+        assert_ps_peers_sound(&idx, &["d.(x)/c.ps1", "a.b/c.ps1", "m/s.ps1", "a/b.ps1"]);
+    }
+
+    #[test]
+    fn ps_renamed_function_scopes_stay_ps_rooted_across_graphs() {
+        for f in ["ps.a/b.ps1//a/b.ps1.F", "ps.a/b.ps1//a/b.ps1.G"] {
+            let g = mixed_overload_graph(f);
+            let idx = OverloadIndex::from_graph(&g, std::path::Path::new("/r"));
+            let (scope, _) = idx
+                .scopes
+                .iter()
+                .find(|(_, fqns)| fqns.iter().any(|x| x == f))
+                .expect("renamed function has a scope");
+            assert!(is_ps_root(scope), "{f} scope {scope}");
+            assert_ps_peers_sound(&idx, &["a/b.ps1"]);
+        }
     }
 }
