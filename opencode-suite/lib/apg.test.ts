@@ -951,3 +951,10 @@ test("apg_scan lists sql as a language", async () => {
   const tool = await registeredTool(apgScan)
   expect(tool.input?.properties?.language?.description ?? "").toMatch(/[:,]\s*sql\s*,/)
 })
+
+// powershell-frontend P7 task-13: the `apg_scan` language list names `ps` as a
+// comma-delimited id, so a substring of another word cannot satisfy it.
+test("apg_scan lists ps as a language", async () => {
+  const tool = await registeredTool(apgScan)
+  expect(tool.input?.properties?.language?.description ?? "").toContain("ps,")
+})
