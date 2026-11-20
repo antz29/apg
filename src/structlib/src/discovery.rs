@@ -28,13 +28,14 @@ const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"]
 /// (`cs csx cshtml razor`), C++'s sources and headers
 /// (`cpp cc cxx c++ h hpp hh hxx tpp ipp`), and the unified JS/TS module
 /// variants (`ts tsx mts cts js jsx mjs cjs`), the COBOL frontend's
-/// (`cob cbl cobol cpy`), and the SQL frontend's (`sql`). `.c` is deliberately absent —
+/// (`cob cbl cobol cpy`), the SQL frontend's (`sql`), and the PowerShell
+/// frontend's (`ps1 psm1 psd1`). `.c` is deliberately absent —
 /// the C++ frontend does not claim it, so a tracked `.c` file falls to the
 /// residual `misc` stream.
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp", "ts",
     "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor", "py", "pyi",
-    "cob", "cbl", "cobol", "cpy", "sql",
+    "cob", "cbl", "cobol", "cpy", "sql", "ps1", "psm1", "psd1",
 ];
 
 /// Reads the pinned `--targets` list: absolute source paths, one per line,
