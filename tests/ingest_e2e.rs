@@ -3126,6 +3126,189 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// PowerShell `dot-source` / `import-module` uses targets are absolute
+    /// script/module paths that must land as unrooted repo-relative File
+    /// identities (never `ps.`-rooted), keeping their properties, whatever the
+    /// opaque id prefix.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn ps_file_edge_uses_targets_survive_unrooted() {
+        let base = std::env::temp_dir().join(format!("apg-ps-file-edge-{}", std::process::id()));
+        let base_str = base.to_string_lossy().into_owned();
+        let main = base.join("main.ps1").to_string_lossy().into_owned();
+        let util = base
+            .join("lib")
+            .join("util.ps1")
+            .to_string_lossy()
+            .into_owned();
+        let foo = base
+            .join("mods")
+            .join("Foo")
+            .join("Foo.psm1")
+            .to_string_lossy()
+            .into_owned();
+        let kind = |k: &str| -> NodeProperties {
+            [("kind".to_string(), k.to_string())].into_iter().collect()
+        };
+        let run = |id: &str| {
+            let records = vec![
+                Record::LangSwitch {
+                    language: "ps".to_string(),
+                },
+                Record::Module { fqn: String::new() },
+                file_rec(&main, "", 10),
+                file_rec(&util, "", 5),
+                file_rec(&foo, "", 7),
+                srec(id, "", "main.ps1", &main),
+                Record::Uses {
+                    from: id.to_string(),
+                    to: util.clone(),
+                    properties: kind("dot-source"),
+                },
+                Record::Uses {
+                    from: id.to_string(),
+                    to: foo.clone(),
+                    properties: kind("import-module"),
+                },
+            ];
+            ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "ps",
+                    config: None,
+                    base: Some(base.as_path()),
+                },
+                None,
+            )
+        };
+        let (graph, report) = run("ps1");
+        assert_eq!(report.skipped, 0);
+        let script = "ps..main.ps1".to_string();
+        for (target, k) in [
+            ("lib/util.ps1", "dot-source"),
+            ("mods/Foo/Foo.psm1", "import-module"),
+        ] {
+            let edge = (script.clone(), target.to_string());
+            assert!(
+                graph.uses.contains(&edge),
+                "the kind={k} uses must survive as Struct->File: {:?}",
+                graph.uses
+            );
+            assert_eq!(
+                graph
+                    .edge_properties
+                    .get(&("uses", edge.0.clone(), edge.1.clone())),
+                Some(&kind(k)),
+                "the surviving {k} edge keeps its properties"
+            );
+        }
+        let leaked = |s: &str| {
+            ["ps.lib/", "ps..lib/", "ps.mods/"]
+                .iter()
+                .any(|p| s.starts_with(p))
+                || s.contains(&base_str)
+        };
+        let endpoints: Vec<&String> = graph
+            .nodes
+            .keys()
+            .chain(
+                graph
+                    .contains
+                    .iter()
+                    .chain(&graph.uses)
+                    .chain(&graph.calls)
+                    .flat_map(|(a, b)| [a, b]),
+            )
+            .collect();
+        assert!(
+            !endpoints.iter().any(|s| leaked(s)),
+            "no File target may be ps-rooted or absolute: {endpoints:?}"
+        );
+        // The single-language default opaque prefix (`n1`) yields the same graph.
+        let (again, again_report) = run("n1");
+        assert_eq!(again_report.skipped, 0);
+        let shape = |g: &apg::graph::Graph| {
+            let mut nodes: Vec<(String, NodeKind)> =
+                g.nodes.iter().map(|(k, n)| (k.clone(), n.kind)).collect();
+            nodes.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut props: Vec<_> = g
+                .edge_properties
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            props.sort_by(|a, b| a.0.cmp(&b.0));
+            (nodes, g.contains.clone(), g.uses.clone(), props)
+        };
+        assert_eq!(shape(&again), shape(&graph));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A ps Struct→File `Uses` whose kind is absent, unknown, or not the exact
+    /// lowercase file-edge kind is dropped; an ordinary Struct→Struct `Uses` stays.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+    fn ps_non_file_edge_struct_to_file_uses_is_dropped() {
+        let base = std::env::temp_dir().join(format!("apg-ps-nonfile-{}", std::process::id()));
+        let main = base.join("main.ps1").to_string_lossy().into_owned();
+        let other = base.join("other.ps1").to_string_lossy().into_owned();
+        let util = base
+            .join("lib")
+            .join("util.ps1")
+            .to_string_lossy()
+            .into_owned();
+        for kind in [None, Some("other"), Some("Dot-Source")] {
+            let properties: NodeProperties = kind
+                .map(|k| ("kind".to_string(), k.to_string()))
+                .into_iter()
+                .collect();
+            let records = vec![
+                Record::LangSwitch {
+                    language: "ps".to_string(),
+                },
+                Record::Module { fqn: String::new() },
+                file_rec(&main, "", 10),
+                file_rec(&other, "", 8),
+                file_rec(&util, "", 5),
+                srec("ps1", "", "main.ps1", &main),
+                srec("ps2", "", "other.ps1", &other),
+                Record::Uses {
+                    from: "ps1".to_string(),
+                    to: util.clone(),
+                    properties,
+                },
+                Record::Uses {
+                    from: "ps1".to_string(),
+                    to: "ps2".to_string(),
+                    properties: Default::default(),
+                },
+            ];
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "ps",
+                    config: None,
+                    base: Some(base.as_path()),
+                },
+                None,
+            );
+            assert!(
+                graph.uses.iter().all(|(_, b)| b != "lib/util.ps1"),
+                "a ps Struct→File Uses with kind {kind:?} must be dropped: {:?}",
+                graph.uses
+            );
+            assert!(
+                graph
+                    .uses
+                    .contains(&("ps..main.ps1".to_string(), "ps..other.ps1".to_string())),
+                "an ordinary ps Struct→Struct Uses must be kept ({kind:?}): {:?}",
+                graph.uses
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn namespace_less_csharp_file_is_contained_by_its_language() {
