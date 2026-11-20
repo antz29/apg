@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "apg-scan-unresolved-directory",
+  "body": "The apg_scan tool's execute resolves its scan directory as `input.directory ?? (findProjectRoot(...) ?? input.directory)` and passes it to `Bun.spawn` typed `dir as string`: when neither a project root (a directory holding apg/.trans or apg/config.json) nor `input.directory` resolves, `dir` is undefined and reaches the spawned `apg scan` argv and its cwd unchecked. Upgrade to an explicit \"no project root found — pass `directory`\" error returned before spawning, the next time the tool's runtime behaviour may change.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/tools/apg_scan.ts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
