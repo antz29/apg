@@ -202,6 +202,17 @@ fn is_cobol_opaque_id(endpoint: &str) -> bool {
         .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// A psfrontend opaque record id: `ps<digits>` (the merged-scan `--id-prefix`)
+/// or `n<digits>` (its default prefix in a single-language scan). No ps
+/// identity key has that shape, so it is never rendered `ps.<id>`.
+fn is_ps_opaque_id(endpoint: &str) -> bool {
+    ["ps", "n"].iter().any(|p| {
+        endpoint
+            .strip_prefix(p)
+            .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
 /// Roots a `contains` endpoint iff it is a known module identity (the frontends
 /// emit `Module -> Module` containment with the raw identity endpoints, while
 /// declaration containment uses opaque ids this must never rewrite). Module
@@ -213,6 +224,11 @@ pub(crate) fn root_module_endpoint(
     module_identities: &HashMap<String, HashSet<String>>,
     base: &Path,
 ) -> String {
+    // psfrontend emits no Module->Module contains: a module named `ps1`/`n3`
+    // must not re-root an opaque id.
+    if language == "ps" && is_ps_opaque_id(endpoint) {
+        return endpoint.to_string();
+    }
     match module_identities.get(language) {
         Some(ids) if ids.contains(endpoint) => root_module_fqn(language, endpoint, base),
         _ => endpoint.to_string(),
@@ -233,6 +249,13 @@ pub(crate) fn root_edge_endpoint(
     module_identities: &HashMap<String, HashSet<String>>,
     base: &Path,
 ) -> String {
+    // A ps `--targets` endpoint is already its full identity key: root it verbatim.
+    if language == "ps" {
+        if is_ps_opaque_id(endpoint) {
+            return endpoint.to_string();
+        }
+        return format!("ps.{endpoint}");
+    }
     let Some(identities) = module_identities.get(language) else {
         return endpoint.to_string();
     };
