@@ -683,43 +683,15 @@ fn java_sources() -> Vec<PathBuf> {
 
 /// C# frontend (Roslyn, published as self-contained single-file).
 fn stage_csharp(out_dir: &str, stage_dir: &Path) -> Vec<String> {
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-
-    let rid = csharp_rid();
-
-    let cs_dist = Path::new(out_dir).join("csharp-dist");
-    let mut cmd = Command::new("dotnet");
-    cmd.arg("publish")
-        .arg("src/csharplib/CsharpFrontend.csproj")
-        .arg("-c")
-        .arg("Release")
-        .arg("-r")
-        .arg(rid)
-        .arg("--self-contained")
-        .arg("true")
-        .arg("-p:PublishSingleFile=true")
-        .arg("-p:PublishReadyToRun=true")
-        .arg("-o")
-        .arg(cs_dist.to_str().unwrap());
-
-    let exe_name = if target_os == "windows" {
-        "csharpfrontend.exe"
-    } else {
-        "csharpfrontend"
-    };
-    let csharpfrontend = cs_dist.join(exe_name);
-
-    let cs_ok = cmd.status().is_ok_and(|s| s.success()) && csharpfrontend.exists();
-    if cs_ok {
-        println!(
-            "cargo:rustc-env=APG_FRONTEND_CSHARP={}",
-            csharpfrontend.display()
-        );
-        let _ = std::fs::copy(&csharpfrontend, stage_dir.join(exe_name));
-        return vec!["csharp".into()];
-    }
-
-    Vec::new()
+    stage_dotnet_frontend(
+        out_dir,
+        stage_dir,
+        "src/csharplib/CsharpFrontend.csproj",
+        "csharp-dist",
+        "csharpfrontend",
+        "APG_FRONTEND_CSHARP",
+        "csharp",
+    )
 }
 
 /// T-SQL frontend (ScriptDom, published as self-contained single-file, untrimmed).
