@@ -17,9 +17,9 @@
 # cannot be rewritten beneath any other agent that is running it.
 #
 # USAGE
-#   scripts/gate.sh          # actionlint, Formula ruby -c, fmt --check, check,
-#                            # clippy, build, test, suite deps, bun test,
-#                            # node --test
+#   scripts/gate.sh          # actionlint, Formula ruby -c, shell -n, fmt --check,
+#                            # check, clippy, build, test, suite deps, suite
+#                            # tsc --noEmit, bun test, node --test
 #   scripts/gate.sh --e2e    # ... then the e2e tier (opt-in): the cargo e2e
 #                            #     tests AND the opencode-suite boundary e2e
 #                            #     (scratch /tmp repos only, never a real project)
@@ -36,11 +36,18 @@
 # check. The step runs with `-shellcheck=` because actionlint's shellcheck
 # integration depends on another ambient binary, so the same tree would pass or
 # fail per machine; the workflow structure, expressions and YAML are what this
-# gate validates (embedded-script style stays a review concern). The
+# gate validates (embedded-script style stays a review concern). The shell
+# step parses (`-n`, never executes) `install.sh` and every `scripts/*.sh` with
+# the shell its first-line shebang names — `sh` for `#!/bin/sh`, `bash` for a
+# bash shebang — and fails on any other shebang, naming the file. The
 # `opencode-suite/node_modules` bootstrap installs from the committed
 # `opencode-suite/bun.lock` (`--frozen-lockfile`) only when the directory is
-# absent — the cold path, a fresh worktree — and skips the install when it is
-# present, so gate-time network exposure is bounded to that first run.
+# absent or lacks the type-check toolchain (`node_modules/.bin/tsc` not
+# executable, or `node_modules/@types/bun` absent) — the cold path, a fresh or
+# pre-toolchain worktree — and skips the install when the toolchain is present,
+# so gate-time network exposure is bounded to that first run. The type-check
+# step then runs the suite-local `tsc --noEmit -p tsconfig.json` (typescript
+# 5.9.3 from `opencode-suite/node_modules`, never bunx/npx or src/tslib's).
 #
 # `cargo test` here is the repo's DEFAULT suite. Since the test-tier split it is
 # the unit+int tiers only, seconds-fast; the e2e tests are `#[ignore]`d and are
@@ -58,12 +65,14 @@ BIN="$PWD/target/debug/apg"
 STEPS=(
   "actionlint   (.github/workflows/*.yml)"
   "ruby -c   (Formula/*.rb)"
+  "shell -n   (install.sh, scripts/*.sh; by shebang)"
   "cargo fmt --check   (cargo fmt fixes)"
   "cargo check --all-targets"
   "cargo clippy --all-targets -- -D warnings"
   "cargo build"
   "cargo test   (default suite: unit+int)"
-  "opencode-suite deps   (bootstrap from bun.lock when absent)"
+  "opencode-suite deps   (bootstrap from bun.lock when absent or lacking tsc/@types/bun)"
+  "tsc --noEmit   (opencode-suite: suite-local typescript)"
   "bun test   (opencode-suite: bun)"
   "node --test   (src/tslib: node)"
 )
@@ -116,6 +125,19 @@ for formula in Formula/*.rb; do
 done
 
 step
+for f in install.sh scripts/*.sh; do
+  IFS= read -r shebang <"$f" || shebang=
+  case "$shebang" in
+    '#!/bin/sh') sh -n "$f" ;;
+    '#!/bin/bash' | '#!/usr/bin/env bash') bash -n "$f" ;;
+    *)
+      printf '%s: unsupported shebang %s — no syntax checker\n' "$f" "${shebang:-(none)}" >&2
+      exit 1
+      ;;
+  esac
+done
+
+step
 cargo fmt --check
 
 step
@@ -131,12 +153,15 @@ step
 cargo test
 
 step
-if [ -d opencode-suite/node_modules ]; then
-  printf 'opencode-suite/node_modules present — skipping install\n'
-  skipped "node_modules present"
+if [ -x opencode-suite/node_modules/.bin/tsc ] && [ -d opencode-suite/node_modules/@types/bun ]; then
+  printf 'opencode-suite/node_modules has the type-check toolchain — skipping install\n'
+  skipped "toolchain present"
 else
   (cd opencode-suite && bun install --frozen-lockfile)
 fi
+
+step
+(cd opencode-suite && node_modules/.bin/tsc --noEmit -p tsconfig.json)
 
 step
 (cd opencode-suite && bun test)
