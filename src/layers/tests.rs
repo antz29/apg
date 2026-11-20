@@ -895,7 +895,7 @@ mod unit {
     /// implementation constraint to a scan Language identity is accepted (a
     /// structural-stream id such as `sh` included), while a non-implementation
     /// source, an authored-node target or another code FQN is refused (every
-    /// target must be one of the twenty-two `LANGUAGE_ROOTS`).
+    /// target must be one of the twenty-three `LANGUAGE_ROOTS`).
     #[test]
     fn edge_kind_matrix_is_complete_and_consistent() {
         let exempt = ["implemented-by", "details", "applies-to"];
@@ -1576,8 +1576,8 @@ mod unit {
     /// `code_identity` strips exactly ONE leading language root — every root in
     /// `LANGUAGE_ROOTS`, a bare FQN unchanged, and only a real `<root>.`
     /// boundary (so `rusty.main` is never mangled). `LANGUAGE_ROOTS` is the
-    /// complete `available_languages` vocabulary (twenty-two ids: the code/agent
-    /// ids including `cobol` and `sql`, plus the structural streams, `md` included):
+    /// complete `available_languages` vocabulary (twenty-three ids: the code/agent
+    /// ids including `cobol`, `sql` and `ps`, plus the structural streams, `md` included):
     /// `agent` is a member and `agent.<file-stem>` strips to the bare stem
     /// exactly once, and a structural root strips the same way.
     #[test]
@@ -1586,11 +1586,12 @@ mod unit {
             LANGUAGE_ROOTS.contains(&"agent")
                 && LANGUAGE_ROOTS.contains(&"cobol")
                 && LANGUAGE_ROOTS.contains(&"sql")
+                && LANGUAGE_ROOTS.contains(&"ps")
                 && LANGUAGE_ROOTS.contains(&"sh")
                 && LANGUAGE_ROOTS.contains(&"misc")
                 && LANGUAGE_ROOTS.contains(&"sln")
-                && LANGUAGE_ROOTS.len() == 22,
-            "LANGUAGE_ROOTS must carry the twenty-two available_languages ids: {LANGUAGE_ROOTS:?}"
+                && LANGUAGE_ROOTS.len() == 23,
+            "LANGUAGE_ROOTS must carry the twenty-three available_languages ids: {LANGUAGE_ROOTS:?}"
         );
         for root in LANGUAGE_ROOTS {
             assert_eq!(
@@ -1610,6 +1611,8 @@ mod unit {
         // The `sln` solution root strips exactly once, like any other root.
         assert_eq!(code_identity("sln.something"), "something");
         assert_eq!(code_identity("sln.sln.x"), "sln.x");
+        // The PowerShell root strips exactly once, leaving the module path.
+        assert_eq!(code_identity("ps.a/b.ps1"), "a/b.ps1");
         assert_eq!(code_identity("apg.cmd_scan"), "apg.cmd_scan");
         assert_eq!(code_identity("/abs/store.go"), "/abs/store.go");
         // ONE root only, and only a real `<root>.` boundary.
