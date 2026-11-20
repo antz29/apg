@@ -1205,6 +1205,112 @@ fn sql_uses_rows(dir: &Path, home: &str) -> Vec<String> {
     )
 }
 
+/// The whole code graph of `dir`'s scanned `db.lbug`: the code oracle minus
+/// its per-scan `Scan` row, plus each Struct/Function/File node's line span.
+fn located_code_graph(dir: &Path) -> BTreeSet<String> {
+    let db = Database::new(
+        dir.join("apg/.trans/db.lbug"),
+        SystemConfig::default().read_only(true),
+    )
+    .unwrap();
+    let mut out = code_snapshot(&db);
+    out.retain(|l| !l.starts_with("Scan:"));
+    let conn = Connection::new(&db).unwrap();
+    for label in ["Struct", "Function", "File"] {
+        let (_, rows) = query_rows(
+            &conn,
+            &format!("MATCH (n:{label}) RETURN n.fqn, n.start_line, n.end_line"),
+        )
+        .unwrap();
+        for row in rows {
+            out.insert(format!(
+                "{label}@{}:{}-{}",
+                cell(&row, 0),
+                cell(&row, 1),
+                cell(&row, 2)
+            ));
+        }
+    }
+    out
+}
+
+/// The code-node labels `graph` (a [`located_code_graph`]) holds at `fqn`.
+fn labels_at(graph: &BTreeSet<String>, fqn: &str) -> Vec<&'static str> {
+    ["Module", "Struct", "Function", "File"]
+        .into_iter()
+        .filter(|l| graph.contains(&format!("{l}:{fqn}:")))
+        .collect()
+}
+
+/// Scratch ps repo (`files`, `apg init` committed, full main scan, project
+/// `demo` started); in the worktree, adding+committing `added` moves `fqn`
+/// from label `old` to `new`. The spliced re-scan must leave only `new` at
+/// `fqn` and equal an `apg scan . --force` of the same tree.
+fn ps_label_change_splices_like_force(
+    tag: &str,
+    files: &[(&str, &str)],
+    added: (&str, &str),
+    fqn: &str,
+    old: &str,
+    new: &str,
+) {
+    let repo = apg::testutil::Repo::new(tag);
+    let home = sibling_home(&repo, tag);
+    let home_s = home.to_str().unwrap();
+    for (rel, text) in files {
+        repo.write(rel, text);
+    }
+    repo.commit_all("ps fixture");
+    apg_ok(&repo.root, home_s, &["init", "."]);
+    repo.commit_all("apg init");
+    apg_ok(&repo.root, home_s, &["scan", "."]);
+    apg_ok(&repo.root, home_s, &["project", "start", "demo"]);
+    let wt = repo.root.join("apg/.worktrees/demo");
+    // The splice success line, never a fallback's `[load] splice:` line.
+    let spliced = |out: std::process::Output| {
+        String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .any(|l| l.contains("[load]") && l.trim_end().ends_with("full load skipped"))
+    };
+
+    let before = located_code_graph(&wt);
+    assert_eq!(
+        labels_at(&before, fqn),
+        [old],
+        "precondition: {fqn} is a {old} before the change"
+    );
+
+    let path = wt.join(added.0);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, added.1).unwrap();
+    apg::testutil::wt_commit(&wt, &[added.0], "label-changing add");
+    assert!(
+        spliced(apg_ok(&wt, home_s, &["scan", "."])),
+        "the incremental re-scan must splice"
+    );
+    let after = located_code_graph(&wt);
+    assert_eq!(
+        labels_at(&after, fqn),
+        [new],
+        "after the splice {fqn} is one {new} node, no stale {old}"
+    );
+
+    assert!(
+        !spliced(apg_ok(&wt, home_s, &["scan", ".", "--force"])),
+        "--force must full-rebuild"
+    );
+    let full = located_code_graph(&wt);
+    assert_eq!(
+        after.difference(&full).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "spliced-only rows (a --force rebuild lacks them)"
+    );
+    assert_eq!(after, full, "the spliced code graph equals --force");
+
+    let _ = std::fs::remove_dir_all(&repo.root);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files
 /// and writes node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -7675,5 +7781,39 @@ mod e2e {
         assert!(c2.contains("Contains:csharp->cs/Top.cs"), "{c2:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Task 8.22: `function ps1.C` in `f/b.ps1` holds `ps.f.b.ps1.ps1.C`;
+    /// the new `f/b.ps1.ps1` declares `class C`, so the FQN becomes a Struct
+    /// and the function re-renders to its `//f/b.ps1` form. The splice must
+    /// drop the old Function row (the pre-task-21 splice kept it).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
+    fn ps_function_to_struct_label_change_splices_like_a_full_rebuild() {
+        ps_label_change_splices_like_force(
+            "ps-label-fn-struct",
+            &[("f/b.ps1", "function ps1.C {\n    'c'\n}\n")],
+            ("f/b.ps1.ps1", "class C {\n}\n"),
+            "ps.f.b.ps1.ps1.C",
+            "Function",
+            "Struct",
+        );
+    }
+
+    /// Task 8.22: script `s/b.ps1` is Struct `ps.s.b.ps1`; a `.ps1` in the new
+    /// directory `s.b.ps1/` renders directory Module `ps.s.b.ps1`, and the
+    /// script Struct takes its unique `//` form. The splice must drop the old
+    /// Struct row (the pre-task-21 splice kept it).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
+    fn ps_struct_to_module_label_change_splices_like_a_full_rebuild() {
+        ps_label_change_splices_like_force(
+            "ps-label-struct-module",
+            &[("s/b.ps1", "function Get-S {\n    's'\n}\n")],
+            ("s.b.ps1/x.ps1", "Get-A\n"),
+            "ps.s.b.ps1",
+            "Struct",
+            "Module",
+        );
     }
 }
