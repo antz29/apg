@@ -134,7 +134,14 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
 /// `py.apg`), so a cross-language module-module FQN collision is impossible by
 /// construction. Every declaration's scope parent begins with a module identity,
 /// so `parent.name` inherits the root without a second transform.
+///
+/// PowerShell is rendered verbatim: psfrontend emits each module identity as
+/// its identity key, so the ingestor prefixes `ps.` with no path normalisation
+/// (no `//` collapse, no `..` pop) — the empty root identity renders `ps.`.
 pub fn root_module_fqn(language: &str, identity: &str, base: &Path) -> String {
+    if language == "ps" {
+        return format!("ps.{identity}");
+    }
     format!("{language}.{}", repo_relative_identity(base, identity))
 }
 
@@ -157,12 +164,18 @@ fn has_module_prefix(identities: &HashSet<String>, name: &str) -> bool {
 /// csharp is the other exception: a global-namespace type is declared with an
 /// empty parent and roots at the bare `csharp` Language id (`csharp.Alpha`,
 /// never `csharp..Alpha`), the same parent a namespace-less file hangs off.
+/// PowerShell bypasses all of the above: psfrontend emits every scope parent as
+/// its identity key, rendered `ps.` + key verbatim — an empty parent is the
+/// root module `ps.`, and a root-level key `.build.ps1` renders `ps..build.ps1`.
 pub(crate) fn rooted_scope(
     language: &str,
     parent: &str,
     module_identities: &HashMap<String, HashSet<String>>,
     base: &Path,
 ) -> String {
+    if language == "ps" {
+        return format!("ps.{parent}");
+    }
     if parent.is_empty() && language == "csharp" {
         return language.to_string();
     }
