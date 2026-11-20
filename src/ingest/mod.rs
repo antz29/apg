@@ -1339,9 +1339,12 @@ fn ingest_records(
                     to,
                     properties,
                 } => {
-                    // A COBOL COPY target is a copybook File identity, not a symbol: leave it unrooted.
-                    let copy = properties.get("kind").map(String::as_str) == Some("copy");
-                    let to = if copy {
+                    // A COBOL COPY copybook or a PowerShell dot-source / import-module
+                    // target is a File identity, not a symbol: leave it unrooted.
+                    let file_edge = properties
+                        .get("kind")
+                        .is_some_and(|k| k == "copy" || crate::ps::is_file_edge_kind(k));
+                    let to = if file_edge {
                         to
                     } else {
                         root_stream_edge_endpoint(
@@ -1614,11 +1617,14 @@ fn ingest_records(
                     to,
                     properties,
                 } => {
-                    // A COBOL COPY target is an absolute copybook path: render it
-                    // to the same repo-relative File identity Record::File uses.
-                    let copy = properties.get("kind").map(String::as_str) == Some("copy");
+                    // A COBOL COPY copybook or a PowerShell dot-source / import-module
+                    // target is an absolute File path: render it to the same
+                    // repo-relative File identity Record::File uses.
+                    let file_edge = properties
+                        .get("kind")
+                        .is_some_and(|k| k == "copy" || crate::ps::is_file_edge_kind(k));
                     let a = resolve(&from);
-                    let b = if copy {
+                    let b = if file_edge {
                         repo_relative_identity(base, &to)
                     } else {
                         resolve(&to)
