@@ -237,9 +237,11 @@ const PY_DETECTOR_SKIP: &[&str] = &[
 
 /// True when extension `ext` (no leading dot) is one of `exts` (each with its
 /// leading dot). `case_insensitive` ignores letter case; otherwise it is exact.
-/// Only the C#, COBOL and SQL candidates pass `case_insensitive = true` (SQL:
-/// `.sql` in any letter case, like sqlfrontend's own discovery and
-/// `language_of`); every other language matches exact-case.
+/// Only the C#, COBOL, SQL and PowerShell candidates pass
+/// `case_insensitive = true` (SQL: `.sql` in any letter case, like
+/// sqlfrontend's own discovery and `language_of`; PowerShell:
+/// `.ps1`/`.psm1`/`.psd1` in any letter case); every other language matches
+/// exact-case.
 fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
     let dotted = format!(".{ext}");
     exts.iter().any(|x| {
@@ -323,7 +325,8 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
     // Every candidate shares the ONE generalised `has_extension` walker; each
     // names only the non-hidden directories it must not descend into
     // (`skip_set`), and the depth bound is explicit per candidate rather than a
-    // shared magic literal. Matching is exact-case except C#, COBOL and SQL.
+    // shared magic literal. Matching is exact-case except C#, COBOL, SQL and
+    // PowerShell.
     let candidates = vec![
         (
             "java",
@@ -381,6 +384,14 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
         ),
         // SQL claims `.sql` sources in any letter case.
         ("sql", &[".sql"], 5, DEFAULT_DETECTOR_SKIP, true),
+        // PowerShell claims `.ps1`/`.psm1`/`.psd1` in any letter case.
+        (
+            "ps",
+            &[".ps1", ".psm1", ".psd1"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+            true,
+        ),
     ];
     let mut out = Vec::new();
     for (lang, exts, depth, skip, ci) in &candidates {
