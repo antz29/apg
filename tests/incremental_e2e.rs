@@ -772,4 +772,157 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/state files/git/database); run via cargo test-e2e"]
+    fn ps_change_widens_targets_to_every_ps_file() {
+        // A change to any ps file re-targets EVERY manifest ps file (the ps
+        // stream is whole-tree, `apg::ps::widen_targets`), so none is reused;
+        // a non-ps change pulls in no ps file.
+        use apg::cache::{CacheKey, Manifest, ScanConfigKey};
+        use apg::impact::OverloadIndex;
+
+        let config = ScanConfigKey {
+            languages: vec!["ps".into(), "md".into(), "go".into()],
+            ..Default::default()
+        };
+        let key = CacheKey::compute(&config);
+        let ps_files: BTreeSet<String> = ["a.ps1", "b.ps1", "sub/Util.PSM1", "sub/Mod.psd1"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let commit = |repo: &git2::Repository, msg: &str| {
+            let mut index = repo.index().unwrap();
+            index
+                .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = repo.signature().unwrap();
+            let parent = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
+                .unwrap()
+                .to_string()
+        };
+        // A fresh scratch repo per case: the committed tree, its recorded
+        // manifest + ScanRecord, the persisted overload state and a clean
+        // previous database.
+        let fixture = |tag: &str| {
+            let dir =
+                std::env::temp_dir().join(format!("apg-ps-widen-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("repo/sub")).unwrap();
+            let repo_dir = std::fs::canonicalize(dir.join("repo")).unwrap();
+            let repo = git2::Repository::init(&repo_dir).unwrap();
+            {
+                let mut cfg = repo.config().unwrap();
+                cfg.set_str("user.name", "apg test").unwrap();
+                cfg.set_str("user.email", "t@example.com").unwrap();
+            }
+            for (p, body) in [
+                (".gitignore", "apg/.trans/\n"),
+                ("a.ps1", "function F { 1 }\n"),
+                ("b.ps1", "F\n"),
+                ("sub/Util.PSM1", "function U { 2 }\n"),
+                ("sub/Mod.psd1", "@{ RootModule = 'Util.PSM1' }\n"),
+                ("x.go", "package x\n\nfunc X() {}\n"),
+                ("README.md", "# readme\n"),
+            ] {
+                std::fs::write(repo_dir.join(p), body).unwrap();
+            }
+            let sha = commit(&repo, "base");
+
+            let apg_root = repo_dir.join("apg");
+            std::fs::create_dir_all(&apg_root).unwrap();
+            let store = FactStore::resolve(&apg_root).unwrap().root;
+            std::fs::create_dir_all(&store).unwrap();
+            let manifest = Manifest::build(&repo_dir);
+            manifest.save(&store).unwrap();
+            ScanRecord {
+                sha,
+                cache_key: key.clone(),
+                manifest,
+                content_key: None,
+            }
+            .save(&store)
+            .unwrap();
+
+            let mut g = Graph::default();
+            g.nodes.insert(
+                "ps.a.ps1.F".into(),
+                located(
+                    NodeKind::Function,
+                    &repo_dir.join("a.ps1").to_string_lossy(),
+                ),
+            );
+            g.nodes.insert(
+                "go.x.X".into(),
+                located(NodeKind::Function, &repo_dir.join("x.go").to_string_lossy()),
+            );
+            State {
+                overloads: OverloadIndex::from_graph(&g, &repo_dir),
+                ..Default::default()
+            }
+            .save(&store)
+            .unwrap();
+            apg::testutil::touch_db(&apg_root);
+            (dir, repo_dir, apg_root, repo)
+        };
+
+        // (1) Renaming F to G in a.ps1 widens to every ps file, nothing else.
+        {
+            let (dir, repo_dir, apg_root, repo) = fixture("rename");
+            std::fs::write(repo_dir.join("a.ps1"), "function G { 1 }\n").unwrap();
+            commit(&repo, "rename F to G");
+
+            let prepared = prepare(&repo_dir, &apg_root, &config, false);
+            assert!(prepared.full_scan.is_none(), "{:?}", prepared.full_scan);
+            assert_eq!(
+                prepared.targets_rel, ps_files,
+                "every ps file, no x.go/README.md"
+            );
+            assert!(
+                prepared
+                    .reuse_candidates
+                    .iter()
+                    .all(|r| !ps_files.contains(&r.rel)),
+                "no ps file is reused: {:?}",
+                prepared.reuse_candidates
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // (2) A non-ps change (README.md, then x.go) pulls in no ps file, and
+        // every ps file stays a reuse candidate.
+        for changed in ["README.md", "x.go"] {
+            let (dir, repo_dir, apg_root, repo) = fixture(&changed.replace('.', "-"));
+            std::fs::write(repo_dir.join(changed), "// changed\n").unwrap();
+            commit(&repo, "non-ps change");
+
+            let prepared = prepare(&repo_dir, &apg_root, &config, false);
+            assert!(prepared.full_scan.is_none(), "{:?}", prepared.full_scan);
+            assert!(
+                prepared.targets_rel.contains(changed),
+                "{changed} must be a target: {:?}",
+                prepared.targets_rel
+            );
+            assert!(
+                prepared.targets_rel.is_disjoint(&ps_files),
+                "a {changed} change must pull in no ps file: {:?}",
+                prepared.targets_rel
+            );
+            let reused: BTreeSet<String> = prepared
+                .reuse_candidates
+                .iter()
+                .map(|r| r.rel.clone())
+                .collect();
+            assert!(
+                ps_files.is_subset(&reused),
+                "every ps file stays a reuse candidate: {reused:?}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
 }
