@@ -126,6 +126,11 @@ mod unit {
             language_line.contains("csharp, py, cobol, sql"),
             "the --language line names sql after cobol: {language_line}"
         );
+        // powershell-frontend phase-07 task-11: the --language line names ps after sql.
+        assert!(
+            language_line.contains("sql, ps"),
+            "the --language line names ps after sql: {language_line}"
+        );
     }
 
     /// Phase-03 task-5: the per-language spawn verdict. On the incremental
