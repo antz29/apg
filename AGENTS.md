@@ -107,7 +107,7 @@ files — the system of record at rest).
   with a .NET SDK (`net9.0`) + NuGet, is self-contained at scan time (it never
   runs MSBuild, `dotnet` or a database), and is bounded by ScriptDom
   `180.140.0`'s `TSql170Parser` (the SQL Server 2025 / Azure SQL ceiling);
-  PowerShell (`src/pslib`) builds with stable Rust `1.98.1` + crates.io + a C
+  PowerShell (`src/pslib`) builds with stable Rust `1.100.0` + crates.io + a C
   compiler (which compiles the tree-sitter runtime and the woodruffw-trough
   grammar's generated C sources), needs nothing at scan time (the parser is
   statically linked, it never shells out, and its preflight tool set is
@@ -127,7 +127,7 @@ files — the system of record at rest).
   per-language formula — the base `scanner` package ships it. The build
   toolchains are pinned in repo-visible files consumed by every
   frontend-compiling path, exact where the mechanism can enforce it: Rust
-  `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and every
+  `1.100.0` (the repo-root `rust-toolchain.toml`, covering the main build and every
   cargo frontend crate — `src/rustlib`, `src/pylib`, `src/structlib`,
   `src/agentlib`, `src/cobollib`, `src/pslib`) and Node on the `26.x` line
   (`src/tslib/package.json` `engines.node` range `>=26.8.1 <27`, enforced
