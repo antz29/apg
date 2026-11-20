@@ -480,4 +480,125 @@ mod e2e {
             );
         });
     }
+
+    /// (c) The unchanged `app/a.ps1` calls `Get-Thing`, which no file
+    /// declares (an unresolved call, no edge to any other file). Adding the
+    /// manifest module `one/` exporting `Get-Thing` resolves the call; adding
+    /// a second exporter `two/` makes it ambiguous (an `unknown` unresolved
+    /// call). Each spliced ps graph equals `--force`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
+    fn parity_new_exporter_resolves_unchanged_caller() {
+        let p = Parity::new("ps-parity-export", &[("app/a.ps1", "Get-Thing\n")]);
+        let srcs = fqns_in(&p.wt, "app/a.ps1");
+        let thing = |g: &[String]| -> Vec<String> {
+            calls_from(g, &srcs)
+                .into_iter()
+                .filter(|l| l.contains("Get-Thing"))
+                .collect()
+        };
+        let psd1 = |m: &str| {
+            format!("@{{\n    RootModule = '{m}.psm1'\n    FunctionsToExport = 'Get-Thing'\n}}\n")
+        };
+        let psm1 = "function Get-Thing {\n    'thing'\n}\n";
+
+        // (1) A new exporter: the unresolved call becomes a Calls edge into one/.
+        let one = psd1("one");
+        p.step(
+            &[("one/one.psd1", &one), ("one/one.psm1", psm1)],
+            |before, after| {
+                let (b, a) = (thing(before), thing(after));
+                assert_ne!(b, a, "the unchanged caller's Get-Thing edge must change");
+                assert!(
+                    b.len() == 1 && b[0].starts_with("UnresolvedCall "),
+                    "Get-Thing starts unresolved: {before:#?}"
+                );
+                assert!(
+                    before
+                        .iter()
+                        .any(|l| l.starts_with("UnresolvedTarget \"Get-Thing\" \"external\"")),
+                    "the undeclared Get-Thing is an external target: {before:#?}"
+                );
+                let target = fqns_in(&p.wt, "one/one.psm1");
+                assert!(
+                    a.len() == 1
+                        && a[0].starts_with("Calls ")
+                        && target.iter().any(|t| a[0].contains(&format!(" {t} "))),
+                    "Get-Thing resolves to one/'s function {target:?}: {after:#?}"
+                );
+            },
+        );
+
+        // (2) A second exporter: the call becomes ambiguous (unknown).
+        let two = psd1("two");
+        p.step(
+            &[("two/two.psd1", &two), ("two/two.psm1", psm1)],
+            |before, after| {
+                let (b, a) = (thing(before), thing(after));
+                assert_ne!(b, a, "the unchanged caller's Get-Thing edge must change");
+                assert!(
+                    a.len() == 1 && a[0].starts_with("UnresolvedCall "),
+                    "Get-Thing turns unresolved: {after:#?}"
+                );
+                assert!(
+                    after
+                        .iter()
+                        .any(|l| l.starts_with("UnresolvedTarget \"Get-Thing\" \"unknown\"")),
+                    "the ambiguous Get-Thing is an unknown target: {after:#?}"
+                );
+            },
+        );
+    }
+
+    /// (d) `f/b.ps1.ps1` declares `class C`, colliding with function `ps1.C`
+    /// of the unchanged `f/b.ps1` (called there by `Use`), which carries its
+    /// `//f/b.ps1:<n>` suffix. Removing the class drops the survivor's
+    /// suffix and `Use`'s call follows. The spliced ps graph equals `--force`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
+    fn parity_removed_collision_drops_suffix() {
+        let second = "f/b.ps1";
+        let p = Parity::new(
+            "ps-parity-unsuffix",
+            &[
+                (
+                    second,
+                    "function ps1.C {\n    'c'\n}\nfunction Use {\n    ps1.C\n}\n",
+                ),
+                ("f/b.ps1.ps1", "function Keep {\n    'k'\n}\nclass C {\n}\n"),
+            ],
+        );
+        let suffix = format!("//{second}");
+        let old = fqns_in(&p.wt, second);
+        assert!(
+            old.iter().any(|f| f.contains(&suffix)),
+            "{second}'s ps1.C starts suffixed: {old:?}"
+        );
+        p.step(
+            &[("f/b.ps1.ps1", "function Keep {\n    'k'\n}\n")],
+            |before, after| {
+                let new = fqns_in(&p.wt, second);
+                assert!(
+                    !new.iter().any(|f| f.contains("//")),
+                    "{second}'s survivor drops its suffix: {new:?}"
+                );
+                let survivor = new
+                    .iter()
+                    .find(|f| f.ends_with("ps1.C\""))
+                    .unwrap_or_else(|| panic!("survivor ps1.C in {second}: {new:?}"));
+                let into = |g: &[String], to: &str| {
+                    g.iter()
+                        .filter(|l| l.starts_with("Calls ") && l.contains(&format!(" {to} ")))
+                        .count()
+                };
+                let old_c = old.iter().find(|f| f.contains(&suffix)).unwrap();
+                assert_eq!(
+                    into(before, old_c),
+                    1,
+                    "Use called the suffixed FQN: {before:#?}"
+                );
+                assert_eq!(into(after, survivor), 1, "Use's call follows: {after:#?}");
+            },
+        );
+    }
 }
