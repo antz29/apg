@@ -724,14 +724,37 @@ fn stage_csharp(out_dir: &str, stage_dir: &Path) -> Vec<String> {
 
 /// T-SQL frontend (ScriptDom, published as self-contained single-file, untrimmed).
 fn stage_sql(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    stage_dotnet_frontend(
+        out_dir,
+        stage_dir,
+        "src/sqllib/SqlFrontend.csproj",
+        "sql-dist",
+        "sqlfrontend",
+        "APG_FRONTEND_SQL",
+        "sql",
+    )
+}
+
+/// `dotnet publish` a .NET frontend as self-contained single-file into
+/// `<out_dir>/<dist_dir>`, export `<env_var>` and stage the exe; returns
+/// `[name]` on success, else nothing.
+fn stage_dotnet_frontend(
+    out_dir: &str,
+    stage_dir: &Path,
+    project: &str,
+    dist_dir: &str,
+    exe_stem: &str,
+    env_var: &str,
+    name: &str,
+) -> Vec<String> {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     let rid = csharp_rid();
 
-    let sql_dist = Path::new(out_dir).join("sql-dist");
+    let dist = Path::new(out_dir).join(dist_dir);
     let mut cmd = Command::new("dotnet");
     cmd.arg("publish")
-        .arg("src/sqllib/SqlFrontend.csproj")
+        .arg(project)
         .arg("-c")
         .arg("Release")
         .arg("-r")
@@ -741,20 +764,20 @@ fn stage_sql(out_dir: &str, stage_dir: &Path) -> Vec<String> {
         .arg("-p:PublishSingleFile=true")
         .arg("-p:PublishReadyToRun=true")
         .arg("-o")
-        .arg(sql_dist.to_str().unwrap());
+        .arg(dist.to_str().unwrap());
 
     let exe_name = if target_os == "windows" {
-        "sqlfrontend.exe"
+        format!("{exe_stem}.exe")
     } else {
-        "sqlfrontend"
+        exe_stem.to_string()
     };
-    let sqlfrontend = sql_dist.join(exe_name);
+    let exe = dist.join(&exe_name);
 
-    let sql_ok = cmd.status().is_ok_and(|s| s.success()) && sqlfrontend.exists();
-    if sql_ok {
-        println!("cargo:rustc-env=APG_FRONTEND_SQL={}", sqlfrontend.display());
-        let _ = std::fs::copy(&sqlfrontend, stage_dir.join(exe_name));
-        return vec!["sql".into()];
+    let ok = cmd.status().is_ok_and(|s| s.success()) && exe.exists();
+    if ok {
+        println!("cargo:rustc-env={env_var}={}", exe.display());
+        let _ = std::fs::copy(&exe, stage_dir.join(&exe_name));
+        return vec![name.into()];
     }
 
     Vec::new()
