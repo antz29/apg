@@ -3309,6 +3309,158 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Cached ps `dot-source`/`import-module` Struct→File uses (and the COBOL
+    /// `copy` neighbour) keep their kind through `splice_cached` and survive
+    /// `finalize_graph`; a property-less Struct→File uses is still dropped.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp fact store); run via cargo test-e2e"]
+    fn cached_ps_file_dependency_edges_keep_their_kind_through_splice_cached() {
+        use apg::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+        use apg::graph::{Graph, Location, Node};
+        use std::path::PathBuf;
+
+        let dir = std::env::temp_dir().join(format!("apg-splice-ps-kind-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+        let kind = |k: &str| -> NodeProperties {
+            [("kind".to_string(), k.to_string())].into_iter().collect()
+        };
+        let loc = |path: &str| Location {
+            path: PathBuf::from(path),
+            start: 0,
+            end: 1,
+            start_line: 1,
+            end_line: 1,
+        };
+
+        // (module, file abs path, lang, declared struct)
+        let files = [
+            (
+                "ps.scripts",
+                "/w/main.ps1",
+                "ps",
+                Some("ps.scripts.main.ps1"),
+            ),
+            (
+                "ps.scripts",
+                "/w/other.ps1",
+                "ps",
+                Some("ps.scripts.other.ps1"),
+            ),
+            ("ps.scripts", "/w/lib/util.ps1", "ps", None),
+            ("ps.scripts", "/w/mods/Foo/Foo.psm1", "ps", None),
+            (
+                "cobol.prog",
+                "/w/PROG.cbl",
+                "cobol",
+                Some("cobol.prog.PROG"),
+            ),
+            ("cobol.prog", "/w/copy/CPY.cpy", "cobol", None),
+        ];
+        let mut g = Graph::default();
+        for (module, path, _, decl) in files {
+            g.nodes.insert(
+                module.to_string(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+            g.nodes.insert(
+                path.to_string(),
+                Node {
+                    kind: NodeKind::File,
+                    location: Some(loc(path)),
+                    ..Node::default()
+                },
+            );
+            g.contains.insert((module.to_string(), path.to_string()));
+            if let Some(s) = decl {
+                g.nodes.insert(
+                    s.to_string(),
+                    Node {
+                        kind: NodeKind::Struct,
+                        location: Some(loc(path)),
+                        code_type: "src".into(),
+                        ..Node::default()
+                    },
+                );
+                g.contains.insert((path.to_string(), s.to_string()));
+            }
+        }
+        let kinded = [
+            ("ps.scripts.main.ps1", "/w/lib/util.ps1", "dot-source"),
+            (
+                "ps.scripts.main.ps1",
+                "/w/mods/Foo/Foo.psm1",
+                "import-module",
+            ),
+            ("cobol.prog.PROG", "/w/copy/CPY.cpy", "copy"),
+        ];
+        for (from, to, k) in kinded {
+            g.uses.insert((from.to_string(), to.to_string()));
+            g.edge_properties
+                .insert(("uses", from.to_string(), to.to_string()), kind(k));
+        }
+        g.uses.insert((
+            "ps.scripts.other.ps1".to_string(),
+            "/w/lib/util.ps1".to_string(),
+        ));
+
+        let mut reuse_files = Vec::new();
+        for (_, abs, lang, _) in files {
+            let rel = abs.strip_prefix("/w/").unwrap();
+            let oid = format!("oid-{rel}");
+            let frag = FileFragment::from_graph(&g, abs, rel, &oid, lang);
+            store.put(&frag, "/w", &cache_key).unwrap();
+            reuse_files.push((rel.to_string(), lang.to_string(), oid));
+        }
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: reuse_files,
+            reader_root: "/fresh".to_string(),
+            skipped_langs: BTreeSet::new(),
+        };
+        let (graph, _) = ingest_with_reuse(
+            Vec::<Record>::new(),
+            &IngestOptions {
+                blacklist: &[],
+                language: "ps",
+                config: None,
+                base: None,
+            },
+            Some(&reuse),
+            None,
+        );
+
+        for (from, to, k) in kinded {
+            let edge = (
+                from.to_string(),
+                to.strip_prefix("/w/").unwrap().to_string(),
+            );
+            assert!(
+                graph.uses.contains(&edge),
+                "the cached kind={k} Struct->File uses must survive: {:?}",
+                graph.uses
+            );
+            assert_eq!(
+                graph
+                    .edge_properties
+                    .get(&("uses", edge.0.clone(), edge.1.clone())),
+                Some(&kind(k)),
+                "the cached {k} edge keeps exactly its properties"
+            );
+        }
+        assert!(
+            !graph.uses.iter().any(|(a, _)| a == "ps.scripts.other.ps1"),
+            "a property-less cached Struct->File uses is still dropped: {:?}",
+            graph.uses
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn namespace_less_csharp_file_is_contained_by_its_language() {
