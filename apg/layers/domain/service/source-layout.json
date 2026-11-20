@@ -22,7 +22,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.repo-gate-shell-syntax-check",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.repo-gate-step-summary",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.repo-gate-suite-type-check",
       "properties": {}
     },
     {

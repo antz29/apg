@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "sql-uses-kind",
-  "body": "An object uses edge carries properties {\"kind\":\"write\"} when the unit names the object as an INSERT, UPDATE, DELETE or MERGE target and {\"kind\":\"read\"} otherwise.",
+  "body": "An object uses edge carries properties {\"kind\":\"write\"} when the unit names the object as an INSERT, UPDATE, DELETE or MERGE target and {\"kind\":\"read\"} otherwise, so every object uses edge of a view carries kind read.",
   "properties": {
     "feature": "sql-frontend"
   },

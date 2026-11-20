@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "repo-gate-shell-syntax-check",
+  "body": "The repository gate syntax-checks install.sh and every scripts/*.sh file as a step of each run, parsing each with the shell its shebang names in no-execute mode and failing on a syntax error.",
+  "properties": {
+    "feature": "repo-gate"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.source-contributor",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "repo-gate-suite-type-check",
+  "body": "The repository gate type-checks every TypeScript file under opencode-suite/tools as a step of each run, failing on a type error and reaching the network only through the suite's node_modules bootstrap.",
+  "properties": {
+    "feature": "repo-gate"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.source-contributor",
+      "properties": {}
+    }
+  ]
+}
