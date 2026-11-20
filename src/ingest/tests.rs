@@ -319,6 +319,127 @@ mod unit {
         assert_eq!(rooted_scope("cobol", "", &none, base), "cobol.");
     }
 
+    /// powershell-frontend phase-07 (a): a unique-form script scope renders
+    /// `ps.` + key verbatim — its `//` is never collapsed.
+    #[test]
+    fn ps_unique_form_script_scope_renders_verbatim() {
+        let base = Path::new("/repo");
+        let scope = rooted_scope("ps", "a/b.ps1//a/b.ps1", &HashMap::new(), base);
+        assert_eq!(scope, "ps.a/b.ps1//a/b.ps1");
+        let f = format!("{scope}.F");
+        assert_eq!(f, "ps.a/b.ps1//a/b.ps1.F");
+        assert_ne!(f, "ps.a/b.ps1/a/b.ps1.F");
+    }
+
+    /// powershell-frontend phase-07 (b): a disambiguated class scope keeps its
+    /// `Name//path:ordinal` parent for its methods.
+    #[test]
+    fn ps_disambiguated_class_scope_keeps_ordinal_parent() {
+        let base = Path::new("/repo");
+        let scope = rooted_scope("ps", "m/s.ps1.C//m/s.ps1:2", &HashMap::new(), base);
+        assert_eq!(scope, "ps.m/s.ps1.C//m/s.ps1:2");
+        assert_eq!(format!("{scope}.M"), "ps.m/s.ps1.C//m/s.ps1:2.M");
+    }
+
+    /// powershell-frontend phase-07 (c): a function in a `..\..\` member of a
+    /// nested manifest keeps its `../` segments (no `..` pop).
+    #[test]
+    fn ps_nested_manifest_member_keeps_dotdot_segments() {
+        let base = Path::new("/repo");
+        let scope = rooted_scope("ps", "m/n/N.psd1/../../x.ps1", &HashMap::new(), base);
+        assert_eq!(scope, "ps.m/n/N.psd1/../../x.ps1");
+        assert_eq!(format!("{scope}.F"), "ps.m/n/N.psd1/../../x.ps1.F");
+    }
+
+    /// powershell-frontend phase-07 (d): a disambiguated `--targets` endpoint
+    /// renders `ps.` + endpoint whether or not ps identities are recorded.
+    #[test]
+    fn ps_disambiguated_targets_endpoint_renders_verbatim() {
+        let base = Path::new("/repo");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "ps".to_string(),
+            HashSet::from(["".to_string(), "a".to_string()]),
+        )]);
+        for modules in [&ids, &HashMap::new()] {
+            assert_eq!(
+                root_stream_edge_endpoint("ps", "a/s.ps1.F//a/s.ps1:3", |_| false, modules, base),
+                "ps.a/s.ps1.F//a/s.ps1:3"
+            );
+        }
+    }
+
+    /// powershell-frontend phase-07 (e): a root `build.ps1` beside a directory
+    /// module `build` is never re-rooted under `ps.build`.
+    #[test]
+    fn ps_root_build_script_beside_build_dir_is_not_rerooted() {
+        let base = Path::new("/repo");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "ps".to_string(),
+            HashSet::from(["".to_string(), "build".to_string()]),
+        )]);
+        assert_eq!(
+            rooted_scope("ps", ".build.ps1", &ids, base),
+            "ps..build.ps1"
+        );
+        let ep = root_edge_endpoint("ps", ".build.ps1.F", &ids, base);
+        assert_eq!(ep, "ps..build.ps1.F");
+        assert!(!ep.starts_with("ps.build"), "{ep}");
+    }
+
+    /// powershell-frontend phase-07 (f): the repo-root module/File parent is
+    /// `ps.`, the root script Struct `ps..build.ps1`, its root-level scope and
+    /// `--targets` endpoint `ps..build.ps1.F`, and a Module identity `sub`
+    /// renders `ps.sub` as a contains endpoint.
+    #[test]
+    fn ps_root_level_file_struct_scope_and_endpoint() {
+        let base = Path::new("/repo");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "ps".to_string(),
+            HashSet::from(["".to_string(), "sub".to_string()]),
+        )]);
+        assert_eq!(root_module_fqn("ps", "", base), "ps.");
+        let root = rooted_scope("ps", "", &ids, base);
+        assert_eq!(root, "ps.");
+        assert_eq!(format!("{root}.build.ps1"), "ps..build.ps1");
+        assert_eq!(
+            format!("{}.F", rooted_scope("ps", ".build.ps1", &ids, base)),
+            "ps..build.ps1.F"
+        );
+        assert_eq!(
+            root_edge_endpoint("ps", ".build.ps1.F", &ids, base),
+            "ps..build.ps1.F"
+        );
+        assert_eq!(root_module_endpoint("ps", "sub", &ids, base), "ps.sub");
+    }
+
+    /// powershell-frontend phase-07 (g): ps opaque ids (`ps<digits>`,
+    /// `n<digits>`) are never rooted, even when repo-root directory modules
+    /// `ps1`/`n7` exist; `ps`, `psx1` and `ps1.F` are not opaque ids.
+    #[test]
+    fn ps_opaque_ids_are_never_rooted() {
+        let base = Path::new("/repo");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "ps".to_string(),
+            HashSet::from(["".to_string(), "ps1".to_string(), "n7".to_string()]),
+        )]);
+        for id in ["ps12", "n7"] {
+            assert_eq!(root_edge_endpoint("ps", id, &ids, base), id);
+            assert_eq!(
+                root_stream_edge_endpoint("ps", id, |_| false, &ids, base),
+                id
+            );
+        }
+        for not_id in ["ps", "psx1", "ps1.F"] {
+            assert_eq!(
+                root_edge_endpoint("ps", not_id, &ids, base),
+                format!("ps.{not_id}")
+            );
+        }
+        assert_eq!(root_module_endpoint("ps", "ps1", &ids, base), "ps1");
+        assert_eq!(root_module_endpoint("ps", "n7", &ids, base), "n7");
+        assert_eq!(root_module_fqn("ps", "ps1", base), "ps.ps1");
+    }
+
     /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
     /// `repo_relative_identity` renders a scanner path relative to the
     /// git-toplevel base (the scan root is the non-git fallback),
@@ -1230,6 +1351,34 @@ mod int {
         );
         // An empty scope stays empty — never a bare `<language>.` root.
         assert_eq!(rooted_scope("go", "", &HashMap::new(), base), "");
+    }
+
+    /// powershell-frontend phase-07: the ps scopes of cases (a), (b) and (f)
+    /// flow through [`rooted_scope`] → [`render_function_fqns`] verbatim.
+    #[test]
+    fn ps_identities_flow_through_the_render_chain() {
+        let base = Path::new("/repo");
+        let none = HashMap::new();
+        let ps = |id: &str, parent: &str, name: &str| FuncDecl {
+            language: "ps".to_string(),
+            ..fd(
+                id,
+                &rooted_scope("ps", parent, &none, base),
+                name,
+                &[],
+                "/repo/x.ps1",
+            )
+        };
+        let decls = [
+            ps("n1", "a/b.ps1//a/b.ps1", "F"),
+            ps("n2", "m/s.ps1.C//m/s.ps1:2", "M"),
+            ps("n3", ".build.ps1", "F"),
+        ];
+        let m = fqns(&decls);
+        assert_eq!(m["n1"], "ps.a/b.ps1//a/b.ps1.F");
+        assert_ne!(m["n1"], "ps.a/b.ps1/a/b.ps1.F");
+        assert_eq!(m["n2"], "ps.m/s.ps1.C//m/s.ps1:2.M");
+        assert_eq!(m["n3"], "ps..build.ps1.F");
     }
 
     /// apg-0.17.0 phase-03 task-9: the structural streams' identity chain
