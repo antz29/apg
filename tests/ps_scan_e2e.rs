@@ -97,6 +97,11 @@ impl Drop for Parity {
 
 impl Parity {
     fn new(tag: &str, files: &[(&str, &str)]) -> Parity {
+        Parity::with_languages(tag, files, "ps")
+    }
+
+    /// [`Parity::new`] whose main full scan passes `--language <languages>`.
+    fn with_languages(tag: &str, files: &[(&str, &str)], languages: &str) -> Parity {
         let repo = Repo::new(tag);
         let home = repo
             .root
@@ -114,7 +119,7 @@ impl Parity {
         let p = Parity { repo, home, wt };
         p.apg(&p.repo.root, &["init", "."]);
         p.repo.commit_all("apg init");
-        p.apg(&p.repo.root, &["scan", ".", "--language", "ps"]);
+        p.apg(&p.repo.root, &["scan", ".", "--language", languages]);
         p.apg(&p.repo.root, &["project", "start", "demo"]);
         p
     }
@@ -298,8 +303,132 @@ fn calls_from(graph: &[String], srcs: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Every Struct-to-File Uses edge in `dir` as sorted `(struct, file,
+/// properties)`; a non-string cell (NULL included) is kept as its JSON text.
+fn struct_file_uses(dir: &Path) -> Vec<(String, String, String)> {
+    let cypher = "MATCH (s:Struct)-[r:Uses]->(f:File) RETURN s.fqn, f.fqn, r.properties";
+    let out = ApgCommand::new(&["query", "--json", cypher])
+        .cwd(dir)
+        .output();
+    assert!(
+        out.status.success(),
+        "query {cypher}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).expect("json rows");
+    let cell = |r: &serde_json::Value, c: &str| match &r[c] {
+        serde_json::Value::String(s) => s.clone(),
+        v => v.to_string(),
+    };
+    let mut edges: Vec<_> = rows
+        .iter()
+        .map(|r| (cell(r, "s.fqn"), cell(r, "f.fqn"), cell(r, "r.properties")))
+        .collect();
+    edges.sort();
+    edges
+}
+
+/// Asserts `dir`'s Struct-to-File Uses are exactly main.ps1's script
+/// Struct (ps-rooted, located in main.ps1) to the three unrooted
+/// repo-relative dependency Files with their kinds; returns the edges.
+fn assert_ps_file_edges(dir: &Path, when: &str) -> Vec<(String, String, String)> {
+    let edges = struct_file_uses(dir);
+    let main = fqns_in(dir, "main.ps1");
+    let expected = [
+        ("lib/util.ps1", "dot-source"),
+        ("mods/Foo/Foo.psd1", "import-module"),
+        ("mods/Foo/Foo.psm1", "import-module"),
+    ];
+    assert_eq!(
+        edges.len(),
+        3,
+        "{when}: exactly three Struct-to-File uses: {edges:#?}"
+    );
+    for ((s, f, props), (file, kind)) in edges.iter().zip(expected) {
+        assert!(
+            s.starts_with("ps.") && main.contains(&format!("\"{s}\"")),
+            "{when}: source is main.ps1's ps-rooted script Struct ({main:?}): {edges:#?}"
+        );
+        assert_eq!(
+            f, file,
+            "{when}: File target is unrooted repo-relative: {edges:#?}"
+        );
+        let props: serde_json::Value = serde_json::from_str(props)
+            .unwrap_or_else(|e| panic!("{when}: properties {props:?} not JSON: {e}"));
+        assert_eq!(
+            props,
+            serde_json::json!({ "kind": kind }),
+            "{when}: {file} kind: {edges:#?}"
+        );
+    }
+    edges
+}
+
 mod e2e {
     use super::*;
+
+    /// ps-file-dependency-ingest: main.ps1 dot-sources lib/util.ps1 and
+    /// imports mods/Foo/Foo.psm1 by path and `Foo` by name (manifest
+    /// Foo.psd1). Its script Struct's three Struct-to-File Uses (unrooted
+    /// File targets, kinds carried) hold after the main full scan, in the
+    /// branch seed, after a spliced ps change, after a spliced md-only change
+    /// (unchanged), and the spliced ps graph equals a `--force` rebuild.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
+    fn file_dependency_edges_survive_full_and_spliced_builds() {
+        let p = Parity::with_languages(
+            "ps-file-deps",
+            &[
+                (
+                    "main.ps1",
+                    ". $PSScriptRoot\\lib\\util.ps1\nImport-Module ./mods/Foo/Foo.psm1\nImport-Module Foo\n",
+                ),
+                ("lib/util.ps1", "function Get-Util {\n    'util'\n}\n"),
+                ("mods/Foo/Foo.psm1", "function Get-Foo {\n    'foo'\n}\n"),
+                ("mods/Foo/Foo.psd1", "@{\n    RootModule = 'Foo.psm1'\n}\n"),
+                ("README.md", "# scratch\n"),
+            ],
+            "ps,md",
+        );
+        assert_ps_file_edges(&p.repo.root, "main full scan");
+        assert_ps_file_edges(&p.wt, "branch seed");
+        let scan = |args: &[&str]| {
+            let mut full = vec!["scan", ".", "--language", "ps,md"];
+            full.extend_from_slice(args);
+            p.apg(&p.wt, &full)
+        };
+        let edit = |rel: &str, text: &str| {
+            std::fs::write(p.wt.join(rel), text).unwrap();
+            wt_commit(&p.wt, &[rel], "file-deps edit");
+        };
+
+        // (1) A ps change: every ps file re-emitted, spliced.
+        edit("lib/util.ps1", "function Get-Util {\n    'util2'\n}\n");
+        let log = scan(&[]);
+        assert!(spliced(&log), "ps change must splice: {log}");
+        let after_ps = assert_ps_file_edges(&p.wt, "after the ps change");
+
+        // (2) An md-only change: every ps file reused, spliced, unchanged.
+        edit("README.md", "# scratch\n\nmore\n");
+        let log = scan(&[]);
+        assert!(spliced(&log), "md change must splice: {log}");
+        let after_md = assert_ps_file_edges(&p.wt, "after the md change");
+        assert_eq!(
+            after_ps, after_md,
+            "an md-only change leaves the edges unchanged"
+        );
+        let spliced_graph = ps_graph(&p.wt);
+
+        // (3) A full rebuild reproduces the spliced ps graph.
+        let log = scan(&["--force"]);
+        assert!(!spliced(&log), "--force must full-rebuild: {log}");
+        assert_ps_file_edges(&p.wt, "after --force");
+        assert_eq!(
+            spliced_graph,
+            ps_graph(&p.wt),
+            "spliced (left) ps graph must equal the --force rebuild (right)"
+        );
+    }
 
     /// `--language ps` selects the PowerShell frontend: every PowerShell File
     /// exists, root scripts sit in `ps.`, the subdirectory module is a
