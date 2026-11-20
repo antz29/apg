@@ -137,6 +137,32 @@ mod unit {
         assert!(!ext_matches("SQL", &[".sql"], false));
     }
 
+    /// powershell-frontend phase-07 task-10: `ps` is a language root whose
+    /// `ps` opaque-id prefix collides with no other root's (sql's `sq`
+    /// included) nor the `x` fallback, it needs no scan-time tool on PATH,
+    /// uses the default `--targets` hand-off, and matches `.ps1`/`.psm1`/
+    /// `.psd1` in any letter case.
+    #[test]
+    fn ps_registration_is_distinct_tool_less_and_case_insensitive() {
+        let roots = crate::layers::LANGUAGE_ROOTS;
+        assert!(roots.contains(&"ps"), "ps is not a language root");
+        let prefix = id_prefix_for("ps");
+        assert_eq!(prefix, "ps");
+        assert_ne!(prefix, id_prefix_for("not-a-language"), "ps vs fallback");
+        for language in roots.iter().filter(|l| **l != "ps") {
+            assert_ne!(prefix, id_prefix_for(language), "ps vs {language}");
+        }
+        assert!(prefix.len() <= 3, "{prefix:?} is not a short prefix");
+        assert!(scan_time_tools("ps").is_empty());
+        assert!(!passes_targets_flag("ps", false));
+        let ps = [".ps1", ".psm1", ".psd1"];
+        assert!(ext_matches("PS1", &ps, true));
+        assert!(ext_matches("Psm1", &ps, true));
+        assert!(ext_matches("psd1", &ps, true));
+        assert!(!ext_matches("ps", &ps, true));
+        assert!(!ext_matches("ps1xml", &ps, true));
+    }
+
     /// sql-frontend phase-06 task-30: `sql` always carries `--targets` (its
     /// list is its emission universe); every other language only when enabled.
     #[test]
