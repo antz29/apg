@@ -648,8 +648,9 @@ fn conformance_scan(tag: &str) -> (Scratch, String, Run) {
 }
 
 /// `recs` as sorted compact JSON lines: ids mapped to identity keys (`key_of`), the `{root}/`
-/// prefix stripped from paths, and ids, byte offsets, lines and `file` dropped.
-fn normalise_records(recs: &[serde_json::Value], root: &str) -> Vec<String> {
+/// prefix stripped from paths, and ids, byte offsets, lines and `file` dropped from every
+/// record kind; with `placeholder`, each `<nameless@path:N>` sentinel's `N` becomes `#`.
+fn normalise_records(recs: &[serde_json::Value], root: &str, placeholder: bool) -> Vec<String> {
     let ids: Vec<&str> = recs
         .iter()
         .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
@@ -674,12 +675,203 @@ fn normalise_records(recs: &[serde_json::Value], root: &str) -> Vec<String> {
                     m.insert(k.to_string(), v.into());
                 }
             }
+            for k in ["fqn", "to"] {
+                let sentinel = m
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .filter(|s| placeholder && s.starts_with("<nameless@"))
+                    .and_then(|s| s.rsplit_once(':'));
+                if let Some((head, _)) = sentinel {
+                    let v = format!("{head}:#>");
+                    m.insert(k.to_string(), v.into());
+                }
+            }
             r.to_string()
         })
         .collect();
     out.sort();
     out
 }
+
+/// A byte range in a fixture text.
+type Bytes = std::ops::Range<usize>;
+
+/// The region oracle's report on one fixture text, walked from the parse tree itself.
+#[derive(Debug)]
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+struct Regions {
+    /// The root node's kind.
+    root: &'static str,
+    /// Each outermost ERROR node (an ERROR root included): (its byte range, its 1-based
+    /// (line, character column), the byte range of the `source_file` child statement holding it).
+    errors: Vec<(Bytes, (usize, usize), Bytes)>,
+    /// Each MISSING node outside the ERROR regions: (its kind, its 1-based (line, column),
+    /// the byte range of the `source_file` child statement holding it).
+    missing: Vec<(&'static str, (usize, usize), Bytes)>,
+    /// Each function_definition/class_definition inside an ERROR node: (kind, declared name,
+    /// index of the region holding it).
+    inside: Vec<(&'static str, String, usize)>,
+}
+
+/// 1-based (line, character column) of `byte` in `src`.
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+fn line_col(src: &str, byte: usize) -> (usize, usize) {
+    let before = &src[..byte];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    (
+        1 + before.matches('\n').count(),
+        1 + before[line_start..].chars().count(),
+    )
+}
+
+/// Parses `src` through `psfrontend::parse` and reports its error regions (see `Regions`).
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+fn regions(src: &str) -> Regions {
+    fn walk(n: Node, src: &str, region: Option<usize>, out: &mut Regions) {
+        // the source_file child holding `n` (the root itself when `n` is the root)
+        let stmt = std::iter::successors(Some(n), Node::parent)
+            .find(|a| a.parent().is_none_or(|p| p.parent().is_none()))
+            .expect("ancestor")
+            .byte_range();
+        let mut region = region;
+        if n.is_error() && region.is_none() {
+            out.errors
+                .push((n.byte_range(), line_col(src, n.start_byte()), stmt.clone()));
+            region = Some(out.errors.len() - 1);
+        } else if n.is_missing() && region.is_none() {
+            out.missing
+                .push((n.kind(), line_col(src, n.start_byte()), stmt.clone()));
+        }
+        if let (Some(r), "function_definition" | "class_definition") = (region, n.kind()) {
+            let name = n
+                .child_by_field_name("name")
+                .map_or("", |c| &src[c.byte_range()]);
+            out.inside.push((n.kind(), name.to_string(), r));
+        }
+        let mut cur = n.walk();
+        for child in n.children(&mut cur) {
+            walk(child, src, region, out);
+        }
+    }
+    let tree = parse(src);
+    let root = tree.root_node();
+    let mut out = Regions {
+        root: root.kind(),
+        errors: Vec::new(),
+        missing: Vec::new(),
+        inside: Vec::new(),
+    };
+    walk(root, src, None, &mut out);
+    out
+}
+
+/// The recovery tree's first broken statement: an until with no condition. The pinned grammar
+/// reduces the do body (its declarations included) before failing, so the ERROR holds them.
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+const RECOVERY_BROKEN_1: &str = "do {\n. ./inside.ps1\nImport-Module InsideMod\nInside-Cmd\nfunction Inside-Fn { Helper-Fn }\nclass InsideClass { [int] Go() { return 1 } }\n} until";
+
+/// The recovery tree's second broken statement: a stray closing parenthesis.
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+const RECOVERY_BROKEN_2: &str = "$q = 1 )";
+
+/// err.ps1 with `b1`/`b2` as its two broken statements (both empty in the clean twin).
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+fn recovery_err(b1: &str, b2: &str) -> String {
+    format!(
+        ". ./helper.ps1\n\nImport-Module Dep\n\nfunction Before-Fn {{ param($a) Helper-Fn; Get-ChildItem }}\n\nfilter Before-Filter {{ $_ }}\n\nclass BeforeClass : HelperBase {{ [BeforeEnum]$e; [int] Run() {{ return $this.Run() }} }}\n\nenum BeforeEnum {{ A; B }}\n\n& {{ 1 }}\n\nExt-Before\n\n{b1}\n\nworkflow Mid-Flow {{ param($w) Before-Fn }}\n\nExt-Mid\n\n{b2}\n\nfunction After-Fn {{ Helper-Fn; git }}\n\nclass AfterClass {{ AfterClass() {{ }} }}\n\nenum AfterEnum {{ X }}\n\n[AfterClass]::new()\n\nImport-Module ./mods/Dep/Dep.psm1\n\n. $x\n\nExt-After\n"
+    )
+}
+
+/// missing.ps1 with `close` ending its unclosed parenthesis (`)` in the clean twin).
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+fn recovery_missing(close: &str) -> String {
+    format!("function Miss-Before {{ }}\n\n$y = (1 + 2{close}\n\nfunction Miss-After {{ Miss-Before }}\n")
+}
+
+/// The recovery tree's clean files: (name, text).
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+const RECOVERY_CLEAN: [(&str, &str); 6] = [
+    ("a_before.ps1", "function Early { }\n"),
+    (
+        "helper.ps1",
+        "function Helper-Fn { }\nclass HelperBase { }\n",
+    ),
+    ("inside.ps1", "function Inside-Lib { }\n"),
+    ("mods/Dep/Dep.psd1", "@{\n    RootModule = 'Dep.psm1'\n}\n"),
+    ("mods/Dep/Dep.psm1", "function Get-Dep { }\n"),
+    (
+        "z_after.ps1",
+        ". ./err.ps1\nAfter-Fn\nMid-Flow\n[AfterClass]::new()\n",
+    ),
+];
+
+/// Writes the recovery tree (its clean twin when `twin`, err.ps1 UTF-16LE with BOM when `wide`)
+/// into a fresh scratch dir and runs the binary over it.
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+fn recovery_scan(tag: &str, twin: bool, wide: bool) -> (Scratch, String, Run) {
+    let dir = Scratch::new(tag);
+    for (name, text) in RECOVERY_CLEAN {
+        dir.write(name, text.as_bytes());
+    }
+    let (err, missing) = if twin {
+        (recovery_err("", ""), recovery_missing(")"))
+    } else {
+        (
+            recovery_err(RECOVERY_BROKEN_1, RECOVERY_BROKEN_2),
+            recovery_missing(""),
+        )
+    };
+    let err = if wide {
+        utf16le_bom(&err)
+    } else {
+        err.into_bytes()
+    };
+    dir.write("err.ps1", &err);
+    dir.write("missing.ps1", missing.as_bytes());
+    let root = dir.root();
+    let run = psfrontend(&[&root]);
+    (dir, root, run)
+}
+
+/// Normalised lines grouped by their record `type`.
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+fn by_kind(lines: &[String]) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for l in lines {
+        let v: serde_json::Value = serde_json::from_str(l).expect("normalised JSON");
+        out.entry(str_of(&v, "type").to_string())
+            .or_default()
+            .push(l.clone());
+    }
+    out
+}
+
+/// The whole-file-region tree: whole.ps1 ends inside an unclosed block holding a further
+/// unclosed construct.
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+const WHOLE_PS1: &str =
+    ". ./a_first.ps1\nImport-Module Dep\nfunction Keep { }\nGet-A\nfunction F { Get-B\n$x = (1 + \n";
+
+/// The whole-file-region tree's other files: (name, text).
+// WIP phase 10 task 2: used by the recovery tests still to be written
+#[allow(dead_code)]
+const WHOLE_OTHERS: [(&str, &str); 4] = [
+    ("a_first.ps1", "function Early-W { }\n"),
+    ("mods/Dep/Dep.psd1", "@{\n    RootModule = 'Dep.psm1'\n}\n"),
+    ("mods/Dep/Dep.psm1", "function Get-Dep { }\n"),
+    ("z_next.ps1", "function Late { }\nLate\nEarly-W\n"),
+];
 
 mod e2e {
     use super::*;
@@ -1917,6 +2109,6 @@ mod e2e {
             want.push(edge("unresolved_use", &from, fqn));
         }
         want.sort();
-        assert_eq!(normalise_records(&recs, &root), want);
+        assert_eq!(normalise_records(&recs, &root, false), want);
     }
 }
