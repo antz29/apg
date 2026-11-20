@@ -567,6 +567,120 @@ fn category<'r>(recs: &'r [serde_json::Value], fqn: &str) -> &'r str {
         .map_or("<none>", |r| str_of(r, "category"))
 }
 
+/// The conformance tree's main.ps1: a dot-source, three imports and every top-level command form.
+const CONF_MAIN: &str = r#". $PSScriptRoot\tools.ps1
+Import-Module Widgets
+Import-Module ../conf/Widgets/Nested/Inner.psm1
+Import-Module $m
+Use-Tool
+Get-Widget
+Get-Inner
+Invoke-Work
+Hide-Inner
+Remove-Widget
+Select-Even
+Widgets\Get-Widget
+Get-ChildItem
+gci
+Microsoft.PowerShell.Utility\Write-Output x
+git status
+& { 1 }
+[Widget]::new(3)
+[System.IO.Path]::GetTempPath()
+"#;
+
+/// The conformance tree: eight files combining every covered construct.
+const CONF_FILES: [(&str, &str); 8] = [
+    (
+        "conf/Widgets/Widgets.psd1",
+        "@{\n    RootModule = 'Widgets.psm1'\n    NestedModules = @('Nested\\Inner.psm1', '.\\lib\\Helpers.ps1')\n    FunctionsToExport = @('Get-*', 'Invoke-Work')\n}\n",
+    ),
+    (
+        "conf/Widgets/Widgets.psm1",
+        r#". $PSScriptRoot\lib\Private.ps1
+function Get-Widget { Select-Even; Format-Widget; Get-Private }
+filter Select-Even { $_ }
+workflow Invoke-Work { Get-Widget }
+function Remove-Widget { }
+class Widget : Base {
+    [Shape]$Kind
+    Widget([int]$n) { }
+    [string] Describe() { return $this.Name() }
+    [string] Name() { return 'w' }
+}
+enum Shape { Round; Square }
+"#,
+    ),
+    (
+        "conf/Widgets/Nested/Inner.psm1",
+        "function Get-Inner { }\nfunction Hide-Inner { }\n",
+    ),
+    ("conf/Widgets/lib/Helpers.ps1", "function Format-Widget { }\n"),
+    (
+        "conf/Widgets/lib/Private.ps1",
+        "function Get-Private { }\nclass Base { }\n",
+    ),
+    ("app/tools.ps1", "function Use-Tool { }\n"),
+    (
+        "app/extras.ps1",
+        r#"using module ../conf/Widgets/Widgets.psm1
+function Get-One { param($a) $a }
+filter Get-Two { param($b) $b }
+workflow Get-Three { param($c) Get-One }
+enum Size : byte { Small }
+class Bag : System.Collections.Generic.List[int] { }
+class Pipe : System.IO.Stream { }
+configuration Web { Node 'localhost' { File Site { } } }
+"#,
+    ),
+    ("app/main.ps1", CONF_MAIN),
+];
+
+/// Writes the conformance tree into a fresh scratch dir and runs the binary over it.
+fn conformance_scan(tag: &str) -> (Scratch, String, Run) {
+    let dir = Scratch::new(tag);
+    for (name, text) in CONF_FILES {
+        dir.write(name, text.as_bytes());
+    }
+    let root = dir.root();
+    let run = psfrontend(&[&root]);
+    (dir, root, run)
+}
+
+/// `recs` as sorted compact JSON lines: ids mapped to identity keys (`key_of`), the `{root}/`
+/// prefix stripped from paths, and ids, byte offsets, lines and `file` dropped.
+fn normalise_records(recs: &[serde_json::Value], root: &str) -> Vec<String> {
+    let ids: Vec<&str> = recs
+        .iter()
+        .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
+        .map(|r| str_of(r, "id"))
+        .collect();
+    let prefix = format!("{root}/");
+    let mut out: Vec<String> = recs
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            let m = r.as_object_mut().expect("object record");
+            for k in ["id", "start", "end", "start_line", "end_line", "file"] {
+                m.remove(k);
+            }
+            for k in ["path", "from", "to"] {
+                if let Some(v) = m.get(k).and_then(|v| v.as_str()).map(str::to_string) {
+                    let v = if ids.contains(&v.as_str()) {
+                        key_of(recs, &v)
+                    } else {
+                        v.strip_prefix(&prefix).unwrap_or(&v).to_string()
+                    };
+                    m.insert(k.to_string(), v.into());
+                }
+            }
+            r.to_string()
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 mod e2e {
     use super::*;
 
@@ -1586,5 +1700,223 @@ mod e2e {
             "{got:?}"
         );
         assert_eq!(category(&got, "sort"), "unknown");
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test e2e:: -- --ignored"]
+    fn bin_conformance_tree() {
+        use serde_json::json;
+        // (0) every fixture text parses to a source_file root with no ERROR/MISSING node
+        for (name, text) in CONF_FILES {
+            assert_eq!(
+                parse_clean(text).root_node().kind(),
+                "source_file",
+                "{name}"
+            );
+        }
+        let (_dir, root, run) = conformance_scan("bin-conf");
+        // (7) exit 0, the summary last, no per-file diagnostic
+        assert!(run.ok, "{:?}", run.stderr);
+        assert_eq!(
+            run.stderr.last().map(String::as_str),
+            Some("ps: 0 files had syntax errors")
+        );
+        let diag = format!("ps: {root}/");
+        assert!(
+            !run.stderr.iter().any(|l| l.starts_with(&diag)),
+            "{:?}",
+            run.stderr
+        );
+        // (8) determinism: a second run over the same tree, byte for byte
+        assert_eq!(psfrontend(&[&root]).stdout, run.stdout);
+        let recs = records(&run.stdout);
+
+        // (6) closure: parents, contains/calls/uses endpoints and file-edge targets
+        let modules = module_recs(&recs);
+        let struct_keys: Vec<String> = recs
+            .iter()
+            .filter(|r| r["type"] == "struct")
+            .map(|r| format!("{}.{}", str_of(r, "parent"), str_of(r, "name")))
+            .collect();
+        let ids: Vec<&str> = recs
+            .iter()
+            .filter(|r| matches!(str_of(r, "type"), "struct" | "function"))
+            .map(|r| str_of(r, "id"))
+            .collect();
+        let files: Vec<String> = file_recs(&recs).into_iter().map(|f| f.0).collect();
+        for r in &recs {
+            let (from, to) = (str_of(r, "from"), str_of(r, "to"));
+            match str_of(r, "type") {
+                "struct" | "function" => {
+                    let p = str_of(r, "parent");
+                    assert!(
+                        modules.iter().any(|m| m == p) || struct_keys.iter().any(|k| k == p),
+                        "{r}"
+                    );
+                }
+                "contains" | "calls" => assert!(ids.contains(&from) && ids.contains(&to), "{r}"),
+                "uses" if r.get("properties").is_some() => {
+                    assert!(ids.contains(&from) && files.iter().any(|f| f == to), "{r}")
+                }
+                "uses" => assert!(ids.contains(&from) && ids.contains(&to), "{r}"),
+                _ => {}
+            }
+        }
+
+        // the sentinel offsets: each site's first character in main.ps1's on-disk bytes
+        let raw = fs::read(format!("{root}/app/main.ps1")).expect("read main.ps1");
+        let site = |s: &str| {
+            let n = CONF_MAIN.find(s).expect("site");
+            assert!(raw[n..].starts_with(s.as_bytes()), "{s}");
+            format!("<nameless@app/main.ps1:{n}>")
+        };
+        let (amp, imp) = (site("& { 1 }"), site("Import-Module $m"));
+
+        let j = |v: serde_json::Value| v.to_string();
+        let unit = |t: &str, parent: &str, name: &str, path: &str, params: &[&str]| {
+            let mut v = json!({"type": t, "parent": parent, "name": name, "path": path});
+            if !params.is_empty() {
+                v["params"] = json!(params);
+            }
+            j(v)
+        };
+        let edge = |t: &str, from: &str, to: &str| j(json!({"type": t, "from": from, "to": to}));
+        let k = |a: &str, b: &str| format!("{a}.{b}");
+
+        let md = "conf/Widgets/Widgets.psd1";
+        let lib = "conf/Widgets/lib";
+        let (p_wm, p_in, p_he, p_pr) = (
+            "conf/Widgets/Widgets.psm1",
+            "conf/Widgets/Nested/Inner.psm1",
+            "conf/Widgets/lib/Helpers.ps1",
+            "conf/Widgets/lib/Private.ps1",
+        );
+        let (p_ma, p_to, p_ex) = ("app/main.ps1", "app/tools.ps1", "app/extras.ps1");
+        let wm = k(md, "Widgets.psm1");
+        let inn = k(md, "Nested/Inner.psm1");
+        let he = k(md, "lib/Helpers.ps1");
+        let pr = k(lib, "Private.ps1");
+        let (ma, to, ex) = ("app.main.ps1", "app.tools.ps1", "app.extras.ps1");
+        let wd = k(&wm, "Widget");
+
+        let mut want: Vec<String> = Vec::new();
+        // (1) modules and files
+        for m in ["app", md, lib] {
+            want.push(j(json!({"type": "module", "fqn": m})));
+        }
+        for (p, m) in [
+            (p_ma, "app"),
+            (p_to, "app"),
+            (p_ex, "app"),
+            (md, md),
+            (p_wm, md),
+            (p_in, md),
+            (p_he, md),
+            (p_pr, lib),
+        ] {
+            want.push(j(json!({"type": "file", "path": p, "parent": m})));
+        }
+        // (2) structs, functions and contains
+        let scripts = [
+            ("app", "main.ps1", p_ma),
+            ("app", "tools.ps1", p_to),
+            ("app", "extras.ps1", p_ex),
+            (md, "Widgets.psm1", p_wm),
+            (md, "Nested/Inner.psm1", p_in),
+            (md, "lib/Helpers.ps1", p_he),
+            (lib, "Private.ps1", p_pr),
+        ];
+        for (m, name, p) in scripts {
+            let key = k(m, name);
+            want.push(unit("struct", m, name, p, &[]));
+            want.push(unit("function", &key, "<script>", p, &[]));
+            want.push(edge("contains", &key, &k(&key, "<script>")));
+        }
+        let members: [(&str, &str, &str, &str, &[&str]); 21] = [
+            ("function", &wm, "Get-Widget", p_wm, &[]),
+            ("function", &wm, "Select-Even", p_wm, &[]),
+            ("function", &wm, "Invoke-Work", p_wm, &[]),
+            ("function", &wm, "Remove-Widget", p_wm, &[]),
+            ("struct", &wm, "Widget", p_wm, &[]),
+            ("struct", &wm, "Shape", p_wm, &[]),
+            ("function", &wd, "new", p_wm, &["int"]),
+            ("function", &wd, "Describe", p_wm, &[]),
+            ("function", &wd, "Name", p_wm, &[]),
+            ("function", &inn, "Get-Inner", p_in, &[]),
+            ("function", &inn, "Hide-Inner", p_in, &[]),
+            ("function", &he, "Format-Widget", p_he, &[]),
+            ("function", &pr, "Get-Private", p_pr, &[]),
+            ("struct", &pr, "Base", p_pr, &[]),
+            ("function", to, "Use-Tool", p_to, &[]),
+            ("function", ex, "Get-One", p_ex, &[]),
+            ("function", ex, "Get-Two", p_ex, &[]),
+            ("function", ex, "Get-Three", p_ex, &[]),
+            ("struct", ex, "Size", p_ex, &[]),
+            ("struct", ex, "Bag", p_ex, &[]),
+            ("struct", ex, "Pipe", p_ex, &[]),
+        ];
+        for (t, parent, name, p, params) in members {
+            want.push(unit(t, parent, name, p, params));
+            want.push(edge("contains", parent, &k(parent, name)));
+        }
+        // (3) calls
+        let script = k(ma, "<script>");
+        for (from, to_key) in [
+            (k(&wm, "Get-Widget"), k(&wm, "Select-Even")),
+            (k(&wm, "Get-Widget"), k(&he, "Format-Widget")),
+            (k(&wm, "Get-Widget"), k(&pr, "Get-Private")),
+            (k(&wm, "Invoke-Work"), k(&wm, "Get-Widget")),
+            (k(ex, "Get-Three"), k(ex, "Get-One")),
+            (k(&wd, "Describe"), k(&wd, "Name")),
+            (script.clone(), k(to, "Use-Tool")),
+            (script.clone(), k(&wm, "Get-Widget")),
+            (script.clone(), k(&inn, "Get-Inner")),
+            (script.clone(), k(&wm, "Invoke-Work")),
+            (script.clone(), k(&wd, "new")),
+        ] {
+            want.push(edge("calls", &from, &to_key));
+        }
+        // (4) uses: four file edges and two type edges
+        for (from, file, kind) in [
+            (wm.as_str(), p_pr, "dot-source"),
+            (ma, p_to, "dot-source"),
+            (ma, md, "import-module"),
+            (ma, p_in, "import-module"),
+        ] {
+            want.push(j(
+                json!({"type": "uses", "from": from, "to": file, "properties": {"kind": kind}}),
+            ));
+        }
+        want.push(edge("uses", &wd, &k(&wm, "Shape")));
+        want.push(edge("uses", &wd, &k(&pr, "Base")));
+        // (5) twelve unresolved targets and their edges
+        for (fqn, cat) in [
+            ("Hide-Inner", "external"),
+            ("Remove-Widget", "external"),
+            ("Select-Even", "external"),
+            ("git", "external"),
+            ("Get-ChildItem", "stdlib"),
+            ("gci", "stdlib"),
+            ("Microsoft.PowerShell.Utility\\Write-Output", "stdlib"),
+            ("System.IO.Path.GetTempPath", "stdlib"),
+            (amp.as_str(), "func-value"),
+        ] {
+            want.push(j(
+                json!({"type": "unresolved", "fqn": fqn, "category": cat}),
+            ));
+            want.push(edge("unresolved_call", &script, fqn));
+        }
+        for (from, fqn, cat) in [
+            (ma.to_string(), imp.as_str(), "unknown"),
+            (k(ex, "Bag"), "System.Collections.Generic.List", "stdlib"),
+            (k(ex, "Pipe"), "System.IO.Stream", "stdlib"),
+        ] {
+            want.push(j(
+                json!({"type": "unresolved", "fqn": fqn, "category": cat}),
+            ));
+            want.push(edge("unresolved_use", &from, fqn));
+        }
+        want.sort();
+        assert_eq!(normalise_records(&recs, &root), want);
     }
 }
