@@ -282,7 +282,9 @@ pub struct Prepared {
     pub cache_key: CacheKey,
     pub full_scan: Option<FullScanReason>,
     /// The re-emission target set (checkout-relative): changed files ∪ the
-    /// reverse-dependency closure over the cached dep index ∪ overload peers.
+    /// reverse-dependency closure over the cached dep index ∪ overload peers
+    /// ∪ every ps file when any ps file is targeted
+    /// ([`crate::ps::widen_targets`]).
     pub targets_rel: BTreeSet<String>,
     /// The changed files (checkout-relative).
     pub changed_rel: BTreeSet<String>,
@@ -515,6 +517,9 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     let sql_targets =
         crate::frontends::whole_language_targets(&targets_rel, manifest.entries.keys());
     targets_rel.extend(sql_targets);
+    // The ps stream is whole-tree too: any targeted ps file re-targets every
+    // ps file in the manifest, so none is reused from cached facts.
+    crate::ps::widen_targets(&mut targets_rel, &manifest);
 
     // FULL-UNIVERSE SEAM (feedback-92): the incremental path derives the full
     // code-FQN universe from the PREVIOUS database. With a non-empty target set
