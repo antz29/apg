@@ -316,30 +316,31 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // can retire FQNs too. A seeded code unit whose location path is a target
     // path (or whose FQN directly names one, for a File) is therefore in scope;
     // it disappears iff the assembled graph does not re-emit it.
-    let mut in_scope: BTreeMap<String, &'static str> = code_fqns_in_paths(conn, delta.targets)?;
+    // Keyed by (FQN, label): an FQN that moves to a node of another label (a
+    // Function yielding to a Struct, a Struct to a Module) leaves the old-label
+    // seed row in scope beside the new one, so it is detach-deleted below.
+    let mut in_scope: BTreeSet<(String, &'static str)> = code_fqns_in_paths(conn, delta.targets)?;
     for (m, planned) in &seeded_modules {
         // Only a REAL module whose ENTIRE file subtree is in the delta can be
         // genuinely gone; a `planned` placeholder never disappears, and an
         // untouched module (or one with any reused file left) is left exactly as
         // the seed left it.
         if !*planned && fully_reached(m) {
-            in_scope.insert(m.clone(), "Module");
+            in_scope.insert((m.clone(), "Module"));
         }
     }
     for fqn in delta.removed_fqns {
-        if !in_scope.contains_key(fqn)
-            && let Some(label) = db_code_label(conn, fqn)?
-        {
-            in_scope.insert(fqn.clone(), label);
+        for label in db_code_labels(conn, fqn)? {
+            in_scope.insert((fqn.clone(), label));
         }
     }
 
-    let mut disappearing: BTreeMap<String, &'static str> = BTreeMap::new();
-    for (fqn, label) in &in_scope {
-        if !delta_labels.contains_key(fqn) {
-            disappearing.insert(fqn.clone(), label);
-        }
-    }
+    // The delta graph holds one node per FQN, so `delta_labels` is exactly the
+    // kept (FQN, label) pair set: a seed pair disappears iff it is not re-emitted.
+    let disappearing: BTreeSet<(String, &'static str)> = in_scope
+        .into_iter()
+        .filter(|(fqn, label)| delta_labels.get(fqn) != Some(label))
+        .collect();
 
     // --- 3. Delete every rel authored by a delta OR disappearing unit -------
     //
@@ -485,15 +486,17 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                     // An edge authored outside the delta is untouched.
                     None => return Ok(()),
                 };
-                // An edge into a unit that is being detached would be dropped by
-                // the DETACH DELETE anyway; a full rebuild prunes it as dangling.
-                if disappearing.contains_key(to) {
-                    return Ok(());
-                }
                 let to_label = endpoint_label(conn, to, delta.graph, &mut resolved)?;
                 let Some(to_label) = to_label else {
                     return Ok(()); // dangling endpoint — the full load prunes it too
                 };
+                // An edge into a unit that is being detached would be dropped by
+                // the DETACH DELETE anyway; a full rebuild prunes it as dangling.
+                // Only the exact (FQN, label) pair: a new-label node at a reused
+                // FQN still takes its edges.
+                if disappearing.contains(&(to.to_string(), to_label)) {
+                    return Ok(());
+                }
                 if !pair_allowed(table, from_label, to_label) {
                     return Ok(());
                 }
@@ -656,8 +659,8 @@ fn literal_list(values: &BTreeSet<String>) -> String {
 fn code_fqns_in_paths(
     conn: &Connection,
     targets: &BTreeSet<String>,
-) -> anyhow::Result<BTreeMap<String, &'static str>> {
-    let mut out = BTreeMap::new();
+) -> anyhow::Result<BTreeSet<(String, &'static str)>> {
+    let mut out = BTreeSet::new();
     if targets.is_empty() {
         return Ok(out);
     }
@@ -668,7 +671,7 @@ fn code_fqns_in_paths(
             &format!("MATCH (n:{label}) WHERE n.path IN [{list}] RETURN n.fqn AS fqn"),
         )?;
         for row in rows {
-            out.insert(cell(&row, 0), label);
+            out.insert((cell(&row, 0), label));
         }
     }
     let (_, rows) = query_rows(
@@ -676,7 +679,7 @@ fn code_fqns_in_paths(
         &format!("MATCH (n:File) WHERE n.fqn IN [{list}] RETURN n.fqn AS fqn"),
     )?;
     for row in rows {
-        out.insert(cell(&row, 0), "File");
+        out.insert((cell(&row, 0), "File"));
     }
     Ok(out)
 }
@@ -781,9 +784,16 @@ fn module_file_subtrees(conn: &Connection) -> anyhow::Result<BTreeMap<String, BT
     Ok(out)
 }
 
-/// The label of a code node at `fqn`, or `None`. Excludes `planned`
-/// placeholders on the four Implementation labels.
+/// The label of a code node at `fqn` (the first of [`db_code_labels`]), or
+/// `None`.
 fn db_code_label(conn: &Connection, fqn: &str) -> anyhow::Result<Option<&'static str>> {
+    Ok(db_code_labels(conn, fqn)?.into_iter().next())
+}
+
+/// Every label holding a code node at `fqn`, in Function/Struct/File/Module
+/// order. Excludes `planned` placeholders on the four Implementation labels.
+fn db_code_labels(conn: &Connection, fqn: &str) -> anyhow::Result<Vec<&'static str>> {
+    let mut out = Vec::new();
     for label in ["Function", "Struct", "File", "Module"] {
         let n = count(
             conn,
@@ -793,10 +803,10 @@ fn db_code_label(conn: &Connection, fqn: &str) -> anyhow::Result<Option<&'static
             ),
         )?;
         if n > 0 {
-            return Ok(Some(label));
+            out.push(label);
         }
     }
-    Ok(None)
+    Ok(out)
 }
 
 /// The DB label of an edge endpoint: the assembled graph's node when present,
@@ -1056,8 +1066,8 @@ fn detach_delete(conn: &Connection, label: &str, fqns: &[String]) -> anyhow::Res
     Ok(())
 }
 
-/// Groups a labelled set by its label.
-fn group_by_label(set: &BTreeMap<String, &'static str>) -> Vec<(&'static str, Vec<String>)> {
+/// Groups a set of (FQN, label) pairs by label.
+fn group_by_label(set: &BTreeSet<(String, &'static str)>) -> Vec<(&'static str, Vec<String>)> {
     let mut groups: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     for (fqn, label) in set {
         groups.entry(label).or_default().push(fqn.clone());
