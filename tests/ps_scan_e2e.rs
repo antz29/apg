@@ -102,6 +102,17 @@ impl Parity {
 
     /// [`Parity::new`] whose main full scan passes `--language <languages>`.
     fn with_languages(tag: &str, files: &[(&str, &str)], languages: &str) -> Parity {
+        let p = Parity::scratch(tag, files);
+        p.apg(&p.repo.root, &["init", "."]);
+        p.repo.commit_all("apg init");
+        p.apg(&p.repo.root, &["scan", ".", "--language", languages]);
+        p.apg(&p.repo.root, &["project", "start", "demo"]);
+        p
+    }
+
+    /// The bare fixture: the scratch repo with `files` committed and the
+    /// isolated HOME — no `apg init`, scan or project yet.
+    fn scratch(tag: &str, files: &[(&str, &str)]) -> Parity {
         let repo = Repo::new(tag);
         let home = repo
             .root
@@ -116,12 +127,7 @@ impl Parity {
         }
         repo.commit_all("ps fixture");
         let wt = repo.root.join("apg").join(".worktrees").join("demo");
-        let p = Parity { repo, home, wt };
-        p.apg(&p.repo.root, &["init", "."]);
-        p.repo.commit_all("apg init");
-        p.apg(&p.repo.root, &["scan", ".", "--language", languages]);
-        p.apg(&p.repo.root, &["project", "start", "demo"]);
-        p
+        Parity { repo, home, wt }
     }
 
     /// One `apg` run in `dir` with the isolated HOME; fails on a non-zero
@@ -364,8 +370,144 @@ fn assert_ps_file_edges(dir: &Path, when: &str) -> Vec<(String, String, String)>
     edges
 }
 
+/// The single Struct FQN located in `path`.
+fn only_struct_in(dir: &Path, path: &str) -> String {
+    let rows = json_lines(
+        dir,
+        &format!("MATCH (n:Struct) WHERE n.path = '{path}' RETURN n.fqn AS a"),
+    );
+    assert_eq!(rows.len(), 1, "exactly one Struct in {path}: {rows:?}");
+    serde_json::from_str(&rows[0]).expect("struct fqn")
+}
+
+/// [`struct_file_uses`] with each properties cell re-serialized as compact
+/// JSON (a NULL stays `null`, non-JSON text stays raw), so it compares
+/// against `json!` text.
+fn file_edge_rows(dir: &Path) -> Vec<(String, String, String)> {
+    struct_file_uses(dir)
+        .into_iter()
+        .map(|(s, f, p)| {
+            let p = serde_json::from_str::<serde_json::Value>(&p)
+                .map(|v| v.to_string())
+                .unwrap_or(p);
+            (s, f, p)
+        })
+        .collect()
+}
+
 mod e2e {
     use super::*;
+
+    /// ps-file-dependency-cached-assembly: main.ps1's dot-source and
+    /// import-module Struct-to-File Uses (beside PROGA's COBOL copy edge) hold
+    /// with their kinds through every assembly of an auto-detected scan: the
+    /// cold full scan, the warm-cache path (db.lbug deleted, every file from
+    /// cached units, zero frontends), the stale-socket full-load fallback
+    /// (`ingest_with_reuse`, ps files reused) and a `--force` rebuild. The
+    /// whole `apg/` layout is ignored and untracked so every tracked path is
+    /// a located File with a fact unit (the warm path needs one per entry).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend/cobolfrontend/structfrontend, db.lbug); run via cargo test-e2e"]
+    fn file_dependency_edges_survive_the_cached_fact_assembly() {
+        const PROGA: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGA.\n       PROCEDURE DIVISION.\n       MAIN-PARA.\n       COPY STMTS.\n           STOP RUN.\n";
+        let p = Parity::scratch(
+            "ps-cached-assembly",
+            &[
+                (
+                    "main.ps1",
+                    ". $PSScriptRoot\\lib\\util.ps1\nImport-Module ./mods/Foo/Foo.psm1\n",
+                ),
+                ("lib/util.ps1", "function Get-Util {\n    'util'\n}\n"),
+                ("mods/Foo/Foo.psm1", "function Get-Foo {\n    'foo'\n}\n"),
+                ("PROGA.cbl", PROGA),
+                ("lib/STMTS.cpy", "           DISPLAY 'S'.\n"),
+            ],
+        );
+        let root = &p.repo.root;
+        p.apg(root, &["init", "."]);
+        let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        std::fs::write(root.join(".gitignore"), format!("{gitignore}/apg/\n")).unwrap();
+        let git = common::git2_repo(&p.repo);
+        let mut index = git.index().unwrap();
+        index
+            .remove_path(Path::new("apg/config.json"))
+            .expect("untrack apg/config.json");
+        index.write().unwrap();
+        p.repo.commit_all("ignore apg/");
+        assert!(p.repo.is_clean(), "the fixture tree must be clean");
+        let scan = |extra: &[&str]| {
+            let mut args = vec!["scan", ".", "--copy-path", "lib"];
+            args.extend_from_slice(extra);
+            p.apg(root, &args)
+        };
+
+        // (1) Cold full scan.
+        let log = scan(&[]);
+        assert!(
+            log.contains("[scan] running ps frontend")
+                && log.contains("[scan] running cobol frontend"),
+            "(1) auto-detect must run ps and cobol: {log}"
+        );
+        let main = only_struct_in(root, "main.ps1");
+        let prog = only_struct_in(root, "PROGA.cbl");
+        assert!(
+            main.starts_with("ps.") && prog.starts_with("cobol."),
+            "{main} {prog}"
+        );
+        let kind = |k: &str| serde_json::json!({ "kind": k }).to_string();
+        let mut expected = vec![
+            (main.clone(), "lib/util.ps1".to_string(), kind("dot-source")),
+            (main, "mods/Foo/Foo.psm1".to_string(), kind("import-module")),
+            (prog, "lib/STMTS.cpy".to_string(), kind("copy")),
+        ];
+        expected.sort();
+        assert_eq!(file_edge_rows(root), expected, "(1) cold full scan");
+
+        // (2) Warm cache: the derived index is gone, the recorded scan at
+        // HEAD assembles every file from cached units with zero frontends.
+        let trans = p.repo.apg_root().join(".trans");
+        for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm"] {
+            let _ = std::fs::remove_file(trans.join(name));
+        }
+        let log = scan(&[]);
+        assert!(
+            log.contains("[scan] warm cache: recorded scan at HEAD"),
+            "(2) must take the warm-cache path: {log}"
+        );
+        assert!(
+            !log.contains("[scan] running "),
+            "(2) the warm path runs zero frontends: {log}"
+        );
+        assert_eq!(file_edge_rows(root), expected, "(2) warm cache");
+
+        // (3) Full-load fallback: a COBOL-only edit (ps files reused) under a
+        // planted stale session socket re-assembles through ingest_with_reuse.
+        std::fs::write(
+            root.join("PROGA.cbl"),
+            PROGA.replacen("\n", "\n      * edited\n", 1),
+        )
+        .unwrap();
+        p.repo.commit_all("edit PROGA");
+        let socket = apg::session::socket_path(&p.repo.apg_root());
+        std::fs::write(&socket, b"stale-session").unwrap();
+        let log = scan(&[]);
+        let _ = std::fs::remove_file(&socket);
+        for line in [
+            "[scan] incremental: ",
+            "[load] full-load fallback: re-assembling the full graph",
+        ] {
+            assert!(log.contains(line), "(3) log must contain `{line}`: {log}");
+        }
+        assert!(
+            !log.contains("[scan] running ps frontend"),
+            "(3) no ps file is targeted, so ps is reused: {log}"
+        );
+        assert_eq!(file_edge_rows(root), expected, "(3) full-load fallback");
+
+        // (4) A --force rebuild.
+        scan(&["--force"]);
+        assert_eq!(file_edge_rows(root), expected, "(4) --force rebuild");
+    }
 
     /// ps-file-dependency-ingest: main.ps1 dot-sources lib/util.ps1 and
     /// imports mods/Foo/Foo.psm1 by path and `Foo` by name (manifest
