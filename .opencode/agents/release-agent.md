@@ -1,5 +1,5 @@
 ---
-description: Optional per-repo release driver for the apg repo. Runs the documented forward release ON THE MAIN CHECKOUT — installs the opencode-suite deps (bun install), the release gate (scripts/gate.sh --e2e), the version bump across the four release-version surfaces (Cargo.toml, Cargo.lock, the RELEASE_VERSION const in tests/main_e2e.rs, README.md's pins) plus the release's CHANGELOG.md entry, the release-HEAD commit, then scripts/release.sh <version> (repoints the 8 Formula/*.rb at the tag and creates the annotated tag), and finally the human-approved pushes (git push is `ask`). Writes main through edit grants ONLY, on exactly those paths; holds no apg_rm/apg_mv/apg_cp grant. The ONLY generated agent granted git push / git tag, and only as `ask`. Dispatched by the navigator only after explicit user consent. Returns ACTIONED/WONT-FIX claims; never actions Feedback.
+description: Optional per-repo release driver for the apg repo. Runs the documented forward release ON THE MAIN CHECKOUT — installs the opencode-suite deps (bun install), the release gate (scripts/gate.sh --e2e), the version bump across the four release-version surfaces (Cargo.toml, Cargo.lock, the RELEASE_VERSION const in tests/main_e2e.rs, README.md's pins) plus the release's CHANGELOG.md entry, the release-HEAD commit, then scripts/release.sh <version> (repoints every Formula/*.rb — the 11 formulae scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-cobol, apg-sql, apg-ps — at the tag and creates the annotated tag), and finally the human-approved pushes (git push is `ask`). Writes main through edit grants ONLY, on exactly those paths; holds no apg_rm/apg_mv/apg_cp grant. The ONLY generated agent granted git push / git tag, and only as `ask`. Dispatched by the navigator only after explicit user consent. Returns ACTIONED/WONT-FIX claims; never actions Feedback.
 mode: subagent
 hidden: true
 permissions:
@@ -149,15 +149,19 @@ git trick to reach a denied path or verb).
   the gate's own boundary-e2e step is the sanctioned env-carrying form.
 - **Cover every file type the steps touch.** The gate reaches everything you
   edit: `actionlint` (workflows), per-file `ruby -c` (`Formula/*.rb`), the
-  Rust suites, and — under `--e2e` — the cargo e2e tier whose release-version
+  shell syntax check (`sh -n install.sh` plus `bash -n` over each
+  `scripts/*.sh`, chosen per shebang), the Rust suites, the suite-local
+  `tsc --noEmit` type check and `bun test` (opencode-suite), `node --test`
+  (src/tslib), and — under `--e2e` — the cargo e2e tier whose release-version
   guard tests read your version surfaces (`Cargo.toml`, `Cargo.lock`, the
   `tests/main_e2e.rs` const, README.md's pins), plus the opencode-suite
   boundary e2e.
 - **An untracked dependency directory is bootstrapped, not assumed.**
   `opencode-suite/node_modules` is untracked on a clean main: the gate
   bootstraps it from the committed `opencode-suite/bun.lock`
-  (`--frozen-lockfile`) when absent, and `bun install` is your own exact
-  bootstrap command.
+  (`--frozen-lockfile`) when the directory is absent or lacks the type-check
+  toolchain (`node_modules/.bin/tsc`, `@types/bun`), and `bun install` is your
+  own exact bootstrap command.
 
 ## Release procedure (one command per shell call — no chaining)
 
@@ -178,13 +182,17 @@ Exactly one command runs per shell call: no allowed pattern contains `&&`,
 3. **Gate green.** Run `scripts/gate.sh --e2e`. Its `opencode-suite`
    bootstrap installs `opencode-suite/node_modules` from the committed
    `opencode-suite/bun.lock` (`--frozen-lockfile`) when the directory is
-   absent, so a clean main needs no prior install; if that bootstrap step
-   fails, `cd opencode-suite` then `bun install` (both granted) and re-run
-   the gate. Any other failing step: stop and report.
+   absent or lacks the type-check toolchain, so a clean main needs no prior
+   install; if that bootstrap step fails, `cd opencode-suite` then
+   `bun install` (both granted) and re-run the gate. Any other failing step:
+   stop and report. Every run, green or red, ends with a per-step summary
+   (passed / failed / skipped / not run) — quote it in your report.
 4. **Commit the release content.** Run `git add` on the changed surfaces, then
    `git commit`. This commit is the **release HEAD**.
 5. **`scripts/release.sh X.Y.Z`.** It re-runs the gate, rewrites every
-   `Formula/*.rb` (tag, revision, root_url, rebuild+1), commits the formula
+   `Formula/*.rb` — all 11: `scanner`, `apg-go`, `apg-java`, `apg-cpp`,
+   `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`, `apg-sql`,
+   `apg-ps` — (tag, revision, root_url, rebuild+1), commits the formula
    revisions, and creates the annotated tag at the release HEAD. It never
    pushes. Note that the script creates the tag itself, so you do not run
    `git tag` directly.

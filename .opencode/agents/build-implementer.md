@@ -286,7 +286,9 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   contract), `build.rs` (compiles and stages every frontend), root
   `Cargo.toml`/`Cargo.lock`, `rust-toolchain.toml`/`.cargo/config.toml` (pinned
   toolchain + `cargo test-unit`/`test-int`/`test-e2e` aliases), `install.sh`,
-  `Formula/**` (the `scanner` formula + seven per-language formulae),
+  `Formula/**` (the `scanner` formula + ten per-language formulae: `apg-go`, `apg-java`,
+  `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`,
+  `apg-sql`, `apg-ps`),
   `.github/**`, and `AGENTS.md`.
 - **Not yours**: `src/**` (root crate → core implementer; frontends → their
   agents), `opencode-suite/**` (core implementer), `README.md`
@@ -294,7 +296,11 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
 - **Standalone cargo crates you gate**: `src/rustlib`, `src/pylib`,
   `src/structlib`, `src/agentlib` via `cargo <cmd> --manifest-path
   src/<crate>/Cargo.toml`. You exercise their tests; you do not edit their
-  source.
+  source. `src/cobollib` and `src/pslib` (also pinned by the root
+  `rust-toolchain.toml`) and the .NET `src/sqllib` are gated by their own
+  agents and you hold no grant for them — when a change on your surface
+  (toolchain pin, `build.rs`, a formula) reaches them, say so in your report
+  so the coordinator dispatches their agent to run their tests.
 
 ## Project flow (operational)
 
@@ -337,25 +343,34 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   allow rule; use `cargo build --config 'env.…="…"'` forms.
 - **Cover every file type the steps touch.** Your gate reaches everything you
   edit: `actionlint` (`.github/workflows/*.yml`, skipped with a loud warning
-  where the tool is absent), per-file `ruby -c` (`Formula/*.rb`), the Rust
-  suites, the four standalone cargo crates, and the JS/TS suites (`bun test`,
-  `node --test`). You own `scripts/**` and may change a step — keep every
+  where the tool is absent), per-file `ruby -c` (`Formula/*.rb`), the shell
+  syntax check (`sh -n install.sh` plus `bash -n` over each `scripts/*.sh`,
+  per shebang — any other shebang fails), the Rust suites, the four standalone
+  cargo crates, and the JS/TS suites (the suite-local `tsc --noEmit`,
+  `bun test`, `node --test`). You own `scripts/**` and may change a step — keep every
   file type you edit inside the gate it belongs to.
 - **An untracked dependency directory is bootstrapped, not assumed.** The
   gate's `opencode-suite/node_modules` bootstrap installs from the committed
   `opencode-suite/bun.lock` (`--frozen-lockfile`) only when the directory is
-  absent — keep that bootstrap inside the gate you own.
+  absent or lacks the type-check toolchain (`node_modules/.bin/tsc` not
+  executable, or `node_modules/@types/bun` absent) — keep that bootstrap
+  inside the gate you own.
 
 ## Done gate — the repo-green contract
 
 - **`scripts/gate.sh`** runs `actionlint` over `.github/workflows/*.yml`
   (skipped with a loud warning where the tool is absent) → a per-file
-  `ruby -c` over `Formula/*.rb` → `cargo fmt --check` →
-  `cargo check --all-targets` → `cargo clippy --all-targets -- -D warnings` →
-  `cargo build` → `cargo test` (the unit+int default suite) → the
-  `opencode-suite/node_modules` bootstrap → `bun test` → `node --test`,
-  stopping at the first failure; `--e2e` appends the cargo e2e tier and the
-  opencode-suite boundary e2e.
+  `ruby -c` over `Formula/*.rb` → the shell syntax check (`sh -n install.sh`
+  plus `bash -n` over each `scripts/*.sh`, per shebang) → `cargo fmt --check`
+  → `cargo check --all-targets` → `cargo clippy --all-targets -- -D warnings`
+  → `cargo build` → `cargo test` (the unit+int default suite) → the
+  `opencode-suite/node_modules` bootstrap (when absent or lacking the
+  type-check toolchain) → the suite-local `tsc --noEmit -p tsconfig.json` (in
+  `opencode-suite/`) → `bun test` → `node --test`, stopping at the first
+  failure; `--e2e` appends the cargo e2e tier and the opencode-suite boundary
+  e2e. Every run, green or red, ends with a per-step summary (passed / failed
+  / skipped / not run); keep the declared `STEPS` list in lockstep with the
+  steps whenever you change one.
 - **Also run the standalone crates' tests** (`cargo test --manifest-path
   src/{rustlib,pylib,structlib,agentlib}/Cargo.toml`).
 - **A `kind=gate` task is done only on a real, observed green run.**

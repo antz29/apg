@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib,agentlib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Works under the Ponytail discipline (fixed level ultra). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites, and the suite-local `opencode-suite/node_modules/.bin/tsc` type check); removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
+description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib,agentlib,cobollib,sqllib,pslib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Works under the Ponytail discipline (fixed level ultra). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites, and the suite-local `opencode-suite/node_modules/.bin/tsc` type check); removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
 mode: subagent
 hidden: true
 permissions:
@@ -60,6 +60,9 @@ permissions:
   - { action: edit, resource: "src/pylib/**", effect: deny }
   - { action: edit, resource: "src/structlib/**", effect: deny }
   - { action: edit, resource: "src/agentlib/**", effect: deny }
+  - { action: edit, resource: "src/cobollib/**", effect: deny }
+  - { action: edit, resource: "src/sqllib/**", effect: deny }
+  - { action: edit, resource: "src/pslib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/golib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/javalib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/cpplib/**", effect: deny }
@@ -69,6 +72,9 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/src/pylib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/structlib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/agentlib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/cobollib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/sqllib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/pslib/**", effect: deny }
   - { action: edit, resource: "src/*/target/**", effect: deny }
   - { action: edit, resource: "src/tslib/node_modules/**", effect: deny }
   - { action: edit, resource: "src/cpplib/vendor/**", effect: deny }
@@ -451,7 +457,8 @@ reviewer:    apg_review_reject <f>                               → status = op
   tier. The language frontends are separate projects whose tests are not yours.
 - **The language frontends are NOT yours.** `src/golib/**`, `src/javalib/**`,
   `src/cpplib/**`, `src/rustlib/**`, `src/tslib/**`, `src/csharplib/**`,
-  `src/pylib/**`, `src/structlib/**`, and `src/agentlib/**` are owned by their
+  `src/pylib/**`, `src/structlib/**`, `src/agentlib/**`, `src/cobollib/**`,
+  `src/sqllib/**`, and `src/pslib/**` are owned by their
   **dedicated frontend agents**; your edit grant explicitly denies every one.
 - **Your shared seams are the ones only you touch**: `src/frontends.rs`,
   `src/classify.rs`/`src/classify/**`, `src/cleanup.rs`, `src/ingest/**`, and
@@ -528,12 +535,15 @@ reviewer:    apg_review_reject <f>                               → status = op
   build) instead of smuggling environment through the shell.
 - **Cover every file type the steps touch.** Your steps reach exactly what
   you edit: Rust (fmt/check/clippy/build/test), the opencode-suite JS/TS
-  product source (`bun test`), and the src/tslib TS suite (`node --test`).
-  `actionlint` and the per-file `ruby -c` reach workflows and formulae —
-  file types you never edit (build-implementer's surface).
+  product source (the suite-local `tsc --noEmit` type check and `bun test`),
+  and the src/tslib TS suite (`node --test`). `actionlint`, the per-file
+  `ruby -c` and the shell syntax check (`sh -n`/`bash -n`) reach workflows,
+  formulae and shell scripts — file types you never edit (build-implementer's
+  surface).
 - **An untracked dependency directory is bootstrapped, not assumed.**
   `opencode-suite/node_modules` is untracked: the gate bootstraps it from the
-  committed `opencode-suite/bun.lock` (`--frozen-lockfile`) when absent, and
+  committed `opencode-suite/bun.lock` (`--frozen-lockfile`) when absent or
+  lacking the type-check toolchain (`node_modules/.bin/tsc`, `@types/bun`), and
   `bun install` is your own exact bootstrap command for running the suite
   outside the gate.
 
@@ -542,12 +552,17 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **The repository gate** is `scripts/gate.sh` (run-only; `scripts/**` is
   `build-implementer`'s): `actionlint` over `.github/workflows/*.yml` (skipped
   with a loud warning where the tool is absent) → a per-file `ruby -c` over
-  `Formula/*.rb` → `cargo fmt --check` → `cargo check --all-targets` →
-  `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`
-  (the unit+int default suite) → the `opencode-suite/node_modules` bootstrap →
-  `bun test` (in `opencode-suite/`) → `node --test` (in `src/tslib/`);
-  `scripts/gate.sh --e2e` appends the cargo e2e tier and the opencode-suite
-  boundary e2e. Running it is the whole done-contract; the steps as separate
+  `Formula/*.rb` → the shell syntax check (`sh -n install.sh` plus `bash -n`
+  over each `scripts/*.sh`, per shebang) → `cargo fmt --check` →
+  `cargo check --all-targets` → `cargo clippy --all-targets -- -D warnings` →
+  `cargo build` → `cargo test` (the unit+int default suite) → the
+  `opencode-suite/node_modules` bootstrap (when absent or lacking the
+  type-check toolchain) → the suite-local `tsc --noEmit -p tsconfig.json` (in
+  `opencode-suite/`) → `bun test` (in `opencode-suite/`) → `node --test` (in
+  `src/tslib/`), stopping at the first failure; `scripts/gate.sh --e2e`
+  appends the cargo e2e tier and the opencode-suite boundary e2e. Every run,
+  green or red, ends with a per-step summary (passed / failed / skipped / not
+  run) — quote it when you report a gate result. Running it is the whole done-contract; the steps as separate
   calls are the same contract. Clippy standard is **zero warnings**.
 - **Fast core-only build**: `cargo build --config 'env.APG_BUILD_FRONTENDS="0"'`
   (matches `cargo build *`). Env-prefixed forms are deliberately not granted.
