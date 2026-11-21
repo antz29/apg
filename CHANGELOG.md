@@ -9,6 +9,74 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.29.2
+
+Patch release: two new frontends (T-SQL and PowerShell), a project-aware C#
+frontend, a general incremental-scan fix, a pinned Rust toolchain, and a
+stronger repo gate.
+
+**T-SQL frontend.** A standalone single-file `sqlfrontend` (`src/sqllib`, a
+.NET `net9.0` build on `Microsoft.SqlServer.TransactSql.ScriptDom` `180.140.0`,
+`TSql170Parser`) graphs T-SQL schemas under the `sql` language root. It claims
+`.sql` sources in any letter case, reads `.sqlproj` membership statically
+(SDK-style and legacy projects; loose directories share one loose database
+scope), neutralises SQLCMD lines, splits `GO` batches with per-batch parse
+recovery, and resolves `EXEC`/function calls, synonyms and object/type
+references into `Uses` edges carrying a `read`/`write`/`trigger`/`type` kind
+(a view and a synonym carry only `read`) and categorised unresolved targets.
+Any `.sql` or `.sqlproj` change re-scans the whole `sql` stream. It is
+self-contained at scan time (never runs MSBuild, `dotnet` or a database) and
+ships as the new `apg-sql` formula and `apg-sql-linux-*` package.
+
+**PowerShell frontend.** A standalone `psfrontend` (`src/pslib`, language id
+`ps`) on the pinned `woodruffw-trough-tree-sitter-powershell =0.1.6` grammar
+over `tree-sitter =0.26.13` claims `.ps1`/`.psm1`/`.psd1` in any letter case.
+It models manifest and directory modules, one script Struct per file with its
+functions, classes, enums and methods, resolves commands, calls and types
+against PowerShell 7.6 built-in tables, and records dot-source/`Import-Module`
+dependencies as Struct→File `Uses` edges (kinds `dot-source`/`import-module`).
+A ps-touching incremental scan re-emits every ps file. It needs nothing at
+scan time and ships as the new `apg-ps` formula and Linux package.
+
+**Project-aware C# frontend.** The C# frontend now claims
+`.cs`/`.csx`/`.cshtml`/`.razor`, models each `.sln` and project as a module,
+compiles per project in project-reference order, resolves restored references
+offline (`obj/project.assets.json`, `HintPath`/`packages/`, the NuGet global
+packages folder; framework packs with embedded net9 reference assemblies as
+fallback; `APG_CSHARP_DOTNET_ROOT`/`APG_CSHARP_REFASM_ROOT` root overrides),
+qualifies cross-project duplicate types (`CollisionQualifier`), compiles Razor
+views and components (Razor `6.0.36` beside Roslyn `4.12.0`) with `#line`-mapped
+locations, and roots a namespace-less file directly under the `csharp`
+Language. The structural scanner gains an `sln` stream and routes MSBuild/.NET
+XML files (`.csproj`, `.props`, `.targets`, `.config`, `.resx`, …) to `xml`.
+
+**Incremental-scan fix (every language).** A spliced scan in which an FQN moved
+to a node of another label (e.g. Function→Struct, Struct→Module) no longer
+leaves the old-label node behind as an orphan row until the next `--force`:
+`splice::apply` now tracks seed and kept code nodes by (FQN, label), matching a
+full rebuild. The splice path also carries every `Uses` edge's properties, and
+cached facts apply the struct-beats-function and type-shadows-module rules
+like a full load.
+
+**Toolchain.** Rust is pinned to `1.100.0` (the repo-root `rust-toolchain.toml`
+and the Linux release CI's `dtolnay/rust-toolchain@1.100.0`); pylib's e2e
+harness now locates `pyfrontend` via `CARGO_BIN_EXE` because cargo 1.100.0 runs
+integration tests from a different directory.
+
+**Repo gate.** `scripts/gate.sh` ends every run with a per-step
+`=== gate summary ===`, adds a shell syntax-check step (`sh -n install.sh`,
+`bash -n` over `scripts/*.sh`, by shebang) and a type-check step over
+`opencode-suite/tools/**` with pinned TypeScript `5.9.3` and `@types/bun`
+`1.4.5`; the opencode-suite tools' inputs are now typed (type-only, no
+behaviour change).
+
+**Build and docs.** `build.rs` stages the C# and SQL frontends through one
+shared helper (no behaviour change). AGENTS.md and README document the new
+frontends, the C# project model, the SQL `Uses` edge kinds and the pinned
+toolchain.
+
+No durable-spec model change.
+
 ## v0.29.1
 
 Patch release: faster and more correct incremental scans. No new features and
