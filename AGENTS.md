@@ -871,12 +871,13 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
     sites dot-sources that File and `import-module` otherwise, whatever the
     order and count of its sites. SQL `Uses` edges
     carry `properties` = `{"kind":"read"|"write"|"trigger"|"type"}`:
-    `read`/`write` from a procedure/function/trigger (Function) or view
-    (Struct) to the table/view/sequence/synonym (Struct) it reads or writes,
-    only `read` from a synonym (Struct), and only to a table, view or
-    sequence, `trigger` from a DML trigger to its table/view, `type` from a
-    routine or column to the user-defined type/table type it names. Every
-    other `Uses` edge stores `properties` = `{}`.
+    `read`/`write` from a procedure/function/trigger (Function) to the
+    table/view/sequence/synonym (Struct) it reads or writes,
+    only `read` from a view (Struct) to the table/view/sequence/synonym
+    (Struct) it reads, only `read` from a synonym (Struct), and only to a
+    table, view or sequence, `trigger` from a DML trigger to its table/view,
+    `type` from a routine or column to the user-defined type/table type it
+    names. Every other `Uses` edge stores `properties` = `{}`.
   - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
   - `UnresolvedUse` — Function→UnresolvedTarget, Struct→UnresolvedTarget
 - Authored node labels (the `apg/layers/` node files): `Requirement` (fqn,
