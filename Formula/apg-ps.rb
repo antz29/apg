@@ -11,8 +11,8 @@ class ApgPs < Formula
   desc "PowerShell scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.29.1",
-      revision: "d28f4053484532cdd284cf009fe1410441a41276"
+      tag:      "v0.29.2",
+      revision: "ee6363e0eef7024791fceeb21ded6dc7bd63fb28"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
