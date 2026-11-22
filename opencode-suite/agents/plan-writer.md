@@ -202,7 +202,10 @@ wording ("today", "now", "no longer", "currently", "was", "previously") are rewr
   considered, test-tier routing, repo-gate facts, and execution method.
 - **PlanPhase** — `apg_plan_add <project> phase <n> --title … --deliverable … --prereq <n> --satisfies <req-name>`:
   fqn `<project>/plan.phase-<n>`; `--satisfies` names the spec **requirements** it delivers
-  (`requirements.requirement.<name>`), `--prereq` adds a `Gates` edge. Every requirement is Satisfied by exactly one phase.
+  (`requirements.requirement.<name>`), `--prereq` adds a `Gates` edge. Every requirement is
+  Satisfied by exactly one phase, and a phase is roughly a **15-task slice** — a rough average
+  across the plan, not a cap: split a deliverable that needs far more, and leave a genuinely
+  small one small.
 - **Planned Implementation node** — `apg_plan_add <project> planned <kind> <fqn> [--name …]
   [--parent …]`: a `Module`/`File`/`Struct`/`Function` marked `planned` at the FQN where the
   code will land, declared BEFORE the task that creates it; a FQN that already resolves is refused.
@@ -236,7 +239,9 @@ Two holistic gates; the navigator orchestrates, and you hold the breakdown or on
    `Satisfies`/`Gates` edges, and the delta's planned nodes. **The skeleton only, no tasks.**
 2. **Structural review #1** (one reviewer) — every requirement Satisfied by exactly one phase,
    no `Gates` cycles, no empty phases; feedback routes to the breakdown writer.
-3. **Parallel per-phase writing** (N writers) — each writes only its phase's `Task` nodes.
+3. **Parallel per-phase writing** (N writers) — each writes only its phase's `Task` nodes;
+   a deliverable that needs far more than the rough 15-task scale goes back to the breakdown
+   writer for a split, never out as a padded list.
 4. **Parallel per-phase review** (N reviewers, cycled) — fixes go through `apg_plan_add` `action=update`, never a re-add, until each phase is green.
 5. **Final holistic review** (one reviewer, cycled) — cross-phase coverage, `Gates` cycles,
    ordering, assignment and operation-edge targets (a `creates` names a declared planned node;
