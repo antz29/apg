@@ -17,6 +17,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.plan-phase-scale-guidance",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
     },
@@ -49,12 +54,12 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.verify-feedback-stage",
+      "source": "solution.component.planned-node-realization-gate",
       "properties": {}
     },
     {
       "kind": "realises",
-      "source": "solution.component.planned-node-realization-gate",
+      "source": "solution.component.verify-feedback-stage",
       "properties": {}
     }
   ]

@@ -7,12 +7,17 @@
   "out": [
     {
       "kind": "requires",
-      "target": "requirements.requirement.plan-review-deterministic-and-minimal",
+      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
+      "target": "requirements.requirement.plan-phase-scale-guidance",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
     }
   ],

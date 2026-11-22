@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "plan-review-prompt",
-  "body": "The plan-review prompt: it carries a coverage pass driven by the verify refusal and a semantic per-node pass over a plan against the change-set delta, plus the research-escalation stop-and-report rule.",
+  "body": "The plan-review prompt carries a coverage pass driven by the verify refusal, a semantic per-node pass over a plan against the change-set delta, a phase-scale decomposition check, and the research-escalation stop-and-report rule.",
   "properties": {},
   "out": [
     {
