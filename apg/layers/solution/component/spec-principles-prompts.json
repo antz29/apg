@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "spec-principles-prompts",
-  "body": "The distributed spec and plan writer and reviewer prompts carry rules R1 through R5, the research-escalation stop-and-report rule, and a plan phase's rough fifteen-task scale, each inside its body-line cap with the shared permissions section.",
+  "body": "Spec and plan writer and reviewer prompts carry R1 through R5 and the research-escalation stop-and-report rule, each inside its body-line cap with the shared permissions section; the plan writer prompt adds a phase's rough fifteen-task scale.",
   "properties": {},
   "out": [
     {
