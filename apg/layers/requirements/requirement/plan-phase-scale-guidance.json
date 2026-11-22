@@ -14,6 +14,11 @@
       "properties": {}
     },
     {
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
+      "properties": {}
+    },
+    {
       "kind": "requires",
       "source": "requirements.user.plan-review-agent",
       "properties": {}

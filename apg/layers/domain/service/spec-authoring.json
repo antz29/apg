@@ -52,6 +52,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.plan-phase-scale-guidance",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.prompt-corpus-model-current",
       "properties": {}
     },
@@ -72,17 +77,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.suite-tool-descriptions-name-live-edge-kinds",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.tier-crossing-coverage-is-lint-and-merge",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.two-representation-model-documented",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.suite-tool-descriptions-name-live-edge-kinds",
       "properties": {}
     }
   ],
