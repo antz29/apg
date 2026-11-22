@@ -231,6 +231,10 @@ pair is structural — the linter reports it, the write refuses
 - **Assignment** — exactly one `assigned-to` Agent per task, named against the branch graph's
   Agent roster (an absent Agent is drift); the `implements` Component, when present, is real.
   "Implement + unit-test X" is two tasks, each assigned to its owning Agent.
+- **Phase scale** — around 15 tasks per phase is the rough expected average, not a rule; a
+  phase running into the dozens or hundreds is a decomposition finding (too coarse a
+  deliverable, or one-task-per-file busywork) — attach to the phase and name the split, never a
+  count-only finding.
 - **Operation edges** — checked against the task's title: `creates` names a **declared planned
   node** (never auto-created); `modifies`/`deletes` name existing branch-graph code;
   `renames`/`moves` carry the live source plus the `target` destination; an empty set is a
