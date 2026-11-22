@@ -163,13 +163,13 @@ Patch only.
             ("codebase-navigator.md", 469),
             ("implementation-phase-reviewer.md", 258),
             ("spec-writer.md", 169),
-            ("plan-writer.md", 167),
-            ("plan-review.md", 123),
+            ("plan-writer.md", 172),
+            ("plan-review.md", 126),
             ("migration-agent.md", 88),
             ("spec-review.md", 84),
             ("researcher.md", 56),
         ];
-        const CORPUS_CAP: usize = 1_908;
+        const CORPUS_CAP: usize = 1_916;
 
         /// The template's lines, without the empty element a trailing newline
         /// would split out (so the count matches the file's line count).
