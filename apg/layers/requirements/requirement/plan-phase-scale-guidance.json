@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "plan-phase-scale-guidance",
-  "body": "The plan writer and plan reviewer prompts state that a plan phase averages about fifteen tasks, a rough scale, not a cap, so a deliverable needing far more goes back to the breakdown writer for a split and a genuinely small one stays small.",
+  "body": "The plan writer and plan reviewer prompts state that a plan phase is a rough working average of about fifteen tasks, so a deliverable needing far more goes back to the breakdown writer for a split and a genuinely small one stays small.",
   "properties": {
     "feature": "plan-coverage"
   },
