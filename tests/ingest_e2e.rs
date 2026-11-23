@@ -1672,6 +1672,244 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// requirements.requirement.reused-stream-reproduces-every-node: a stream a
+    /// scan reuses reproduces every node it produced. The skipped language's
+    /// `Language` root, its `Module` rows and each module's `Language -> Module`
+    /// edge are replayed from whichever scaffolding record the store holds — a
+    /// complete one, a legacy one written before it carried `languages`/
+    /// `language_edges` (`#[serde(default)]` decodes both as empty), or none at
+    /// all — while the per-file fact units carry the declarations and their
+    /// containment chain. With no record at all, the record-only pure-intermediate
+    /// module is the one row the reused units cannot attest.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp FactStore + db.lbug); run via cargo test-e2e"]
+    fn reused_stream_replays_its_language_root_and_module_rows() {
+        use apg::cache::{
+            CacheKey, FactStore, FileFragment, FileIndex, ModuleScaffolding, SCAFFOLDING_FILE,
+            ScanConfigKey,
+        };
+
+        let dir = std::env::temp_dir().join(format!("apg-reused-stream-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "go",
+            config: None,
+            base: None,
+        };
+        let files = [("pkg/a.go", "oid-a"), ("pkg/b.go", "oid-b")];
+
+        // The go stream a scan reuses: `demo` is a pure-intermediate module above
+        // two file-bearing modules, so only the scaffolding record can attest it.
+        let mut records = vec![Record::LangSwitch {
+            language: "go".to_string(),
+        }];
+        for fqn in ["demo", "demo/core", "demo/util"] {
+            records.push(Record::Module {
+                fqn: fqn.to_string(),
+            });
+        }
+        for (from, to) in [("demo", "demo/core"), ("demo", "demo/util")] {
+            records.push(Record::Contains {
+                from: from.to_string(),
+                to: to.to_string(),
+                properties: NodeProperties::default(),
+            });
+        }
+        records.push(file_rec("pkg/a.go", "demo/core", 10));
+        records.push(file_rec("pkg/b.go", "demo/util", 10));
+        records.push(srec("s1", "demo/core", "Core", "pkg/a.go"));
+        records.push(frec("f1", "demo/util", "Run", "pkg/b.go"));
+        let (full, _) = ingest(records, &opts, None);
+
+        // Record the two units and the language's scaffolding through the
+        // production paths.
+        let index = FileIndex::build(&full);
+        for (path, oid) in files {
+            let frag = FileFragment::from_index(&index, path, path, oid, "go");
+            store.put(&frag, "/x", &cache_key).unwrap();
+        }
+        let scaffolding = ModuleScaffolding::extract(&full, Path::new("/x"));
+        store
+            .put_scaffolding("go", &scaffolding["go"], &cache_key)
+            .unwrap();
+
+        let reuse = || Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: files
+                .iter()
+                .map(|(p, oid)| (p.to_string(), "go".to_string(), oid.to_string()))
+                .collect(),
+            reader_root: "/x".to_string(),
+            skipped_langs: ["go".to_string()].into_iter().collect(),
+        };
+        let assemble = || ingest_with_reuse(Vec::<Record>::new(), &opts, Some(&reuse()), None).0;
+
+        // A complete record: the root, every module and every hierarchy edge.
+        let complete = assemble();
+        // A legacy record: the shape a binary that predates `languages`/
+        // `language_edges` wrote. `#[serde(default)]` decodes both as empty, so
+        // `splice_cached` must derive them from the skipped language instead.
+        let scaffolding_file = store
+            .root
+            .join("go")
+            .join(cache_key.token())
+            .join(SCAFFOLDING_FILE);
+        std::fs::write(
+            &scaffolding_file,
+            serde_json::json!({
+                "modules": &scaffolding["go"].modules,
+                "edges": &scaffolding["go"].edges,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let legacy = assemble();
+        // No record at all: only the reused units attest their modules.
+        std::fs::remove_file(&scaffolding_file).unwrap();
+        let absent = assemble();
+
+        // Every record shape reproduces the `Language` root.
+        for (shape, graph) in [
+            ("complete", &complete),
+            ("legacy", &legacy),
+            ("absent", &absent),
+        ] {
+            assert_eq!(
+                graph.nodes.get("go").map(|n| n.kind),
+                Some(NodeKind::Language),
+                "{shape}: the reused stream's `Language` root must be replayed"
+            );
+        }
+        // A complete or legacy record reproduces a full rebuild: every module
+        // row, every `Language -> Module` edge and every containment edge.
+        for (shape, graph) in [("complete", &complete), ("legacy", &legacy)] {
+            for m in ["go.demo", "go.demo/core", "go.demo/util"] {
+                assert!(
+                    graph
+                        .nodes
+                        .get(m)
+                        .is_some_and(|n| n.kind == NodeKind::Module),
+                    "{shape}: module `{m}` must be replayed: {:?}",
+                    graph.nodes.keys().collect::<Vec<_>>()
+                );
+                assert!(
+                    graph.contains.contains(&("go".to_string(), m.to_string())),
+                    "{shape}: the `Language -> Module` edge go -> {m} must be replayed"
+                );
+            }
+            assert_eq!(
+                graph.nodes.keys().collect::<BTreeSet<_>>(),
+                full.nodes.keys().collect::<BTreeSet<_>>(),
+                "{shape}: every scanned node"
+            );
+            assert_eq!(
+                graph.contains, full.contains,
+                "{shape}: every containment edge"
+            );
+        }
+        // With no record, the root and every module a reused unit attests are
+        // replayed. The record-only pure-intermediate module is the exception:
+        // nothing on disk carries it, so only the units' parent modules survive.
+        assert!(
+            !absent.nodes.contains_key("go.demo"),
+            "without a record the pure-intermediate module has no source"
+        );
+        for m in ["go.demo/core", "go.demo/util"] {
+            assert!(
+                absent
+                    .nodes
+                    .get(m)
+                    .is_some_and(|n| n.kind == NodeKind::Module),
+                "absent: module `{m}` must be replayed: {:?}",
+                absent.nodes.keys().collect::<Vec<_>>()
+            );
+            assert!(
+                absent.contains.contains(&("go".to_string(), m.to_string())),
+                "absent: the `Language -> Module` edge go -> {m} must be replayed"
+            );
+        }
+        assert_eq!(
+            absent.nodes.keys().cloned().collect::<BTreeSet<_>>(),
+            full.nodes
+                .keys()
+                .filter(|f| *f != "go.demo")
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            "absent: every node the reused units and their modules attest"
+        );
+        assert_eq!(
+            absent.contains.iter().cloned().collect::<BTreeSet<_>>(),
+            full.contains
+                .iter()
+                .filter(|(a, b)| a != "go.demo" && b != "go.demo")
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            "absent: every containment edge but the record-only module's"
+        );
+
+        // And in the database it lands in, for every shape: the `Language` root
+        // row, every module row and every `Language -> Module` row, plus both
+        // declarations closing over their module and language root.
+        let full_db = dir.join("full").join("db.lbug");
+        std::fs::create_dir_all(full_db.parent().unwrap()).unwrap();
+        build_db(&full_db, &full);
+        let full_rows = db_code_rows(&full_db);
+        let full_roots = db_contains_pairs(&full_db, "Language", "Module");
+        for (shape, graph) in [
+            ("complete", &complete),
+            ("legacy", &legacy),
+            ("absent", &absent),
+        ] {
+            let db = dir.join(shape).join("db.lbug");
+            std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+            build_db(&db, graph);
+            let mut expected_rows = full_rows.clone();
+            let mut expected_roots = full_roots.clone();
+            if shape == "absent" {
+                if let Some(modules) = expected_rows.get_mut("Module") {
+                    modules.retain(|r| r.first().is_none_or(|f| f != "go.demo"));
+                }
+                expected_roots.retain(|p| p[1] != "go.demo");
+            }
+            assert_eq!(
+                db_rows(&db, "MATCH (n:Language) RETURN n.fqn")
+                    .into_iter()
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([vec!["go".to_string()]]),
+                "{shape}: exactly the language root row"
+            );
+            assert_eq!(
+                db_code_rows(&db),
+                expected_rows,
+                "{shape}: every Module/File/Struct/Function row"
+            );
+            assert_eq!(
+                db_contains_pairs(&db, "Language", "Module"),
+                expected_roots,
+                "{shape}: every `Language -> Module` row"
+            );
+            // Both declarations hang under a File under a Module under the root.
+            let chain = db_rows(
+                &db,
+                "MATCH (l:Language)-[:Contains]->(m:Module)-[:Contains]->(f:File)-[:Contains]->(d) RETURN count(*)",
+            );
+            assert_eq!(
+                chain
+                    .first()
+                    .and_then(|r| r.first())
+                    .and_then(|n| n.parse::<i64>().ok()),
+                Some(2),
+                "{shape}: every declaration closes over its module and language root"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Phase-02 task-8: the win-B assembly reports the spool AND every
     /// `splice_cached` admission through the same `Progress` emitter — exactly
     /// one symbol (and one summary tally) per node that enters the graph, never
