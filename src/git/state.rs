@@ -463,6 +463,93 @@ pub fn is_fresh_with_state(apg_root: &Path, state: &GitState) -> bool {
     rec.sha == cur_sha && rec.clean == state.clean && state.content_key.as_deref() == Some(rec_key)
 }
 
+/// The collect-all form of [`is_fresh_with_state`]: `Ok(())` when the DB is
+/// reusable as-is, otherwise `Err` naming EVERY freshness input that differs
+/// between the scan recorded in the DB's own `Scan` row and the current
+/// checkout — one entry per differing input, never short-circuited. The verdict
+/// is exactly [`is_fresh_with_state`]'s (`Err` ⇔ not fresh), so that predicate
+/// can be `freshness_differences(apg_root, state).is_ok()`, and the STALE
+/// refusal / scan preamble can name every reported input.
+///
+/// The label strings (stable — pinned by tests):
+///
+/// - `"database"` — no `db.lbug` under `apg_root`;
+/// - `"socket"` — a session socket exists but fails its connect/`Ping`;
+/// - `"git sha"` — the checkout has no HEAD sha (not a git repo / unborn HEAD);
+/// - `"recorded scan"` — the DB has no readable, hardening-era `Scan` row;
+/// - `"pending state"` — the DB carries an admitted-but-unsaved mutation;
+/// - `"schema"` — the DB's table shape is not this binary's;
+/// - `"authored digest"` — the DB's authored/transient digest differs from the
+///   tree's (or either digest could not be computed);
+/// - `"content key"` — the recorded content-identity key is absent
+///   (pre-hardening) or differs from the current tree's;
+/// - `"sha"` — the recorded HEAD sha differs from the current one;
+/// - `"cleanliness"` — the recorded cleanliness differs from the current one.
+///
+/// The first four are precondition failures — without them the remaining inputs
+/// cannot be evaluated, so each is reported alone. The rest are collected
+/// together. The live-session read skip is preserved exactly: pending state,
+/// schema and authored digest are evaluated only when no live session owns
+/// `db.lbug`; the recorded/git content comparison runs either way.
+pub fn freshness_differences(apg_root: &Path, state: &GitState) -> Result<(), Vec<&'static str>> {
+    if !db_path(apg_root).exists() {
+        return Err(vec!["database"]);
+    }
+    let socket = crate::session::socket_path(apg_root);
+    let live_session = socket.exists() && crate::session::live_session_at(&socket);
+    if socket.exists() && !live_session {
+        return Err(vec!["socket"]);
+    }
+    let Some(cur_sha) = state.sha.as_deref() else {
+        return Err(vec!["git sha"]);
+    };
+    let Some(rec) = (if live_session {
+        db_recorded_scan_routed(apg_root)
+    } else {
+        db_recorded_scan(apg_root)
+    }) else {
+        return Err(vec!["recorded scan"]);
+    };
+    let mut differing: Vec<&'static str> = Vec::new();
+    if !live_session {
+        if crate::artifacts::db::db_has_pending_state(apg_root) {
+            differing.push("pending state");
+        }
+        if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
+            differing.push("schema");
+        }
+        let authored_ok = match crate::splice::seed::seed_authored_identity(&db_path(apg_root)) {
+            Ok(db) => {
+                crate::splice::seed::tree_authored_identity(apg_root).is_ok_and(|tree| tree == db)
+            }
+            Err(_) => false,
+        };
+        if !authored_ok {
+            differing.push("authored digest");
+        }
+    }
+    match rec.content_key.as_deref() {
+        // Pre-hardening: freshness cannot be verified.
+        None => differing.push("content key"),
+        Some(rec_key) => {
+            if state.content_key.as_deref() != Some(rec_key) {
+                differing.push("content key");
+            }
+        }
+    }
+    if rec.sha != cur_sha {
+        differing.push("sha");
+    }
+    if rec.clean != state.clean {
+        differing.push("cleanliness");
+    }
+    if differing.is_empty() {
+        Ok(())
+    } else {
+        Err(differing)
+    }
+}
+
 /// The `&Path` entry point to [`is_fresh_with_state`]: the DB-existence
 /// precondition runs first (no DB → NOT fresh without any git walk); otherwise
 /// it captures the current [`GitState`] once and delegates to the state-based
