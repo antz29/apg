@@ -489,7 +489,10 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     // language, so its modules and the modules the reused per-file units
     // contributed in pass 2 all belong to it. A complete record, a legacy one
     // written before it carried `languages`/`language_edges`, and an absent
-    // record therefore rebuild the same root a full rebuild has.
+    // record still derive the root the record or the reused units' modules
+    // attest. A language with an absent record and no replayed module
+    // contributes nothing — a full rebuild materialises no root for a language
+    // whose frontend emitted no record at all.
     for lang in &reuse.skipped_langs {
         let scaffolding = reuse.store.scaffolding(lang, reuse.cache_key);
         let replayed: BTreeSet<&String> = cached_modules
@@ -498,6 +501,9 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
             .map(|(m, _)| m)
             .chain(scaffolding.iter().flat_map(|s| &s.modules))
             .collect();
+        if scaffolding.is_none() && replayed.is_empty() {
+            continue;
+        }
         select_language(&mut progress, lang);
         for m in replayed {
             if module_needs_insert(graph, m) {
