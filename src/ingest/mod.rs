@@ -1441,19 +1441,30 @@ fn ingest_records(
     // is shadowed: a class in a shadowed package can render the same FQN as a
     // method of the class that shadowed it (NetBeans QA test-data layout), and
     // flat FQN space can't hold both. The struct wins; the function is dropped
-    // and its edges pruned as dangling. Function-vs-function still panics (a
-    // genuine duplicate declaration is a scanner bug).
+    // and its edges pruned as dangling. `seen` records the claiming declaration's
+    // repo-relative source path: a repeat from the same source is one
+    // declaration streamed twice and is admitted once, while two different
+    // sources rendering one FQN is a genuine duplicate declaration and panics
+    // naming both sources.
+    let function_sources: HashMap<&str, &str> = funcs
+        .iter()
+        .map(|f| (f.id.as_str(), f.path.as_str()))
+        .collect();
     for (id, fqn) in render_function_fqns(&funcs) {
+        let source = function_sources[id.as_str()];
         match seen.get(&fqn) {
             None => {
-                seen.insert(fqn.clone(), (id.clone(), NodeKind::Function));
+                seen.insert(fqn.clone(), (source.to_string(), NodeKind::Function));
                 id_to_fqn.insert(id, fqn);
             }
             Some((_, NodeKind::Struct)) => {
                 shadowed_functions += 1;
             }
+            Some((prev, _)) if prev == source => {
+                id_to_fqn.insert(id, fqn);
+            }
             Some((prev, _)) => {
-                panic!("FQN collision: `{fqn}` claimed by both `{prev}` and `{id}`");
+                panic!("FQN collision: `{fqn}` claimed by both `{prev}` and `{source}`");
             }
         }
     }
