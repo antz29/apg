@@ -165,6 +165,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.project-merge-integrator",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.project-start-seeder",
       "properties": {}
     },
