@@ -87,15 +87,18 @@ pub(crate) fn run_pipeline(
             // Only when the target set is NON-empty: a zero-target incremental
             // scan runs every frontend unfiltered (an empty target list means
             // "no filter"), so the agent frontend already emits the full roster
-            // itself. Re-emitting it here would double-emit and panic in
-            // `ingest_records` on a duplicate project node.
+            // itself and is each Agent identity's one source. Re-emitting it
+            // here would stream those identities twice; the ingestor admits a
+            // same-source repeat once (dropping it), so the double-feed is
+            // redundant, and the roster keeps a single emitter.
             //
             // Carry only the UNCHANGED definitions: the agent frontend re-emits
-            // a CHANGED definition into the target spool (a second, stale record
-            // for the same FQN would panic in `ingest_records` with a duplicate
-            // project node) and emits nothing for a DELETED one (a stale record
-            // would resurrect a ghost Agent the splice's disappear-by-path
-            // removal cannot detach). Both cases are in `targets_rel`.
+            // a CHANGED definition into the target spool, where it is already
+            // that FQN's one source (a stale repeat from the same definition
+            // path is withheld so it cannot be the record admitted first), and
+            // emits nothing for a DELETED one (a stale record would resurrect a
+            // ghost Agent the splice's disappear-by-path removal cannot
+            // detach). Both cases are in `targets_rel`.
             if let Some(input) = input
                 && !input.targets_rel.is_empty()
                 && let Some(previous) = input.previous.as_ref()

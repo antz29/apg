@@ -10122,10 +10122,11 @@ mod e2e {
     /// empty commit moves HEAD with the tree untouched, so the recorded scan is
     /// an ancestor of HEAD with an empty delta: every frontend runs UNFILTERED
     /// (an empty target list means "no filter"), and the agent frontend is the
-    /// roster's sole source. Before the `run_pipeline` guard a zero-target delta
-    /// re-emitted the previous roster on top of that unfiltered emission — a
-    /// duplicate Agent node the ingestor refuses — so this pins the one-roster
-    /// outcome alongside the plan task's `--assigned-to` row.
+    /// roster's sole source. Without the `run_pipeline` guard a zero-target delta
+    /// re-emitted the previous roster on top of that unfiltered emission — every
+    /// Agent identity streamed twice, its one-source invariant broken — and
+    /// this pins the single-emitter outcome alongside the plan task's
+    /// `--assigned-to` row.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
     fn zero_target_incremental_scan_keeps_the_agent_roster_without_duplicates() {
