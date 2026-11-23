@@ -107,16 +107,19 @@ fn spec_node(kind: NodeKind) -> Node {
     }
 }
 
-/// Claims `fqn` for declaration `id`, panicking if a different declaration
-/// already rendered the same FQN. `seen` records the kind of the claimer so
-/// the caller can resolve cross-kind collisions (type wins over module/function).
-fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, kind: NodeKind) {
+/// Claims `fqn` for the declaration from `source`, panicking if a declaration
+/// from a different source already rendered the same FQN — the panic names both
+/// source paths. A repeat from the same source is one declaration streamed
+/// twice and is admitted once. `seen` records the claiming source path and kind
+/// so the caller can resolve cross-kind collisions (type wins over
+/// module/function).
+fn claim(seen: &mut HashMap<String, (String, NodeKind)>, source: &str, fqn: &str, kind: NodeKind) {
     if let Some((prev, _)) = seen.get(fqn) {
-        if prev != id {
-            panic!("FQN collision: `{fqn}` claimed by both `{prev}` and `{id}`");
+        if prev != source {
+            panic!("FQN collision: `{fqn}` claimed by both `{prev}` and `{source}`");
         }
     } else {
-        seen.insert(fqn.to_string(), (id.to_string(), kind));
+        seen.insert(fqn.to_string(), (source.to_string(), kind));
     }
 }
 
@@ -805,9 +808,9 @@ fn ingest_records(
                         "{}.{name}",
                         rooted_scope(&lang, &parent, &module_identities, base)
                     );
-                    claim(&mut seen, &id, &fqn, NodeKind::Struct);
-                    id_to_fqn.insert(id.clone(), fqn.clone());
                     let identity = repo_relative_identity(base, &path);
+                    claim(&mut seen, &identity, &fqn, NodeKind::Struct);
+                    id_to_fqn.insert(id.clone(), fqn.clone());
                     if is_blacklisted(&fqn, Some(&identity), &lang, opts) {
                         skipped += 1;
                         continue;
