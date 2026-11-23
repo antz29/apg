@@ -19,6 +19,11 @@
       "properties": {}
     },
     {
+      "kind": "driven-by",
+      "source": "domain.service.planned-node-realization",
+      "properties": {}
+    },
+    {
       "kind": "requires",
       "source": "requirements.user.navigator-agent",
       "properties": {}

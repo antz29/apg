@@ -22,6 +22,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.planned-realization-coverage-spans-every-kind-in-a-separate-crate",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
       "properties": {}
     },
@@ -32,17 +37,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.scan-admits-each-code-identity-once",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.still-planned-node-keeps-node-and-edges",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.verify-gate-judges-planned-realization",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.planned-realization-coverage-spans-every-kind-in-a-separate-crate",
       "properties": {}
     }
   ],
