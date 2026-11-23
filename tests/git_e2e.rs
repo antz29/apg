@@ -568,6 +568,184 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// `refusal_message` names every differing freshness input: each arm starts
+    /// from an otherwise-fresh fixture DB, flips exactly ONE input, and asserts
+    /// the refusal reports that input's stable label — and only it — in the
+    /// `differing:` list. A final arm flips TWO inputs at once and pins that the
+    /// single refusal message names both. The two inputs that instead make
+    /// `refusal_message` return `None` (no `db.lbug` at all, and no git HEAD
+    /// sha) stay covered by `no_db_is_never_stale` and
+    /// `non_git_repo_is_never_stale`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug/socket); run via cargo test-e2e"]
+    fn refusal_message_names_each_differing_freshness_input() {
+        // One flipped input ⇒ exactly that label in the refusal's `differing:`
+        // list, and the verdict never reads fresh.
+        let assert_names = |apg: &Path, label: &str| {
+            let state = git_state(apg);
+            assert_eq!(
+                freshness_differences(apg, &state)
+                    .expect_err("a differing input must never read fresh"),
+                vec![label],
+                "one flipped input must be the only difference"
+            );
+            let msg = refusal_message(apg).expect("a differing input must refuse");
+            assert!(
+                msg.contains(&format!("differing: {label})")),
+                "the refusal must name `{label}`: {msg}"
+            );
+            assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
+        };
+
+        // `socket`: a present-but-dead session socket (row and tree agree).
+        let repo = fixture_repo("refuse-socket");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(refusal_message(&apg).is_none(), "the baseline is fresh");
+        let socket = apg::session::socket_path(&apg);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        assert_names(&apg, "socket");
+        testutil::remove(&repo);
+
+        // `recorded scan`: a DB whose own `Scan` row records no scan.
+        let repo = fixture_repo("refuse-norec");
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta_keyed(&apg, None, false, "2026-09-07T00:00:00Z", None);
+        assert_names(&apg, "recorded scan");
+        testutil::remove(&repo);
+
+        // `pending state`: a pending-removal identity with no socket. The
+        // ledger is outside the authored-digest tables, so the mark is the only
+        // cause.
+        let repo = fixture_repo("refuse-pending");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.record_pending_removal("requirements.requirement.refund")
+            .unwrap();
+        drop(db);
+        assert_names(&apg, "pending state");
+        testutil::remove(&repo);
+
+        // `schema`: an extra node table this binary does not recognise (the
+        // authored digest still agrees, so only the shape differs).
+        let repo = fixture_repo("refuse-schema");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query("CREATE NODE TABLE FreshnessRefusalProbe(fqn STRING, PRIMARY KEY(fqn))")
+            .unwrap();
+        drop(db);
+        assert_names(&apg, "schema");
+        testutil::remove(&repo);
+
+        // `authored digest`: the DB carries an authored row the tree does not.
+        // The insert leaves `updated` NULL, so the pending-state mark stays
+        // clear and the digest alone differs.
+        let repo = fixture_repo("refuse-authored");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query(
+                "CREATE (:Requirement {fqn: 'requirements.requirement.ghost', \
+                 id: 'ghost', title: 'ghost', body: 'ghost', feature: ''})",
+            )
+            .unwrap();
+        drop(db);
+        assert_names(&apg, "authored digest");
+        testutil::remove(&repo);
+
+        // `content key`: the recorded content identity is a foreign key.
+        let repo = fixture_repo("refuse-key");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(Some(&sha), Some(true), Some("diverged-content-key"))
+            .unwrap();
+        drop(db);
+        assert_names(&apg, "content key");
+        testutil::remove(&repo);
+
+        // `sha`: the recorded HEAD sha is foreign; key and cleanliness agree.
+        let repo = fixture_repo("refuse-sha");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let key = git_state(&apg).content_key;
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(
+            Some("0000000000000000000000000000000000000000"),
+            Some(true),
+            key.as_deref(),
+        )
+        .unwrap();
+        drop(db);
+        assert_names(&apg, "sha");
+        testutil::remove(&repo);
+
+        // `cleanliness`: a clean tree recorded as dirty; sha and key agree.
+        let repo = fixture_repo("refuse-clean");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(refusal_message(&apg).is_none(), "the baseline is fresh");
+        testutil::write_scan_meta(&apg, Some(&sha), false, "2026-09-07T00:00:00Z");
+        assert_names(&apg, "cleanliness");
+        testutil::remove(&repo);
+
+        // DUAL FLIP on an otherwise-fresh fixture: the recorded scan differs in
+        // TWO inputs at once — a foreign content key AND a foreign sha — and the
+        // one refusal message names both in the same `differing:` list.
+        let repo = fixture_repo("refuse-dual");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(refusal_message(&apg).is_none(), "the baseline is fresh");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(
+            Some("0000000000000000000000000000000000000000"),
+            Some(true),
+            Some("diverged-content-key"),
+        )
+        .unwrap();
+        drop(db);
+        let state = git_state(&apg);
+        assert_eq!(
+            freshness_differences(&apg, &state)
+                .expect_err("two differing inputs must never read fresh"),
+            vec!["content key", "sha"],
+            "collect-all must report BOTH differing inputs in its single result"
+        );
+        assert_eq!(
+            refusal_message(&apg).unwrap(),
+            format!(
+                "graph is stale (recorded 0000000000000000000000000000000000000000@true, \
+                 current {sha}@true; differing: content key, sha) — run `apg scan` before mutating"
+            )
+        );
+        testutil::remove(&repo);
+    }
+
     // ------------------------------------------------------------------
     // Identity (R7): worktree vs main, default branch, the layout invariant
     // ------------------------------------------------------------------
