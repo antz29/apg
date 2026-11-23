@@ -527,6 +527,18 @@ mod unit {
         claim(&mut seen, "n2", "rust.pkg.F", NodeKind::Function);
     }
 
+    /// A repeated identity from the SAME source path is one declaration
+    /// streamed twice (a frontend re-emission): `claim` admits it once and
+    /// does not panic, while a cross-source collision still does (pinned by
+    /// `same_kind_claim_still_panics_under_rooting`).
+    #[test]
+    fn same_source_repeated_identity_is_admitted_once() {
+        let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
+        claim(&mut seen, "src/a.rs", "rust.pkg.F", NodeKind::Function);
+        claim(&mut seen, "src/a.rs", "rust.pkg.F", NodeKind::Function);
+        assert_eq!(seen.len(), 1);
+    }
+
     /// apg-0.17.0 phase-01 task-20: the claim guard accepts the structural
     /// scanner's language-rooted identities — the bare per-format roots
     /// (`md.`/`sh.`/…/`misc.`), rooted submodules, and file-rooted
