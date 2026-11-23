@@ -1,6 +1,7 @@
 use super::*;
 use crate::classify::{ApgConfig, CodeTypeRule, StructuralScope};
 use crate::graph::Graph;
+use std::path::Path;
 
 fn located_node(kind: NodeKind, path: &str) -> Node {
     Node {
@@ -676,5 +677,70 @@ mod unit {
             serde_json::from_str(r#"{"kind":"uses","from":"a","to":"b","target_type":""}"#)
                 .expect("a legacy edge deserializes");
         assert!(legacy.properties.is_empty());
+    }
+
+    /// scan-graph-integrity phase-02 task-3: a mixed file-bearing and
+    /// intermediate hierarchy records its `Language` root and a
+    /// `Language -> Module` edge for **every** module — the intermediate one
+    /// included, though no file of its own anchors it — and a file-rooted
+    /// language (files carried directly by its root, no `Module` at all)
+    /// records a root-only entry.
+    #[test]
+    fn module_scaffolding_records_a_language_root_for_every_module() {
+        let (root, mid, leaf) = ("godemo", "godemo/mid", "godemo/mid/leaf");
+        let (a, b) = ("/x/go/a.go", "/x/go/mid/leaf/b.go");
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "go".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        for m in [root, mid, leaf] {
+            g.nodes.insert(m.into(), module_node());
+        }
+        g.nodes.insert(a.into(), located_node(NodeKind::File, a));
+        g.nodes.insert(b.into(), located_node(NodeKind::File, b));
+        g.contains.insert((root.into(), mid.into()));
+        g.contains.insert((mid.into(), leaf.into()));
+        g.contains.insert((root.into(), a.into()));
+        g.contains.insert((leaf.into(), b.into()));
+        // A file-rooted language: its root carries the file, with no Module.
+        g.nodes.insert(
+            "csharp".into(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "/x/csharp/Program.cs".into(),
+            located_node(NodeKind::File, "/x/csharp/Program.cs"),
+        );
+        g.contains
+            .insert(("csharp".into(), "/x/csharp/Program.cs".into()));
+
+        let by_lang = ModuleScaffolding::extract(&g, Path::new("/x"));
+
+        let go = &by_lang["go"];
+        assert_eq!(go.languages, vec!["go".to_string()]);
+        assert_eq!(
+            go.modules,
+            vec![root.to_string(), mid.to_string(), leaf.to_string()]
+        );
+        assert_eq!(
+            go.language_edges,
+            vec![
+                ("go".to_string(), root.to_string()),
+                ("go".to_string(), mid.to_string()),
+                ("go".to_string(), leaf.to_string()),
+            ]
+        );
+        // The file-rooted language has no component to walk: root only.
+        let csharp = &by_lang["csharp"];
+        assert_eq!(csharp.languages, vec!["csharp".to_string()]);
+        assert!(csharp.modules.is_empty(), "{csharp:?}");
+        assert!(csharp.language_edges.is_empty(), "{csharp:?}");
     }
 }
