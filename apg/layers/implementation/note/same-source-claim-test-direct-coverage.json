@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "same-source-claim-test-direct-coverage",
+  "body": "This test pins `claim`'s same-source admit-once branch; `insert_node`'s own duplicate-location early return is not directly pinned here. Extend with a dedicated `insert_node` test if direct coverage of that branch is wanted.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.tests.unit.same_source_repeated_identity_is_admitted_once",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

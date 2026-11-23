@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cross-source-same-kind-test-overlap",
+  "body": "This test pins the same panic text as its sibling `cross_source_duplicate_identity_names_both_sources`, differing only in the rooted FQN fixture (`rust.pkg.F`). Keep both while the rooting framing is documented; merge if the rooting distinction stops being the point.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.tests.unit.same_kind_claim_still_panics_under_rooting",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

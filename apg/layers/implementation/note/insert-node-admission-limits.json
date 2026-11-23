@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "insert-node-admission-limits",
+  "body": "A location-less FQN repeated still panics with `<no source>` on both sides (Module, Language, spec/plan/Scan nodes), and the same-source dedupe requires equal kind, so a same-path cross-kind repeat still panics. Upgrade only if a location-less identity ever needs idempotent admission, or a frontend can stream two kinds from one file at one FQN.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.insert_node",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

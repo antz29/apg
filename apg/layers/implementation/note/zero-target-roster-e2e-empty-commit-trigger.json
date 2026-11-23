@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "zero-target-roster-e2e-empty-commit-trigger",
+  "body": "The zero-target trigger is an empty commit (HEAD advances, manifest unchanged), the real incremental verdict with an empty delta. If the fast path ever starts treating HEAD-only movement as fresh, the `[scan] incremental: 0 target file(s)` pin fails loudly rather than silently passing — intentional, no upgrade.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.zero_target_incremental_scan_keeps_the_agent_roster_without_duplicates",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
