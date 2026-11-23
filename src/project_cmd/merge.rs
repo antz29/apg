@@ -16,7 +16,10 @@ use super::require_apg_root;
 use super::start::{ScanFn, real_scan};
 
 /// `apg project merge <name>` — verify gate → merge-strength validation →
-/// merge → main rebuild.
+/// merge → main rebuild, then self-cleanup. A failed post-merge rebuild leaves
+/// the merge unlanded: the default branch is reset to the pre-merge commit, a
+/// now-stale main derived index is discarded, and the worktree and branch are
+/// kept, so re-running the command retries the whole act.
 pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(name) = p.positional.first() else {
