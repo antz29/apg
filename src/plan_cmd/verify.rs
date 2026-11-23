@@ -82,8 +82,19 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     // for it and judges the finished branch database instead of a transient one.
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
     if crate::git::is_stale(apg_root) {
+        // Name every input `freshness_differences` reports (the same list
+        // `refusal_message` and `staleness_line` render), so the operator
+        // learns which one to refresh. `is_stale` stays the refuse gate — it
+        // is N/A (false) for a missing DB or repo, so verify keeps refusing
+        // exactly when the branch graph is not fresh.
+        let differing =
+            match crate::git::freshness_differences(apg_root, &crate::git::git_state(apg_root)) {
+                // A tree that moved between the gate and the read above.
+                Ok(()) => String::new(),
+                Err(differing) => format!(" (differing: {})", differing.join(", ")),
+            };
         anyhow::bail!(
-            "cannot verify `{project}`: the branch graph is stale — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)"
+            "cannot verify `{project}`: the branch graph is stale{differing} — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)"
         );
     }
     let records = load_plan(apg_root, project)?;
