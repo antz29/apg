@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "skipped-language-test-scaffolding-dominated",
+  "body": "The replay set here is scaffolding-dominated (all four modules sit in one file-anchored component), so a module contributed only by a per-file unit and absent from the scaffolding record is not distinguished; the complete, legacy and absent-record coverage lives in `reused_stream_replays_its_language_root_and_module_rows`. Upgrade if this test must also distinguish a unit-attested-only module.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.ingest_e2e.e2e.skipped_language_scaffolding_is_replayed_into_the_assembly",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "absent-scaffolding-replays-unit-attested-modules",
+  "body": "An absent scaffolding record can replay only the modules the reused units attest: a pure-intermediate Module is recorded nowhere else and is absent in that case, which the test asserts explicitly. Upgrade if an absent record's modules ever become reconstructible.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.ingest_e2e.e2e.reused_stream_replays_its_language_root_and_module_rows",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
