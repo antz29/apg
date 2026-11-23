@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-merge-e2e-in-process-rebuild-seam",
+  "body": "The injected rebuild drives the in-process `scan_checkout_locked` through the `project_merge_at` seam rather than a spawned candidate binary; the real-binary merge CLI path is exercised by the merge CLI e2e elsewhere. Upgrade if this e2e must drive the real binary's post-merge rebuild.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.merge_failed_rebuild_leaves_the_merge_unlanded_and_the_project_retryable",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

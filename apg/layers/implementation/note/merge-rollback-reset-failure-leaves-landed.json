@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "merge-rollback-reset-failure-leaves-landed",
+  "body": "The rollback path is exercised only by the two phase-4 e2e tests (`merge_failed_rebuild_leaves_the_merge_unlanded_and_the_project_retryable` and `merge_failed_rebuild_before_writing_keeps_the_pre_merge_graph`). If the hard reset to the pre-merge commit itself fails, main stays landed with a stale graph: the code bails with an explicit `run apg scan` fix and is not data-destructive. Upgrade if a reset failure must also be recovered automatically.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.merge.project_merge_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
