@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "refusal-message-double-read-and-direct-display",
+  "body": "`refusal_message` evaluates freshness twice (the `is_stale` gate, then `freshness_differences` for the labels), and its recorded half still uses the direct `db_recorded_scan` rather than the routed read, so under a live session it can print `-@-` while the differing list came from the routed read (pre-existing, benign today). Upgrade by routing the display read or folding the gate and list into one evaluation only if the pairing is made a contract or refusal latency shows in a profile.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.refusal_message",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

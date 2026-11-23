@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "staleness-dual-flip-pins-label-order",
+  "body": "The dual-flip exact-equality assertion pins the label report order (`sha` before `cleanliness`, the production push order), not just membership. Revisit the test if `freshness_differences`' collection order ever changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.git_e2e.e2e.staleness_line_agrees_with_is_fresh",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

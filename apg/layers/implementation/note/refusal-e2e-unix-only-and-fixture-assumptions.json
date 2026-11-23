@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "refusal-e2e-unix-only-and-fixture-assumptions",
+  "body": "The test is `#[cfg(unix)]` because of its dead-socket arm (precedent `dead_session_socket_makes_the_graph_unfresh`), so it is absent on non-unix targets; `database` and `git sha` are deliberately not flipped (both make `is_stale` false, so `refusal_message` returns `None`) and stay pinned by `no_db_is_never_stale`/`non_git_repo_is_never_stale`; the `authored digest` arm manufactures the divergence with a raw DB `Requirement` insert, leaving the tree-side recovery arm to `splice_e2e`. Upgrade if the repo gains a non-unix CI target or these fixture-shape assumptions change.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.git_e2e.e2e.refusal_message_names_each_differing_freshness_input",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
