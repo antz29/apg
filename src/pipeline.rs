@@ -84,6 +84,12 @@ pub(crate) fn run_pipeline(
             // `UnrepresentedAuthored` on every incremental scan. The tree-side
             // digest re-emits the same roster (`splice::seed`'s record stream).
             //
+            // Only when the target set is NON-empty: a zero-target incremental
+            // scan runs every frontend unfiltered (an empty target list means
+            // "no filter"), so the agent frontend already emits the full roster
+            // itself. Re-emitting it here would double-emit and panic in
+            // `ingest_records` on a duplicate project node.
+            //
             // Carry only the UNCHANGED definitions: the agent frontend re-emits
             // a CHANGED definition into the target spool (a second, stale record
             // for the same FQN would panic in `ingest_records` with a duplicate
@@ -91,6 +97,7 @@ pub(crate) fn run_pipeline(
             // would resurrect a ghost Agent the splice's disappear-by-path
             // removal cannot detach). Both cases are in `targets_rel`.
             if let Some(input) = input
+                && !input.targets_rel.is_empty()
                 && let Some(previous) = input.previous.as_ref()
             {
                 delta_spool.extend(
