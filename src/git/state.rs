@@ -557,13 +557,25 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 /// against the *pre-scan* DB before the new scan overwrites it. N/A when the
 /// scan is not in a git repo, or when there is no prior scan to be stale.
 ///
-/// The verdict is the SAME content-identity rule [`is_fresh`] uses, so the
-/// printed line and the fast-path decision can never disagree (a recorded-dirty
-/// tree whose content digest changed at the same sha prints STALE, never FRESH
-/// followed by a full pipeline run). The one exception is `apg scan --force`:
-/// it prints this pre-force verdict and then discards the index and rebuilds
-/// anyway, so a FRESH line there is followed by a full pipeline run by design —
-/// the forced scan is the only path that overrides the verdict it just printed.
+/// The exact line shapes:
+///
+/// - `Git state: N/A (not a git repo)` — no HEAD sha to compare;
+/// - `Git state: no scan yet (current <sha>@<clean>)` — no `db.lbug`;
+/// - `Git state: recorded <rec> vs current <cur> → FRESH` — byte-identical to
+///   the pre-collect-all line, with no parenthetical;
+/// - `Git state: recorded <rec> vs current <cur> → STALE (differing: <labels>)`
+///   — `<labels>` is [`freshness_differences`]' list joined by `, `, so every
+///   differing freshness input is named. A DB with no readable `Scan` row
+///   reports the single `recorded scan` label with recorded `-@-`.
+///
+/// The verdict is the SAME content-identity rule [`is_fresh`] uses — it is
+/// [`freshness_differences`] directly — so the printed line and the fast-path
+/// decision can never disagree (a recorded-dirty tree whose content digest
+/// changed at the same sha prints STALE, never FRESH followed by a full
+/// pipeline run). The one exception is `apg scan --force`: it prints this
+/// pre-force verdict and then discards the index and rebuilds anyway, so a
+/// FRESH line there is followed by a full pipeline run by design — the forced
+/// scan is the only path that overrides the verdict it just printed.
 pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
     let Some(cur_sha) = current.sha.as_deref() else {
         return "Git state: N/A (not a git repo)".to_string();
@@ -575,19 +587,15 @@ pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
         );
     }
     let cur = state_str(Some(cur_sha), current.clean);
-    match db_recorded_scan(apg_root) {
-        None => format!(
-            "Git state: recorded {} vs current {cur} → STALE",
-            state_str(None, false)
+    let rec = match db_recorded_scan(apg_root) {
+        Some(rec) => state_str(Some(&rec.sha), rec.clean),
+        None => state_str(None, false),
+    };
+    match freshness_differences(apg_root, current) {
+        Ok(()) => format!("Git state: recorded {rec} vs current {cur} → FRESH"),
+        Err(differing) => format!(
+            "Git state: recorded {rec} vs current {cur} → STALE (differing: {})",
+            differing.join(", ")
         ),
-        Some(rec) => {
-            let rec = state_str(Some(&rec.sha), rec.clean);
-            let verdict = if is_fresh_with_state(apg_root, current) {
-                "FRESH"
-            } else {
-                "STALE"
-            };
-            format!("Git state: recorded {rec} vs current {cur} → {verdict}")
-        }
     }
 }
