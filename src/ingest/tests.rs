@@ -539,6 +539,19 @@ mod unit {
         assert_eq!(seen.len(), 1);
     }
 
+    /// Claiming the same FQN from two DIFFERENT source paths is a genuine
+    /// cross-source collision: `claim` panics and names both contributing
+    /// source paths, keeping the `FQN collision:` prefix.
+    #[test]
+    #[should_panic(
+        expected = "FQN collision: `rust.pkg.F` claimed by both `src/a.rs` and `src/b.rs`"
+    )]
+    fn cross_source_duplicate_identity_names_both_sources() {
+        let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
+        claim(&mut seen, "src/a.rs", "rust.pkg.F", NodeKind::Function);
+        claim(&mut seen, "src/b.rs", "rust.pkg.F", NodeKind::Function);
+    }
+
     /// apg-0.17.0 phase-01 task-20: the claim guard accepts the structural
     /// scanner's language-rooted identities — the bare per-format roots
     /// (`md.`/`sh.`/…/`misc.`), rooted submodules, and file-rooted
