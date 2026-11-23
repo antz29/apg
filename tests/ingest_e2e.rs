@@ -204,7 +204,9 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
-    #[should_panic(expected = "FQN collision")]
+    // The empty-base (`None`) render passes each scanner path through verbatim,
+    // so the cross-source duplicate must name both contributing paths.
+    #[should_panic(expected = "FQN collision: `go.pkg.A` claimed by both `/x/a.go` and `/x/b.go`")]
     fn duplicate_fqn_panics() {
         let records = vec![
             Record::Module {
