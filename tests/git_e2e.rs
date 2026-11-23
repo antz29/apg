@@ -746,6 +746,185 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// `staleness_line` names every differing freshness input the predicate
+    /// reports, and its FRESH line stays bare. Each arm starts from an
+    /// otherwise-fresh fixture DB, flips exactly ONE input, and asserts the
+    /// printed line's `differing:` list is the SAME list
+    /// [`freshness_differences`] returns; a dual-flip arm pins that two differing
+    /// inputs are named together. The `database` and `git sha` inputs never reach
+    /// the STALE arm (`staleness_line` prints `no scan yet` / `N/A` instead) and
+    /// stay covered by `no_db_is_never_stale` and `non_git_repo_is_never_stale`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug/socket); run via cargo test-e2e"]
+    fn staleness_line_names_each_differing_freshness_input() {
+        // The printed STALE line's `differing:` list is exactly the predicate's
+        // list: the same inputs, in the same order, joined by `, `.
+        let assert_line_names = |apg: &Path, labels: &[&'static str]| {
+            let state = git_state(apg);
+            assert_eq!(
+                freshness_differences(apg, &state)
+                    .expect_err("a differing input must never read fresh"),
+                labels.to_vec(),
+                "the predicate must report exactly the flipped inputs"
+            );
+            let line = staleness_line(apg, &state);
+            assert!(
+                line.contains(&format!("→ STALE (differing: {})", labels.join(", "))),
+                "the printed STALE line must name the same inputs the predicate reports: {line}"
+            );
+            assert!(
+                !line.contains("→ FRESH"),
+                "a line naming a differing input must never read FRESH: {line}"
+            );
+        };
+
+        // FRESH stays bare: the byte-identical pre-collect-all line, no
+        // parenthetical.
+        let repo = fixture_repo("stale-line-fresh");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert_eq!(
+            staleness_line(&apg, &git_state(&apg)),
+            format!("Git state: recorded {sha}@true vs current {sha}@true → FRESH"),
+            "FRESH must stay bare (no differing parenthetical)"
+        );
+        testutil::remove(&repo);
+
+        // `socket`: a present-but-dead session socket (row and tree agree).
+        let repo = fixture_repo("stale-line-socket");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let socket = apg::session::socket_path(&apg);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        assert_line_names(&apg, &["socket"]);
+        testutil::remove(&repo);
+
+        // `recorded scan`: a DB whose own `Scan` row records no scan (printed
+        // with a `-@-` recorded side).
+        let repo = fixture_repo("stale-line-norec");
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta_keyed(&apg, None, false, "2026-09-07T00:00:00Z", None);
+        assert_line_names(&apg, &["recorded scan"]);
+        testutil::remove(&repo);
+
+        // `pending state`: a pending-removal identity with no socket. The
+        // ledger is outside the authored-digest tables, so the mark is the only
+        // cause.
+        let repo = fixture_repo("stale-line-pending");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.record_pending_removal("requirements.requirement.refund")
+            .unwrap();
+        drop(db);
+        assert_line_names(&apg, &["pending state"]);
+        testutil::remove(&repo);
+
+        // `schema`: an extra node table this binary does not recognise (the
+        // authored digest still agrees, so only the shape differs).
+        let repo = fixture_repo("stale-line-schema");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query("CREATE NODE TABLE StalenessLineProbe(fqn STRING, PRIMARY KEY(fqn))")
+            .unwrap();
+        drop(db);
+        assert_line_names(&apg, &["schema"]);
+        testutil::remove(&repo);
+
+        // `authored digest`: the DB carries an authored row the tree does not.
+        // The insert leaves `updated` NULL, so pending state stays clear and the
+        // digest alone differs.
+        let repo = fixture_repo("stale-line-authored");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query(
+                "CREATE (:Requirement {fqn: 'requirements.requirement.ghost', \
+                 id: 'ghost', title: 'ghost', body: 'ghost', feature: ''})",
+            )
+            .unwrap();
+        drop(db);
+        assert_line_names(&apg, &["authored digest"]);
+        testutil::remove(&repo);
+
+        // `content key`: the recorded content identity is a foreign key.
+        let repo = fixture_repo("stale-line-key");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(Some(&sha), Some(true), Some("diverged-content-key"))
+            .unwrap();
+        drop(db);
+        assert_line_names(&apg, &["content key"]);
+        testutil::remove(&repo);
+
+        // `sha`: the recorded HEAD sha is foreign; key and cleanliness agree.
+        let repo = fixture_repo("stale-line-sha");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let key = git_state(&apg).content_key;
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(
+            Some("0000000000000000000000000000000000000000"),
+            Some(true),
+            key.as_deref(),
+        )
+        .unwrap();
+        drop(db);
+        assert_line_names(&apg, &["sha"]);
+        testutil::remove(&repo);
+
+        // `cleanliness`: a clean tree recorded as dirty; sha and key agree.
+        let repo = fixture_repo("stale-line-clean");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        testutil::write_scan_meta(&apg, Some(&sha), false, "2026-09-07T00:00:00Z");
+        assert_line_names(&apg, &["cleanliness"]);
+        testutil::remove(&repo);
+
+        // DUAL FLIP: a foreign content key AND a foreign sha differ at once, so
+        // the printed line names both in the predicate's order.
+        let repo = fixture_repo("stale-line-dual");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.refresh_scan_row(
+            Some("0000000000000000000000000000000000000000"),
+            Some(true),
+            Some("diverged-content-key"),
+        )
+        .unwrap();
+        drop(db);
+        assert_line_names(&apg, &["content key", "sha"]);
+        testutil::remove(&repo);
+    }
+
     // ------------------------------------------------------------------
     // Identity (R7): worktree vs main, default branch, the layout invariant
     // ------------------------------------------------------------------
