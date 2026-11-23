@@ -779,8 +779,10 @@ Because the language roots are disjoint, a cross-language module/symbol FQN
 collision is impossible by construction (`rust.apg` and `py.apg` both survive).
 
 Overloads are grouped by `(parent, name)`; any group of size > 1 renders every
-member with the `(params)` suffix. The ingestor fails loudly (panics) on any
-residual same-kind FQN collision rather than silently overwriting.
+member with the `(params)` suffix. A code identity a source path repeats is one
+declaration streamed twice and is admitted once; a residual same-kind FQN
+collision between two source paths fails loudly (panics), naming both
+contributing source paths, rather than silently overwriting.
 
 ## LadybugDB Tooling
 
