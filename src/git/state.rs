@@ -352,6 +352,10 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
 /// never consulted: a touch without a byte change stays fresh, a byte edit is
 /// stale.
 ///
+/// The verdict is exactly [`freshness_differences`]'s — the body is
+/// `freshness_differences(apg_root, state).is_ok()` — so the predicate and the
+/// collect-all form can never disagree.
+///
 /// The DB-existence precondition comes FIRST. The fast-path's action is "reuse
 /// the existing DB", so with no `db.lbug` at all there is nothing to reuse →
 /// NOT fresh. A missing/pre-hardening recorded key means freshness cannot be
@@ -400,67 +404,7 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
 /// `clean` and `content_key`) instead of re-reading the tree, so a caller that
 /// already captured a [`GitState`] pays for one status walk, not two.
 pub fn is_fresh_with_state(apg_root: &Path, state: &GitState) -> bool {
-    if !db_path(apg_root).exists() {
-        return false;
-    }
-    // A present socket that fails a connect/`Ping` is an unclean exit (see the
-    // doc above) — NOT fresh. A LIVE session is handled by the short-circuit
-    // below. An absent socket is the ordinary case.
-    let socket = crate::session::socket_path(apg_root);
-    let live_session = socket.exists() && crate::session::live_session_at(&socket);
-    if socket.exists() && !live_session {
-        return false;
-    }
-    // Not a git repo and an unborn HEAD both arrive as `sha: None` (see
-    // [`git_state`]) — no recorded state to compare → NOT fresh.
-    let Some(cur_sha) = state.sha.as_deref() else {
-        return false;
-    };
-    // The DB's own `Scan` row is the one recorded-state source. While a live
-    // session owns `db.lbug` it holds the DB exclusively, so it is taken through
-    // the session's routed read rather than a second handle here.
-    let Some(rec) = (if live_session {
-        db_recorded_scan_routed(apg_root)
-    } else {
-        db_recorded_scan(apg_root)
-    }) else {
-        return false;
-    };
-    // While a live session owns `db.lbug`, short-circuit the database reads
-    // below, so a live session never makes the on-disk fast path unfresh. The
-    // recorded/git content comparison still runs.
-    if !live_session {
-        // Pending state (a dirty row or a pending-removal identity) is an
-        // admitted-but-unsaved mutation: the derived DB is ahead of the last
-        // saved state, so it cannot be reused as-is. Fails closed.
-        if crate::artifacts::db::db_has_pending_state(apg_root) {
-            return false;
-        }
-        // A table shape this binary does not recognise cannot be reasoned
-        // about. The scan's own seed eligibility asks the same question.
-        // Fails closed.
-        if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
-            return false;
-        }
-        // Recovery safety net: the DB's ACTUAL authored/transient digest must
-        // equal the on-disk tree's (the independent source of truth), so a
-        // re-anchored `Scan` row cannot mask an authored row the DB dropped.
-        // Any error fails closed.
-        let Ok(db_authored) = crate::splice::seed::seed_authored_identity(&db_path(apg_root))
-        else {
-            return false;
-        };
-        let Ok(tree_authored) = crate::splice::seed::tree_authored_identity(apg_root) else {
-            return false;
-        };
-        if db_authored != tree_authored {
-            return false;
-        }
-    }
-    let Some(rec_key) = rec.content_key.as_deref() else {
-        return false; // pre-hardening: freshness cannot be verified
-    };
-    rec.sha == cur_sha && rec.clean == state.clean && state.content_key.as_deref() == Some(rec_key)
+    freshness_differences(apg_root, state).is_ok()
 }
 
 /// The collect-all form of [`is_fresh_with_state`]: `Ok(())` when the DB is
