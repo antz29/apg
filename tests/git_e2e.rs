@@ -408,7 +408,11 @@ mod e2e {
     /// same sha prints STALE from BOTH (never FRESH followed by a full run).
     /// The pending-state (dirty row, pending-removal ledger) and table-shape
     /// arms each start from an otherwise-fresh DB and flip exactly one input,
-    /// so each reads fresh if its production check is removed.
+    /// so each reads fresh if its production check is removed. A final arm
+    /// flips TWO inputs at once (recorded sha AND recorded cleanliness) on an
+    /// otherwise-fresh fixture and pins that `freshness_differences` collects
+    /// both in its single result and `staleness_line` names both — pinning
+    /// collect-all on the scan-preamble path.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn staleness_line_agrees_with_is_fresh() {
@@ -530,6 +534,36 @@ mod e2e {
         assert!(is_stale(&apg));
         let line = staleness_line(&apg, &git_state(&apg));
         assert!(line.contains("→ STALE"), "printed line: {line}");
+        assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
+        testutil::remove(&repo);
+
+        // DUAL FLIP on an otherwise-fresh fixture: the recorded scan differs in
+        // TWO inputs at once — a different recorded sha AND a recorded-dirty
+        // tree whose actual tree is clean (the content key still matches, taken
+        // from the current checkout). `freshness_differences` must collect BOTH
+        // in its single result (never short-circuiting one away), and
+        // `staleness_line` must print both.
+        let repo = fixture_repo("fresh-dual-flip");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the dual-flip fixture starts fresh");
+        let other_sha = format!("{sha}0");
+        testutil::write_scan_meta(&apg, Some(&other_sha), false, "2026-09-07T00:00:00Z");
+        let state = git_state(&apg);
+        let differing = freshness_differences(&apg, &state)
+            .expect_err("two differing inputs must never read fresh");
+        assert_eq!(
+            differing,
+            vec!["sha", "cleanliness"],
+            "collect-all must report BOTH differing inputs in its single result"
+        );
+        let line = staleness_line(&apg, &state);
+        assert!(
+            line.contains("differing: sha, cleanliness"),
+            "printed line: {line}"
+        );
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
     }
