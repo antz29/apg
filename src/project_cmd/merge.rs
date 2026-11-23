@@ -1,5 +1,7 @@
 //! `apg project merge` — verify gate → merge-strength validation → merge →
-//! main rebuild → self-cleanup.
+//! main rebuild → self-cleanup. A failed rebuild rolls the merge back: the
+//! default branch is reset to the pre-merge commit and a stale main derived
+//! graph discarded, so the merge is unlanded and retryable.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -30,8 +32,13 @@ pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
 /// unguarded `apg scan` of the main checkout; tests override it. After the
 /// verify gate → merge-strength validation → merge → rebuild succeed, the
 /// merged project cleans up after itself: its worktree is removed and its
-/// branch deleted (self-cleanup; never the default branch). Any refusal or
-/// failure before the success path leaves both untouched.
+/// branch deleted (self-cleanup; never the default branch). Every refusal
+/// before the merge leaves the checkout, worktree and branch untouched. A
+/// rebuild failure after the merge is NOT left landed: the default branch is
+/// reset to the pre-merge commit and a main derived graph that no longer
+/// matches the restored HEAD is discarded, so the merge is unlanded; the
+/// worktree and project branch remain, so re-running `apg project merge`
+/// retries the whole act.
 ///
 /// The main rebuild after the merge is unconditional: every change-set — a
 /// spec-only one included — takes the same rebuild, with no source-diff or
@@ -145,6 +152,7 @@ pub fn project_merge_at(
     // checkout): fast-forward when the default has not moved, otherwise a
     // merge commit. Conflicts are a hard refusal with a manual fix line.
     let head_commit = repo.head()?.peel_to_commit()?;
+    let pre_merge = head_commit.id();
     let their = branch.get().peel_to_commit()?;
     if their.id() == head_commit.id() {
         anyhow::bail!(
@@ -188,13 +196,34 @@ pub fn project_merge_at(
     // no source-diff or spec-only short-circuit: the merged authored rows are in
     // main's database only after this rebuild assembles them from
     // `apg/layers/**` plus the scanned code, so skipping it would leave the
-    // database stale. Cleanup runs ONLY on the success path — any refusal or
-    // failure before this point leaves the worktree and branch untouched. The
-    // worktree is unregistered + removed and the project branch deleted (safe:
-    // the merged branch is by definition merged into the default branch; the
-    // default branch itself is hard-refused inside delete_branch).
+    // database stale. Cleanup runs ONLY on the success path; a rebuild failure
+    // instead rolls the merge back (below), leaving the worktree and branch for
+    // the retry. The worktree is unregistered + removed and the project branch
+    // deleted (safe: the merged branch is by definition merged into the default
+    // branch; the default branch itself is hard-refused inside delete_branch).
     let rebuild = rebuild.unwrap_or(&real_scan);
-    rebuild(&identity.main_root)?;
+    if let Err(err) = rebuild(&identity.main_root) {
+        // The merge landed but main's derived graph did not follow it. Roll the
+        // default branch back to the pre-merge commit so the merge is unlanded,
+        // then discard a derived index that no longer matches the restored HEAD
+        // (a rebuild that failed before writing leaves the pre-merge DB fresh
+        // against the restored HEAD and keeps it). The worktree and project
+        // branch stay, so the retry re-runs the whole act.
+        let rollback = repo
+            .find_object(pre_merge, None)
+            .and_then(|obj| repo.reset(&obj, git2::ResetType::Hard, None));
+        if !git::is_fresh(main_apg_root) {
+            crate::session::discard_derived_index(&main_apg_root.join(specs::TRANS));
+        }
+        if let Err(reset_err) = rollback {
+            anyhow::bail!(
+                "main rebuild failed after merging `{name}` and the default branch could not be rolled back to {pre_merge} ({reset_err}) — the merge is landed with a stale graph: {err}. Fix: run `apg scan` in the main checkout."
+            );
+        }
+        anyhow::bail!(
+            "main rebuild failed after merging `{name}` — the merge is unlanded: the default branch was reset to the pre-merge commit {pre_merge} and main's derived graph discarded where it no longer matched. Fix: re-run `apg project merge {name}`. Rebuild error: {err}"
+        );
+    }
     git::remove_worktree(&identity.main_root, name)?;
     git::delete_branch(&identity.main_root, name)?;
     Ok(())
