@@ -537,18 +537,33 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
 
 /// The refusal message for a stale DB, or `None` when the DB is fresh (or N/A).
 /// Only ever called by the mutation gate once `is_stale` is true.
+///
+/// The exact shape (stable — pinned by tests):
+///
+/// `graph is stale (recorded <rec>, current <cur>; differing: <labels>) — run `apg scan` before mutating`
+///
+/// `<rec>`/`<cur>` are [`state_str`] (`<sha>@<clean>`, or `-@-` when there is
+/// no sha to display) and `<labels>` is [`freshness_differences`]' reason list
+/// joined by `, `, so every differing freshness input is named: `database`,
+/// `socket`, `git sha`, `recorded scan`, `pending state`, `schema`,
+/// `authored digest`, `content key`, `sha`, `cleanliness`.
 pub fn refusal_message(apg_root: &Path) -> Option<String> {
     if !is_stale(apg_root) {
         return None;
     }
     let current = git_state(apg_root);
+    let Err(differing) = freshness_differences(apg_root, &current) else {
+        // A tree that moved between the `is_stale` gate and the read above.
+        return None;
+    };
     let recorded = match db_recorded_scan(apg_root) {
         Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
     };
     let cur = state_str(current.sha.as_deref(), current.clean);
     Some(format!(
-        "graph is stale (recorded {recorded}, current {cur}) — run `apg scan` before mutating"
+        "graph is stale (recorded {recorded}, current {cur}; differing: {}) — run `apg scan` before mutating",
+        differing.join(", ")
     ))
 }
 
