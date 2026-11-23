@@ -131,7 +131,18 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
 /// The admission order does not change that: a declaration admitted after a
 /// placeholder replaces it, and a placeholder admitted after a declaration is
 /// dropped.
+///
+/// A repeated location-bearing identity from the same source path is one
+/// declaration streamed twice (a frontend re-emission or a replayed roster):
+/// the first admission stands. Two different source paths rendering one
+/// identity is a real collision, reported with both paths.
 fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut Progress<'_>>) {
+    let source = |node: &Node| {
+        node.location.as_ref().map_or_else(
+            || "<no source>".to_string(),
+            |location| location.path.display().to_string(),
+        )
+    };
     // A real declaration replaces an unresolved-target placeholder (which lives
     // only in `graph.nodes`, not in `seen`), never the other way around.
     match graph.nodes.get(&fqn) {
@@ -152,7 +163,23 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node, progress: Option<&mut
         // superseded — a plan never overwrites real code (the plan-writer is
         // rejected at authoring time; this is the ingest-side backstop).
         Some(_) if node.status.as_deref() == Some("planned") => return,
-        Some(_) => panic!("duplicate project node FQN: `{fqn}`"),
+        // The same identity, location-bearing, streamed again from its own
+        // source path: admit it once.
+        Some(existing)
+            if existing.kind == node.kind
+                && existing
+                    .location
+                    .as_ref()
+                    .zip(node.location.as_ref())
+                    .is_some_and(|(a, b)| a.path == b.path) =>
+        {
+            return;
+        }
+        Some(existing) => panic!(
+            "duplicate project node FQN: `{fqn}` from `{}` and `{}`",
+            source(existing),
+            source(&node),
+        ),
     }
     let kind = node.kind;
     graph.nodes.insert(fqn, node);
