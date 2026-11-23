@@ -227,7 +227,9 @@ mod e2e {
     /// modules, the file-less descendants, and every `Module -> Module` edge a
     /// per-file fact unit cannot — while planned placeholders and file-less
     /// components are excluded — and it round-trips through the store under a
-    /// cache key.
+    /// cache key. PHASE_09: it also carries the `Language` root and one
+    /// `Language -> Module` edge for every module of a component, the
+    /// intermediate and file-less ones included.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir + store on disk); run via cargo test-e2e"]
     fn module_scaffolding_covers_intermediates_descendants_and_round_trips() {
@@ -304,6 +306,16 @@ mod e2e {
             go.edges,
             vec![("godemo".to_string(), "godemo/changed".to_string())]
         );
+        // The derived `Language` root and one `Language -> Module` edge for
+        // every module, the file-bearing child included.
+        assert_eq!(go.languages, vec!["go".to_string()]);
+        assert_eq!(
+            go.language_edges,
+            vec![
+                ("go".to_string(), "godemo".to_string()),
+                ("go".to_string(), "godemo/changed".to_string()),
+            ]
+        );
         let cs = &by_lang["csharp"];
         assert_eq!(
             cs.modules,
@@ -328,9 +340,30 @@ mod e2e {
             "Apg.CsharpFrontend.Tests".to_string(),
             "Apg.CsharpFrontend.Tests.Inline".to_string()
         )));
+        // The `Language` root and a `Language -> Module` edge for every module:
+        // the two pure-intermediate modules and the file-less descendant
+        // included, though only the leaf module owns a file.
+        assert_eq!(cs.languages, vec!["csharp".to_string()]);
+        assert_eq!(
+            cs.language_edges,
+            vec![
+                ("csharp".to_string(), "Apg".to_string()),
+                ("csharp".to_string(), "Apg.CsharpFrontend".to_string()),
+                ("csharp".to_string(), "Apg.CsharpFrontend.Tests".to_string()),
+                (
+                    "csharp".to_string(),
+                    "Apg.CsharpFrontend.Tests.Inline".to_string()
+                ),
+            ]
+        );
 
         store.put_scaffolding_all(&by_lang, &cache_key).unwrap();
         assert_eq!(store.scaffolding("csharp", &cache_key).as_ref(), Some(cs));
+        // The `Language` root and every module's edge survive the round-trip.
+        let replayed_go = store
+            .scaffolding("go", &cache_key)
+            .expect("go scaffolding round-trips");
+        assert_eq!(&replayed_go, go);
         // A drifted key sees nothing (the store never mis-reads an old unit).
         let drifted = CacheKey::compute(&ScanConfigKey {
             languages: vec!["go".into()],
