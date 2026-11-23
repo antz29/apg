@@ -10,12 +10,17 @@
   "out": [
     {
       "kind": "contains",
+      "target": "domain.entity.project-context",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.service.project-context-guard",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.entity.project-context",
+      "target": "domain.service.project-integration",
       "properties": {}
     }
   ],

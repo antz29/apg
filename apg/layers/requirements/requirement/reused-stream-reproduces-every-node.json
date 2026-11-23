@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "reused-stream-reproduces-every-node",
+  "body": "A stream a scan reuses reproduces every node that stream produced — its Language root, its Module rows and its declarations — so every declaration in the assembled database carries its parent module and language root.",
+  "properties": {
+    "feature": "splice-equivalence"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

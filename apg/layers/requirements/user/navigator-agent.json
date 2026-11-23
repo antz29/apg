@@ -22,6 +22,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.agent-roster-survives-an-incremental-scan",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
       "properties": {}
     },
@@ -47,6 +52,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.freshness-refusal-names-the-differing-input",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.ignore-lookup-accepts-absolute-and-relative-paths",
       "properties": {}
     },
@@ -68,6 +78,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.main-checkout-reads-stay-legal",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.merge-lands-with-a-current-graph",
       "properties": {}
     },
     {
@@ -158,6 +173,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.research-escalation-triage",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-admits-each-code-identity-once",
       "properties": {}
     },
     {

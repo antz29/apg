@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "containment-closure",
+  "body": "A database a scan publishes is closed under containment: every declaration's Module parent and every Module's Language root are present in it, so a reused stream leaves no orphan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

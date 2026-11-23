@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "project-merge-integrator",
+  "body": "The project merge act: the verify gate, the merge-strength check, the branch merge, the main graph rebuild and the project self-clean, ordered so a merge lands only with its graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.merge.project_merge",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

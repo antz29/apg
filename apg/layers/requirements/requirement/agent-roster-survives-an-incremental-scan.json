@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "agent-roster-survives-an-incremental-scan",
+  "body": "An incremental scan keeps every unchanged agent definition's Agent node and each task's assigned-to edge by re-emitting the unchanged roster, and a definition the frontend emits arrives from the frontend alone.",
+  "properties": {
+    "feature": "task-assignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-definition-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.incremental-delta-splice",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

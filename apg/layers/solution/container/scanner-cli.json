@@ -159,6 +159,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.project-merge-integrator",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.project-start-seeder",
       "properties": {}
     },

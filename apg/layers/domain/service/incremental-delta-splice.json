@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.agent-roster-survives-an-incremental-scan",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.delta-contains-parent-may-live-only-in-the-seed",
       "properties": {}
     },
@@ -23,6 +28,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.one-file-rescan-stays-under-the-value-threshold",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.reused-stream-reproduces-every-node",
       "properties": {}
     },
     {

@@ -47,6 +47,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.reused-stream-reproduces-every-node",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-admits-each-code-identity-once",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.scan-reads-the-previous-database-first",
       "properties": {}
     },

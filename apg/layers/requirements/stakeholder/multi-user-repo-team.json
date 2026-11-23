@@ -47,6 +47,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.reused-stream-reproduces-every-node",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.scan-reads-the-previous-database-first",
       "properties": {}
     },
