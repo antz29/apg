@@ -457,9 +457,9 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     // Pass 2: cached module records — a module declared by a reused unit must
     // exist for its Module→File `contains` edges to survive. Inserted when the
     // spool emitted no real Module at the FQN.
-    for (m, lang) in cached_modules {
-        if module_needs_insert(graph, &m) {
-            select_language(&mut progress, &lang);
+    for (m, lang) in &cached_modules {
+        if module_needs_insert(graph, m) {
+            select_language(&mut progress, lang);
             insert_node(
                 graph,
                 m.clone(),
@@ -482,12 +482,24 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     // Only a language the orchestrator actually skipped is replayed, so a
     // spawned language's fresh scaffolding (emitted unconditionally, outside the
     // emission filter) is never shadowed by stale cache rows.
+    //
+    // PHASE_09: the skipped language's `Language` root and each replayed
+    // module's `Language -> Module` edge are DERIVED from the skipped language
+    // itself, never read back from the record — the record is stored per
+    // language, so its modules and the modules the reused per-file units
+    // contributed in pass 2 all belong to it. A complete record, a legacy one
+    // written before it carried `languages`/`language_edges`, and an absent
+    // record therefore rebuild the same root a full rebuild has.
     for lang in &reuse.skipped_langs {
-        let Some(scaffolding) = reuse.store.scaffolding(lang, reuse.cache_key) else {
-            continue;
-        };
+        let scaffolding = reuse.store.scaffolding(lang, reuse.cache_key);
+        let replayed: BTreeSet<&String> = cached_modules
+            .iter()
+            .filter(|(_, l)| *l == lang)
+            .map(|(m, _)| m)
+            .chain(scaffolding.iter().flat_map(|s| &s.modules))
+            .collect();
         select_language(&mut progress, lang);
-        for m in &scaffolding.modules {
+        for m in replayed {
             if module_needs_insert(graph, m) {
                 insert_node(
                     graph,
@@ -499,28 +511,23 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
                     progress.as_deref_mut(),
                 );
             }
+            graph.contains.insert((lang.clone(), m.clone()));
         }
-        for (from, to) in &scaffolding.edges {
-            graph.contains.insert((from.clone(), to.clone()));
+        if !graph.nodes.contains_key(lang) {
+            insert_node(
+                graph,
+                lang.clone(),
+                Node {
+                    kind: NodeKind::Language,
+                    ..Node::default()
+                },
+                progress.as_deref_mut(),
+            );
         }
-        // PHASE_09: the skipped language's own `Language` root and its
-        // `Language -> Module` edges are global scaffolding too — without them
-        // the assembled graph would lack the language root a full rebuild has.
-        for l in &scaffolding.languages {
-            if !graph.nodes.contains_key(l) {
-                insert_node(
-                    graph,
-                    l.clone(),
-                    Node {
-                        kind: NodeKind::Language,
-                        ..Node::default()
-                    },
-                    progress.as_deref_mut(),
-                );
+        if let Some(scaffolding) = &scaffolding {
+            for (from, to) in &scaffolding.edges {
+                graph.contains.insert((from.clone(), to.clone()));
             }
-        }
-        for (from, to) in &scaffolding.language_edges {
-            graph.contains.insert((from.clone(), to.clone()));
         }
     }
 
