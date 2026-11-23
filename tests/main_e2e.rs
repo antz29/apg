@@ -10115,6 +10115,143 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Phase-01 task-9 (e2e, scratch /tmp repo, real `apg init` + real
+    /// `apg scan`, CANDIDATE binary only — `global.constraint.no-real-project-test`):
+    /// a **zero-target** incremental scan keeps the Agent roster and the
+    /// Task→Agent `AssignedTo` rows without double-emitting the roster. An
+    /// empty commit moves HEAD with the tree untouched, so the recorded scan is
+    /// an ancestor of HEAD with an empty delta: every frontend runs UNFILTERED
+    /// (an empty target list means "no filter"), and the agent frontend is the
+    /// roster's sole source. Before the `run_pipeline` guard a zero-target delta
+    /// re-emitted the previous roster on top of that unfiltered emission — a
+    /// duplicate Agent node the ingestor refuses — so this pins the one-roster
+    /// outcome alongside the plan task's `--assigned-to` row.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+    fn zero_target_incremental_scan_keeps_the_agent_roster_without_duplicates() {
+        let (base, repo_dir) = winb_scratch(
+            "zero-target-roster",
+            &[
+                ("main.go", "package main\n\nfunc main() {}\n"),
+                (
+                    ".opencode/agents/implementer.md",
+                    "# Implementer\n\nCore implementation.\n",
+                ),
+            ],
+        );
+        let home = base.join("home");
+        let home_s = home.to_str().unwrap().to_string();
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let stderr_of = |out: &std::process::Output| -> String {
+            String::from_utf8_lossy(&out.stderr).into_owned()
+        };
+
+        run(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        // The main scan records the fact store and seeds the Agent roster.
+        run(&repo_dir, &["scan", "."]);
+        run(&repo_dir, &["project", "start", "demo"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("demo");
+        assert!(wt.is_dir(), "the project worktree must exist");
+
+        // The task's `--assigned-to` resolves against the branch graph's Agent
+        // roster and lands in the transient plan store the scan projects.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "task",
+                "1",
+                "1",
+                "--title",
+                "T1",
+                "--assigned-to",
+                "agent.implementer",
+            ],
+        );
+
+        // Move HEAD without touching the tree: the recorded scan is an ancestor
+        // of HEAD with an empty delta, so the scan is a zero-target incremental
+        // one and every frontend runs unfiltered.
+        let repo = git2::Repository::open(&wt).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "empty commit: nothing in the tree changed",
+            &head.tree().unwrap(),
+            &[&head],
+        )
+        .unwrap();
+
+        let scan_stderr = stderr_of(&run(&wt, &["scan", "."]));
+        assert!(
+            scan_stderr.contains("[scan] incremental: 0 target file(s),"),
+            "the empty commit must drive the zero-target incremental path: {scan_stderr}"
+        );
+        assert!(
+            scan_stderr.contains("[scan] running agent frontend"),
+            "the zero-target scan must emit the roster through the agent frontend: {scan_stderr}"
+        );
+
+        // The roster is emitted exactly once — the agent frontend's own
+        // unfiltered emission, never a second pipeline re-emit.
+        assert_eq!(
+            db_query(&wt, "MATCH (a:Agent) RETURN a.fqn"),
+            vec![vec!["agent.implementer".to_string()]],
+            "the zero-target scan must keep exactly one Agent row, not double-emit it"
+        );
+        // The plan task's assignment survives the zero-target incremental scan.
+        assert_eq!(
+            db_query(
+                &wt,
+                "MATCH (t:Task)-[:AssignedTo]->(a:Agent) RETURN t.fqn, a.fqn",
+            ),
+            vec![vec![
+                "demo/plan.phase-01.task-1".to_string(),
+                "agent.implementer".to_string(),
+            ]],
+            "the Task→Agent AssignedTo row must survive the zero-target incremental scan"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// Phase-08 task-17/20 (e2e): a mixed Go + Python repo scans BOTH
     /// frontends into ONE graph — py auto-detects alongside go, both
     /// frontends run, the merged graph carries a py symbol and its resolved
