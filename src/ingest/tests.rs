@@ -515,16 +515,20 @@ mod unit {
     }
 
     /// Phase-09 task-40: language rooting removes only the CROSS-language
-    /// collision. A same-kind collision WITHIN one language still fails
-    /// loudly in `claim` — the rooted FQNs are no different: two
-    /// declarations rendering the same rooted FQN panic rather than silently
-    /// overwriting.
+    /// collision. A same-kind collision WITHIN one language from two different
+    /// sources still fails loudly in `claim` — the rooted FQNs are no
+    /// different: two declarations rendering the same rooted FQN panic rather
+    /// than silently overwriting, and the report names both contributing
+    /// source paths. A repeat from the SAME source is instead admitted once
+    /// (pinned by `same_source_repeated_identity_is_admitted_once`).
     #[test]
-    #[should_panic(expected = "FQN collision")]
+    #[should_panic(
+        expected = "FQN collision: `rust.pkg.F` claimed by both `src/one.rs` and `src/two.rs`"
+    )]
     fn same_kind_claim_still_panics_under_rooting() {
         let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
-        claim(&mut seen, "n1", "rust.pkg.F", NodeKind::Function);
-        claim(&mut seen, "n2", "rust.pkg.F", NodeKind::Function);
+        claim(&mut seen, "src/one.rs", "rust.pkg.F", NodeKind::Function);
+        claim(&mut seen, "src/two.rs", "rust.pkg.F", NodeKind::Function);
     }
 
     /// A repeated identity from the SAME source path is one declaration
