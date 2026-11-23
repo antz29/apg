@@ -643,6 +643,16 @@ impl ModuleScaffolding {
     /// descendants (e.g. an inline `mod tests`) are attributed to the same
     /// language as the files that anchor the component. A component with no
     /// attached file anywhere is an empty/planned placeholder and is dropped.
+    ///
+    /// Each surviving component records its `Language` root and a
+    /// `Language -> Module` edge for **every** module of the component, derived
+    /// from that component's language rather than read back from
+    /// `graph.contains`: a module a reused unit contributed to the assembled
+    /// graph carries no language edge of its own, and a record written without
+    /// one would erase the root when the language is replayed. A **file-rooted**
+    /// language — one whose `Language -> File` edges carry its files with no
+    /// `Module` of their own (an all-namespace-less C# stream) — has no
+    /// component to walk, so it is recorded as a root-only entry.
     pub fn extract(graph: &Graph, scan_root: &Path) -> BTreeMap<String, ModuleScaffolding> {
         let real: BTreeSet<String> = graph
             .nodes
@@ -714,9 +724,14 @@ impl ModuleScaffolding {
             let Some(lang) = langs.into_iter().next() else {
                 continue;
             };
-            let entry = out.entry(lang).or_default();
+            let entry = out.entry(lang.clone()).or_default();
+            // PHASE_09: the component's `Language` root and every module's
+            // `Language -> Module` edge, so a skipped language's root survives
+            // the incremental assembly.
+            entry.languages.push(lang.clone());
             for m in &component {
                 entry.modules.push(m.clone());
+                entry.language_edges.push((lang.clone(), m.clone()));
                 if let Some(files) = direct_files.get(m) {
                     entry.files.insert(m.clone(), files.clone());
                 }
@@ -726,19 +741,18 @@ impl ModuleScaffolding {
                     entry.edges.push((a.clone(), b.clone()));
                 }
             }
-            // PHASE_09: the component's `Language` root(s) and the
-            // `Language -> Module` edges, so a skipped language's root survives
-            // the incremental assembly.
-            for (a, b) in &graph.contains {
-                if component.contains(b)
-                    && graph
-                        .nodes
-                        .get(a)
-                        .is_some_and(|n| n.kind == NodeKind::Language)
-                {
-                    entry.languages.push(a.clone());
-                    entry.language_edges.push((a.clone(), b.clone()));
-                }
+        }
+        // A file-rooted language never enters a component walk above: its
+        // `Language -> File` edges carry its files with no `Module` of their
+        // own. Record its root alone so a replay rebuilds it.
+        for (a, b) in &graph.contains {
+            if graph
+                .nodes
+                .get(a)
+                .is_some_and(|n| n.kind == NodeKind::Language)
+                && graph.nodes.get(b).is_some_and(|n| n.kind == NodeKind::File)
+            {
+                out.entry(a.clone()).or_default().languages.push(a.clone());
             }
         }
         for scaffolding in out.values_mut() {
