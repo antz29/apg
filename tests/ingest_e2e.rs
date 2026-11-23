@@ -1475,6 +1475,16 @@ mod e2e {
             Some(&reuse),
             None,
         );
+        // PHASE_09: the skipped language's `Language` root itself must be
+        // replayed, not just its modules.
+        assert!(
+            graph
+                .nodes
+                .get("csharp")
+                .is_some_and(|n| n.kind == NodeKind::Language),
+            "the skipped language's `Language` root must be replayed: {:?}",
+            graph.nodes.keys().collect::<Vec<_>>()
+        );
         for m in [
             "Apg",
             "Apg.CsharpFrontend",
@@ -1485,6 +1495,13 @@ mod e2e {
                 graph.nodes.contains_key(m),
                 "the skipped language's module `{m}` must be replayed: {:?}",
                 graph.nodes.keys().collect::<Vec<_>>()
+            );
+            // PHASE_09: every replayed module hangs off its `Language` root.
+            assert!(
+                graph
+                    .contains
+                    .contains(&("csharp".to_string(), m.to_string())),
+                "the `Language -> Module` edge csharp -> {m} must be replayed"
             );
         }
         for (from, to) in [
