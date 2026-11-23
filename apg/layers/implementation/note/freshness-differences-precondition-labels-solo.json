@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "freshness-differences-precondition-labels-solo",
-  "body": "The four precondition labels (`database`, `socket`, `git sha`, `recorded scan`) are reported alone because the remaining inputs cannot be evaluated without them; a precondition failure therefore never also lists the collected inputs. Upgrade by enumerating a precondition label in an e2e test only if that pairing becomes a contract.",
+  "body": "The four precondition labels (`database`, `socket`, `git sha`, `recorded scan`) are reported alone, so a precondition failure never also lists the collected inputs. `database`, `git sha` and `recorded scan` are alone because the remaining inputs cannot be evaluated without them; `socket` is alone by the untrusted-DB phantom-projection contract — after an unclean session exit the on-disk DB cannot be trusted until a rebuild, even though its rows are readable and the other inputs are computable. Upgrade by enumerating a precondition label in an e2e test only if that pairing becomes a contract.",
   "properties": {},
   "out": [
     {
