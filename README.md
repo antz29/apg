@@ -768,7 +768,12 @@ warning where the dev-machine tool is absent), a per-file `ruby -c` over
 (the fast unit+int default), the `opencode-suite/node_modules` bootstrap from
 the committed `opencode-suite/bun.lock` (skipped when the directory is
 present), `bun test` (in `opencode-suite/`) and `node --test` (in
-`src/tslib/`). `scripts/gate.sh --e2e` appends the cargo e2e tier and the
+`src/tslib/`). `scripts/gate.sh --e2e` appends the e2e tier — the per-binary
+runner `bash scripts/test-e2e.sh`, which builds every `*_e2e` test binary once
+and runs each as its own process under a bounded pool: `E2E_JOBS` concurrent
+binaries (default `min(8, CPU cores)`) at `E2E_THREADS` libtest threads each
+(default 4), heavy binaries (`splice_e2e`) capped lower, one log per binary
+under `target/e2e-logs/`, and a non-zero exit on any failure — and the
 opencode-suite boundary e2e. It is run-only for every agent except
 `build-implementer`, which owns `scripts/**`.
 
