@@ -485,8 +485,14 @@ committed `opencode-suite/bun.lock` (run when the directory is absent or lacks
 the type-check toolchain — typescript 5.9.3, @types/bun 1.4.5; skipped when
 the toolchain is present) → the type check (the suite-local `tsc --noEmit -p
 opencode-suite/tsconfig.json` over `opencode-suite/tools/**`) → `bun test` (in
-`opencode-suite/`) → `node --test` (in `src/tslib/`); `scripts/gate.sh --e2e`
-appends the e2e tier — the per-binary runner `bash scripts/test-e2e.sh`, which
+`opencode-suite/`) → `node --test` (in `src/tslib/`). `scripts/gate.sh --e2e`
+and `scripts/gate.sh --e2e-full` both append the e2e tier through the per-binary
+runner `bash scripts/test-e2e.sh`, and differ only in that runner's selection.
+`--e2e` is the **hermetic** selection — the built `apg` binary alone — so a
+scenario that needs a per-language frontend (an acceptance scan spawning
+`gofrontend`/`pyfrontend`/…) or the pinned-scale 50k-file rescan is excluded;
+`--e2e-full` is the **complete** selection, running every e2e scenario (the
+real-frontend acceptance scans and the pinned-scale rescan included). The runner
 builds every discovered `*_e2e` test binary once (`cargo test --no-run`, so a
 new `tests/foo_e2e.rs` joins automatically) and runs each as its own process
 under a bounded pool: `E2E_JOBS` concurrent binaries (default `min(8, CPU
@@ -536,8 +542,8 @@ form `cargo test e2e:: -- --ignored --list`.
 `readme_documents_release_version`) read `Cargo.toml`/`Cargo.lock`/`README.md`
 from disk, so they are **e2e** and are **no longer run by a plain `cargo test --lib`**.
 The default gate stays fast and the guard is exercised by the opt-in e2e tier.
-The release gate is therefore `cargo build` + `cargo test --lib` (fast unit+int) +
-`cargo test-e2e` (which runs the guard); see the release section below.
+The release gate is therefore `scripts/gate.sh --e2e-full` — the complete e2e
+selection, which runs the guard; see the release section below.
 
 **Self-contained e2e.** The whole test suite is self-contained
 (`global.constraint.self-contained-tests`): every e2e scenario builds its own
@@ -771,7 +777,7 @@ on the old version, ships stale `OLD-version` bottles.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
-1. **Gate green**: run `scripts/gate.sh --e2e` — the single gate command and
+1. **Gate green**: run `scripts/gate.sh --e2e-full` — the single gate command and
    the runnable entry point (the gate is one granted command; env-prefixed
    variants of a step match no allow rule). It provisions the untracked
    `opencode-suite/node_modules` — which the `bun test` step's
@@ -791,16 +797,18 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `tsc --noEmit -p opencode-suite/tsconfig.json` over
    `opencode-suite/tools/**`) → `bun test` (in `opencode-suite/`) →
    `node --test` (in `src/tslib/`), and
-   `--e2e` appends the e2e tier (run by the `scripts/test-e2e.sh` per-binary
-   runner) and the opencode-suite boundary e2e. In
-   practice that means `cargo build` first, then **`cargo test --lib` AND
-   `cargo test-e2e`** pass (not just `cargo check`). `cargo test --lib` is the fast unit+int default gate
+   `--e2e-full` appends the complete e2e tier (run by the `scripts/test-e2e.sh`
+   per-binary runner — every e2e scenario, the real-frontend acceptance scans
+   and the pinned-scale rescan included) and the opencode-suite boundary e2e. In
+   practice that means `cargo build` first, then the default unit+int suite and
+   the **complete e2e tier** pass (not just `cargo check`). `cargo test --lib` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
-   the guard runs under `cargo test-e2e` (`cargo test e2e:: -- --ignored`)
-   — a stale `RELEASE_VERSION` literal ships the release HEAD red unless the e2e
-   tier is run (the const lives in `tests/main_e2e.rs`). Build first because the
-   cross-process tests spawn
+   the guard runs only under the complete e2e tier
+   (`cargo test-e2e`, `cargo test e2e:: -- --ignored`, or the gate's
+   `--e2e-full`) — a stale `RELEASE_VERSION` literal ships the release HEAD red
+   unless the complete e2e tier is run (the const lives in `tests/main_e2e.rs`).
+   Build first because the cross-process tests spawn
    `target/<profile>/apg` (`src/testutil.rs`), which `cargo test --lib` alone does not
    rebuild: a stale artifact makes the session/lock tests fail against an old CLI
    with misleading errors.
