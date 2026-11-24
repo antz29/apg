@@ -286,6 +286,23 @@ pub fn schema_template_db() -> &'static Path {
         .as_path()
 }
 
+/// The schema-initialised fixture database at `path`: the process
+/// [`schema_template_db`] copied into place — parent directories created, the
+/// destination's stale `db.lbug`/`.wal`/`.shm` discarded through
+/// [`crate::session::discard_derived_index`] first — then opened at
+/// [`fixture_db_config`]. A fixture gets the full schema with no rows without
+/// running `create_schema` itself, and the open database is returned so a
+/// caller that fills it keeps it for `copy_from` while one that needs only its
+/// shape (e.g. [`touch_db`]) simply drops it. Panics when the copy or the open
+/// fails, like the other fixture builders.
+pub fn schema_db_at(path: &Path) -> lbug::Database {
+    let dir = path.parent().expect("fixture db path has a parent");
+    std::fs::create_dir_all(dir).unwrap();
+    crate::session::discard_derived_index(dir);
+    std::fs::copy(schema_template_db(), path).unwrap();
+    lbug::Database::new(path, fixture_db_config()).unwrap()
+}
+
 /// A real, empty `apg/.trans/db.lbug` with the full schema but no rows — the
 /// DB-existence fixture the staleness predicates need (they open the DB to read
 /// its `Scan` row; a raw empty marker is not a database). A test that wants the
