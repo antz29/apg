@@ -13057,4 +13057,195 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// phase-04 task-14: the cached (previous-scan) database carries the
+    /// caller's edge to a function the current tree RENAMED AWAY. The rescan
+    /// must CLOSE the graph over the live FQNs: the vanished-target edge is
+    /// dropped, no `UnresolvedTarget` is fabricated for the vanished FQN, a
+    /// genuine unresolved-target edge survives, and every surviving edge
+    /// endpoint is a real node or a live unresolved target.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/fact store); run via cargo test-e2e"]
+    fn renamed_away_target_edge_is_dropped_and_the_scan_graph_stays_closed() {
+        let (base, repo_dir) = winb_scratch("closed-graph-rename", &winb_go_fixture());
+        let home = base.join("home");
+        // The caller starts with a genuine external reference beside its call to
+        // the leaf, so the live unresolved-target edge spans the whole test.
+        std::fs::write(
+            repo_dir.join("b/b.go"),
+            "package b\n\nimport (\n\t\"fmt\"\n\n\t\"scratch/a\"\n)\n\ntype B struct {\n\tA a.A\n}\n\nfunc Foo() int {\n\tfmt.Println(\"foo\")\n\treturn a.Leaf()\n}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&repo_dir, "call fmt");
+        let _ = winb_run(&repo_dir, &home, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        let cold = winb_run(&repo_dir, &home, &["scan", "."]);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+
+        let old = "go.scratch/a.Leaf";
+        let new = "go.scratch/a.Leaf2";
+        // The cached database holds the caller's edge to the old FQN.
+        let cached_edge = db_query(
+            &repo_dir,
+            &format!(
+                "MATCH (a:Function)-[:Calls]->(b:Function) WHERE a.fqn = 'go.scratch/b.Foo' \
+                 AND b.fqn = '{old}' RETURN a.fqn"
+            ),
+        );
+        assert_eq!(
+            cached_edge.len(),
+            1,
+            "the previous scan's database carries the edge to the old FQN"
+        );
+        // ...and a genuine external reference, the live unresolved target.
+        let unresolved_before = db_query(
+            &repo_dir,
+            "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) \
+             WHERE a.fqn = 'go.scratch/b.Foo' RETURN u.fqn",
+        );
+        assert!(
+            unresolved_before
+                .iter()
+                .any(|r| db_text(r, 0).contains("Println")),
+            "the fixture carries a genuine unresolved target: {unresolved_before:?}"
+        );
+
+        // Rename `Leaf` to `Leaf2` and keep the tree compilable, so the old
+        // FQN vanishes while the caller re-resolves to the new one.
+        std::fs::write(
+            repo_dir.join("a/a.go"),
+            "package a\n\ntype A struct {\n\tX int\n}\n\nfunc Leaf2() int { return 1 }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo_dir.join("b/b.go"),
+            "package b\n\nimport (\n\t\"fmt\"\n\n\t\"scratch/a\"\n)\n\ntype B struct {\n\tA a.A\n}\n\nfunc Foo() int {\n\tfmt.Println(\"foo\")\n\treturn a.Leaf2()\n}\n",
+        )
+        .unwrap();
+        scratch_commit_all(&repo_dir, "rename Leaf to Leaf2");
+        let inc = winb_run(&repo_dir, &home, &["scan", "."]);
+        let inc_err = String::from_utf8_lossy(&inc.stderr).into_owned();
+        assert!(inc.status.success(), "incremental scan: {inc_err}");
+        assert!(
+            inc_err.contains("[scan] incremental:"),
+            "the rename must take the delta dispatch: {inc_err}"
+        );
+
+        // The vanished FQN names no node and is an endpoint of no edge.
+        for label in [
+            "Language",
+            "Module",
+            "File",
+            "Struct",
+            "Function",
+            "UnresolvedTarget",
+        ] {
+            let rows = db_query(
+                &repo_dir,
+                &format!("MATCH (n:{label}) WHERE n.fqn = '{old}' RETURN n.fqn"),
+            );
+            assert!(
+                rows.is_empty(),
+                "the vanished FQN must name no {label} node: {rows:?}"
+            );
+        }
+        for table in [
+            "Contains",
+            "Calls",
+            "Uses",
+            "UnresolvedCall",
+            "UnresolvedUse",
+        ] {
+            let rows = db_query(
+                &repo_dir,
+                &format!(
+                    "MATCH (a)-[:{table}]->(b) WHERE a.fqn = '{old}' OR b.fqn = '{old}' \
+                     RETURN a.fqn, b.fqn"
+                ),
+            );
+            assert!(
+                rows.is_empty(),
+                "no {table} edge may name the vanished FQN: {rows:?}"
+            );
+        }
+        // No fabricated unresolved target recycles the vanished real FQN.
+        let fabricated = db_query(
+            &repo_dir,
+            "MATCH (n:UnresolvedTarget) WHERE n.fqn CONTAINS 'Leaf' RETURN n.fqn",
+        );
+        assert!(
+            fabricated.is_empty(),
+            "a vanished real FQN is never recycled into an unresolved target: {fabricated:?}"
+        );
+
+        // The renamed function landed and the caller re-resolved to it.
+        let renamed_edge = db_query(
+            &repo_dir,
+            &format!(
+                "MATCH (a:Function)-[:Calls]->(b:Function) WHERE a.fqn = 'go.scratch/b.Foo' \
+                 AND b.fqn = '{new}' RETURN a.fqn"
+            ),
+        );
+        assert_eq!(
+            renamed_edge.len(),
+            1,
+            "the caller's edge re-resolved to the renamed function"
+        );
+
+        // The genuine unresolved-target edge survived.
+        let unresolved_after = db_query(
+            &repo_dir,
+            "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) \
+             WHERE a.fqn = 'go.scratch/b.Foo' RETURN u.fqn",
+        );
+        assert!(
+            unresolved_after
+                .iter()
+                .any(|r| db_text(r, 0).contains("Println")),
+            "the live unresolved-target edge must survive: {unresolved_after:?}"
+        );
+
+        // The closed-graph invariant: every surviving edge endpoint is a real
+        // node or a live unresolved target.
+        let mut live: BTreeSet<String> = BTreeSet::new();
+        for label in [
+            "Language",
+            "Module",
+            "File",
+            "Struct",
+            "Function",
+            "Agent",
+            "UnresolvedTarget",
+        ] {
+            for row in db_query(&repo_dir, &format!("MATCH (n:{label}) RETURN n.fqn")) {
+                live.insert(db_text(&row, 0));
+            }
+        }
+        for table in [
+            "Contains",
+            "Calls",
+            "Uses",
+            "UnresolvedCall",
+            "UnresolvedUse",
+        ] {
+            for row in db_query(
+                &repo_dir,
+                &format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"),
+            ) {
+                for i in [0, 1] {
+                    let endpoint = db_text(&row, i);
+                    assert!(
+                        live.contains(&endpoint),
+                        "a {table} edge has a dangling endpoint {endpoint:?}"
+                    );
+                }
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
