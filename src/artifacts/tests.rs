@@ -318,4 +318,68 @@ mod unit {
             "{below_floor}"
         );
     }
+
+    /// `--flag=value` is one token: the first `=` splits the name from the
+    /// value, and nothing lands in `positional`.
+    #[test]
+    fn inline_flag_value_splits_into_flag_and_value() {
+        let args = ["--flag=value".to_string()];
+        let parsed = parse_args(&args);
+        assert_eq!(parsed.get("flag"), Some("value".to_string()));
+        assert_eq!(parsed.all("flag"), vec!["value".to_string()]);
+        assert!(parsed.positional.is_empty(), "{:?}", parsed.positional);
+    }
+
+    /// The two-token `--flag value` form behaves exactly as before the inline
+    /// split was added.
+    #[test]
+    fn two_token_flag_value_form_is_unchanged() {
+        let args = ["--flag".to_string(), "value".to_string()];
+        let parsed = parse_args(&args);
+        assert_eq!(parsed.get("flag"), Some("value".to_string()));
+        assert_eq!(parsed.all("flag"), vec!["value".to_string()]);
+        assert!(parsed.positional.is_empty(), "{:?}", parsed.positional);
+    }
+
+    /// A bare `--flag` with no following token is a boolean: present, with an
+    /// empty value list and no `get` value.
+    #[test]
+    fn bare_flag_stays_boolean_with_no_values() {
+        let args = ["--flag".to_string()];
+        let parsed = parse_args(&args);
+        assert!(parsed.has("flag"));
+        assert!(parsed.all("flag").is_empty());
+        assert_eq!(parsed.get("flag"), None);
+        assert!(parsed.positional.is_empty(), "{:?}", parsed.positional);
+    }
+
+    /// A following token that starts with `--` is another flag, never the
+    /// first flag's value.
+    #[test]
+    fn value_starting_with_dashes_is_not_swallowed() {
+        let args = ["--flag".to_string(), "--other".to_string()];
+        let parsed = parse_args(&args);
+        assert!(parsed.has("flag"));
+        assert!(parsed.all("flag").is_empty());
+        assert!(parsed.has("other"));
+        assert!(parsed.all("other").is_empty());
+        assert!(parsed.positional.is_empty(), "{:?}", parsed.positional);
+    }
+
+    /// The inline split takes the first `=` only (so `a=b` survives whole), an
+    /// empty value is a value, and a positional containing `=` stays
+    /// positional.
+    #[test]
+    fn inline_value_keeps_further_equals_and_empty_value() {
+        let with_equals = parse_args(&["--flag=a=b".to_string()]);
+        assert_eq!(with_equals.get("flag"), Some("a=b".to_string()));
+
+        let empty = parse_args(&["--flag=".to_string()]);
+        assert_eq!(empty.get("flag"), Some(String::new()));
+        assert_eq!(empty.all("flag"), vec![String::new()]);
+
+        let positional = parse_args(&["a=b".to_string()]);
+        assert_eq!(positional.positional, vec!["a=b".to_string()]);
+        assert!(!positional.has("a"));
+    }
 }
