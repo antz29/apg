@@ -48,6 +48,9 @@ pub mod delete;
 pub mod merge;
 pub mod start;
 
+#[cfg(test)]
+mod tests;
+
 pub use delete::*;
 pub use merge::*;
 pub use start::*;
