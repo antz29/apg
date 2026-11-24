@@ -363,6 +363,44 @@ pub fn apply_db_overrides(
     Ok(config)
 }
 
+/// Read one `APG_DB_*` numeric override: absent is `None`, a plain unsigned
+/// integer is the value, and anything else — a non-UTF-8 value included — is an
+/// error naming the variable, never silently ignored.
+fn env_u64(name: &str) -> anyhow::Result<Option<u64>> {
+    match std::env::var(name) {
+        Ok(raw) => raw.trim().parse().map(Some).map_err(|_| {
+            anyhow::anyhow!("{name} `{raw}`: expected a plain unsigned integer (bytes)")
+        }),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(err) => anyhow::bail!("{name}: {err}"),
+    }
+}
+
+/// The engine [`SystemConfig`] one database open uses: [`SystemConfig::default`]
+/// with the site's `read_only` flag, then the fixture-sized
+/// `APG_DB_MAX_SIZE` (byte size), `APG_DB_BUFFER_POOL` (bytes) and
+/// `APG_DB_THREADS` (count) test overrides folded in through
+/// [`apply_db_overrides`]. With all three unset the base config is returned
+/// unchanged, so production behaviour is exactly the engine default.
+///
+/// These three variables are read **here and nowhere else** — no caller mutates
+/// the process environment. They are test-only: an override that does not parse,
+/// or a `max_size` below the 8 MiB floor or not a power of two, is a hard error
+/// naming the input, never silently ignored or clamped.
+pub fn system_config(read_only: bool) -> anyhow::Result<SystemConfig> {
+    let max_size = match std::env::var("APG_DB_MAX_SIZE") {
+        Ok(raw) => Some(raw),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(err) => anyhow::bail!("APG_DB_MAX_SIZE: {err}"),
+    };
+    apply_db_overrides(
+        SystemConfig::default().read_only(read_only),
+        max_size.as_deref(),
+        env_u64("APG_DB_BUFFER_POOL")?,
+        env_u64("APG_DB_THREADS")?,
+    )
+}
+
 impl ArtifactDb {
     pub fn open(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
@@ -372,7 +410,7 @@ impl ArtifactDb {
                 db_path.display()
             );
         }
-        let db = Database::new(&db_path, SystemConfig::default())?;
+        let db = Database::new(&db_path, system_config(false)?)?;
         Ok(ArtifactDb { db })
     }
 
@@ -1069,7 +1107,7 @@ impl PreviousScan {
         if !db_path.exists() {
             return None;
         }
-        let db = Database::new(&db_path, SystemConfig::default().read_only(true)).ok()?;
+        let db = Database::new(&db_path, system_config(true).ok()?).ok()?;
         let artifact = ArtifactDb { db };
         if artifact.has_pending_state() {
             return None;
@@ -1400,7 +1438,7 @@ where
 /// An **absent** `db.lbug` is **not** pending: there is nothing to discard, so
 /// the answer is `false` — not an error, and not a reason to refuse a scan or a
 /// session start. Otherwise the database is opened **exactly once**, **read-only**
-/// ([`SystemConfig::default`] with `read_only(true)`), one connection is taken
+/// ([`system_config(true)`]), one connection is taken
 /// from it, the pending-removal ledger is read once
 /// (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`), and the per-table
 /// row answers fold through the shared pure rule [`pending_state_present`] — the
@@ -1418,7 +1456,10 @@ pub fn db_has_pending_state(apg_root: &Path) -> bool {
     if !db_path.exists() {
         return false;
     }
-    let db = match Database::new(&db_path, SystemConfig::default().read_only(true)) {
+    let Ok(config) = system_config(true) else {
+        return true;
+    };
+    let db = match Database::new(&db_path, config) {
         Ok(db) => db,
         Err(_) => return true,
     };
