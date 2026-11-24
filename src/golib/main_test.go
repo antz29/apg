@@ -93,11 +93,11 @@ func TestTargetPkgPaths(t *testing.T) {
 }
 
 func TestGoBuildCacheDir(t *testing.T) {
-	if got, want := goBuildCacheDir("/facts", "KEY"), filepath.Join("/facts", "go", "KEY"); got != want {
-		t.Fatalf("goBuildCacheDir = %q want %q", got, want)
-	}
-	if got, want := goBuildCacheDir("/facts", ""), filepath.Join("/facts", "go"); got != want {
-		t.Fatalf("goBuildCacheDir (no key) = %q want %q", got, want)
+	for _, cacheDir := range []string{"/facts", "/checkout/apg/.trans/cache"} {
+		want := filepath.Join(cacheDir, "go")
+		if got := goBuildCacheDir(cacheDir); got != want {
+			t.Fatalf("goBuildCacheDir(%q) = %q want %q", cacheDir, got, want)
+		}
 	}
 }
 
@@ -106,11 +106,11 @@ func TestApplyGoBuildCache(t *testing.T) {
 	prevRoots := goBuildCacheRoots
 	t.Cleanup(func() { goBuildCacheRoots = prevRoots })
 	dir := t.TempDir()
-	got, err := applyGoBuildCache(dir, "cache-key-token")
+	got, err := applyGoBuildCache(dir)
 	if err != nil {
 		t.Fatalf("applyGoBuildCache: %v", err)
 	}
-	want := filepath.Join(dir, "go", "cache-key-token")
+	want := filepath.Join(dir, "go")
 	if got != want {
 		t.Fatalf("applyGoBuildCache dir = %q want %q", got, want)
 	}
@@ -136,11 +136,11 @@ func TestApplyGoBuildCache(t *testing.T) {
 }
 
 // TestIsGeneratedScratchPath is the phase-03 task-9 unit: the pure emission
-// filter rejects the per-scan GOCACHE (dir/key), the generated `_testmain`
+// filter rejects the per-scan GOCACHE, the generated `_testmain`
 // scratch file, and the synthesized `init`/`main` declared in it — while
 // keeping ordinary project source.
 func TestIsGeneratedScratchPath(t *testing.T) {
-	cacheDir := goBuildCacheDir("/facts", "cache-key-token")
+	cacheDir := goBuildCacheDir("/facts")
 
 	// Go writes the generated test main into the GOCACHE under a content-hash
 	// name (no `.go` suffix), so cache membership — not the basename — is the
@@ -173,9 +173,9 @@ func TestIsGeneratedScratchPath(t *testing.T) {
 		}
 	}
 
-	// A sibling directory that merely shares a string prefix with the cache key
-	// is not inside the cache.
-	sibling := filepath.Join("/facts", "go", "cache-key-token-2", "53", "x-d")
+	// A sibling directory that merely shares a string prefix with the cache
+	// directory is not inside the cache.
+	sibling := filepath.Join("/facts", "go-2", "53", "x-d")
 	if isGeneratedScratchPath(sibling, cacheDir) {
 		t.Errorf("isGeneratedScratchPath(%q) = true, want false (cache sibling)", sibling)
 	}
@@ -192,14 +192,14 @@ func TestIsGeneratedScratchPath(t *testing.T) {
 
 // TestToolchainScratchFromRecordedCache is the phase-03 task-9 unit for the
 // wiring: once applyGoBuildCache has recorded the per-scan GOCACHE
-// (`goBuildCacheDir` dir + key), a generated `_testmain` under it never reaches
+// (`goBuildCacheDir` dir), a generated `_testmain` under it never reaches
 // the emission stream, while project source does.
 func TestToolchainScratchFromRecordedCache(t *testing.T) {
 	prev := goBuildCacheRoots
 	goBuildCacheRoots = nil
 	t.Cleanup(func() { goBuildCacheRoots = prev })
 
-	cacheDir := goBuildCacheDir("/facts", "cache-key-token")
+	cacheDir := goBuildCacheDir("/facts")
 	recordGoBuildCacheRoot(cacheDir)
 
 	scratch := filepath.Join(cacheDir, "53", "0123456789abcdef-d")

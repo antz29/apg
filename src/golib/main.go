@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: gofrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]\n")
+		fmt.Fprintf(os.Stderr, "Usage: gofrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [exclude...]\n")
 		os.Exit(1)
 	}
 	root, _ := filepath.Abs(os.Args[1])
@@ -23,7 +23,7 @@ func main() {
 	// excludes.
 	var moduleDirs []string
 	var excludes []string
-	var targetsPath, cacheDir, cacheKey string
+	var targetsPath, cacheDir string
 	args := os.Args[2:]
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -39,22 +39,19 @@ func main() {
 		case args[i] == "--cache-dir" && i+1 < len(args):
 			cacheDir = args[i+1]
 			i++
-		case args[i] == "--cache-key" && i+1 < len(args):
-			cacheKey = args[i+1]
-			i++
 		default:
 			excludes = append(excludes, args[i])
 		}
 	}
 
-	// The native Go build/export cache for this scan lives under the shared
-	// store root: <cache-dir>/go/<cache-key>/ (the pinned per-language artifact
-	// location, phase-02 task-10). Set it BEFORE any `go` subprocess — module
-	// discovery and go/packages both inherit the environment — so unchanged
-	// packages' compiled export data is reused across scans instead of being
-	// re-type-checked from scratch, and the user's default GOCACHE is untouched.
+	// The native Go build/export cache for this scan lives under the cache dir:
+	// <cache-dir>/go (the pinned per-language artifact location). Set it BEFORE
+	// any `go` subprocess — module discovery and go/packages both inherit the
+	// environment — so unchanged packages' compiled export data is reused across
+	// scans instead of being re-type-checked from scratch, and the user's default
+	// GOCACHE is untouched.
 	if cacheDir != "" {
-		if gc, err := applyGoBuildCache(cacheDir, cacheKey); err != nil {
+		if gc, err := applyGoBuildCache(cacheDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not create GOCACHE %s: %v\n", gc, err)
 		}
 	}

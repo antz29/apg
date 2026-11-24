@@ -7,13 +7,9 @@ import (
 )
 
 // goBuildCacheDir is the native Go build/export cache for this scan:
-// `<cache-dir>/go/<cache-key>/` — the pinned per-language artifact location.
-func goBuildCacheDir(cacheDir, cacheKey string) string {
-	dir := filepath.Join(cacheDir, "go")
-	if cacheKey != "" {
-		dir = filepath.Join(dir, cacheKey)
-	}
-	return dir
+// `<cache-dir>/go` — the pinned per-language artifact location.
+func goBuildCacheDir(cacheDir string) string {
+	return filepath.Join(cacheDir, "go")
 }
 
 // goBuildCacheRoots holds the per-scan GOCACHE directory (in every spelling the
@@ -31,8 +27,8 @@ var goBuildCacheRoots []string
 // `_testmain` Go writes into it — out of the scanned project source; the cache
 // location itself is unchanged, so the cross-scan reuse it exists for is
 // preserved.
-func applyGoBuildCache(cacheDir, cacheKey string) (string, error) {
-	dir := goBuildCacheDir(cacheDir, cacheKey)
+func applyGoBuildCache(cacheDir string) (string, error) {
+	dir := goBuildCacheDir(cacheDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return dir, err
 	}
@@ -84,7 +80,7 @@ func isToolchainScratch(path string) bool {
 
 // isGeneratedScratchPath is the PURE emission filter behind isToolchainScratch:
 // it reports whether path is a Go toolchain scratch artifact for the given
-// per-scan GOCACHE directory (`goBuildCacheDir(cacheDir, cacheKey)`) — the
+// per-scan GOCACHE directory (`goBuildCacheDir(cacheDir)`) — the
 // generated `_testmain` file Go writes into the cache when a test package is
 // compiled, or a `_testmain.go` reported elsewhere (e.g. under `$WORK`). It is
 // string-only: no filesystem, environment, or process access.
@@ -100,7 +96,7 @@ func isGeneratedScratchPath(path, cacheDir string) bool {
 
 // pathAtOrUnder reports whether path is dir itself or lies beneath it. Both are
 // cleaned before comparison, and the separator bound keeps a sibling that
-// merely shares a string prefix (…/KEY vs …/KEY-2) out; an empty dir never
+// merely shares a string prefix (…/go vs …/go-2) out; an empty dir never
 // matches.
 func pathAtOrUnder(path, dir string) bool {
 	if path == "" || dir == "" {
