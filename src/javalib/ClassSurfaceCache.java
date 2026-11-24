@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -44,19 +45,82 @@ class ClassSurfaceCache {
         }
     }
 
-    /** True when a cached record's bytecode is still present in the class dir. */
+    /**
+     * Minimum plausible class-file size: a valid file is at least the 8-byte
+     * magic+minor+major header. Anything shorter is truncated and must force a
+     * reseed, never be reused as cached bytecode.
+     */
+    private static final int MIN_CLASS_BYTES = 8;
+
+    private static final byte[] CLASS_MAGIC = {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
+
+    /**
+     * True when every class file a cached record references is present, a
+     * regular file, at least {@link #MIN_CLASS_BYTES} long, and starts with the
+     * CAFEBABE magic. A record declaring no bytecode (`flats` empty) is
+     * vacuously intact.
+     */
     static boolean classesPresent(Path classesDir, FileRec rec) {
         if (rec.flats.isEmpty()) return true;
         for (String flat : rec.flats) {
-            if (Files.exists(classesDir.resolve(flat.replace('.', '/') + ".class"))) return true;
+            if (!classFileValid(classesDir.resolve(flat.replace('.', '/') + ".class"))) return false;
         }
-        return false;
+        return true;
     }
 
-    /** Loads the persisted `surface.tsv` (path -> declaration surface). */
+    private static boolean classFileValid(Path p) {
+        try {
+            if (!Files.isRegularFile(p) || Files.size(p) < MIN_CLASS_BYTES) return false;
+            try (var in = Files.newInputStream(p)) {
+                byte[] head = in.readNBytes(4);
+                if (head.length < 4) return false;
+                for (int i = 0; i < 4; i++) if (head[i] != CLASS_MAGIC[i]) return false;
+                return true;
+            }
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** Best-effort recursive delete of the class cache; warns and continues on failure. */
+    private static void wipeClasses(Path classesDir) {
+        if (classesDir == null || !Files.exists(classesDir)) return;
+        List<Path> entries;
+        try (var walk = Files.walk(classesDir)) {
+            entries = walk.sorted(Comparator.reverseOrder()).toList();
+        } catch (IOException | UncheckedIOException e) {
+            System.err.println("WARNING: could not wipe class cache " + classesDir + ": " + e);
+            return;
+        }
+        for (Path p : entries) {
+            try {
+                Files.deleteIfExists(p);
+            } catch (IOException e) {
+                System.err.println("WARNING: could not remove cached class file " + p + ": " + e);
+            }
+        }
+    }
+
+    /**
+     * Loads the persisted `surface.tsv` (path -> declaration surface).
+     *
+     * The cache is treated as absent — the sibling `classes/` directory is wiped
+     * and an empty surface returned so the scan reseeds — unless `surface.tsv`
+     * is a present, readable regular file and every class file it references
+     * passes {@link #classesPresent} (present, non-truncated, valid CAFEBABE
+     * magic). The per-file `D` hashes remain the wrong-source detector; the
+     * class-file checks detect truncated or stale bytecode.
+     */
     static Map<String, FileRec> loadSurface(Path file) {
+        Path classesDir = file == null || file.getParent() == null
+                ? null
+                : file.getParent().resolve("classes");
+        // Absent/unreadable marker: wipe and reseed rather than reuse stale bytecode.
+        if (file == null || classesDir == null || !Files.isRegularFile(file) || !Files.isReadable(file)) {
+            wipeClasses(classesDir);
+            return new LinkedHashMap<>();
+        }
         Map<String, FileRec> out = new LinkedHashMap<>();
-        if (!Files.exists(file)) return out;
         try {
             for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
                 if (line.isEmpty()) continue;
@@ -77,6 +141,19 @@ class ClassSurfaceCache {
             }
         } catch (IOException e) {
             System.err.println("WARNING: could not read surface cache: " + e);
+            wipeClasses(classesDir);
+            return new LinkedHashMap<>();
+        }
+        for (FileRec r : out.values()) {
+            if (!classesPresent(classesDir, r)) {
+                wipeClasses(classesDir);
+                try {
+                    Files.deleteIfExists(file);
+                } catch (IOException e) {
+                    System.err.println("WARNING: could not delete invalid surface cache " + file + ": " + e);
+                }
+                return new LinkedHashMap<>();
+            }
         }
         return out;
     }
@@ -85,7 +162,14 @@ class ClassSurfaceCache {
         return m.computeIfAbsent(path, k -> new FileRec());
     }
 
-    /** Atomically persists the declaration surface for the next scan. */
+    /**
+     * Atomically persists the declaration surface for the next scan.
+     *
+     * Each `D` record carries the source file's SHA-1 hash — the wrong-source
+     * detector compared on the next scan — beside the class-file present/magic/
+     * size checks ({@link #classesPresent}) that detect truncated or stale
+     * bytecode. The temp+rename keeps a crash from leaving a half-written marker.
+     */
     static void saveSurface(Path file, Map<String, FileRec> surface) {
         StringBuilder sb = new StringBuilder();
         for (var e : surface.entrySet()) {
