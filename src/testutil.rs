@@ -258,6 +258,34 @@ pub fn fixture_db_config() -> lbug::SystemConfig {
         .clone()
 }
 
+/// The process-wide **schema template**: a file-backed database carrying the
+/// full schema and no rows, built once per process, closed, and returned by
+/// path so every empty-database fixture copies it instead of re-running
+/// `create_schema`. An in-memory database cannot be copied to a `db.lbug`, so
+/// the shape is materialised on disk once, under a pid-keyed temp dir whose
+/// stale `db.lbug`/`wal`/`shm` are discarded first (a reused pid, or an
+/// interrupted earlier build, must not leave a half-database in the way). Opens
+/// at [`fixture_db_config`], not `system_config`: the test process never sets
+/// `APG_DB_*`, so `system_config` would open at the engine default.
+pub fn schema_template_db() -> &'static Path {
+    static TEMPLATE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    TEMPLATE
+        .get_or_init(|| {
+            let dir =
+                std::env::temp_dir().join(format!("apg-schema-template-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            crate::session::discard_derived_index(&dir);
+            let path = dir.join("db.lbug");
+            let db = lbug::Database::new(&path, fixture_db_config()).unwrap();
+            let conn = lbug::Connection::new(&db).unwrap();
+            load::create_schema(&conn).unwrap();
+            drop(conn);
+            drop(db);
+            path
+        })
+        .as_path()
+}
+
 /// A real, empty `apg/.trans/db.lbug` with the full schema but no rows — the
 /// DB-existence fixture the staleness predicates need (they open the DB to read
 /// its `Scan` row; a raw empty marker is not a database). A test that wants the
