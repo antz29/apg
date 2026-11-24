@@ -4,14 +4,14 @@ public class CallGraphBuilder {
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
         // `--id-prefix <p>` (default "n") keeps opaque ids unique across
-        // frontends when a scan merges multiple languages. The three
-        // phase-02 task-11 hand-off flags are appended beside it on the
-        // incremental path (the pinned target-set interface).
+        // frontends when a scan merges multiple languages. The phase-02
+        // task-11 hand-off flags are appended beside it on the incremental
+        // path (the pinned target-set interface), and `--cache-dir <dir>` is
+        // the per-worktree toolchain cache root.
         String idPrefix = "n";
         List<String> excludePaths = new ArrayList<>();
         String targetsPath = null;
         String cacheDir = null;
-        String cacheKey = null;
         for (int i = 1; i < args.length; i++) {
             if (args[i].equals("--id-prefix") && i + 1 < args.length) {
                 idPrefix = args[i + 1];
@@ -21,9 +21,6 @@ public class CallGraphBuilder {
                 i++;
             } else if (args[i].equals("--cache-dir") && i + 1 < args.length) {
                 cacheDir = args[i + 1];
-                i++;
-            } else if (args[i].equals("--cache-key") && i + 1 < args.length) {
-                cacheKey = args[i + 1];
                 i++;
             } else {
                 excludePaths.add(args[i]);
@@ -43,12 +40,12 @@ public class CallGraphBuilder {
             if (targets.isEmpty()) targets = null;
         }
         if (targets == null) {
-            // Phase-04 task-32: the pinned --cache-dir/--cache-key hand-off
-            // reaches the full-scan path too (task-17 seeds the class cache);
-            // the incremental dispatch and the emission filter are unchanged.
-            ScanRunner.runFullScan(dir, files, prefix, cacheDir, cacheKey);
+            // Phase-04 task-32: the pinned --cache-dir hand-off reaches the
+            // full-scan path too (task-17 seeds the class cache); the
+            // incremental dispatch and the emission filter are unchanged.
+            ScanRunner.runFullScan(dir, files, prefix, cacheDir);
         } else {
-            ScanRunner.runIncrementalScan(dir, files, targets, prefix, cacheDir, cacheKey);
+            ScanRunner.runIncrementalScan(dir, files, targets, prefix, cacheDir);
         }
     }
 }

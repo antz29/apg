@@ -6,12 +6,11 @@ import java.util.*;
 class ScanRunner {
     /**
      * The full-context scan: parse everything, attribute everything, emit
-     * everything. When the pinned `--cache-dir`/`--cache-key` hand-off is
-     * present it also seeds the native class cache (phase-04 task-17) so the
-     * next targeted scan reuses it instead of recompiling every unchanged
-     * source.
+     * everything. When the pinned `--cache-dir` hand-off is present it also
+     * seeds the native class cache (phase-04 task-17) so the next targeted
+     * scan reuses it instead of recompiling every unchanged source.
      */
-    static void runFullScan(Path dir, List<Path> files, String prefix, String cacheDir, String cacheKey)
+    static void runFullScan(Path dir, List<Path> files, String prefix, String cacheDir)
             throws Exception {
         // Module descriptors stay in the walked set (their `file` record is a
         // graph fact) but are attributed nowhere; every batch/total/surface
@@ -74,19 +73,19 @@ class ScanRunner {
         // Phase-04 task-17: stdout is complete; seed the native class cache the
         // targeted path consumes. Best-effort — a cache failure never fails the
         // scan, and an absent flag writes nothing.
-        seedClassCache(allFiles, dir, cacheDir, cacheKey);
+        seedClassCache(allFiles, dir, cacheDir);
     }
 
     /**
-     * The pinned native-artifact root `<cache-dir>/java/<cache-key>`, or null
-     * when either flag is absent. The full scan only persists when both flags
-     * are present: an absent flag keeps the pre-phase-04 behaviour and writes
+     * The pinned per-worktree native-artifact root `<cache-dir>/java`, or null
+     * when `--cache-dir` is absent. The full scan seeds it and a targeted scan
+     * consumes the same `classes/` + `surface.tsv`, so one scan's cache is the
+     * next one's. An absent flag keeps the pre-phase-04 behaviour and writes
      * no artifact (no cache path is fabricated or defaulted).
      */
-    static Path persistentJavaRoot(String cacheDir, String cacheKey) {
+    static Path persistentJavaRoot(String cacheDir) {
         if (cacheDir == null || cacheDir.isEmpty()) return null;
-        if (cacheKey == null || cacheKey.isEmpty()) return null;
-        return Paths.get(cacheDir, "java").resolve(cacheKey);
+        return Paths.get(cacheDir, "java");
     }
 
     /**
@@ -97,8 +96,8 @@ class ScanRunner {
      * it is authoritative (global.constraint.frontend-full-context); a partial
      * surface is never persisted.
      */
-    static void seedClassCache(List<Path> allFiles, Path dir, String cacheDir, String cacheKey) {
-        Path javaRoot = persistentJavaRoot(cacheDir, cacheKey);
+    static void seedClassCache(List<Path> allFiles, Path dir, String cacheDir) {
+        Path javaRoot = persistentJavaRoot(cacheDir);
         if (javaRoot == null) return;
         Path root = dir.toAbsolutePath().normalize();
         try {
@@ -147,14 +146,13 @@ class ScanRunner {
     // ------------------------------------------------------------------
 
     static void runIncrementalScan(Path dir, List<Path> allFiles, List<Path> targetList,
-            String prefix, String cacheDir, String cacheKey) throws Exception {
+            String prefix, String cacheDir) throws Exception {
         Path root = dir.toAbsolutePath().normalize();
 
-        // The native artifact lives at <cache-dir>/java/<cache-key>/ (pinned).
+        // The native artifact lives at the per-worktree root <cache-dir>/java/.
         Path javaRoot = null;
         if (cacheDir != null && !cacheDir.isEmpty()) {
             javaRoot = Paths.get(cacheDir, "java");
-            if (cacheKey != null && !cacheKey.isEmpty()) javaRoot = javaRoot.resolve(cacheKey);
         }
         boolean persistent = javaRoot != null;
         Path classesDir;
