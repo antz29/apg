@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "test-database-address-space-bound",
+  "body": "A test process keeps every database it opens inside its own address space, so end-to-end parallelism comes from separate test binaries and each database's reserved virtual region bounds how many one process holds.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

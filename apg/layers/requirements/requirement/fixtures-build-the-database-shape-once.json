@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "fixtures-build-the-database-shape-once",
+  "body": "A test process builds the database shape its fixtures need once, and every later fixture in that process starts from that build, so setup cost follows the process rather than the fixture count.",
+  "properties": {
+    "feature": "test-speed"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}

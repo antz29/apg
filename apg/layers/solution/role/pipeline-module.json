@@ -15,17 +15,22 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.dev-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ps-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.sql-build-artifact",
       "properties": {}
     },
     {
       "kind": "is-role",
       "source": "solution.component.structural-build-staging",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
-      "source": "solution.component.ps-build-artifact",
       "properties": {}
     }
   ]

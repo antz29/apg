@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "test-database-config",
+  "body": "The system configuration a test database opens with: its address-space ceiling, buffer-pool size and thread count, sized for a fixture rather than a multi-gigabyte production graph.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.test-harness",
+      "properties": {}
+    }
+  ]
+}

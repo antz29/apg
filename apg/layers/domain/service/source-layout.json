@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "source-layout",
-  "body": "The capability that lays apg's first-party source out as cohesive modules with a reachable library surface and tier-separable tests.",
+  "body": "The capability that lays apg's first-party source out as cohesive modules with a reachable library surface and tier-separable tests, and builds and stages its development artifacts and test fixtures at a cost that follows the change.",
   "properties": {},
   "out": [
     {
@@ -12,7 +12,32 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.dev-profile-bounds-dependency-debug-info",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.e2e-binary-parallelism",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.e2e-fixtures-author-pre-scan-through-the-single-file-writer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fixtures-build-the-database-shape-once",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.frontend-rerun-set-is-production-source",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.full-e2e-selection-is-complete",
       "properties": {}
     },
     {
@@ -55,6 +80,11 @@
     {
       "kind": "contains",
       "source": "domain.group.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.dev-build-staging",
       "properties": {}
     },
     {

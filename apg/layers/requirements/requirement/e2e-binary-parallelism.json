@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "e2e-binary-parallelism",
+  "body": "The end-to-end tier runs its test binaries concurrently under a bounded worker budget, so its wall time follows the slowest worker rather than the sum of every binary's tests.",
+  "properties": {
+    "feature": "test-speed"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}

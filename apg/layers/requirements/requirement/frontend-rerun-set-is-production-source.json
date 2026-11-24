@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "frontend-rerun-set-is-production-source",
+  "body": "The root build script's rerun set is each frontend's production sources, so touching a test corpus or fixture leaves the frontend staging fingerprint unchanged.",
+  "properties": {
+    "feature": "test-speed"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}

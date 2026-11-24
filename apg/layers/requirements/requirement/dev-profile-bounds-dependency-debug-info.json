@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "dev-profile-bounds-dependency-debug-info",
+  "body": "The development build profile keeps line-table debug information and drops full dependency debug information, so linking the root crate and its test targets is faster with file-and-line backtraces intact.",
+  "properties": {
+    "feature": "test-speed"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}

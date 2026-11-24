@@ -9,6 +9,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "domain.value.test-database-config",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.value.test-fixture",
       "properties": {}
     }

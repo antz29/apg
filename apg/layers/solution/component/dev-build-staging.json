@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "dev-build-staging",
+  "body": "The development build surface: the root build script's per-crate frontend build and staging, the frontends directory the runtime resolves, and the profile and alias settings the development and test builds use.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": ".cargo/config.toml",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "build.rs",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.pipeline-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.source-layout",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.build-pipeline",
+      "properties": {}
+    }
+  ]
+}

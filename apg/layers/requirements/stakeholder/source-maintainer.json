@@ -12,12 +12,12 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
+      "target": "requirements.requirement.dev-profile-bounds-dependency-debug-info",
       "properties": {}
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.tier-separable-tests",
+      "target": "requirements.requirement.e2e-binary-parallelism",
       "properties": {}
     },
     {
@@ -27,7 +27,32 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.fixtures-build-the-database-shape-once",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.frontend-rerun-set-is-production-source",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.full-e2e-selection-is-complete",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.planned-realization-coverage-spans-every-kind-in-a-separate-crate",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.planned-realization-crosses-crate-boundaries",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.tier-separable-tests",
       "properties": {}
     }
   ],

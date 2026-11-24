@@ -14,6 +14,16 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.dev-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.ps-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.sql-build-artifact",
       "properties": {}
     },
@@ -25,11 +35,6 @@
     {
       "kind": "is-role",
       "target": "solution.role.pipeline-container",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.ps-build-artifact",
       "properties": {}
     }
   ],

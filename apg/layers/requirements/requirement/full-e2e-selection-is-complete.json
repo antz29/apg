@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "full-e2e-selection-is-complete",
+  "body": "A documented full selection runs every end-to-end scenario, the real-frontend acceptance scans and the pinned-scale rescan included, and the release gate runs that selection.",
+  "properties": {
+    "feature": "test-speed"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}
