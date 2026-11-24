@@ -12,6 +12,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.default-gate-test-step-builds-no-e2e-binary",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.dev-artifacts-shared-across-worktrees",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.dev-profile-bounds-dependency-debug-info",
       "properties": {}
     },
@@ -23,6 +33,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.e2e-fixtures-author-pre-scan-through-the-single-file-writer",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.e2e-selection-splits-hermetic-and-full",
       "properties": {}
     },
     {
@@ -63,6 +78,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.spec-only-splice-equivalence-tests",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.test-database-config-is-fixture-sized",
       "properties": {}
     },
     {

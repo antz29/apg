@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "default-gate-test-step-builds-no-e2e-binary",
+  "body": "The repository gate's default test step runs the crate's unit and integration tests without building an end-to-end binary crate, while clippy --all-targets type-checks every target and the end-to-end invocation builds and runs those crates.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.source-layout",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}
