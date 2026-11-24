@@ -443,6 +443,31 @@ impl FactStore {
     pub fn remove_worktree(&self, worktree: WorktreeId) -> Result<()> {
         self.write_txn()?.remove_worktree(worktree)
     }
+
+    /// Records one worktree's scan intent (unix seconds). It joins the one held
+    /// write transaction, committed by [`Self::save_index`].
+    pub fn put_intent(&self, worktree: WorktreeId, at: u64) -> Result<()> {
+        self.write_txn()?.put_intent(worktree, at)
+    }
+
+    /// Clears one worktree's scan intent. It joins the one held write
+    /// transaction, committed by [`Self::save_index`].
+    pub fn remove_intent(&self, worktree: WorktreeId) -> Result<()> {
+        self.write_txn()?.remove_intent(worktree)
+    }
+
+    /// One worktree's scan-intent timestamp (unix seconds); `None` when none was
+    /// recorded or the store cannot be read.
+    pub fn get_intent(&self, worktree: WorktreeId) -> Option<u64> {
+        self.read()?.get_intent(worktree).ok()?
+    }
+
+    /// Every live scan intent; empty when the store cannot be read.
+    pub fn iter_intents(&self) -> Vec<(WorktreeId, u64)> {
+        self.read()
+            .and_then(|read| read.iter_intents().ok())
+            .unwrap_or_default()
+    }
 }
 
 /// Retires the legacy phase-2 store directory (`<store>/facts/`) once, on the
