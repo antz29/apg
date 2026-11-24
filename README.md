@@ -757,8 +757,9 @@ cargo test-e2e      # e2e tier only, opt-in (cargo test e2e:: -- --ignored --tes
 
 The e2e tier is the opt-in final gate; it exercises a scratch `/tmp` git repo and
 also runs the release-version guard (which reads `Cargo.toml`/`Cargo.lock`/
-`README.md` and is therefore e2e), so a release gate is `scripts/gate.sh --e2e`
-(`cargo build` + `cargo test --lib` + `cargo test-e2e`).
+`README.md` and is therefore e2e), so the release gate is
+`scripts/gate.sh --e2e-full` — the complete e2e selection (`cargo build` +
+`cargo test --lib` + every e2e scenario).
 
 The gate is `scripts/gate.sh` — the single command that runs, stopping at the
 first failure, `actionlint` over `.github/workflows/*.yml` (skipped with a
@@ -768,14 +769,20 @@ warning where the dev-machine tool is absent), a per-file `ruby -c` over
 (the fast unit+int default), the `opencode-suite/node_modules` bootstrap from
 the committed `opencode-suite/bun.lock` (skipped when the directory is
 present), `bun test` (in `opencode-suite/`) and `node --test` (in
-`src/tslib/`). `scripts/gate.sh --e2e` appends the e2e tier — the per-binary
-runner `bash scripts/test-e2e.sh`, which builds every `*_e2e` test binary once
-and runs each as its own process under a bounded pool: `E2E_JOBS` concurrent
-binaries (default `min(8, CPU cores)`) at `E2E_THREADS` libtest threads each
-(default 4), heavy binaries (`splice_e2e`) capped lower, one log per binary
-under `target/e2e-logs/`, and a non-zero exit on any failure — and the
-opencode-suite boundary e2e. It is run-only for every agent except
-`build-implementer`, which owns `scripts/**`.
+`src/tslib/`). `scripts/gate.sh --e2e` and `scripts/gate.sh --e2e-full` both
+append the e2e tier through the per-binary runner `bash scripts/test-e2e.sh`,
+and differ only in that runner's selection: `--e2e` is the **hermetic**
+selection — the built `apg` binary alone, so a scenario that spawns a
+per-language frontend (an acceptance scan) or the pinned-scale 50k-file rescan
+is excluded — while `--e2e-full` is the **complete** selection, running every
+e2e scenario (the real-frontend acceptance scans and the pinned-scale rescan
+included). The runner builds every `*_e2e` test binary once and runs each as
+its own process under a bounded pool: `E2E_JOBS` concurrent binaries (default
+`min(8, CPU cores)`) at `E2E_THREADS` libtest threads each (default 4), heavy
+binaries (`splice_e2e`) capped lower, one log per binary under
+`target/e2e-logs/`, and a non-zero exit on any failure — and the opencode-suite
+boundary e2e. It is run-only for every agent except `build-implementer`, which
+owns `scripts/**`.
 
 ## Project layout
 
