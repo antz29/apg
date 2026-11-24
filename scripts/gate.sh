@@ -18,8 +18,8 @@
 #
 # USAGE
 #   scripts/gate.sh          # actionlint, Formula ruby -c, shell -n, fmt --check,
-#                            # check, clippy, build, test, suite deps, suite
-#                            # tsc --noEmit, bun test, node --test
+#                            # check, clippy, build, test --lib, suite deps,
+#                            # suite tsc --noEmit, bun test, node --test
 #   scripts/gate.sh --e2e    # ... then the e2e tier (opt-in): the cargo e2e
 #                            #     tests AND the opencode-suite boundary e2e
 #                            #     (scratch /tmp repos only, never a real project)
@@ -49,9 +49,11 @@
 # step then runs the suite-local `tsc --noEmit -p tsconfig.json` (typescript
 # 5.9.3 from `opencode-suite/node_modules`, never bunx/npx or src/tslib's).
 #
-# `cargo test` here is the repo's DEFAULT suite. Since the test-tier split it is
-# the unit+int tiers only, seconds-fast; the e2e tests are `#[ignore]`d and are
-# run only by `--e2e` (or `cargo test-e2e`). E2E_THREADS bounds their
+# `cargo test --lib` here is the repo's DEFAULT suite: the lib target's unit+int
+# tiers only, seconds-fast. It links no test target under `tests/`, so the e2e
+# crates are never built by the default step; `cargo clippy --all-targets` above
+# is unchanged and still type-checks every target, and `--e2e` builds and runs
+# the e2e crates (or `cargo test-e2e` on its own). E2E_THREADS bounds their
 # parallelism (default 1: many concurrent `db.lbug` opens have been observed to
 # flake with LadybugDB `Mmap ... failed`).
 set -euo pipefail
@@ -70,7 +72,7 @@ STEPS=(
   "cargo check --all-targets"
   "cargo clippy --all-targets -- -D warnings"
   "cargo build"
-  "cargo test   (default suite: unit+int)"
+  "cargo test --lib   (default suite: unit+int)"
   "opencode-suite deps   (bootstrap from bun.lock when absent or lacking tsc/@types/bun)"
   "tsc --noEmit   (opencode-suite: suite-local typescript)"
   "bun test   (opencode-suite: bun)"
@@ -150,7 +152,7 @@ step
 cargo build
 
 step
-cargo test
+cargo test --lib
 
 step
 if [ -x opencode-suite/node_modules/.bin/tsc ] && [ -d opencode-suite/node_modules/@types/bun ]; then
