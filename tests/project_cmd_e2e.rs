@@ -4320,4 +4320,234 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    // ------------------------------------------------------------------
+    // phase-02 task-1 (e2e, real candidate binary + in-test hermetic
+    // agent-only fixture): a merge that adds `.opencode/agents/rebuild-extra.md`
+    // lands with no panic and a current main graph. The rebuild re-scans main
+    // through the REAL pipeline (structfrontend + agentfrontend only — no code
+    // sources), and the coverage claim is a File-modify because the branch
+    // rescan made the agent File FQN real BEFORE the spec claimed it.
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+    fn merge_with_agent_definitions_lands_a_current_main_graph() {
+        // In-test hermetic fixture — NOT `warm_scratch`, whose `go.mod` + `.go`
+        // files would need a per-language frontend and drop this scenario from
+        // the hermetic `--e2e` selection. README.md + config.json keep the
+        // structural scanner non-empty; `.opencode/agents/` feeds the bundled
+        // agent frontend; every code frontend detects nothing.
+        let base =
+            std::env::temp_dir().join(format!("apg-agent-merge-{}-agents", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("refs/heads/main");
+        let repo = git2::Repository::init_opts(&repo_dir, &opts).unwrap();
+        {
+            let mut cfg = repo.config().unwrap();
+            cfg.set_str("user.name", "apg agent merge test").unwrap();
+            cfg.set_str("user.email", "apg-agent-merge@example.com")
+                .unwrap();
+        }
+        std::fs::write(
+            repo_dir.join(".gitignore"),
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(repo_dir.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
+        // `apg init` scaffolds the scratch dir too, and libgit2's dir-only
+        // ignore entry (`apg/.scratch/`) only matches an existing directory.
+        std::fs::create_dir_all(repo_dir.join(specs::LAYOUT).join(specs::SCRATCH)).unwrap();
+        std::fs::write(
+            repo_dir.join(specs::LAYOUT).join("config.json"),
+            format!(
+                "{{\n  \"default\": \"src\",\n  \"types\": [],\n  \"version\": \"{}\"\n}}\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            repo_dir.join("README.md"),
+            "# Agent merge fixture\n\nAn agent-definition-only repo.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo_dir.join("config.json"),
+            "{\n  \"name\": \"agent-merge-fixture\"\n}\n",
+        )
+        .unwrap();
+        // One pre-existing definition on main so the rebuild re-scans two.
+        let agents_dir = repo_dir.join(".opencode/agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            agents_dir.join("seed-agent.md"),
+            "# Seed agent\n\nA pre-existing definition.\n",
+        )
+        .unwrap();
+        warm_commit_all(&repo_dir, "init agent fixture");
+
+        // Main must carry a fresh scan: `project start` seeds the branch DB
+        // from it, and the merge rebuild re-scans main.
+        let scan = warm_run(&repo_dir, &home, &["scan", "."]);
+        assert!(
+            scan.status.success(),
+            "main scan: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+
+        let start = warm_run(&repo_dir, &home, &["project", "start", "agents"]);
+        assert!(
+            start.status.success(),
+            "project start: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        let wt = repo_dir
+            .join(specs::LAYOUT)
+            .join(".worktrees")
+            .join("agents");
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        // Commit the added definition on the project branch, then rescan so the
+        // File FQN `.opencode/agents/rebuild-extra.md` is real in the branch
+        // scanned universe before the spec claims it.
+        std::fs::create_dir_all(wt.join(".opencode/agents")).unwrap();
+        std::fs::write(
+            wt.join(".opencode/agents/rebuild-extra.md"),
+            "# Rebuild extra\n\nAdded by the merged change-set.\n",
+        )
+        .unwrap();
+        warm_commit_all(&wt, "add rebuild-extra agent definition");
+        let branch_scan = warm_run(&wt, &home, &["scan", "."]);
+        assert!(
+            branch_scan.status.success(),
+            "branch scan: {}",
+            String::from_utf8_lossy(&branch_scan.stderr)
+        );
+
+        // A whole-model spec whose Component claims the now-real agent File FQN
+        // as its `implemented-by` target (`write_project` validates it against
+        // the branch DB's scanned universe).
+        write_spec_node(&wt_apg, ".opencode/agents/rebuild-extra.md");
+
+        // The verify-passing plan: one phase Satisfies'ing the authored
+        // requirement, one `modifies` task covering that claim with a File
+        // modify edge — never a create (the File is already real, so a planned
+        // node at its FQN would be realize-dead).
+        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("agents.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "agents",
+            &[
+                Record::Plan {
+                    fqn: "agents/plan".into(),
+                    title: "Agent merge plan".into(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "agents/plan.phase-01".into(),
+                    number: 1,
+                    title: "P1".into(),
+                    deliverable: "the landed agent definition".into(),
+                    status: "pending".into(),
+                },
+                Record::Contains {
+                    from: "agents/plan".into(),
+                    to: "agents/plan.phase-01".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::Satisfies {
+                    from: "agents/plan.phase-01".into(),
+                    to: "requirements.requirement.timer".into(),
+                },
+                Record::Task {
+                    fqn: "agents/plan.phase-01.task-1".into(),
+                    title: "touch .opencode/agents/rebuild-extra.md".into(),
+                    status: "pending".into(),
+                },
+                Record::FileModify {
+                    from: "agents/plan.phase-01.task-1".into(),
+                    to: ".opencode/agents/rebuild-extra.md".into(),
+                },
+                Record::Contains {
+                    from: "agents/plan.phase-01".into(),
+                    to: "agents/plan.phase-01.task-1".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+            ],
+        )
+        .unwrap();
+
+        let main_repo = git2::Repository::open(&repo_dir).unwrap();
+        let branch_tip = main_repo
+            .find_branch("agents", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        // `apg project merge` from the MAIN checkout's CLI: verify -> ff ->
+        // unguarded main rebuild (the real pipeline, agentfrontend included) ->
+        // self-cleanup. The rebuild must report success, never a caught panic.
+        let merge = warm_run(&repo_dir, &home, &["project", "merge", "agents"]);
+        let merge_err = String::from_utf8_lossy(&merge.stderr);
+        assert!(merge.status.success(), "project merge: {merge_err}");
+        assert!(
+            !merge_err.contains("panicked"),
+            "the post-merge rebuild must not panic: {merge_err}"
+        );
+
+        let after = git2::Repository::open(&repo_dir).unwrap();
+        assert_eq!(
+            after.head().unwrap().peel_to_commit().unwrap().id(),
+            branch_tip,
+            "merge must fast-forward the default branch to the branch tip"
+        );
+        assert!(
+            !wt.exists(),
+            "the merged project's worktree must be removed"
+        );
+        assert!(
+            after
+                .find_branch("agents", git2::BranchType::Local)
+                .is_err(),
+            "the merged project's branch must be deleted"
+        );
+
+        // Main's rebuilt graph carries both agent definitions (File + Agent
+        // nodes) and the merged requirement.
+        let main_apg = repo_dir.join(specs::LAYOUT);
+        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+        assert!(
+            db.has_node(".opencode/agents/rebuild-extra.md"),
+            "main's rebuild must carry the added agent File FQN"
+        );
+        assert!(
+            db.has_node("agent.rebuild-extra"),
+            "main's rebuild must carry the rebuild-extra Agent node"
+        );
+        assert!(
+            db.has_node("agent.seed-agent"),
+            "the rebuild must re-scan the pre-existing definition too"
+        );
+        assert!(
+            db.has_node("requirements.requirement.timer"),
+            "main's rebuild must carry the merged requirement"
+        );
+        drop(db);
+        assert!(
+            git::is_fresh(&main_apg),
+            "main's rebuilt index must be fresh for the restored HEAD"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
