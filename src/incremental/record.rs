@@ -27,9 +27,16 @@ pub fn record(
     sha: &str,
     targets_rel: &BTreeSet<String>,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(store_root)?;
     let writer_root = scan_root.to_string_lossy().into_owned();
     let mut store = FactStore::at(store_root.to_path_buf()).load();
+    // The delta path merges the target-only graph into the stored baseline
+    // state, so read that baseline BEFORE the first write holds the store gate:
+    // a second store open would contend on `facts.lock`.
+    let mut delta_state = if targets_rel.is_empty() {
+        None
+    } else {
+        Some(State::load(store_root, scan_root))
+    };
 
     // Per-file fact units for every located file in the assembled graph, derived
     // from ONE per-file index (phase-04 task-12) rather than an `O(F*(N+E))`
@@ -85,11 +92,12 @@ pub fn record(
             store.put_scaffolding(lang, &merged, cache_key)?;
         }
     }
-    store.save_index()?;
+    let id = manifest.worktree_id();
+    store.put_refs(id, &manifest.entries)?;
+    store.register_worktree(id, &manifest.root)?;
 
-    // The manifest + scan record (the next scan's baseline).
-    manifest.save(store_root)?;
-    ScanRecord {
+    // The scan record (the next scan's baseline).
+    let record = ScanRecord {
         sha: sha.to_string(),
         cache_key: cache_key.clone(),
         manifest: manifest.clone(),
@@ -100,21 +108,28 @@ pub fn record(
             .nodes
             .get(crate::schema::SCAN_HEAD)
             .and_then(|n| n.content_key.clone()),
-    }
-    .save(store_root)?;
+    };
+    store.put_scan(id, &postcard::to_allocvec(&record)?)?;
 
-    // The portable indexes. On the delta path the graph carries only the target
-    // files' re-emitted facts, so the persisted state is merged with the delta
-    // instead of re-derived from it — an unchanged file's entries survive. A
-    // full scan (or the full-load fallback's re-assembled graph) derives the
-    // whole state from the graph.
-    if full_scan {
-        State::from_graph(graph, scan_root).save(store_root)?;
+    // The portable delta state. On the delta path the graph carries only the
+    // target files' re-emitted facts, so the persisted state is merged with the
+    // delta instead of re-derived from it — an unchanged file's entries
+    // survive. A full scan (or the full-load fallback's re-assembled graph)
+    // derives the whole state from the graph.
+    let state = if full_scan {
+        State::from_graph(graph, scan_root)
     } else {
-        let mut state = State::load(store_root);
+        let mut state = delta_state.take().unwrap_or_default();
         state.merge_delta(graph, scan_root, targets_rel);
-        state.save(store_root)?;
-    }
+        state
+    };
+    store.put_deps(id, &postcard::to_allocvec(&state.dep_edges_rel)?)?;
+    store.put_signatures(id, &postcard::to_allocvec(&state.signatures)?)?;
+    store.put_overloads(id, &postcard::to_allocvec(&state.overloads)?)?;
+
+    // ONE commit: the per-file units, scaffolding, refs/registry, the scan row
+    // and the delta rows land together.
+    store.save_index()?;
     Ok(())
 }
 

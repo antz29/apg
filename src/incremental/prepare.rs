@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::cache::{CacheKey, FactStore, Manifest, ScanConfigKey};
+use crate::cache::{CacheKey, FactStore, Manifest, ScanConfigKey, worktree_id};
 use crate::delta::{self, Delta, FullScanReason, ScanRecord};
 use crate::graph::{Graph, NodeKind};
 use crate::impact::depindex::rel;
@@ -33,50 +33,36 @@ pub struct State {
     pub overloads: OverloadIndex,
 }
 
-impl State {
-    fn dir(root: &Path) -> PathBuf {
-        root.join("index")
-    }
+/// Postcard-decodes a stored row, falling back to the type's default when the
+/// row is absent or undecodable (a cache miss).
+fn decode_or_default<T: serde::de::DeserializeOwned + Default>(bytes: Option<Vec<u8>>) -> T {
+    bytes
+        .and_then(|b| postcard::from_bytes(&b).ok())
+        .unwrap_or_default()
+}
 
-    /// Loads the state from disk (empty when absent/unreadable).
-    pub fn load(root: &Path) -> State {
-        let dir = Self::dir(root);
-        let deps = std::fs::read_to_string(dir.join("deps.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str::<Vec<(String, String)>>(&t).ok())
-            .unwrap_or_default();
-        let signatures = std::fs::read_to_string(dir.join("signatures.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str::<SignatureMap>(&t).ok())
-            .unwrap_or_default();
-        let overloads = std::fs::read_to_string(dir.join("overloads.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str::<OverloadIndex>(&t).ok())
-            .unwrap_or_default();
+impl State {
+    /// Loads this worktree's state from the redb deps/signatures/overloads
+    /// rows (empty when absent/unreadable).
+    pub fn load(root: &Path, scan_root: &Path) -> State {
+        let store = FactStore::at(root.to_path_buf()).load();
+        let id = worktree_id(scan_root);
         State {
-            dep_edges_rel: deps,
-            signatures,
-            overloads,
+            dep_edges_rel: decode_or_default(store.deps(id)),
+            signatures: decode_or_default(store.signatures(id)),
+            overloads: decode_or_default(store.overloads(id)),
         }
     }
 
-    /// Persists the state under the store root.
-    pub fn save(&self, root: &Path) -> anyhow::Result<()> {
-        let dir = Self::dir(root);
-        std::fs::create_dir_all(&dir)?;
-        std::fs::write(
-            dir.join("deps.json"),
-            serde_json::to_string_pretty(&self.dep_edges_rel)?,
-        )?;
-        std::fs::write(
-            dir.join("signatures.json"),
-            serde_json::to_string_pretty(&self.signatures)?,
-        )?;
-        std::fs::write(
-            dir.join("overloads.json"),
-            serde_json::to_string_pretty(&self.overloads)?,
-        )?;
-        Ok(())
+    /// Persists this worktree's state into the redb deps/signatures/overloads
+    /// rows in one committed transaction.
+    pub fn save(&self, root: &Path, scan_root: &Path) -> anyhow::Result<()> {
+        let store = FactStore::at(root.to_path_buf()).load();
+        let id = worktree_id(scan_root);
+        store.put_deps(id, &postcard::to_allocvec(&self.dep_edges_rel)?)?;
+        store.put_signatures(id, &postcard::to_allocvec(&self.signatures)?)?;
+        store.put_overloads(id, &postcard::to_allocvec(&self.overloads)?)?;
+        store.save_index()
     }
 
     /// Derives the state from a freshly assembled full graph, keyed
@@ -299,7 +285,8 @@ pub struct Prepared {
     pub manifest: Manifest,
     /// The content-identity key of the recorded scan the delta was derived from
     /// (`ScanRecord::content_key`), captured BEFORE the completed scan
-    /// overwrites `scan.json`. The win-C splice is eligible only when the LOCAL
+    /// overwrites this worktree's store scan row. The win-C splice is eligible
+    /// only when the LOCAL
     /// seed DB's own recorded key equals this — otherwise another worktree's
     /// scan advanced the shared state past this worktree's DB and seeding would
     /// publish a DB that is not a full rebuild (feedback-101, see
@@ -453,10 +440,10 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         };
     }
     // The content identity the delta is derived from, captured BEFORE the
-    // completed scan rewrites the shared `scan.json` (feedback-101): the win-C
+    // completed scan rewrites this worktree's store scan row (feedback-101): the win-C
     // splice seeds the LOCAL db.lbug and must refuse it when its own recorded
     // key differs — another worktree scanned in between.
-    let recorded_content_key = ScanRecord::load(&store_root).and_then(|r| r.content_key);
+    let recorded_content_key = ScanRecord::load(&store_root, scan_root).and_then(|r| r.content_key);
     let plan = delta::plan(apg_root, Some(&store_root), config);
     let manifest = Manifest::build(scan_root);
     if let Some(reason) = plan.full_scan {
@@ -476,7 +463,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         };
     }
 
-    let recorded = Manifest::load(&store_root);
+    let recorded = Manifest::load(&store_root, scan_root);
     let manifest_delta = recorded
         .as_ref()
         .map(|m| m.diff(&manifest))
@@ -501,7 +488,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         .cloned()
         .collect();
 
-    let state = State::load(&store_root);
+    let state = State::load(&store_root, scan_root);
 
     // Stage-1 target set: the changed files ∪ their overload peers. The
     // reverse-dependency closure is computed AFTER phase 1 by
@@ -619,8 +606,7 @@ pub fn extra_cascade_targets(
     phase1_graph: &Graph,
     stage1: &BTreeSet<String>,
 ) -> BTreeSet<String> {
-    let _ = scan_root;
-    let state = State::load(store_root);
+    let state = State::load(store_root, scan_root);
     // The phase-1 graph's signatures, keyed checkout-relative.
     let new_sigs = signatures_of_graph(phase1_graph, scan_root);
     // Signature-changed stage-1 files: compare only the stage-1 entries (files

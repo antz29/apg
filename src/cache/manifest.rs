@@ -4,10 +4,11 @@
 //! [`crate::cache`].
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::cache::{FactStore, WorktreeId};
 use crate::classify::ApgConfig;
 
 /// The scanner JSONL schema/format version folded into [`CacheKey`]. Bump when
@@ -229,6 +230,31 @@ pub fn blob_oid_of_file(path: &Path) -> Option<String> {
 /// content.
 const SKIP_DIRS: &[&str] = &[".git", ".worktrees", "target", "node_modules"];
 
+/// The canonical checkout root a path belongs to: the git workdir when `root`
+/// is inside a repository (so a linked worktree hashes its own workdir), else
+/// the canonicalized path. The base [`worktree_id`] hashes and
+/// [`Manifest::load`] reports.
+fn canonical_root(root: &Path) -> PathBuf {
+    git2::Repository::discover(root)
+        .ok()
+        .and_then(|repo| {
+            repo.workdir()
+                .map(|w| std::fs::canonicalize(w).unwrap_or_else(|_| w.to_path_buf()))
+        })
+        .unwrap_or_else(|| std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()))
+}
+
+/// The per-worktree identity every worktree-scoped store row is keyed by: the
+/// first 16 bytes of BLAKE3 over the canonical checkout root's path. Stable
+/// across processes for one checkout and distinct for every linked worktree.
+pub fn worktree_id(root: &Path) -> WorktreeId {
+    let canonical = canonical_root(root);
+    let hash = blake3::hash(canonical.to_string_lossy().as_bytes());
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&hash.as_bytes()[..16]);
+    id
+}
+
 impl Manifest {
     /// Builds the manifest for the scan root `root` (the scanned directory, an
     /// absolute path). In a git checkout the identity is read, not walked: each
@@ -339,20 +365,38 @@ impl Manifest {
         }
     }
 
-    /// Persists the manifest as JSON under the shared store root
-    /// (`<store-root>/manifest.json`).
-    pub fn save(&self, store_root: &Path) -> anyhow::Result<()> {
-        std::fs::create_dir_all(store_root)?;
-        let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(store_root.join("manifest.json"), json)?;
-        Ok(())
+    /// This manifest's worktree identity: the store row key every refs/scan/
+    /// delta write for it is scoped by.
+    pub fn worktree_id(&self) -> WorktreeId {
+        worktree_id(Path::new(&self.root))
     }
 
-    /// Loads a manifest previously saved under the shared store root, or
-    /// `None` when none exists / it is unreadable.
-    pub fn load(store_root: &Path) -> Option<Manifest> {
-        let text = std::fs::read_to_string(store_root.join("manifest.json")).ok()?;
-        serde_json::from_str(&text).ok()
+    /// Persists the manifest's `path -> blob OID` rows for this worktree in the
+    /// shared redb store, registering its canonical root beside them.
+    pub fn save(&self, store_root: &Path) -> anyhow::Result<()> {
+        let store = FactStore::at(store_root.to_path_buf()).load();
+        let id = self.worktree_id();
+        store.put_refs(id, &self.entries)?;
+        store.register_worktree(id, &self.root)?;
+        store.save_index()
+    }
+
+    /// Loads this worktree's manifest rows from the shared store, or `None`
+    /// when the worktree was never registered (no prior scan).
+    pub fn load(store_root: &Path, root: &Path) -> Option<Manifest> {
+        let store = FactStore::at(store_root.to_path_buf()).load();
+        let id = worktree_id(root);
+        if !store
+            .worktrees()
+            .iter()
+            .any(|(worktree, _)| *worktree == id)
+        {
+            return None;
+        }
+        Some(Manifest {
+            root: canonical_root(root).to_string_lossy().into_owned(),
+            entries: store.refs(id),
+        })
     }
 
     /// The OID recorded for `rel`, if any.

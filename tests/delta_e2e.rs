@@ -41,6 +41,15 @@ fn write(dir: &Path, rel: &str, body: &str) {
     std::fs::write(p, body).unwrap();
 }
 
+/// An empty manifest rooted at `root`: the per-worktree store key derives from
+/// the root, so a fixture record must carry a real checkout root.
+fn rooted(root: &Path) -> Manifest {
+    Manifest {
+        root: root.to_string_lossy().into_owned(),
+        entries: Default::default(),
+    }
+}
+
 /// e2e tier -- real I/O: every test here builds a scratch git repo under
 /// the temp dir and runs real libgit2 operations. Each is `#[ignore]`d, so
 /// a plain `cargo test` never runs one; the only entry point is the named
@@ -121,7 +130,7 @@ mod e2e {
         ScanRecord {
             sha: tip.clone(),
             cache_key: key.clone(),
-            manifest: Manifest::default(),
+            manifest: rooted(&dir),
             content_key: None,
         }
         .save(&store)
@@ -139,7 +148,7 @@ mod e2e {
         ScanRecord {
             sha: base.clone(),
             cache_key: key.clone(),
-            manifest: Manifest::default(),
+            manifest: rooted(&dir),
             content_key: None,
         }
         .save(&store)
@@ -153,7 +162,7 @@ mod e2e {
         ScanRecord {
             sha: tip.clone(),
             cache_key: key.clone(),
-            manifest: Manifest::default(),
+            manifest: rooted(&dir),
             content_key: None,
         }
         .save(&store)
@@ -196,7 +205,7 @@ mod e2e {
         ScanRecord {
             sha: "not-a-sha".to_string(),
             cache_key: key.clone(),
-            manifest: Manifest::default(),
+            manifest: rooted(&dir),
             content_key: None,
         }
         .save(&store)
@@ -226,7 +235,7 @@ mod e2e {
         ScanRecord {
             sha: base,
             cache_key: recorded,
-            manifest: Manifest::default(),
+            manifest: rooted(&dir),
             content_key: None,
         }
         .save(&store)
@@ -275,46 +284,46 @@ mod e2e {
         assert!(matches!(reason, Some(FullScanReason::NoRecordedScan)));
         let _ = std::fs::remove_dir_all(&dir);
     }
-    /// The phase-01 content-identity key on the shared scan record
-    /// (feedback-101). It was listed as "pure serde ⇒ unit" but its body does
-    /// real filesystem I/O (`std::env::temp_dir()` + `ScanRecord::save/load`
-    /// via std::fs), so by `global.constraint.test-tier-boundaries` it is e2e
-    /// (the law governs, the body wins).
+    /// The phase-01 content-identity key on the per-worktree scan record
+    /// (feedback-101). Its body does real filesystem I/O (`std::env::temp_dir()`
+    /// plus the redb store), so by `global.constraint.test-tier-boundaries` it
+    /// is e2e (the law governs, the body wins).
     #[test]
-    #[ignore = "e2e tier: real I/O (temp dir + scan.json fs); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (temp dir + redb store); run via cargo test-e2e"]
     fn scan_record_content_key_round_trips_and_defaults_absent() {
-        // The phase-01 content-identity key is part of the shared scan record
-        // (feedback-101): the next scan's splice guard compares this against the
-        // local DB's own recorded key. A pre-hardening `scan.json` (no field)
-        // still loads — serde-defaults to `None` — which simply makes the
-        // splice ineligible rather than failing to read the record.
+        // The phase-01 content-identity key is part of the per-worktree scan
+        // record (feedback-101): the next scan's splice guard compares this
+        // against the local DB's own recorded key. A pre-hardening record (no
+        // field) loads with `None` — serde-defaults to absent — which simply
+        // makes the splice ineligible rather than failing to read the record.
         let dir = std::env::temp_dir().join(format!("apg-scanrecord-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let key = CacheKey::compute(&ScanConfigKey::default());
         let store = dir.join("store");
-        std::fs::create_dir_all(&store).unwrap();
-        std::fs::write(
-            store.join("scan.json"),
-            format!(
-                r#"{{"sha":"abc","cache_key":{},"manifest":{}}}"#,
-                serde_json::to_string(&key).unwrap(),
-                serde_json::to_string(&Manifest::default()).unwrap()
-            ),
-        )
+        ScanRecord {
+            sha: "abc".into(),
+            cache_key: key.clone(),
+            manifest: rooted(&dir),
+            content_key: None,
+        }
+        .save(&store)
         .unwrap();
-        assert_eq!(ScanRecord::load(&store).unwrap().content_key, None);
+        assert_eq!(ScanRecord::load(&store, &dir).unwrap().content_key, None);
 
         ScanRecord {
             sha: "abc".into(),
             cache_key: key,
-            manifest: Manifest::default(),
+            manifest: rooted(&dir),
             content_key: Some("keyabc".into()),
         }
         .save(&store)
         .unwrap();
         assert_eq!(
-            ScanRecord::load(&store).unwrap().content_key.as_deref(),
+            ScanRecord::load(&store, &dir)
+                .unwrap()
+                .content_key
+                .as_deref(),
             Some("keyabc")
         );
         let _ = std::fs::remove_dir_all(&dir);

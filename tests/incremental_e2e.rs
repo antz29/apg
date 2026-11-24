@@ -1,11 +1,20 @@
 mod common;
 
-use apg::cache::{FactStore, FileFragment};
+use apg::cache::{FactStore, FileFragment, worktree_id};
 use apg::delta::ScanRecord;
 use apg::graph::{Graph, Node, NodeKind};
 use apg::incremental::*;
 use apg::testutil::located;
 use std::collections::BTreeSet;
+
+/// An empty manifest rooted at `root`: the per-worktree store key derives from
+/// the root, so a fixture record must carry a real checkout root.
+fn rooted_manifest(root: &std::path::Path) -> apg::cache::Manifest {
+    apg::cache::Manifest {
+        root: root.to_string_lossy().into_owned(),
+        entries: Default::default(),
+    }
+}
 
 /// e2e tier -- real I/O: these tests stage temp dirs, write state files and
 /// run real libgit2 operations. Each is `#[ignore]`d, so a plain `cargo
@@ -39,9 +48,9 @@ mod e2e {
             vec![("src/b.go".to_string(), "src/a.go".to_string())]
         );
         assert!(state.signatures.contains_key("src/a.go"));
-        state.save(&dir).unwrap();
+        state.save(&dir, &root).unwrap();
 
-        let loaded = State::load(&dir);
+        let loaded = State::load(&dir, &root);
         assert_eq!(loaded.dep_edges_rel, state.dep_edges_rel);
         assert_eq!(loaded.signatures, state.signatures);
         let _ = std::fs::remove_dir_all(&dir);
@@ -76,7 +85,7 @@ mod e2e {
             .insert(("scratch/b.Foo".into(), "scratch/a.Leaf".into()));
         old.calls
             .insert(("scratch/c.Bar".into(), "scratch/b.Foo".into()));
-        State::from_graph(&old, &root).save(&dir).unwrap();
+        State::from_graph(&old, &root).save(&dir, &root).unwrap();
 
         // Body-only: a.Leaf keeps its (empty) params ⇒ no cascade.
         let body = old.clone();
@@ -171,7 +180,7 @@ mod e2e {
         // full-scans.
         {
             let (dir, repo_dir, apg_root, store, sha) = fixture("no-db");
-            record(&store, &sha, Manifest::default());
+            record(&store, &sha, rooted_manifest(&repo_dir));
 
             let prepared = prepare(&repo_dir, &apg_root, &config, false);
             assert!(
@@ -192,7 +201,7 @@ mod e2e {
         // pending-state half of the same rule.
         {
             let (dir, repo_dir, apg_root, store, sha) = fixture("dirty-db");
-            record(&store, &sha, Manifest::default());
+            record(&store, &sha, rooted_manifest(&repo_dir));
             apg::testutil::touch_db(&apg_root);
             {
                 let db = apg::artifacts::ArtifactDb::open(&apg_root).unwrap();
@@ -222,7 +231,7 @@ mod e2e {
         // usable previous universe, so the ordinary delta keeps reuse.
         {
             let (dir, repo_dir, apg_root, store, sha) = fixture("clean-db");
-            record(&store, &sha, Manifest::default());
+            record(&store, &sha, rooted_manifest(&repo_dir));
             apg::testutil::touch_db(&apg_root);
 
             let prepared = prepare(&repo_dir, &apg_root, &config, false);
@@ -288,7 +297,10 @@ mod e2e {
                 ..Node::default()
             },
         );
-        let mut manifest = Manifest::default();
+        let mut manifest = Manifest {
+            root: scan_root.to_string_lossy().into_owned(),
+            entries: Default::default(),
+        };
         let mut abs_of: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
         for (i, rel) in rels.iter().enumerate() {
@@ -391,17 +403,18 @@ mod e2e {
             );
         }
 
-        // (c) the baseline writes still land after the runs, and re-running
+        // (c) the baseline rows still land after the runs, and re-running
         // with a target set leaves a reused unit's fragment/inputs digest
         // unchanged.
-        assert!(Manifest::load(&store_b).is_some(), "manifest.json on disk");
-        assert!(ScanRecord::load(&store_b).is_some(), "scan.json on disk");
-        for name in ["deps.json", "signatures.json", "overloads.json"] {
-            assert!(
-                store_b.join("index").join(name).exists(),
-                "index/{name} on disk"
-            );
-        }
+        let id = worktree_id(&scan_root);
+        assert!(
+            Manifest::load(&store_b, &scan_root).is_some(),
+            "manifest row"
+        );
+        assert!(ScanRecord::load(&store_b, &scan_root).is_some(), "scan row");
+        assert!(b.deps(id).is_some(), "deps row");
+        assert!(b.signatures(id).is_some(), "signatures row");
+        assert!(b.overloads(id).is_some(), "overloads row");
         let digest_a = digest_of("src/a.go");
         let (before, before_root) = b
             .reuse(
@@ -471,7 +484,10 @@ mod e2e {
         let abs = |rel: &str| scan_root.join(rel).to_string_lossy().into_owned();
 
         let rels = ["src/a.go", "src/b.go", "src/c.go", "src/d.go", "src/old.go"];
-        let mut manifest = Manifest::default();
+        let mut manifest = Manifest {
+            root: scan_root.to_string_lossy().into_owned(),
+            entries: Default::default(),
+        };
         for (i, rel) in rels.iter().chain(["src/J.java"].iter()).enumerate() {
             std::fs::write(scan_root.join(rel), format!("package m // {i}\n")).unwrap();
             manifest
@@ -562,13 +578,11 @@ mod e2e {
         .unwrap();
 
         // A skipped language's scaffolding is only ever written by a full scan;
-        // capture its bytes to prove the delta path never touches it.
-        let java_scaffold = store_root
-            .join("java")
-            .join(cache_key.token())
-            .join(apg::cache::SCAFFOLDING_FILE);
-        let java_before =
-            std::fs::read(&java_scaffold).expect("the full scan wrote the skipped language");
+        // capture it to prove the delta path never touches it.
+        let java_before = FactStore::at(store_root.clone())
+            .load()
+            .scaffolding("java", &cache_key)
+            .expect("the full scan wrote the skipped language");
 
         // The target-only delta graph: `src/a.go`/`src/c.go` re-emitted with a
         // changed signature and a cross-cut call into an unchanged file's
@@ -626,12 +640,11 @@ mod e2e {
         )
         .unwrap();
 
-        for name in ["deps.json", "signatures.json", "overloads.json"] {
-            assert!(
-                store_root.join("index").join(name).exists(),
-                "index/{name} on disk"
-            );
-        }
+        let id = worktree_id(&scan_root);
+        let persisted = FactStore::at(store_root.clone()).load();
+        assert!(persisted.deps(id).is_some(), "deps row");
+        assert!(persisted.signatures(id).is_some(), "signatures row");
+        assert!(persisted.overloads(id).is_some(), "overloads row");
 
         // The full NEW graph the delta is a target-only slice of: the same tree
         // with `src/old.go` gone and the two targets re-declared.
@@ -665,7 +678,7 @@ mod e2e {
         // The merged index reproduces the full-graph rebuild. Dep edges and
         // signatures compare directly; overload scopes are sorted on the merge
         // path, so compare their members as SETS.
-        let merged = State::load(&store_root);
+        let merged = State::load(&store_root, &scan_root);
         assert_eq!(merged.dep_edges_rel, truth.dep_edges_rel);
         assert_eq!(merged.signatures, truth.signatures);
         assert_eq!(merged.overloads.file_scopes, truth.overloads.file_scopes);
@@ -763,11 +776,14 @@ mod e2e {
             "a language edge to a retired module is dropped: {go:?}"
         );
 
-        // The skipped language's stored record is byte-identical.
-        let java_after = std::fs::read(&java_scaffold).unwrap();
+        // The skipped language's stored scaffolding is unchanged.
+        let java_after = FactStore::at(store_root.clone())
+            .load()
+            .scaffolding("java", &cache_key)
+            .unwrap();
         assert_eq!(
             java_after, java_before,
-            "a skipped language's scaffolding stays byte-identical"
+            "a skipped language's scaffolding stays unchanged"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -865,7 +881,7 @@ mod e2e {
                 overloads: OverloadIndex::from_graph(&g, &repo_dir),
                 ..Default::default()
             }
-            .save(&store)
+            .save(&store, &repo_dir)
             .unwrap();
             apg::testutil::touch_db(&apg_root);
             (dir, repo_dir, apg_root, repo)

@@ -795,9 +795,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let records = records.chain(layers_records).chain(transient_records);
 
     // The win-B pipeline input: the store to splice cached facts from and to
-    // record the completed scan back into. The store is ALWAYS recorded (a full
-    // scan records the cold baseline the next scan diffs against); only `reuse`
-    // is `None` on the full path.
+    // record the completed scan back into THIS worktree's store rows. The store
+    // is ALWAYS recorded (a full scan records the cold baseline the next scan
+    // diffs against); only `reuse` is `None` on the full path.
     let pipeline_input = if incremental.store_root.as_os_str().is_empty() {
         None
     } else {
@@ -817,8 +817,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             targets_rel: targets_rel.clone(),
             removed_fqns: incremental.removed_fqns.clone(),
             // The shared recorded content identity the delta was derived from,
-            // captured before the completed scan rewrote `scan.json` — the
-            // splice's equivalence guard (feedback-101).
+            // captured before the completed scan replaced THIS worktree's store
+            // scan row — the splice's equivalence guard (feedback-101).
             recorded_content_key: incremental.recorded_content_key.clone(),
         })
     };

@@ -29,7 +29,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::cache::{CacheKey, Manifest, ScanConfigKey};
+use crate::cache::{CacheKey, FactStore, Manifest, ScanConfigKey, worktree_id};
 
 /// The three status sets a git delta resolves to, plus the rename pairs. Paths
 /// are checkout-relative (`/`-separated).
@@ -157,21 +157,20 @@ pub struct ScanRecord {
 }
 
 impl ScanRecord {
-    fn path(store_root: &Path) -> std::path::PathBuf {
-        store_root.join("scan.json")
-    }
-
-    /// Persists the record under the store root.
+    /// Persists the record in this worktree's redb scan row.
     pub fn save(&self, store_root: &Path) -> anyhow::Result<()> {
-        std::fs::create_dir_all(store_root)?;
-        std::fs::write(Self::path(store_root), serde_json::to_string_pretty(self)?)?;
-        Ok(())
+        let store = FactStore::at(store_root.to_path_buf()).load();
+        let bytes = postcard::to_allocvec(self)?;
+        store.put_scan(self.manifest.worktree_id(), &bytes)?;
+        store.save_index()
     }
 
-    /// Loads a prior record, or `None` when none exists / it is unreadable.
-    pub fn load(store_root: &Path) -> Option<ScanRecord> {
-        let text = std::fs::read_to_string(Self::path(store_root)).ok()?;
-        serde_json::from_str(&text).ok()
+    /// Loads this worktree's prior record from the redb scan row, or `None`
+    /// when none was recorded / it is undecodable.
+    pub fn load(store_root: &Path, root: &Path) -> Option<ScanRecord> {
+        let store = FactStore::at(store_root.to_path_buf()).load();
+        let bytes = store.scan(worktree_id(root))?;
+        postcard::from_bytes(&bytes).ok()
     }
 }
 
@@ -283,7 +282,11 @@ pub fn scan_state(
     let repo = git2::Repository::discover(apg_root).ok();
     let head = repo.as_ref().and_then(head_oid);
     let head_str = head.map(|o| o.to_string());
-    let record = store_root.and_then(ScanRecord::load);
+    let record: Option<ScanRecord> = store_root.and_then(|store_root| {
+        let store = FactStore::at(store_root.to_path_buf()).load();
+        let bytes = store.scan(worktree_id(apg_root))?;
+        postcard::from_bytes(&bytes).ok()
+    });
     let ancestor = match (&repo, head, &record) {
         (Some(repo), Some(head), Some(record)) => git2::Oid::from_str(&record.sha)
             .ok()

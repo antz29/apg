@@ -1570,8 +1570,9 @@ mod e2e {
     }
 
     /// feedback-101: the splice seeds the LOCAL `db.lbug` while the
-    /// manifest/delta live in the SHARED store (`<git-common-dir>/apg/facts`).
-    /// When another worktree scans in between, the shared `scan.json`/manifest
+    /// manifest/delta live in the shared redb store
+    /// (`<git-common-dir>/apg/facts.db`), scoped to this worktree's id. When
+    /// another worktree scans in between, this worktree's store scan row
     /// advances past this worktree's DB; the empty-target case then upserts no
     /// code unit and the stale seeded rows survive — the published DB is NOT a
     /// full rebuild, and the next freshness fast-path reuses it. The
@@ -1615,12 +1616,15 @@ mod e2e {
         ScanRecord {
             sha: "newsha".into(),
             cache_key: key,
-            manifest: Manifest::default(),
+            manifest: Manifest {
+                root: dir.to_string_lossy().into_owned(),
+                entries: Default::default(),
+            },
             content_key: Some("newkey".into()),
         }
         .save(&store)
         .unwrap();
-        let recorded = ScanRecord::load(&store).unwrap();
+        let recorded = ScanRecord::load(&store, &dir).unwrap();
 
         // The unguarded splice — the pre-fix behaviour — applies the
         // empty-target delta: no code unit is upserted, so the stale seeded
