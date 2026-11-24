@@ -287,18 +287,25 @@ pub fn schema_template_db() -> &'static Path {
 }
 
 /// The schema-initialised fixture database at `path`: the process
-/// [`schema_template_db`] copied into place — parent directories created, the
-/// destination's stale `db.lbug`/`.wal`/`.shm` discarded through
-/// [`crate::session::discard_derived_index`] first — then opened at
-/// [`fixture_db_config`]. A fixture gets the full schema with no rows without
-/// running `create_schema` itself, and the open database is returned so a
-/// caller that fills it keeps it for `copy_from` while one that needs only its
-/// shape (e.g. [`touch_db`]) simply drops it. Panics when the copy or the open
-/// fails, like the other fixture builders.
+/// [`schema_template_db`] copied into place — parent directories created, then
+/// the destination's own stale file and `.wal`/`.shm` sidecars removed
+/// (`path`, `path.wal`, `path.shm`, not-found ignored) — then opened at
+/// [`fixture_db_config`]. The discard is **destination-scoped**, unlike
+/// `crate::session::discard_derived_index`'s hard-named `db.lbug` in the
+/// directory, so a fixture at `expected.lbug` does not wipe a sibling
+/// `db.lbug` another fixture already published. A fixture gets the full schema
+/// with no rows without running `create_schema` itself, and the open database
+/// is returned so a caller that fills it keeps it for `copy_from` while one
+/// that needs only its shape (e.g. [`touch_db`]) simply drops it. Panics when
+/// the copy or the open fails, like the other fixture builders.
 pub fn schema_db_at(path: &Path) -> lbug::Database {
     let dir = path.parent().expect("fixture db path has a parent");
     std::fs::create_dir_all(dir).unwrap();
-    crate::session::discard_derived_index(dir);
+    for suffix in ["", ".wal", ".shm"] {
+        let mut stale = path.as_os_str().to_owned();
+        stale.push(suffix);
+        let _ = std::fs::remove_file(stale);
+    }
     std::fs::copy(schema_template_db(), path).unwrap();
     lbug::Database::new(path, fixture_db_config()).unwrap()
 }
