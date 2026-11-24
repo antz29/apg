@@ -636,16 +636,16 @@ fn md_mixed_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Builds a real on-disk DB at `path` through the same
-/// `create_schema + copy_from` full load the scan path uses, so the dispatch
-/// under test sees a genuine previous database.
+/// Builds a real on-disk DB at `path`: the schema comes from the process
+/// [`apg::testutil::schema_db_at`] template, and the real `build_load_files +
+/// copy_from` leg then loads the rows, so the dispatch under test sees a
+/// genuine previous database.
 fn win_c_build_db(path: &Path, graph: &graph::Graph) {
     let ldir = path.parent().unwrap().join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(graph, &ldir).unwrap();
-    let db = Database::new(path, fixture_db_config()).unwrap();
+    let db = apg::testutil::schema_db_at(path);
     let conn = Connection::new(&db).unwrap();
-    load::create_schema(&conn).unwrap();
     load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
