@@ -31,6 +31,10 @@ use crate::{cache, classify, graph, incremental, ingest, load, schema, session, 
 /// Production always opens the derived database at the engine default (see
 /// [`run_pipeline_with`]); an in-process caller that needs a different
 /// `SystemConfig` calls that entry point directly.
+///
+/// Returns the recorded phase timings, except when the shared fact store is
+/// held by another writer: that named contention error is propagated so the
+/// scan exits non-zero instead of silently skipping the record.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_pipeline(
     records: impl IntoIterator<Item = schema::Record>,
@@ -42,7 +46,7 @@ pub(crate) fn run_pipeline(
     base: Option<&Path>,
     log: &mut Log,
     progress: Option<&mut Progress<'_>>,
-) -> timing::PipelineTimings {
+) -> anyhow::Result<timing::PipelineTimings> {
     run_pipeline_with(
         records,
         blacklist,
@@ -73,7 +77,7 @@ pub(crate) fn run_pipeline_with(
     log: &mut Log,
     progress: Option<&mut Progress<'_>>,
     db_config: Option<SystemConfig>,
-) -> timing::PipelineTimings {
+) -> anyhow::Result<timing::PipelineTimings> {
     // Phase-04 task-4: this function owns two reported phases. Ingest-assembly
     // covers the ingestor passes, cleanup, and the fact-store recording from
     // entry to the DB dispatch below; db-load covers that dispatch (splice OR
@@ -236,6 +240,7 @@ pub(crate) fn run_pipeline_with(
             &input.targets_rel,
         ) {
             Ok(()) => log.ln("[scan] content-addressed facts recorded"),
+            Err(err) if crate::cache::store::is_contention(&err) => return Err(err),
             Err(e) => log.ln(&format!("[scan] fact recording skipped: {e:#}")),
         }
     }
@@ -425,10 +430,10 @@ pub(crate) fn run_pipeline_with(
         let _ = std::fs::remove_dir_all(&dir);
         log.ln("[load] temp dir removed");
     }
-    timing::PipelineTimings {
+    Ok(timing::PipelineTimings {
         ingest_assembly,
         db_load: db_start.elapsed(),
-    }
+    })
 }
 
 /// The win-C DB-build dispatch (phase-03 task-4): try to seed the working

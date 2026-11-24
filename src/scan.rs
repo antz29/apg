@@ -320,6 +320,17 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         cobol_dialect: cobol_dialect.map(str::to_string),
     };
 
+    // The shared fact store's writer gate: a scan that finds another process
+    // writing it waits the bounded budget and then fails, naming the contention,
+    // before any frontend runs. The gate is released as soon as this probe's open
+    // returns — it is never held across a frontend. A genuinely unavailable store
+    // (not a git repository, unreadable) keeps the ordinary full-scan fallback.
+    match cache::FactStore::resolve(&apg_root) {
+        Ok(_) => {}
+        Err(err) if cache::store::is_contention(&err) => return Err(err),
+        Err(_) => {}
+    }
+
     // Win-B incremental preparation (phase-02 task-8): the content manifest,
     // git delta + correctness fallbacks, impact target set, and the fact-reuse
     // candidates. `full_scan: Some(reason)` falls through to the full pipeline
@@ -831,7 +842,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         Some(&identity_base),
         &mut log,
         Some(&mut progress),
-    );
+    )?;
     progress.summary();
     timing.add(
         timing::Phase::IngestAssembly,

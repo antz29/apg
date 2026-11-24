@@ -1297,7 +1297,8 @@ pub fn scan_checkout_locked(project_dir: &Path) -> anyhow::Result<()> {
             &mut log,
             None,
             Some(fixture_db_config()),
-        );
+        )
+        .expect("run_pipeline_with");
         Ok(())
     };
     std::env::set_current_dir(old)?;
