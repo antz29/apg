@@ -118,6 +118,23 @@ fn stage_dir() -> PathBuf {
     stage_dir
 }
 
+/// Resolve a standalone-crate frontend binary: with a shared dev target dir
+/// (`CARGO_TARGET_DIR` set and non-empty) the crate's `cargo build --release`
+/// lands in `<CARGO_TARGET_DIR>/release/<bin>`; without one it lands in the
+/// crate-local `src/<lib>/target/release/<bin>`. The caller keeps its own
+/// existence/skip check on the returned path.
+#[allow(dead_code)] // the stage functions begin calling it in the follow-up change
+fn frontend_artifact(lib: &str, bin: &str) -> PathBuf {
+    match std::env::var("CARGO_TARGET_DIR") {
+        Ok(dir) if !dir.is_empty() => Path::new(&dir).join("release").join(bin),
+        _ => Path::new("src")
+            .join(lib)
+            .join("target")
+            .join("release")
+            .join(bin),
+    }
+}
+
 fn main() {
     watch_frontend_sources();
 
