@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use lbug::{Connection, Database};
 
@@ -789,15 +790,44 @@ pub struct TableShape {
 /// engine's internal table ordering never affects the comparison.
 pub type SchemaFingerprint = BTreeMap<String, TableShape>;
 
+/// The process-wide [`expected_schema`] cache: the fingerprint is deterministic
+/// for a given binary, so every `validate_compatible` call in the process (and
+/// every fixture that asks the same question) shares one derivation.
+static EXPECTED_SCHEMA: OnceLock<SchemaFingerprint> = OnceLock::new();
+
+/// Runs `build` at most once per process against `cell`, cloning the cached
+/// value for every call after the first. An errored build leaves `cell` unset —
+/// the failure is returned to this caller but never cached, so the next call
+/// runs `build` again and reports it again.
+pub(crate) fn cached_fingerprint(
+    cell: &OnceLock<SchemaFingerprint>,
+    build: impl FnOnce() -> anyhow::Result<SchemaFingerprint>,
+) -> anyhow::Result<SchemaFingerprint> {
+    if let Some(fingerprint) = cell.get() {
+        return Ok(fingerprint.clone());
+    }
+    let built = build()?;
+    // A concurrent builder may have won the race; the fingerprint is
+    // deterministic, so whichever value landed is correct.
+    let _ = cell.set(built);
+    Ok(cell
+        .get()
+        .expect("the fingerprint cell is populated above")
+        .clone())
+}
+
 /// This binary's expected schema fingerprint: run its own `create_schema`
-/// against a throwaway in-memory DB and introspect it. Deriving the expectation
-/// from the very DDL the full load uses makes the check self-maintaining — a
-/// schema change can never leave a stale expectation behind.
+/// against a throwaway in-memory DB and introspect it, once per process.
+/// Deriving the expectation from the very DDL the full load uses makes the
+/// check self-maintaining — a schema change can never leave a stale expectation
+/// behind.
 fn expected_schema() -> anyhow::Result<SchemaFingerprint> {
-    let db = Database::in_memory(system_config(false)?)?;
-    let conn = Connection::new(&db)?;
-    load::create_schema(&conn)?;
-    extract_schema(&conn)
+    cached_fingerprint(&EXPECTED_SCHEMA, || {
+        let db = Database::in_memory(system_config(false)?)?;
+        let conn = Connection::new(&db)?;
+        load::create_schema(&conn)?;
+        extract_schema(&conn)
+    })
 }
 
 /// Reads the whole structural fingerprint of the open DB: every table's name,
