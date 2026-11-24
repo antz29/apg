@@ -700,10 +700,15 @@ scratch target (a lower bound — frontend caches warm); the no-rebuild build wa
 **Fixture costs.** `touch_db` (`Database::new` + `create_schema`) ≈**0.6 s**,
 upper bound **0.70 s** (the no-DB fixture floor is 0.016 s; a later
 `ArtifactDb::open` ≈0.15 s each). One full in-process `scan_checkout`
-≈**0.74–0.82 s** (fixture floor ≈0.02 s); the closest real-scan test (4-file
-fixture, 3 scans) **3.75–3.89 s** total. A warm second scan's
-`[timing]`/`[timing-json]` (contended) reported **startup 0.879 s / frontend
-0.163 s / ingest-assembly 0.0025 s / db-load 0.542 s**; the cold first scan's
+≈**0.74–0.82 s** (fixture floor ≈0.02 s); the closest real-scan test —
+`tests/main_e2e.rs`'s
+`acceptance_scan_emits_per_phase_timing_report_with_fast_path_skip_marker`
+(4-file fixture, 3 scans) — **3.75–3.89 s** total. The
+`[timing]`/`[timing-json]` breakdown (contended) is that test's frontend-running
+content-edit third scan (a warm re-scan of the unchanged fixture is the
+freshness fast path and reports `frontend=0.000 s … frontend-skipped`):
+**startup 0.879 s / frontend 0.163 s / ingest-assembly 0.0025 s / db-load
+0.542 s**; the cold first scan's
 `db-load` is a full load and is a **floor** at 0.54 s. The fixture timings above
 are wall-clock measurements around `touch_db`/`scan_checkout`/the real scan
 itself, not `[timing]` output, except the breakdown line which is read from that
