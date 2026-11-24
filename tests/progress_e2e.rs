@@ -16,6 +16,7 @@ use std::process::{Command, Output, Stdio};
 
 use apg::progress::{KINDS, START_LINE};
 use apg::specs::{LAYOUT, TRANS};
+use apg::testutil::fixture_db_config;
 use common::{ApgCommand, Repo, apg_bin};
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ fn language_of(fqn: &str) -> &str {
 /// language.
 fn graph_counts(root: &Path) -> Summary {
     let path = root.join(LAYOUT).join(TRANS).join("db.lbug");
-    let db = lbug::Database::new(&path, lbug::SystemConfig::default().read_only(true))
+    let db = lbug::Database::new(&path, fixture_db_config().read_only(true))
         .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
     let conn = lbug::Connection::new(&db).unwrap();
     let fqns = |label: &str| -> Vec<String> {
