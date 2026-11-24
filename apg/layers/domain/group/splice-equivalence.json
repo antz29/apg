@@ -40,6 +40,11 @@
     },
     {
       "kind": "contains",
+      "target": "domain.service.fact-store-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.service.incremental-delta-splice",
       "properties": {}
     },

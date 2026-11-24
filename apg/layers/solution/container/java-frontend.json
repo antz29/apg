@@ -9,6 +9,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "solution.component.java-class-cache",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.java-package-hierarchy",
       "properties": {}
     },

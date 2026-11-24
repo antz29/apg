@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "shared-fact-store",
-  "body": "The repository-wide fact store, shared by every worktree and branch, against which a worktree's local database is equated by content identity and whose recorded key governs seed eligibility.",
+  "body": "The repository-wide derived fact store: one redb database at `<git-common-dir>/apg/facts.db`, shared by every worktree and branch, holding content-addressed bodies with per-worktree refs and scan records.",
   "properties": {
     "kind": "entity"
   },
@@ -10,6 +10,16 @@
     {
       "kind": "contains",
       "target": "domain.value.cache-key",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.fact-body",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.fact-unit-key",
       "properties": {}
     }
   ],

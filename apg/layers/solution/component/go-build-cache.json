@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "go-build-cache",
-  "body": "The Go frontend's shared build-cache handling: it points the build cache at a per-scan directory under the git-common-dir and keeps generated test scratch files out of the emitted package list.",
+  "body": "The Go frontend's per-worktree build cache: it points `GOCACHE` at the checkout's own `apg/.trans/cache/go` and keeps generated test scratch files out of the emitted package list.",
   "properties": {},
   "out": [
     {
@@ -23,6 +23,11 @@
     {
       "kind": "realises",
       "target": "domain.service.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.toolchain-cache",
       "properties": {}
     }
   ],

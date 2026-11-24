@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cached-fact-assembly-is-warm-only",
-  "body": "Cached-fact assembly builds the full graph for the warm path alone, rebuilding a worktree's database from the shared store at an unchanged HEAD.",
+  "body": "Cached-fact assembly builds the full graph for the warm path alone, rebuilding a worktree's database from the shared store when a committed scan record's content key matches the tree.",
   "properties": {},
   "out": [],
   "in": [

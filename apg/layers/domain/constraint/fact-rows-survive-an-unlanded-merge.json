@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "fact-rows-survive-an-unlanded-merge",
+  "body": "An unlanded merge keeps every fact row it and the project already recorded — main's and the project's refs, scan records and delta rows — and the content-key mismatch alone prevents their reuse.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "toolchain-cache-path",
+  "body": "The checkout-relative home of a language's toolchain cache, `<checkout>/apg/.trans/cache/<language>`, whose only namespace is the worktree it belongs to.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.toolchain-cache",
+      "properties": {}
+    }
+  ]
+}

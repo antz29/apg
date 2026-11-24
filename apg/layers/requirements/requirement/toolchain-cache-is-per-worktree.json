@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "toolchain-cache-is-per-worktree",
+  "body": "Every language's toolchain cache lives under its own checkout's `apg/.trans/cache/<language>/` and never under the git common directory, so a facts format or config change leaves it intact.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.toolchain-cache",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

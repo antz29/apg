@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "fact-body-addressed-by-encoded-digest",
+  "body": "A fact body is addressed by the BLAKE3-256 digest of its postcard-encoded bytes behind a one-byte codec header, and two byte-identical encoded bodies occupy one row.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.fact-store-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

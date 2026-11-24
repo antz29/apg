@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "fact-unit-key",
+  "body": "The identity of one per-file fact unit: the facts format version, the config digest, the language, the repo-relative path and the blob OID, with the resolution inputs recorded as a diagnostic.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.shared-fact-store",
+      "properties": {}
+    }
+  ]
+}

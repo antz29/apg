@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "cache-key",
-  "body": "The identity that invalidates the whole scan cache when it drifts: the binary version, the scanner schema, the projection rules, the scan config, and the classification-config identity together.",
+  "body": "The identity that invalidates the whole scan cache when it drifts: the explicit facts format version together with the scan config and the classification-config digest.",
   "properties": {},
   "out": [],
   "in": [

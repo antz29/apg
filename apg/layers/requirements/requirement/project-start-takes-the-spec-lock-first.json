@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "project-start-takes-the-spec-lock-first",
+  "body": "`apg project start` acquires the spec lock before its freshness gate and holds it through the seed copy and the cache materialisation, so it waits out a running scan instead of refusing.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

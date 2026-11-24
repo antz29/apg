@@ -27,7 +27,17 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.assembled-edges-end-at-a-real-node",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.cache-copy-policy-falls-back-to-a-copy",
       "properties": {}
     },
     {
@@ -38,6 +48,21 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.dirty-checkout-refusal-keeps-its-verdict",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.fact-format-change-rebuilds-the-store",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.fact-scan-writes-an-intent-row",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.fact-store-collected-by-reachability",
       "properties": {}
     },
     {
@@ -73,6 +98,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.incremental-splice-applies-a-delta-graph",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.legacy-fact-directory-is-deleted-once",
       "properties": {}
     },
     {
@@ -172,6 +202,16 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.project-start-clones-the-toolchain-cache",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-start-takes-the-spec-lock-first",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     },
@@ -183,6 +223,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.scan-admits-each-code-identity-once",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.scan-fact-commit-is-one-transaction",
       "properties": {}
     },
     {

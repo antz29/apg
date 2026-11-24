@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.concurrent-fact-writers-wait-then-fail-named",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.content-key-value-is-stable-for-a-tree-state",
       "properties": {}
     },
@@ -17,7 +22,32 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.fact-body-addressed-by-encoded-digest",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.fact-manifests-are-per-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.fact-reuse-is-oid-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.fact-store-is-one-redb-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.graph-first-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.java-class-cache-needs-its-surface-marker",
       "properties": {}
     },
     {
@@ -68,6 +98,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.toolchain-cache-is-per-worktree",
       "properties": {}
     }
   ],

@@ -57,6 +57,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.project-start-takes-the-spec-lock-first",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.scan-leaves-graph-fresh",
       "properties": {}
     },

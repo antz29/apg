@@ -75,6 +75,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.java-class-cache",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.java-package-hierarchy",
       "properties": {}
     },
@@ -146,6 +151,11 @@
     {
       "kind": "is-role",
       "source": "solution.component.sql-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.ts-build-info-cache",
       "properties": {}
     },
     {

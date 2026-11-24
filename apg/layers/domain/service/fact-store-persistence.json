@@ -1,0 +1,71 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "fact-store-persistence",
+  "body": "The capability that persists a scan's facts in one redb write transaction, keeps each worktree's own refs and scan record, and collects every body no live manifest or scaffolding reaches.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.concurrent-fact-writers-wait-then-fail-named",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-body-addressed-by-encoded-digest",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-format-change-rebuilds-the-store",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-manifests-are-per-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-reuse-is-oid-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-scan-writes-an-intent-row",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-store-collected-by-reachability",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fact-store-is-one-redb-database",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.legacy-fact-directory-is-deleted-once",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.scan-fact-commit-is-one-transaction",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.splice-equivalence",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.fact-store",
+      "properties": {}
+    }
+  ]
+}

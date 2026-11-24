@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "oid-reuse-correctness-is-a-closed-graph",
+  "body": "OID-only fact reuse is sound because assembly closes the graph over real nodes, and the guarantee stops there: a cross-file rename leaves a persisted caller edge to the vanished FQN dropped rather than repaired.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

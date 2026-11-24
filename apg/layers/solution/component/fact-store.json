@@ -1,0 +1,56 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "fact-store",
+  "body": "The repository-wide redb fact store: its format-version and integrity check on open, its body, unit, refs, scan, scaffolding and delta tables, the one record transaction, the bounded writer wait, and the reachability collection.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.factstore.FactStore",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.factstore.FactStore.load",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.factstore.FactStore.put",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.factstore.FactStore.resolve",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.factstore.common_git_dir",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.manifest.Manifest",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.fact-store-persistence",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

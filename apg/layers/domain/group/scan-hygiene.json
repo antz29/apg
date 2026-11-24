@@ -14,12 +14,22 @@
     },
     {
       "kind": "contains",
+      "target": "domain.entity.tool-owned-layout",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.toolchain-cache",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.service.scan-hygiene",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.entity.tool-owned-layout",
+      "target": "domain.service.toolchain-cache",
       "properties": {}
     }
   ],

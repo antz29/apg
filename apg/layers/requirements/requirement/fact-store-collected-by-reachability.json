@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "fact-store-collected-by-reachability",
+  "body": "The fact store's roots are every live worktree's current manifest together with the live scaffolding, so a body is deleted only when no live ref and no scaffolding reaches it and a newer body never strands an older one.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.fact-store-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

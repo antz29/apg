@@ -1,0 +1,28 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "toolchain-cache",
+  "body": "The per-checkout toolchain cache: the Go build cache, the Java class directory with its surface marker, and the TypeScript build info, each under the checkout's own `apg/.trans/cache/<language>/`.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.cache-copy-policy",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.toolchain-cache-path",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-hygiene",
+      "properties": {}
+    }
+  ]
+}

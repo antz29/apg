@@ -1,0 +1,56 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "toolchain-cache",
+  "body": "The capability that gives each checkout its own per-language toolchain cache under its `apg/.trans/cache` directory and materialises it from the main checkout at project start.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cache-copy-policy-falls-back-to-a-copy",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.java-class-cache-needs-its-surface-marker",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-start-clones-the-toolchain-cache",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.toolchain-cache-is-per-worktree",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.go-build-cache",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.java-class-cache",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-start-seeder",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ts-build-info-cache",
+      "properties": {}
+    }
+  ]
+}

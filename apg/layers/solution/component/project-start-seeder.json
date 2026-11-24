@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "project-start-seeder",
-  "body": "The project-start branch-database seeder: it requires main's scan to be fresh for main's head and copies main's transient database into the new worktree in place of a frontend scan.",
+  "body": "The project-start seeder: it takes the spec lock before its freshness gate, copies main's transient database into the new worktree in place of a frontend scan, and materialises the worktree toolchain cache by the selected policy.",
   "properties": {},
   "out": [
     {
@@ -27,12 +27,17 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.splice-eligibility",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.project-context-guard",
+      "target": "domain.service.toolchain-cache",
       "properties": {}
     }
   ],

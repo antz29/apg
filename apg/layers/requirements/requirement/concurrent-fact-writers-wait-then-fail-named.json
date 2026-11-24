@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "concurrent-fact-writers-wait-then-fail-named",
+  "body": "A scan that finds another process writing the fact store waits a bounded time and then fails with an error naming the contention, and no fact-store lock is held while a frontend runs.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.fact-store-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

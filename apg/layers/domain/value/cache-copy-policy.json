@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "cache-copy-policy",
+  "body": "The project-start cache-copy choice: auto, clone, copy, or skip, resolved from the command-line flag, the environment, `apg/config.json`, and the auto default in that order.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.toolchain-cache",
+      "properties": {}
+    }
+  ]
+}

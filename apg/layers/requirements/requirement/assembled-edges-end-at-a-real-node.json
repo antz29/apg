@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "assembled-edges-end-at-a-real-node",
+  "body": "After assembly and splice every edge endpoint is a real node or an unresolved target, so an edge whose target FQN vanished is dropped rather than left dangling or fabricated into an unresolved target.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

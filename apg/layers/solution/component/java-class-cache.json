@@ -1,0 +1,46 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "java-class-cache",
+  "body": "The Java frontend's class cache: the persistent class directory with its `surface.tsv` marker, the completeness check, and the wipe-and-reseed when the marker is absent or a class file fails its check.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "java.ClassSurfaceCache.classesPresent",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.ClassSurfaceCache.loadSurface",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.ClassSurfaceCache.saveSurface",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.ScanRunner.persistentJavaRoot",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.toolchain-cache",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.java-frontend",
+      "properties": {}
+    }
+  ]
+}

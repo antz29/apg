@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "java-class-cache-needs-its-surface-marker",
+  "body": "Java treats a class cache as absent unless `surface.tsv` is present and its class files pass a magic and size check, wipes the directory otherwise, and keeps the per-file SHA-1 records as the wrong-source detector.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.toolchain-cache",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
+      "properties": {}
+    }
+  ]
+}

@@ -9,6 +9,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "solution.component.ts-build-info-cache",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.ts-package-rooting",
       "properties": {}
     },

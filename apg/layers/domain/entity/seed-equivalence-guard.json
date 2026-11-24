@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "seed-equivalence-guard",
-  "body": "The eligibility check that admits the splice when the local seed provably matches the shared recorded scan, requiring both a matching content-identity key and the assembled durable and transient rows already in the seed.",
+  "body": "The eligibility check that admits the splice when the local seed provably matches the worktree's recorded scan, requiring both a matching content-identity key and the assembled durable and transient rows already in the seed.",
   "properties": {
     "kind": "entity"
   },

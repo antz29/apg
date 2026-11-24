@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "scan-fact-commit-is-one-transaction",
+  "body": "One scan commits its new bodies, its unit rows, its own worktree's refs and scan record, the language scaffolding and the delta rows in one redb write transaction, so a crash before it leaves the previous snapshot.",
+  "properties": {
+    "feature": "scan-cache"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.fact-store-persistence",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}
