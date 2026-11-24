@@ -5,7 +5,8 @@ use apg::layers::{NodeProperties, properties_from_json, properties_json};
 use apg::load;
 use apg::schema::SCAN_HEAD;
 use apg::splice::*;
-use lbug::{Connection, Database, SystemConfig};
+use apg::testutil::fixture_db_config;
+use lbug::{Connection, Database};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -102,7 +103,7 @@ fn build_db(path: &Path, graph: &Graph) {
     let ldir = path.parent().unwrap().join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(graph, &ldir).unwrap();
-    let db = Database::new(path, SystemConfig::default()).unwrap();
+    let db = Database::new(path, fixture_db_config()).unwrap();
     let conn = Connection::new(&db).unwrap();
     load::create_schema(&conn).unwrap();
     load::copy_from(&conn, &ldir).unwrap();
@@ -157,7 +158,7 @@ fn seed_temps(target: &Path) -> Vec<PathBuf> {
 /// (`row_counts` walks every table `show_tables()` reports, nodes and RELs
 /// alike).
 fn table_counts(path: &Path) -> BTreeMap<String, i64> {
-    let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+    let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
     let counts = row_counts(&db);
     drop(db);
     counts
@@ -166,7 +167,7 @@ fn table_counts(path: &Path) -> BTreeMap<String, i64> {
 /// The `UnresolvedTarget` rows as `(fqn, category)` — the oracle's unresolved
 /// set by FQN WITH its category (folded per-category counts come from this).
 fn unresolved_rows(path: &Path) -> BTreeSet<(String, String)> {
-    let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+    let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
     let conn = Connection::new(&db).unwrap();
     let (names, rows) = query_rows(
         &conn,
@@ -193,7 +194,7 @@ fn category_counts(rows: &BTreeSet<(String, String)>) -> BTreeMap<String, usize>
 /// The single `Scan` row of a DB file opened read-only, as
 /// `(git_sha, git_clean, content_key, scanned_at)`.
 fn scan_row_of(path: &Path) -> (String, String, String, String) {
-    let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+    let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
     let conn = Connection::new(&db).unwrap();
     let (_, rows) = query_rows(
         &conn,
@@ -941,7 +942,7 @@ fn seed_and_splice(prev_path: &Path, a: &str, b: &str, c: &str) -> (SeededDb, Gr
 
 /// Reads the current `db.lbug` snapshot through the code oracle.
 fn published_snapshot(path: &Path) -> BTreeSet<String> {
-    let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+    let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
     let snap = code_snapshot(&db);
     drop(db);
     snap
@@ -1037,7 +1038,7 @@ fn agent_assembled() -> Graph {
 /// The `Agent` rows of a DB file opened read-only, as
 /// `(fqn, path, start_line, end_line, code_type)`.
 fn agent_rows(path: &Path) -> BTreeSet<(String, String, u64, u64, String)> {
-    let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+    let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
     let conn = Connection::new(&db).unwrap();
     let (names, rows) = query_rows(
         &conn,
@@ -1210,7 +1211,7 @@ fn sql_uses_rows(dir: &Path, home: &str) -> Vec<String> {
 fn located_code_graph(dir: &Path) -> BTreeSet<String> {
     let db = Database::new(
         dir.join("apg/.trans/db.lbug"),
-        SystemConfig::default().read_only(true),
+        fixture_db_config().read_only(true),
     )
     .unwrap();
     let mut out = code_snapshot(&db);
@@ -1328,12 +1329,12 @@ mod e2e {
         build_db(&prev, &fixture_graph());
 
         let before_schema = {
-            let db = Database::new(&prev, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(&prev, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             extract_schema(&conn).unwrap()
         };
         let before_counts = {
-            let db = Database::new(&prev, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(&prev, fixture_db_config().read_only(true)).unwrap();
             row_counts(&db)
         };
 
@@ -1414,7 +1415,7 @@ mod e2e {
         let dir = scratch("schema");
         let prev = dir.join("db.lbug");
         {
-            let db = Database::new(&prev, SystemConfig::default()).unwrap();
+            let db = Database::new(&prev, fixture_db_config()).unwrap();
             let conn = Connection::new(&db).unwrap();
             // Deliberately wrong: one table, none of the expected ones.
             conn.query("CREATE NODE TABLE Widget(fqn STRING PRIMARY KEY, extra INT64)")
@@ -1531,8 +1532,7 @@ mod e2e {
 
         let spliced = code_snapshot(&seeded.db);
         let expected = {
-            let db =
-                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(&expected_path, fixture_db_config().read_only(true)).unwrap();
             let snap = code_snapshot(&db);
             drop(db);
             snap
@@ -1775,7 +1775,7 @@ mod e2e {
             "the full load must project exactly the assembled authored rows"
         );
         let full_counts = {
-            let db = Database::new(&full_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(&full_path, fixture_db_config().read_only(true)).unwrap();
             row_counts(&db)
         };
         assert_eq!(full_counts.get("Requirement"), Some(&2));
@@ -2082,8 +2082,7 @@ mod e2e {
         let expected_path = dir.join("expected.lbug");
         build_db(&expected_path, &multi_lang_new(&changed, &skipped));
         let expected = {
-            let db =
-                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(&expected_path, fixture_db_config().read_only(true)).unwrap();
             let snap = code_snapshot(&db);
             drop(db);
             snap
@@ -3316,8 +3315,7 @@ mod e2e {
         // The full structural set oracle (the Module set included).
         let spliced = code_snapshot(&seeded.db);
         let expected = {
-            let db =
-                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(&expected_path, fixture_db_config().read_only(true)).unwrap();
             let snap = code_snapshot(&db);
             drop(db);
             snap
@@ -3475,7 +3473,7 @@ mod e2e {
                      n.path AS path, n.start_line AS sl, n.end_line AS el"
                 ),
             };
-            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(db_path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (_, rows) = query_rows(&conn, &query).unwrap();
             let row = rows.into_iter().next();
@@ -3773,7 +3771,7 @@ mod e2e {
 
         /// `count(*)` over `query` on the DB at `db_path`, read-only.
         fn count_rows(db_path: &Path, query: &str) -> i64 {
-            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(db_path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (_, rows) = query_rows(&conn, query).unwrap();
             let n = rows
@@ -4219,7 +4217,7 @@ mod e2e {
 
         /// `count(*)` over `query` on the DB at `db_path`, read-only.
         fn count_rows(db_path: &Path, query: &str) -> i64 {
-            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(db_path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (_, rows) = query_rows(&conn, query).unwrap();
             let n = rows
@@ -4239,7 +4237,7 @@ mod e2e {
         /// every family incident to the FQN is in the snapshot — including one
         /// the fixture does not explicitly assert.
         fn snapshot(db_path: &Path, fqn: &str) -> Vec<String> {
-            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(db_path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let mut out = Vec::new();
             for (tag, query) in [
@@ -4583,7 +4581,7 @@ mod e2e {
         // --- The same splice must still realize the landed LOCATED FQN: the
         // planned placeholder is gone, the real node keeps the FQN with its
         // status cleared and its location filled.
-        let db = Database::new(&db_path, SystemConfig::default().read_only(true)).unwrap();
+        let db = Database::new(&db_path, fixture_db_config().read_only(true)).unwrap();
         let conn = Connection::new(&db).unwrap();
         let (_, rows) = query_rows(
             &conn,
@@ -4707,7 +4705,7 @@ mod e2e {
                      n.path AS path, n.start_line AS sl, n.end_line AS el"
                 ),
             };
-            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(db_path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (_, rows) = query_rows(&conn, &query).unwrap();
             let row = rows.into_iter().next();
@@ -4721,7 +4719,7 @@ mod e2e {
         /// family incident to the FQN is in the snapshot — including one the
         /// fixture does not explicitly assert.
         fn snapshot(db_path: &Path, label: &str, fqn: &str) -> Vec<String> {
-            let db = Database::new(db_path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(db_path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let mut out = Vec::new();
             for (tag, query) in [
@@ -5058,7 +5056,7 @@ mod e2e {
 
         // The healed rows keep their FQN-keyed `Contains` edges (the heal is an
         // in-place upsert, and the delta re-emits the assembled `Contains`).
-        let db = Database::new(&seeded.temp_path, SystemConfig::default().read_only(true)).unwrap();
+        let db = Database::new(&seeded.temp_path, fixture_db_config().read_only(true)).unwrap();
         let conn = Connection::new(&db).unwrap();
         for matched in [
             format!(
@@ -5914,7 +5912,7 @@ mod e2e {
             .unwrap();
         publish(seeded).unwrap();
 
-        let db = Database::new(&prev_path, SystemConfig::default().read_only(true)).unwrap();
+        let db = Database::new(&prev_path, fixture_db_config().read_only(true)).unwrap();
         let conn = Connection::new(&db).unwrap();
         let (names, rows) = query_rows(
             &conn,
@@ -6404,7 +6402,7 @@ mod e2e {
         /// duplicated row fails; the cells are the table's full property tuple
         /// in a stable (sorted) column order — never the internal storage id.
         fn every_table_snapshot(path: &Path) -> BTreeMap<String, usize> {
-            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (names, tables) =
                 query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
@@ -6836,7 +6834,7 @@ mod e2e {
         /// The `Contains` rows of a DB file opened read-only, as
         /// `(parent_fqn, child_fqn)`.
         fn contains_rows(path: &Path) -> BTreeSet<(String, String)> {
-            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (_, rows) = query_rows(
                 &conn,
@@ -7544,7 +7542,7 @@ mod e2e {
 
         // The published DB: the seed-resident edges flipped, the GC removed the
         // now-real targets' rows, and the two controls survived.
-        let db = Database::new(&prev_path, SystemConfig::default().read_only(true)).unwrap();
+        let db = Database::new(&prev_path, fixture_db_config().read_only(true)).unwrap();
         let conn = Connection::new(&db).unwrap();
 
         let (names, rows) = query_rows(
