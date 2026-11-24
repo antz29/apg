@@ -1865,6 +1865,82 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Phase-05 task-10: the oracle for the schema-template routing. The
+    /// process template (`testutil::schema_template_db`) that every
+    /// `touch_db`/`schema_db_at` fixture copies must carry exactly the schema a
+    /// **freshly** `load::create_schema`d file-backed database does — the real
+    /// init path — and so must a `touch_db` fixture built from it. Every table,
+    /// every column (name/type/primary key) and every rel connection is
+    /// compared, not a count; a failure names the differing table and prints
+    /// both shapes, whose `Debug` carries each column.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs/create_schema); run via cargo test-e2e"]
+    fn schema_template_matches_fresh_schema() {
+        // The reference: the real init path, `create_schema` on a fresh file.
+        let fresh = {
+            let dir = std::env::temp_dir().join(format!("apg-schema-fresh-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let db = Database::new(dir.join("db.lbug"), fixture_db_config()).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            load::create_schema(&conn).unwrap();
+            let fingerprint = splice::extract_schema(&conn).unwrap();
+            drop(conn);
+            drop(db);
+            let _ = std::fs::remove_dir_all(&dir);
+            fingerprint
+        };
+
+        // The process template itself, opened read-only.
+        let template = {
+            let db = Database::new(
+                testutil::schema_template_db(),
+                fixture_db_config().read_only(true),
+            )
+            .unwrap();
+            let conn = Connection::new(&db).unwrap();
+            splice::extract_schema(&conn).unwrap()
+        };
+
+        // A `touch_db` fixture, which copies the template into place.
+        let fixture = {
+            let root =
+                std::env::temp_dir().join(format!("apg-schema-fixture-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            testutil::touch_db(&root);
+            let db = Database::new(
+                root.join(specs::TRANS).join("db.lbug"),
+                fixture_db_config().read_only(true),
+            )
+            .unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let fingerprint = splice::extract_schema(&conn).unwrap();
+            drop(conn);
+            drop(db);
+            let _ = std::fs::remove_dir_all(&root);
+            fingerprint
+        };
+
+        let compared = [
+            ("process schema template", &template),
+            ("touch_db fixture", &fixture),
+        ];
+        assert!(
+            !fresh.is_empty(),
+            "a fresh `create_schema` database must declare tables"
+        );
+        for (label, got) in compared {
+            for table in fresh.keys().chain(got.keys()).collect::<BTreeSet<_>>() {
+                let (actual, expected) = (got.get(table), fresh.get(table));
+                assert!(
+                    actual == expected,
+                    "{label}: table `{table}` differs from a fresh `create_schema` database\n  \
+                     got:   {actual:#?}\n  fresh: {expected:#?}"
+                );
+            }
+        }
+    }
+
     /// Phase-05 task-4 (E2E): on the MAIN checkout `apg query` — plain CSV and
     /// `--json` — serves the transient Plan/PlanPhase/Task/Feedback projections
     /// the `apg_plan` / `apg_plan_phases` / `apg_plan_tasks` readers run (plus
