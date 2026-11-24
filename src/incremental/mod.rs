@@ -7,7 +7,8 @@
 //! (`<git-common-dir>/apg`, [`crate::cache::FactStore`]) so it is shared across
 //! every worktree and branch: `facts.db`, whose redb tables carry the fact
 //! units, the body blobs and the module scaffolding, beside the `facts.lock`
-//! writer gate.
+//! writer gate — an opening reader or writer waits on it for a bounded ~30 s
+//! and then fails with a named contention error.
 //!
 //! The per-worktree `refs`, `scans`, `deps`, `signatures` and `overloads` tables
 //! are declared for phase 4. In phase 3 the delta path still persists the JSON
