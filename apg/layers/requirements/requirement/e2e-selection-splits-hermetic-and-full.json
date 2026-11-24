@@ -3,7 +3,9 @@
   "type": "requirement",
   "name": "e2e-selection-splits-hermetic-and-full",
   "body": "The end-to-end tier separates a hermetic selection that exercises the built binary alone from a full selection that runs the real frontends and the pinned-scale acceptance, and the release gate runs the full selection.",
-  "properties": {},
+  "properties": {
+    "feature": "test-speed"
+  },
   "out": [],
   "in": [
     {

@@ -3,7 +3,9 @@
   "type": "requirement",
   "name": "dev-artifacts-shared-across-worktrees",
   "body": "A development worktree reuses the frontend and compiled artefacts built once for the checkout instead of a per-worktree rebuild, a forced rebuild replaces them, and freshness follows each frontend's sources plus the ingestor and build script.",
-  "properties": {},
+  "properties": {
+    "feature": "test-speed"
+  },
   "out": [],
   "in": [
     {

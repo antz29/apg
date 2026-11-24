@@ -3,7 +3,9 @@
   "type": "requirement",
   "name": "test-database-config-is-fixture-sized",
   "body": "A test database opens with a system configuration sized for its fixture rather than the engine's default ceiling, and a production database open keeps the engine default unless a test override applies.",
-  "properties": {},
+  "properties": {
+    "feature": "test-speed"
+  },
   "out": [],
   "in": [
     {
