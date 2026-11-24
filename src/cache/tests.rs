@@ -204,11 +204,13 @@ mod unit {
             default: "src".into(),
             types: vec![code_type_rule("test", "**/tests/**")],
             structural: Some(structural_scope()),
+            cache: None,
         };
         let a_again = ApgConfig {
             default: "src".into(),
             types: vec![code_type_rule("test", "**/tests/**")],
             structural: Some(structural_scope()),
+            cache: None,
         };
         let key = |cfg: Option<&ApgConfig>| {
             CacheKey::compute(&ScanConfigKey {
@@ -238,12 +240,14 @@ mod unit {
             default: "src".into(),
             types: vec![code_type_rule("test", "**/spec/**")],
             structural: Some(structural_scope()),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&glob_changed))));
         let name_changed = ApgConfig {
             default: "src".into(),
             types: vec![code_type_rule("generated", "**/tests/**")],
             structural: Some(structural_scope()),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&name_changed))));
         let names_changed = ApgConfig {
@@ -253,6 +257,7 @@ mod unit {
                 ..code_type_rule("test", "**/tests/**")
             }],
             structural: Some(structural_scope()),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&names_changed))));
         let ordered = |first: (&str, &str), second: (&str, &str)| ApgConfig {
@@ -262,6 +267,7 @@ mod unit {
                 code_type_rule(second.0, second.1),
             ],
             structural: Some(structural_scope()),
+            cache: None,
         };
         assert!(
             !key(Some(&ordered(
@@ -278,6 +284,7 @@ mod unit {
             default: "lib".into(),
             types: vec![code_type_rule("test", "**/tests/**")],
             structural: Some(structural_scope()),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&default_changed))));
         // Structural scope: include, exclude, code_type, and absence vs presence.
@@ -288,6 +295,7 @@ mod unit {
                 include: vec!["**/*.yaml".into()],
                 ..structural_scope()
             }),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&include_changed))));
         let exclude_changed = ApgConfig {
@@ -297,6 +305,7 @@ mod unit {
                 exclude: vec!["third_party/**".into()],
                 ..structural_scope()
             }),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&exclude_changed))));
         let code_type_changed = ApgConfig {
@@ -306,12 +315,14 @@ mod unit {
                 code_type: Some("cfg".into()),
                 ..structural_scope()
             }),
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&code_type_changed))));
         let no_structural = ApgConfig {
             default: "src".into(),
             types: vec![code_type_rule("test", "**/tests/**")],
             structural: None,
+            cache: None,
         };
         assert!(!ka.matches(&key(Some(&no_structural))));
 

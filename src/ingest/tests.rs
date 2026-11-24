@@ -1492,6 +1492,7 @@ mod int {
             default: "src".to_string(),
             types: Vec::new(),
             structural: Some(crate::classify::StructuralScope::default()),
+            cache: None,
         };
         assert_eq!(
             crate::classify::classify_code_type("ci.yml", "yaml.ci.yml", "yaml", Some(&cfg)),

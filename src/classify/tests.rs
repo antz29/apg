@@ -151,6 +151,7 @@ mod unit {
             default: "src".to_string(),
             types: Vec::new(),
             structural: Some(StructuralScope::default()),
+            cache: None,
         };
         for lang in [
             "sh",
@@ -195,6 +196,7 @@ mod unit {
                 exclude: Vec::new(),
                 code_type: Some("cfg".to_string()),
             }),
+            cache: None,
         };
         assert_eq!(
             classify_code_type("ci.yml", "yaml.ci.yml", "yaml", Some(&custom)),

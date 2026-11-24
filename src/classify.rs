@@ -30,6 +30,17 @@ pub struct StructuralScope {
     pub code_type: Option<String>,
 }
 
+/// The `apg/config.json` **cache** section: the project-start cache-copy
+/// choice. An absent section is no preference (the CLI, then `APG_CACHE_COPY`,
+/// then `auto`).
+#[derive(serde::Deserialize, Default)]
+pub struct CacheSection {
+    /// `cache.project-start`: `auto`|`clone`|`copy`|`skip`; absent = no
+    /// preference.
+    #[serde(default, rename = "project-start")]
+    pub project_start: Option<String>,
+}
+
 /// Project-level classification config (apg.json), replacing the built-in
 /// defaults when present.
 #[derive(serde::Deserialize, Default)]
@@ -42,6 +53,9 @@ pub struct ApgConfig {
     /// scanner's defaults (claim everything, `config`).
     #[serde(default)]
     pub structural: Option<StructuralScope>,
+    /// The cache section (see [`CacheSection`]); `None` means absent.
+    #[serde(default)]
+    pub cache: Option<CacheSection>,
 }
 
 fn default_code_type() -> String {
