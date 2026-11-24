@@ -35,11 +35,11 @@
 //!    the git common dir, a store format or config change leaves it intact, and
 //!    every worktree keeps its own.
 //!
-//! The transitional JSON records — `manifest.json`, `scan.json` and the
-//! `index/` dependency/signature/overload files — live beside `facts.db` under
-//! `<git-common-dir>/apg/` (not under `apg/facts/`) until the phase-4 tasks move
-//! them into the redb store; the store does not read them. Module scaffolding no
-//! longer has a JSON file there: it is in the redb `scaffolding` table.
+//! Every fact a scan records lives in the redb tables alone: the content bodies
+//! and units, the module scaffolding, and the per-worktree `refs`, `scans`,
+//! `deps`, `signatures` and `overloads` rows, beside the `worktrees` registry and
+//! the `meta` format row. There are no `manifest.json`, `scan.json` or
+//! `index/*.json` files beside `facts.db` — the store carries everything.
 //!
 //! The global cache key ([`CacheKey`], `domain.value.cache-key`) is the
 //! version/format/config identity that invalidates the whole cache on drift:
@@ -50,10 +50,10 @@
 //! it into each record's `code_type`, so a config change must force a full
 //! load).
 
-// This module lands the win-B content-addressed API; a few of its accessors
-// (e.g. `FactStore::has`, `Manifest::rebase_root`) are consumed by the splice
-// path and the test suites rather than by `cmd_scan` today, so the whole
-// module's surface is deliberately public.
+// This module lands the win-B content-addressed API, and the whole module's
+// surface is deliberately public even though a few accessors are not wired into
+// production: `FactStore::has` is used only by the test suites, and
+// `Manifest::rebase_root` currently has no caller at all.
 //
 // The implementation is split across cohesive submodules — the body codec
 // ([`body`]), the manifest and global cache key ([`manifest`]), the per-file
