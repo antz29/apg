@@ -160,9 +160,13 @@ checkout instead of once per worktree:
   a cached `deps/` binary rather than recompile when it considers the crate's
   inputs unchanged — the variable removes the artifact, it does not force
   `rustc` to re-run.
-- Re-staging is driven by each frontend's source tree plus the ingestor's
-  top-level `src/ingest/*.rs` (`tests.rs` excluded) and `build.rs` itself;
-  a changed `APG_BUILD_FRONTENDS` also re-runs the build script.
+- Re-staging is driven by each frontend's **production** source tree only: the
+  walk prunes every frontend's `tests/` directory and test-suffixed files
+  (`tests.rs`, `*_test.go`, `*Test.java`, `*.test.ts`, `*_test.rs`), while a
+  production file whose name merely contains "test" (e.g.
+  `src/cpplib/self_test.h`) stays watched. The rerun set also carries
+  `build.rs` and every production `src/ingest/*.rs` (`tests.rs` excluded); a
+  changed `APG_BUILD_FRONTENDS` also re-runs the build script.
 - `APG_FRONTEND_DIR` remains the runtime override for frontend lookup.
 
 This is a dev/test arrangement only — the release install path and the
