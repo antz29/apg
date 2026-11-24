@@ -1,10 +1,29 @@
 use super::*;
 
+use crate::load;
+use crate::testutil::fixture_db_config;
+use lbug::{Connection, Database};
+
+/// A fresh derivation of this binary's schema from an in-memory
+/// `create_schema`/`extract_schema` pass, independent of any cache. Shared by
+/// the int tier's expected-schema-cache tests.
+fn fresh_schema_fingerprint() -> anyhow::Result<SchemaFingerprint> {
+    let db = Database::in_memory(fixture_db_config())?;
+    let conn = Connection::new(&db)?;
+    load::create_schema(&conn)?;
+    extract_schema(&conn)
+}
+
 /// int tier -- pure in-memory: the seed-vs-full-load DECISION surface wired
-/// through the extracted equivalence predicate; no filesystem, database, git
-/// or process. The `db.lbug` copy/schema/DB-equality half stays e2e below.
+/// through the extracted equivalence predicate, plus the expected-schema cache
+/// driven against a test-local cell (its fresh derivation uses an in-memory
+/// engine only, never a `db.lbug`); no filesystem, git or process. The
+/// `db.lbug` copy/schema/DB-equality half stays e2e below.
 mod int {
     use super::*;
+
+    use std::cell::Cell;
+    use std::sync::OnceLock;
 
     /// fix-module-identity phase-06 task-10: the seed guard's content-key
     /// equivalence (`seed_key_matches`) is the same rule `seed_checked`
@@ -84,6 +103,77 @@ mod int {
             "{unrepresented}"
         );
         assert!(unrepresented.contains("full load"), "{unrepresented}");
+    }
+
+    /// `cached_fingerprint` against a test-local `OnceLock` returns the same
+    /// fingerprint a fresh in-memory `create_schema`/`extract_schema` derives,
+    /// and a populated cell serves every later call without rebuilding.
+    #[test]
+    fn cached_fingerprint_equals_a_fresh_in_memory_schema() {
+        let fresh = fresh_schema_fingerprint().expect("fresh in-memory schema fingerprint");
+
+        let cell = OnceLock::new();
+        let builds = Cell::new(0usize);
+        let cached = cached_fingerprint(&cell, || {
+            builds.set(builds.get() + 1);
+            fresh_schema_fingerprint()
+        })
+        .expect("cached schema fingerprint");
+        assert_eq!(
+            cached, fresh,
+            "the cached fingerprint must equal a fresh one"
+        );
+        assert!(
+            cell.get().is_some(),
+            "a successful build populates the cell"
+        );
+
+        // A second call must serve the cell, not run the builder.
+        let again = cached_fingerprint(&cell, || {
+            builds.set(builds.get() + 1);
+            Ok(SchemaFingerprint::new())
+        })
+        .expect("cached schema fingerprint");
+        assert_eq!(
+            again, fresh,
+            "a populated cell serves the cached fingerprint"
+        );
+        assert_eq!(builds.get(), 1, "only the first call builds");
+    }
+
+    /// An errored build is reported to its caller but never cached: the cell
+    /// stays unset, so the next call re-invokes the builder and re-reports.
+    #[test]
+    fn an_errored_schema_build_is_not_cached() {
+        let cell = OnceLock::new();
+        let builds = Cell::new(0usize);
+        let first = cached_fingerprint(&cell, || {
+            builds.set(builds.get() + 1);
+            Err(anyhow::anyhow!("schema build failed"))
+        });
+        assert!(first.is_err(), "the first call reports the builder's error");
+        assert!(
+            cell.get().is_none(),
+            "an errored build leaves the cell unset"
+        );
+
+        let second = cached_fingerprint(&cell, || {
+            builds.set(builds.get() + 1);
+            Err(anyhow::anyhow!("schema build failed again"))
+        });
+        assert!(
+            second.is_err(),
+            "the second call reports again, not a cached value"
+        );
+        assert!(
+            second.unwrap_err().to_string().contains("again"),
+            "the re-run error is the second build's, not a cached one"
+        );
+        assert_eq!(builds.get(), 2, "every call re-invokes the builder");
+        assert!(
+            cell.get().is_none(),
+            "the cell stays unset after a second failure"
+        );
     }
 }
 
