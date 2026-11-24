@@ -6,11 +6,11 @@
 //! The layout is `<checkout>/apg/.trans/cache/<language>/`: the cache root lives
 //! under the checkout's own `apg/` root, so every worktree owns a cache and a
 //! fact-store format or config change leaves it intact. It is deliberately
-//! **not** the shared fact store (`<git-common-dir>/apg/facts`): nothing here
-//! consults the git common dir, a cache key or the binary version — these are
-//! pure path arithmetic over the apg root the caller passes in, so scan's
-//! frontend hand-off and `apg project start`'s cache materialisation agree on
-//! one layout without touching the filesystem.
+//! **not** the shared fact store (`<git-common-dir>/apg`, holding `facts.db`
+//! and `facts.lock`): nothing here consults the git common dir, a cache key or
+//! the binary version — these are pure path arithmetic over the apg root the
+//! caller passes in, so scan's frontend hand-off and `apg project start`'s
+//! cache materialisation agree on one layout without touching the filesystem.
 
 use std::path::{Path, PathBuf};
 

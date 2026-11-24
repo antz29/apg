@@ -218,8 +218,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // the old DB and the pipeline has no previous database to splice.
     // Run after the verdict above, which is therefore the honest pre-force
     // state, and before the fast-path probe. The shared fact store
-    // (`<git-common-dir>/apg/facts`) lives outside `.trans` and is never
-    // removed here; `apg/layers/**` and the scanned sources are never touched.
+    // (`<git-common-dir>/apg`, holding `facts.db` and the `facts.lock` writer
+    // gate) lives outside `.trans` and is never removed here; `apg/layers/**`
+    // and the scanned sources are never touched.
     if force {
         session::discard_derived_index(&trans_dir);
     }

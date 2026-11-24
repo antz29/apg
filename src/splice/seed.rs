@@ -85,11 +85,12 @@ pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
 /// The equivalence-guarded seed (feedback-101).
 ///
 /// The delta/manifest are **shared** across worktrees
-/// (`<git-common-dir>/apg/facts`) while the seeded DB is **local** to this
-/// worktree. The splice is exact only when the LOCAL seed was built from the
-/// SAME tree content the shared [`crate::delta::ScanRecord`] (and hence the
-/// delta) was derived from. If another worktree (or main) scans in between, the
-/// shared record advances past this worktree's DB: the manifest diff no longer
+/// (`<git-common-dir>/apg`, holding `facts.db` and `facts.lock`) while the
+/// seeded DB is **local** to this worktree. The splice is exact only when the
+/// LOCAL seed was built from the SAME tree content the shared
+/// [`crate::delta::ScanRecord`] (and hence the delta) was derived from. If
+/// another worktree (or main) scans in between, the shared record advances past
+/// this worktree's DB: the manifest diff no longer
 /// describes the local DB, an empty/partial target set leaves the stale seeded
 /// rows in place, and the published DB is not a full rebuild — which the next
 /// freshness fast-path then reuses. `content_key` folds the HEAD sha and the
