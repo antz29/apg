@@ -1,12 +1,12 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
-use lbug::{Database, SystemConfig};
+use lbug::Database;
 
 use crate::schema::Record;
 use crate::specs;
 
-use super::db::ArtifactDb;
+use super::db::{ArtifactDb, system_config};
 use super::merge::{edge_merge, node_fqn};
 
 /// The exact set of node FQNs a transient metadata mutation must detach before
@@ -199,7 +199,7 @@ pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTre
             db_path.display()
         );
     }
-    let db = Database::new(&db_path, SystemConfig::default().read_only(true))?;
+    let db = Database::new(&db_path, system_config(true)?)?;
     ArtifactDb { db }.code_universes_from_db()
 }
 
