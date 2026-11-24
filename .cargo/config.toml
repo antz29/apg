@@ -5,9 +5,10 @@
 #   e2e   -- 1+ units WITH real I/O (any temp dir, node-file write, db.lbug
 #            open, git op or process spawn is e2e BY DEFINITION)
 #
-# Every e2e test is additionally `#[ignore]`d, so a plain `cargo test` (the
-# fast default gate) runs the unit+int tiers only and can never reach an e2e
-# test; e2e is the opt-in FINAL gate only.
+# Every e2e test is additionally `#[ignore]`d, so `cargo test --lib` (the fast
+# default gate) runs the unit+int tiers only and can never reach an e2e test,
+# though a bare `cargo test` still links the e2e test targets; e2e is the
+# opt-in FINAL gate only.
 #
 # Helpers/fixtures/builders stay OUT of tiers -- they live on the shared
 # public harness `apg::testutil` (src/testutil.rs) or the crate's
