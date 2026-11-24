@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "test-database-config-is-fixture-sized",
-  "body": "A test database opens with a system configuration sized for its fixture rather than the engine's default ceiling, while a production database open keeps the default configuration whenever no test override applies.",
+  "body": "A test database opens with a system configuration sized for its fixture rather than the engine's default ceiling, and a production database open keeps the engine default unless a test override applies.",
   "properties": {},
   "out": [],
   "in": [
