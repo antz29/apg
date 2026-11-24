@@ -8460,12 +8460,13 @@ mod e2e {
     /// over the real repo — the same pattern as
     /// `cargo_manifest_and_lockfile_declare_release_version`. Reads the real
     /// `Cargo.toml`/`Cargo.lock`/`build.rs` and the real build artifacts
-    /// under `src/rustlib/target/` (real filesystem I/O), so it is
+    /// under the resolved target dir (real filesystem I/O), so it is
     /// `#[ignore]`-and-invoke. (A) root workspace membership unchanged;
     /// (B) a separate rustlib lockfile distinct from the root's;
-    /// (C) build.rs still compiles rustlib into its isolated target dir.
+    /// (C) build.rs still compiles rustlib into its resolved target dir — the
+    /// shared `$CARGO_TARGET_DIR/release/` when set, else its isolated one.
     #[test]
-    #[ignore = "e2e tier: real I/O (repo files/build artifacts under src/rustlib/target); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (repo files/build artifacts under the resolved target dir); run via cargo test-e2e"]
     fn rust_build_isolation_preserved() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
@@ -8528,8 +8529,9 @@ mod e2e {
 
         // (C) BUILD.RS STILL COMPILES RUSTLIB IN ISOLATION: `cargo build
         // --manifest-path src/rustlib/Cargo.toml ... --release --bin
-        // rustfrontend`, targeting the isolated
-        // `src/rustlib/target/release/` (ALWAYS `--release`, independent of
+        // rustfrontend`, targeting the resolved target dir
+        // (`$CARGO_TARGET_DIR/release/` when set, else the isolated
+        // `src/rustlib/target/release/`; ALWAYS `--release`, independent of
         // the outer cargo profile).
         let build_rs = std::fs::read_to_string(root.join("build.rs")).unwrap();
         assert!(
@@ -8540,15 +8542,20 @@ mod e2e {
             build_rs.contains("--bin") && build_rs.contains("rustfrontend"),
             "(C) build.rs must build the rustfrontend bin"
         );
-        // build.rs compiles rustlib with `--release` into the isolated
-        // `src/rustlib/target/release/` regardless of the outer cargo
-        // profile, then stages it into the active profile's frontends dir.
-        let isolated = root.join("src/rustlib/target/release/rustfrontend");
+        // build.rs compiles rustlib with `--release` regardless of the outer
+        // cargo profile, then stages it into the active profile's frontends
+        // dir. The artifact lands in the shared `$CARGO_TARGET_DIR/release/`
+        // when that variable is set (build.rs's `frontend_artifact`), and in
+        // the isolated `src/rustlib/target/release/` otherwise.
+        let rustfrontend = match std::env::var("CARGO_TARGET_DIR") {
+            Ok(dir) if !dir.is_empty() => PathBuf::from(dir).join("release/rustfrontend"),
+            _ => root.join("src/rustlib/target/release/rustfrontend"),
+        };
         assert!(
-            isolated.is_file(),
-            "(C) the rustfrontend must be built into the ISOLATED target dir {} — \
+            rustfrontend.is_file(),
+            "(C) the rustfrontend must be built into {} — \
                  run `cargo build` (build.rs compiles it there)",
-            isolated.display()
+            rustfrontend.display()
         );
         let profile_dir = apg::testutil::apg_bin()
             .parent()
