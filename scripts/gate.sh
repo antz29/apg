@@ -20,9 +20,10 @@
 #   scripts/gate.sh          # actionlint, Formula ruby -c, shell -n, fmt --check,
 #                            # check, clippy, build, test --lib, suite deps,
 #                            # suite tsc --noEmit, bun test, node --test
-#   scripts/gate.sh --e2e    # ... then the e2e tier (opt-in): the cargo e2e
-#                            #     tests AND the opencode-suite boundary e2e
-#                            #     (scratch /tmp repos only, never a real project)
+#   scripts/gate.sh --e2e    # ... then the e2e tier (opt-in): the per-binary
+#                            #     runner scripts/test-e2e.sh AND the
+#                            #     opencode-suite boundary e2e (scratch /tmp
+#                            #     repos only, never a real project)
 #
 # Every run, green or red, ends with a summary: one line per step of the run's
 # mode, in order — passed, failed, skipped (by its own condition), or not run.
@@ -52,11 +53,13 @@
 # `cargo test --lib` here is the repo's DEFAULT suite: the lib target's unit+int
 # tiers only, seconds-fast. It links no test target under `tests/`, so the e2e
 # crates are never built by the default step; `cargo clippy --all-targets` above
-# is unchanged and still type-checks every target, and `--e2e` builds and runs
-# the e2e crates (or `cargo test-e2e` on its own). E2E_THREADS bounds their
-# parallelism (default 4, the documented `cargo test-e2e` alias value; many
-# concurrent `db.lbug` opens have been observed to flake with LadybugDB
-# `Mmap ... failed`).
+# is unchanged and still type-checks every target, and `--e2e` runs
+# `scripts/test-e2e.sh` (or `cargo test-e2e` on its own). The runner builds
+# every `*_e2e` binary once and runs each as its own process under a bounded
+# pool: E2E_JOBS concurrent binaries (default min(8, CPU cores)) at
+# E2E_THREADS libtest threads each (default 4, the documented `cargo test-e2e`
+# alias value), heavy binaries (splice_e2e) capped lower; many concurrent
+# `db.lbug` opens have been observed to flake with LadybugDB `Mmap ... failed`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -81,7 +84,7 @@ STEPS=(
 )
 if [ "${1:-}" = "--e2e" ]; then
   STEPS+=(
-    "cargo test e2e:: -- --ignored --test-threads=${E2E_THREADS:-4}"
+    "bash scripts/test-e2e.sh   (e2e tier: E2E_JOBS binaries x ${E2E_THREADS:-4} threads)"
     "bun test e2e   (opencode-suite boundary; candidate $BIN)"
   )
 fi
@@ -173,8 +176,13 @@ step
 (cd src/tslib && node --test)
 
 if [ "${1:-}" = "--e2e" ]; then
+  # The runner is committed 100644 (no chmod here), so run it through bash. It
+  # owns the libtest `e2e:: --ignored` opt-in and the per-binary pool; the
+  # E2E_THREADS/E2E_JOBS overrides pass through (unset E2E_THREADS defaults to
+  # 4 threads, unset or empty E2E_JOBS to the runner's min(8, cores) binaries).
   step
-  cargo test e2e:: -- --ignored --test-threads="${E2E_THREADS:-4}"
+  export E2E_THREADS="${E2E_THREADS:-4}" E2E_JOBS="${E2E_JOBS:-}"
+  bash scripts/test-e2e.sh
 
   # The suite e2e is opt-in via APG_SUITE_E2E=1 (the boundary cases self-skip
   # otherwise), and every agent's shell grant is deny-by-default exact patterns
