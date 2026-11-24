@@ -1142,4 +1142,203 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// phase-04 task-11: one redb store holds each worktree's OWN `refs`/scan/
+    /// delta rows, and a unit is selected on its five-part `(format, config,
+    /// language, repo-relative path, blob OID)` identity alone — the recorded
+    /// `inputs` diagnostic never gates the OID-only `candidate`/`has_unit`
+    /// selection, while the inputs-gated `has`/`reuse` still does.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktrees/redb store); run via cargo test-e2e"]
+    fn each_worktree_keeps_its_rows_and_units_reuse_on_the_oid_alone() {
+        use apg::delta::ScanRecord;
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("store-worktree-rows");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write("a/a.go", "package a\n\nfunc Leaf() int { return 1 }\n");
+        repo.commit_all("source");
+        let home = scratch_home("store-worktree-rows");
+        let home_s = home.to_string_lossy().into_owned();
+
+        let cold = scan_in(&repo.root, &home_s);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+
+        // A second worktree at the same commit, given a DIFFERENT tree (an
+        // untracked file that calls into the leaf), scanned on its own.
+        let wt = repo.start_project("wt");
+        std::fs::create_dir_all(wt.join("b")).unwrap();
+        std::fs::write(
+            wt.join("b/b.go"),
+            "package b\n\nimport \"scratch/a\"\n\nfunc Use() int { return a.Leaf() }\n",
+        )
+        .unwrap();
+        let fresh = scan_in(&wt, &home_s);
+        assert!(
+            fresh.status.success(),
+            "worktree scan: {}",
+            String::from_utf8_lossy(&fresh.stderr)
+        );
+
+        let store_root = repo.root.join(".git/apg");
+        let store = FactStore::at(store_root.clone()).load();
+        let main_id = apg::cache::worktree_id(&repo.root);
+        let wt_id = apg::cache::worktree_id(&wt);
+        assert_ne!(main_id, wt_id, "each checkout has its own worktree id");
+
+        // (1) refs: each worktree's own manifest rows, matching its own tree.
+        let main_refs = store.refs(main_id);
+        let wt_refs = store.refs(wt_id);
+        assert_eq!(
+            main_refs,
+            Manifest::build(&repo.root).entries,
+            "the main worktree's refs are its tree"
+        );
+        assert_eq!(
+            wt_refs,
+            Manifest::build(&wt).entries,
+            "the worktree's refs are its own tree"
+        );
+        assert!(
+            main_refs.contains_key("a/a.go") && !main_refs.contains_key("b/b.go"),
+            "the main tree has a/a.go and no b/b.go: {main_refs:?}"
+        );
+        assert!(
+            wt_refs.contains_key("b/b.go"),
+            "the worktree's refs carry its added file: {wt_refs:?}"
+        );
+        assert_ne!(main_refs, wt_refs, "the two trees' refs differ");
+
+        // The scan rows: each worktree keeps its OWN row, recording its root.
+        let main_row = store.scan(main_id).expect("the main scan row");
+        let wt_row = store.scan(wt_id).expect("the worktree scan row");
+        assert_ne!(main_row, wt_row, "the two scan rows differ");
+        let main_record: ScanRecord =
+            postcard::from_bytes(&main_row).expect("the main scan row decodes");
+        let wt_record: ScanRecord = postcard::from_bytes(&wt_row).expect("the wt scan row decodes");
+        let main_root = std::fs::canonicalize(&repo.root).unwrap();
+        let wt_root = std::fs::canonicalize(&wt).unwrap();
+        assert_eq!(main_record.manifest.root, main_root.to_string_lossy());
+        assert_eq!(wt_record.manifest.root, wt_root.to_string_lossy());
+        assert_eq!(main_record.manifest.entries, main_refs);
+        assert_eq!(wt_record.manifest.entries, wt_refs);
+        let ids: std::collections::BTreeSet<Vec<u8>> = store
+            .scans()
+            .into_iter()
+            .map(|(id, _)| id.to_vec())
+            .collect();
+        assert_eq!(
+            ids,
+            [main_id.to_vec(), wt_id.to_vec()].into_iter().collect(),
+            "exactly one scan row per worktree"
+        );
+
+        // The delta rows: each worktree's own file-dependency index, matching
+        // its tree (the worktree's b/b.go → a/a.go edge only exists in its row).
+        let main_deps: Vec<(String, String)> =
+            postcard::from_bytes(&store.deps(main_id).expect("the main worktree delta row"))
+                .unwrap();
+        let wt_deps: Vec<(String, String)> =
+            postcard::from_bytes(&store.deps(wt_id).expect("the worktree delta row")).unwrap();
+        assert!(
+            main_deps.is_empty(),
+            "the main tree has no cross-file dependency: {main_deps:?}"
+        );
+        assert_eq!(
+            wt_deps,
+            vec![("b/b.go".to_string(), "a/a.go".to_string())],
+            "the worktree's delta rows are its own"
+        );
+        for (label, row) in [
+            ("signatures", store.signatures(main_id)),
+            ("overloads", store.overloads(main_id)),
+            ("signatures", store.signatures(wt_id)),
+            ("overloads", store.overloads(wt_id)),
+        ] {
+            assert!(row.is_some(), "each worktree keeps its own {label} row");
+        }
+        drop(store);
+
+        // (2) The OID-only selection: a unit recorded with one `inputs`
+        // diagnostic is selected on its five-part identity alone, while the
+        // inputs-gated read still refuses a drifted digest.
+        let key = CacheKey::compute(&ScanConfigKey::default());
+        let mut unit_store = FactStore::at(store_root).load();
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "fixture.mod".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "/w/diag.go".to_string(),
+            Node {
+                kind: NodeKind::File,
+                location: Some(Location {
+                    path: PathBuf::from("/w/diag.go"),
+                    start: 0,
+                    end: 0,
+                    start_line: 1,
+                    end_line: 3,
+                }),
+                ..Node::default()
+            },
+        );
+        g.contains
+            .insert(("fixture.mod".to_string(), "/w/diag.go".to_string()));
+        let frag = FileFragment::from_graph(&g, "/w/diag.go", "diag/a.go", "oid-diag", "go");
+        let recorded_inputs = frag.inputs_digest();
+        assert!(!recorded_inputs.is_empty(), "the unit records inputs");
+        unit_store.put(&frag, "/w", &key).unwrap();
+        unit_store.save_index().unwrap();
+
+        // The OID-only selection returns it regardless of the inputs column.
+        assert!(unit_store.has_unit("go", "diag/a.go", "oid-diag", &key));
+        let (candidate, root) = unit_store
+            .candidate("go", "diag/a.go", "oid-diag", &key)
+            .expect("the OID-only candidate is selected");
+        assert_eq!(root, "/w");
+        assert_eq!(candidate.rel_path, "diag/a.go");
+
+        // ...while a DIFFERENT inputs digest fails the inputs-gated read: the
+        // digest is diagnostic, never part of the key.
+        assert!(unit_store.has("go", "diag/a.go", "oid-diag", &recorded_inputs, &key));
+        assert!(
+            !unit_store.has(
+                "go",
+                "diag/a.go",
+                "oid-diag",
+                "a-different-inputs-digest",
+                &key
+            ),
+            "a drifted inputs diagnostic is not reusable through `has`"
+        );
+        assert!(
+            unit_store
+                .reuse(
+                    "go",
+                    "diag/a.go",
+                    "oid-diag",
+                    "a-different-inputs-digest",
+                    &key
+                )
+                .is_none(),
+            "a drifted inputs diagnostic is not reusable through `reuse`"
+        );
+        assert!(
+            unit_store
+                .reuse("go", "diag/a.go", "oid-diag", &recorded_inputs, &key)
+                .is_some(),
+            "the recorded inputs digest still reuses"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
