@@ -315,6 +315,11 @@ one count per scanned language:
 Progress is on by default when stderr is a terminal and off when it is piped or
 redirected; `--no-progress` turns it off.
 
+A stale index is diagnosed by input, never a bare refusal: a staleness refusal
+and the scan preamble name every differing freshness input as `differing: …`
+(e.g. `sha`, `content key`, `authored digest`; the scan preamble's line also
+prints its `Git state:` verdict).
+
 Outputs (all under the gitignored `apg/.trans/` directory; the committed
 `apg/` dir holds `config.json` plus the durable `apg/layers/` node files —
 one JSON file per authored spec node, FQN `<layer>.<type>.<name>` — the
@@ -625,7 +630,12 @@ destination). A target-less activity carries no operation edge.
   feedback resolved; every `implemented-by` claim and added/changed requirement
   in the change-set delta is covered by a task or phase) and prints the merge
   handoff. `apg project merge <name>` (from the main checkout) then runs
-  verify → merge → unguarded main rebuild. Push/tag remain human-approved acts.
+  verify → merge → unguarded main rebuild. A post-merge rebuild that fails — a
+  returned error or a panic — unlands the merge instead of leaving a stale main
+  graph: the default branch is hard-reset to the pre-merge commit, the stale
+  main derived index (`apg/.trans/db.lbug`) is discarded, and the project
+  branch and worktree stay so re-running `apg project merge <name>` retries
+  with no manual main scan. Push/tag remain human-approved acts.
 
 ## Configuration
 
