@@ -22,7 +22,11 @@
 //!    predicate. The refs, scans and delta rows are per-worktree: every such
 //!    row is scoped by the reading worktree's [`WorktreeId`], so a fresh
 //!    worktree of the same repository reads the shared content units and
-//!    re-bases them onto its own absolute root.
+//!    re-bases them onto its own absolute root. Opening the store takes the
+//!    exclusive `<root>/facts.lock` sibling of `facts.db`, polling up to a
+//!    bounded ~30 s and failing with a named contention error, and the one
+//!    write transaction holds that gate for its lifetime — never across a
+//!    frontend run.
 //!
 //! 3. The per-worktree toolchain cache layout ([`toolchain`]) — each frontend's
 //!    own native build cache lives under the checkout's
@@ -31,14 +35,16 @@
 //!    the git common dir, a store format or config change leaves it intact, and
 //!    every worktree keeps its own.
 //!
-//! The phase-02 JSON records — `manifest.json`, `scan.json`, `index.json`, the
-//! `index/` dependency/signature/overload files and `scaffolding.json` — still
-//! live at their current `<git-common-dir>/apg/facts/` location until the
-//! phase-4 tasks move them into the redb store; the store does not read them.
+//! The transitional JSON records — `manifest.json`, `scan.json` and the
+//! `index/` dependency/signature/overload files — live beside `facts.db` under
+//! `<git-common-dir>/apg/` (not under `apg/facts/`) until the phase-4 tasks move
+//! them into the redb store; the store does not read them. Module scaffolding no
+//! longer has a JSON file there: it is in the redb `scaffolding` table.
 //!
 //! The global cache key ([`CacheKey`], `domain.value.cache-key`) is the
 //! version/format/config identity that invalidates the whole cache on drift:
-//! binary version, scanner JSONL schema/format, ingestor projection rules, the
+//! the explicit fact-store format version ([`FACTS_FORMAT_VERSION`]), scanner
+//! JSONL schema/format, ingestor projection rules, the
 //! scan config (languages, excludes, modules), and the classification config
 //! (`apg/config.json`'s `default` / `types` / `structural` — the ingestor folds
 //! it into each record's `code_type`, so a config change must force a full
@@ -52,10 +58,10 @@
 // The implementation is split across cohesive submodules — the body codec
 // ([`body`]), the manifest and global cache key ([`manifest`]), the per-file
 // fact units, single-pass index and module scaffolding ([`fragment`]), the
-// shared redb store ([`store`]), the transitional file-backed fact store
-// ([`factstore`]), and the checkout-local toolchain cache layout
-// ([`toolchain`]) — all re-exported here so `crate::cache::<name>` keeps
-// resolving.
+// redb substrate and its `facts.lock` writer gate ([`store`]), the `FactStore`
+// facade over the redb store ([`factstore`]), and the checkout-local toolchain
+// cache layout ([`toolchain`]) — all re-exported here so `crate::cache::<name>`
+// keeps resolving.
 #![allow(dead_code)]
 
 pub mod body;

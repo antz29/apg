@@ -4,15 +4,20 @@
 //! per-scan state `apg scan` needs.
 //!
 //! The persisted state lives under the shared store root
-//! (`<git-common-dir>/apg/facts`, [`crate::cache::FactStore`]) so it is shared
-//! across every worktree and branch:
+//! (`<git-common-dir>/apg`, [`crate::cache::FactStore`]) so it is shared across
+//! every worktree and branch: `facts.db`, whose redb tables carry the fact
+//! units, the body blobs and the module scaffolding, beside the `facts.lock`
+//! writer gate.
+//!
+//! The per-worktree `refs`, `scans`, `deps`, `signatures` and `overloads` tables
+//! are declared for phase 4. In phase 3 the delta path still persists the JSON
+//! state beside `facts.db`:
 //!
 //! * `manifest.json` — the last scan's content manifest (path → blob OID),
 //! * `scan.json` — the last scan's commit sha + global cache key,
 //! * `index/deps.json` — the file-level dependency index (checkout-relative),
 //! * `index/signatures.json` — each file's exported signature set,
-//! * `index/overloads.json` — overload groups (checkout-relative),
-//! * `<lang>/<cache-key>/` — the per-file fact units.
+//! * `index/overloads.json` — overload groups (checkout-relative).
 //!
 //! Paths are checkout-relative throughout, so a fresh worktree of the same
 //! repository reads the same state and re-bases it onto its own root — the
