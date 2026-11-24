@@ -4,9 +4,10 @@
 
 mod common;
 
+use apg::artifacts::db::system_config;
 use apg::testutil::with_cwd;
 use apg::*;
-use lbug::{Connection, Database, SystemConfig};
+use lbug::{Connection, Database};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -275,7 +276,7 @@ fn winb_graph(
 /// returns the raw rows (column order preserved, names discarded).
 fn db_query(repo_dir: &Path, query: &str) -> Vec<Vec<String>> {
     let path = repo_dir.join("apg/.trans/db.lbug");
-    let db = Database::new(&path, SystemConfig::default().read_only(true))
+    let db = Database::new(&path, system_config(true).expect("database config"))
         .unwrap_or_else(|_| panic!("open {}", path.display()));
     let conn = Connection::new(&db).unwrap();
     let (_, rows) = splice::query_rows(&conn, query)
@@ -643,7 +644,7 @@ fn win_c_build_db(path: &Path, graph: &graph::Graph) {
     let ldir = path.parent().unwrap().join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(graph, &ldir).unwrap();
-    let db = Database::new(path, SystemConfig::default()).unwrap();
+    let db = Database::new(path, system_config(false).expect("database config")).unwrap();
     let conn = Connection::new(&db).unwrap();
     load::create_schema(&conn).unwrap();
     load::copy_from(&conn, &ldir).unwrap();
@@ -1846,7 +1847,11 @@ mod e2e {
         let ldir = dir.join(specs::TRANS).join("load");
         std::fs::create_dir_all(&ldir).unwrap();
         load::build_load_files(&graph, &ldir).unwrap();
-        let db = Database::new(dir.join(specs::TRANS).join("db.lbug"), Default::default()).unwrap();
+        let db = Database::new(
+            dir.join(specs::TRANS).join("db.lbug"),
+            system_config(false).expect("database config"),
+        )
+        .unwrap();
         let conn = Connection::new(&db).unwrap();
         load::create_schema(&conn).unwrap();
         load::copy_from(&conn, &ldir).unwrap();
@@ -1886,7 +1891,7 @@ mod e2e {
         {
             let db = Database::new(
                 apg_root.join(specs::TRANS).join("db.lbug"),
-                Default::default(),
+                system_config(false).expect("database config"),
             )
             .unwrap();
             let conn = Connection::new(&db).unwrap();
@@ -6942,7 +6947,11 @@ mod e2e {
 
         // The published DB answers with the new unit, keeps the unaffected one,
         // and carries the refreshed Scan head.
-        let db = Database::new(splice::db_path(&apg_root), SystemConfig::default()).unwrap();
+        let db = Database::new(
+            splice::db_path(&apg_root),
+            system_config(false).expect("database config"),
+        )
+        .unwrap();
         let conn = Connection::new(&db).unwrap();
         let funcs = emit_json_rows(
             conn.query("MATCH (f:Function) RETURN f.fqn AS fqn")
@@ -7123,7 +7132,7 @@ mod e2e {
         /// the `Scan` row's wall-clock `scanned_at`, normalised so two genuinely
         /// equivalent full assemblies compare equal.
         fn every_table_snapshot(path: &Path) -> BTreeMap<String, usize> {
-            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(path, system_config(true).expect("database config")).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (names, tables) =
                 splice::query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
@@ -12672,7 +12681,7 @@ mod e2e {
         /// column unset, both meaning "no properties" (the same normalisation
         /// the `splice_e2e` every-table oracle applies).
         fn every_table_snapshot(path: &Path) -> BTreeMap<String, usize> {
-            let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+            let db = Database::new(path, system_config(true).expect("database config")).unwrap();
             let conn = Connection::new(&db).unwrap();
             let (names, tables) =
                 splice::query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
