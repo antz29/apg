@@ -4,6 +4,7 @@ use apg::graph::NodeKind;
 use apg::ingest::*;
 use apg::layers::NodeProperties;
 use apg::schema::{Record, SCAN_HEAD};
+use apg::testutil::fixture_db_config;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -52,7 +53,7 @@ fn file_rec(path: &str, parent: &str, end_line: u32) -> Record {
 /// Runs `query` against a DB file opened read-only and returns every row's
 /// cells as strings (empty when the DB cannot be opened/queried).
 fn db_rows(path: &Path, query: &str) -> Vec<Vec<String>> {
-    let db = lbug::Database::new(path, lbug::SystemConfig::default().read_only(true))
+    let db = lbug::Database::new(path, fixture_db_config().read_only(true))
         .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
     let conn = lbug::Connection::new(&db).unwrap();
     let rows = conn
@@ -186,7 +187,7 @@ fn build_db(path: &Path, graph: &apg::graph::Graph) {
     let ldir = path.parent().unwrap().join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     apg::load::build_load_files(graph, &ldir).unwrap();
-    let db = lbug::Database::new(path, lbug::SystemConfig::default()).unwrap();
+    let db = lbug::Database::new(path, fixture_db_config()).unwrap();
     let conn = lbug::Connection::new(&db).unwrap();
     apg::load::create_schema(&conn).unwrap();
     apg::load::copy_from(&conn, &ldir).unwrap();
