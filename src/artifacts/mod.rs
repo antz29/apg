@@ -36,8 +36,8 @@ pub(crate) use merge::rel_pair_allowed;
 use crate::schema::Record;
 
 /// A tiny option parser for the spec/plan/review subcommands. Positional args
-/// (not starting with `--`) and repeatable flags (`--flag value`, boolean when
-/// no value follows).
+/// (not starting with `--`) and repeatable flags (`--flag value` or
+/// `--flag=value`, boolean when no value follows).
 pub struct ParsedArgs {
     pub positional: Vec<String>,
     pub flags: HashMap<String, Vec<String>>,
@@ -48,13 +48,20 @@ pub fn parse_args(args: &[String]) -> ParsedArgs {
     let mut flags: HashMap<String, Vec<String>> = HashMap::new();
     let mut i = 0;
     while i < args.len() {
-        if let Some(name) = args[i].strip_prefix("--") {
-            let mut vals = Vec::new();
-            while i + 1 < args.len() && !args[i + 1].starts_with("--") {
-                vals.push(args[i + 1].clone());
-                i += 1;
+        if let Some(rest) = args[i].strip_prefix("--") {
+            if let Some((name, value)) = rest.split_once('=') {
+                flags
+                    .entry(name.to_string())
+                    .or_default()
+                    .push(value.to_string());
+            } else {
+                let mut vals = Vec::new();
+                while i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                    vals.push(args[i + 1].clone());
+                    i += 1;
+                }
+                flags.entry(rest.to_string()).or_default().extend(vals);
             }
-            flags.entry(name.to_string()).or_default().extend(vals);
         } else {
             positional.push(args[i].clone());
         }
