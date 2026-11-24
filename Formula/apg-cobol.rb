@@ -15,8 +15,8 @@ class ApgCobol < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.30.0"
-    rebuild 6
-    sha256 cellar: :any_skip_relocation, arm64_sequoia: "5c5026af5789bb0c50d901d762c2b135e33b9218ca14eefd1f52c2a08421ee82"
+    rebuild 7
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "dd87405bcf0086ef96f610a8dcb9b862dd309f21524f629625248b9f019b9fb2"
   end
 
   # A bottle block is merged here by the bottle workflow once this formula is
