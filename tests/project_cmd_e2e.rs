@@ -3056,6 +3056,193 @@ mod e2e {
     }
 
     // ------------------------------------------------------------------
+    // phase-02 task-2 (e2e): a post-merge rebuild that PANICS *after* writing
+    // its Scan row is caught and takes the SAME rollback as a returned error:
+    // main is back at its pre-merge HEAD, the stale derived index is discarded,
+    // the worktree and branch remain, and a retried merge lands and self-cleans.
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+    fn merge_panicking_rebuild_leaves_the_merge_unlanded_and_the_project_retryable() {
+        // Fold every scan (main pre-scan + the write-then-panic rebuild + the
+        // retried merge's rebuild) into ONE CWD_LOCK hold.
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+            testutil::scan_checkout_locked(dir)
+        }
+        let repo = Repo::new("merge-panicking-rebuild");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+
+        // Main must carry a fresh scan: start seeds the branch from it, and
+        // the recorded scan anchors the pre-merge HEAD the rollback restores.
+        start_scan_locked(&repo.root).unwrap();
+        let pre_merge = repo.head_sha();
+
+        let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        // A merge-strength-valid durable spec + a verify-passing plan (no
+        // planned node, no feedback) so the merge reaches the rebuild.
+        write_spec_node(&wt_apg, "go.fixture.mod.Store");
+        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("foo.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "foo",
+            &[
+                Record::Plan {
+                    fqn: "foo/plan".to_string(),
+                    title: "foo plan".to_string(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "foo/plan.phase-01".to_string(),
+                    number: 1,
+                    title: "P1".to_string(),
+                    deliverable: "D".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::Contains {
+                    from: "foo/plan".to_string(),
+                    to: "foo/plan.phase-01".to_string(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::Satisfies {
+                    from: "foo/plan.phase-01".to_string(),
+                    to: "requirements.requirement.timer".to_string(),
+                },
+                Record::Task {
+                    fqn: "foo/plan.phase-01.task-1".to_string(),
+                    title: "touch go.fixture.mod.Store".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::StructModify {
+                    from: "foo/plan.phase-01.task-1".to_string(),
+                    to: "go.fixture.mod.Store".to_string(),
+                },
+                Record::Contains {
+                    from: "foo/plan.phase-01".to_string(),
+                    to: "foo/plan.phase-01.task-1".to_string(),
+                    properties: layers::NodeProperties::default(),
+                },
+            ],
+        )
+        .unwrap();
+        plan_cmd::plan_verify_at(&wt_apg, "foo").unwrap();
+        let foo_tip = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        // The write-then-panic rebuild: a FULL scan at the merged HEAD writes
+        // the derived index (its Scan row records the abandoned merge HEAD),
+        // THEN unwinds — the "scan ran, then the merge process panicked" shape.
+        let panic_after_scan = |dir: &Path| -> anyhow::Result<()> {
+            testutil::scan_checkout_locked(dir)?;
+            panic!("injected main rebuild panic");
+        };
+        let err = project_merge_at(&repo.apg_root(), "foo", Some(&panic_after_scan)).unwrap_err();
+        let err = format!("{err:#}");
+        // The panic was caught and routed onto the same rollback as an error.
+        assert!(err.contains("merge is unlanded"), "{err}");
+        assert!(
+            err.contains("main rebuild panicked: injected main rebuild panic"),
+            "the panic must surface as the rebuild failure: {err}"
+        );
+
+        // Main is back at its pre-merge HEAD: the merge did not land.
+        assert_eq!(
+            repo.head_sha(),
+            pre_merge,
+            "main must be reset to the pre-merge commit"
+        );
+        assert!(repo.is_clean(), "the restored main checkout must be clean");
+        assert!(
+            !repo
+                .root
+                .join("apg/layers/requirements/requirement/timer.json")
+                .exists(),
+            "the merged authored node file must not survive the rollback"
+        );
+        // The derived index the panicking rebuild wrote now records the
+        // abandoned merge HEAD, so it is discarded rather than left
+        // fresh-but-wrong.
+        let main_trans = repo.apg_root().join(specs::TRANS);
+        assert!(
+            !main_trans.join("db.lbug").exists(),
+            "main's derived index must be discarded when it no longer matches the restored HEAD"
+        );
+        assert!(
+            !git::is_fresh(&repo.apg_root()),
+            "with no derived index main cannot serve as fresh"
+        );
+        // The project stays retryable: worktree + branch + branch DB remain.
+        assert!(wt.is_dir(), "the worktree must remain for the retry");
+        assert!(
+            wt_apg.join(specs::TRANS).join("db.lbug").exists(),
+            "the branch DB must remain"
+        );
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert!(
+            main_repo.find_worktree("foo").is_ok(),
+            "the worktree must stay registered for the retry"
+        );
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_ok(),
+            "the project branch must stay for the retry"
+        );
+
+        // The retried merge, with a succeeding rebuild, lands the merge and
+        // self-cleans.
+        project_merge_at(&repo.apg_root(), "foo", Some(&start_scan_locked)).unwrap();
+        assert_eq!(
+            repo.head_sha(),
+            foo_tip.to_string(),
+            "the retried merge must land the project tip"
+        );
+        assert!(!wt.exists(), "the merged worktree must be removed");
+        assert!(
+            main_repo.find_worktree("foo").is_err(),
+            "the merged worktree must be unregistered"
+        );
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_err(),
+            "the merged branch must be deleted"
+        );
+        let db = artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
+        assert!(
+            db.has_node("requirements.requirement.timer"),
+            "the retried rebuild must land the merged spec"
+        );
+        assert!(
+            db.has_node(format!("{MOD_FQN}.Store").as_str()),
+            "the retried rebuild must land the code"
+        );
+        drop(db);
+        assert!(
+            !git::is_stale(&repo.apg_root()),
+            "main's scan_meta must be fresh after the retried rebuild"
+        );
+        assert!(
+            repo.is_clean(),
+            "main must be clean after the retried merge"
+        );
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
     // phase-04 task-3 (e2e): a post-merge rebuild that fails BEFORE writing a
     // Scan row leaves main's pre-merge derived index intact — the rollback
     // restores the pre-merge HEAD, against which that DB is still fresh, so it
