@@ -452,7 +452,7 @@ invocation; a module with no test of a given tier simply omits that submodule.
 **The four documented invocations** (aliases live in `.cargo/config.toml`):
 
 ```sh
-cargo test          # DEFAULT GATE: unit+int only, seconds, e2e unreachable
+cargo test --lib    # DEFAULT GATE: unit+int only, seconds, e2e unreachable
 cargo test-unit     # unit tier only     (= cargo test tests::unit::)
 cargo test-int      # int tier only      (= cargo test tests::int::)
 cargo test-e2e      # e2e tier only, opt-in (= cargo test e2e:: -- --ignored --test-threads=4)
@@ -463,10 +463,11 @@ of virtual address space per `Database`, and the heavy `tests/splice_e2e.rs`
 exhausts the process address space at libtest's default thread count (`Buffer manager exception: Mmap for size 8796093022208 failed`) while
 passing at `--test-threads=4` with byte-identical test bodies.
 
-`cargo test` runs **unit+int only** and stays seconds-fast: the e2e tests are
-`#[ignore]`d and live in the per-crate `tests/*_e2e.rs` integration crates under
-`mod e2e` (`e2e::…`), so they are excluded from and unreachable through the
-default gate. **e2e is the FINAL gate only** and obeys
+`cargo test --lib` runs the lib target's **unit+int** tiers only and stays
+seconds-fast: the e2e tests are `#[ignore]`d and live in the per-crate
+`tests/*_e2e.rs` integration crates under `mod e2e` (`e2e::…`), so they are
+excluded from and unreachable through the default gate (the lib target links no
+test target under `tests/`). **e2e is the FINAL gate only** and obeys
 `global.constraint.no-real-project-test`: the candidate binary is exercised
 against a scratch `/tmp` git repo, never a real project (see below).
 
@@ -476,7 +477,7 @@ stopping at the first failure: `actionlint` over `.github/workflows/*.yml`
 `ruby -c` over `Formula/*.rb`, the shell syntax check (`sh -n install.sh`
 plus `bash -n` over each `scripts/*.sh`, the shell chosen per file by its
 shebang), `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
---all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
+--all-targets -- -D warnings` → `cargo build` → `cargo test --lib` (the default
 unit+int suite) → the `opencode-suite/node_modules` bootstrap from the
 committed `opencode-suite/bun.lock` (run when the directory is absent or lacks
 the type-check toolchain — typescript 5.9.3, @types/bun 1.4.5; skipped when
@@ -522,9 +523,9 @@ form `cargo test e2e:: -- --ignored --list`.
 **Release gate note.** The release-version guard tests
 (`cargo_manifest_and_lockfile_declare_release_version`,
 `readme_documents_release_version`) read `Cargo.toml`/`Cargo.lock`/`README.md`
-from disk, so they are **e2e** and are **no longer run by a plain `cargo test`**.
+from disk, so they are **e2e** and are **no longer run by a plain `cargo test --lib`**.
 The default gate stays fast and the guard is exercised by the opt-in e2e tier.
-The release gate is therefore `cargo build` + `cargo test` (fast unit+int) +
+The release gate is therefore `cargo build` + `cargo test --lib` (fast unit+int) +
 `cargo test-e2e` (which runs the guard); see the release section below.
 
 **Self-contained e2e.** The whole test suite is self-contained
@@ -746,22 +747,22 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `ruby -c` over `Formula/*.rb` → the shell syntax check (`sh -n install.sh`
    plus `bash -n` over each `scripts/*.sh`, per shebang) → `cargo fmt --check`
    → `cargo check --all-targets` → `cargo clippy --all-targets -D warnings` →
-   `cargo build` → `cargo test` (the unit+int default suite) → the
+   `cargo build` → `cargo test --lib` (the unit+int default suite) → the
    `opencode-suite/node_modules` bootstrap (when the directory is absent or
    lacks the type-check toolchain) → the type check (the suite-local
    `tsc --noEmit -p opencode-suite/tsconfig.json` over
    `opencode-suite/tools/**`) → `bun test` (in `opencode-suite/`) →
    `node --test` (in `src/tslib/`), and
    `--e2e` appends the cargo e2e tier and the opencode-suite boundary e2e. In
-   practice that means `cargo build` first, then **`cargo test` AND
-   `cargo test-e2e`** pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
+   practice that means `cargo build` first, then **`cargo test --lib` AND
+   `cargo test-e2e`** pass (not just `cargo check`). `cargo test --lib` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
    the guard runs under `cargo test-e2e` (`cargo test e2e:: -- --ignored`)
    — a stale `RELEASE_VERSION` literal ships the release HEAD red unless the e2e
    tier is run (the const lives in `tests/main_e2e.rs`). Build first because the
    cross-process tests spawn
-   `target/<profile>/apg` (`src/testutil.rs`), which `cargo test` alone does not
+   `target/<profile>/apg` (`src/testutil.rs`), which `cargo test --lib` alone does not
    rebuild: a stale artifact makes the session/lock tests fail against an old CLI
    with misleading errors.
 2. **Bump the version** in `Cargo.toml`, `Cargo.lock`, the `RELEASE_VERSION`
