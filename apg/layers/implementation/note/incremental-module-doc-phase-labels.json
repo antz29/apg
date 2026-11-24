@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "incremental-module-doc-phase-labels",
+  "body": "The src/incremental/mod.rs header still tags the module \"phase-02 task-8\" and its #![allow(dead_code)] note cites the \"phase-03 splice path\"; both are historical phase labels, so restate them when the plan phases are renumbered or when the dead-code allowance is removed.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/incremental/mod.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

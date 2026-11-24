@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "warm-row-selection-and-completeness",
-  "body": "warm_prepared selects the first committed scan row in redb iteration order whose content_key and cache_key match the tree; rows agreeing on both describe the same tree so any is equivalent, but if two matching rows ever carry divergent refs the first silently wins, so add a deterministic tie-break only if divergent same-key rows become possible. Its completeness check also requires a fact unit for every non-\"other\" manifest entry, and a tracked apg/config.json is blacklisted from the graph so it carries no unit — warm assembly therefore only hits when the apg/ layout is gitignored; upgrade when the completeness check learns to skip the tool-owned layout.",
+  "body": "warm_prepared selects the first committed scan row in redb iteration order whose content_key and cache_key match the tree; rows agreeing on both describe the same tree so any is equivalent, but if two matching rows ever carry divergent refs the first silently wins, so add a deterministic tie-break only if divergent same-key rows become possible. Its completeness check skips the tool-owned top-level apg/ layout (which never carries a fact unit), but still requires a unit for every other manifest entry, so a scan whose user blacklist or structural-scope exclude drops tracked files (no unit, no node) never warms; skip those entries with the same predicate when excluded-path scans need warm.",
   "properties": {},
   "out": [
     {
