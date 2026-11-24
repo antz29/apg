@@ -5,7 +5,7 @@ use apg::layers::{NodeProperties, properties_from_json, properties_json};
 use apg::load;
 use apg::schema::SCAN_HEAD;
 use apg::splice::*;
-use apg::testutil::fixture_db_config;
+use apg::testutil::{fixture_db_config, schema_db_at};
 use lbug::{Connection, Database};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -96,16 +96,16 @@ fn fixture_graph() -> Graph {
     g
 }
 
-/// Builds a real on-disk DB at `path` through the same
-/// `create_schema + copy_from` full load the scan path uses, so the seed
-/// under test sees a genuine previous database.
+/// Builds a real on-disk DB at `path`: the schema half is the process
+/// [`schema_db_at`] template copy (not a per-call `create_schema`), and the
+/// data half is the same `build_load_files + copy_from` full load the scan
+/// path uses, so the seed under test sees a genuine previous database.
 fn build_db(path: &Path, graph: &Graph) {
     let ldir = path.parent().unwrap().join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(graph, &ldir).unwrap();
-    let db = Database::new(path, fixture_db_config()).unwrap();
+    let db = schema_db_at(path);
     let conn = Connection::new(&db).unwrap();
-    load::create_schema(&conn).unwrap();
     load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
