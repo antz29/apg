@@ -541,6 +541,98 @@ type whose globs (`tests/**`, `**/tests/**`, `**/tests.rs`, `**/*.test.ts`,
 are queryable with `WHERE f.code_type = 'test'` while production modules stay
 `src`.
 
+### Pre-change e2e baseline (dated snapshot — 2026-11-24)
+
+This is the **pre-change** baseline for the test-speed work: later phases record
+their own dated results rather than amending this one. It was taken at commit
+`4ce88d08` (branch `test-speed`, toolchain pin Rust 1.100.0) over the gate
+invocation `scripts/gate.sh --e2e` as it behaved at that commit — the cargo e2e
+tier run as `cargo test e2e:: -- --ignored --test-threads=1` (`E2E_THREADS`,
+default 1). Per-test wall times required `RUSTC_BOOTSTRAP=1` and `-Z
+unstable-options --report-time` (stable refuses `--report-time`).
+
+**Tier total.** 472 e2e tests, 452 passed; **≈1080 s (18.0 min)** at
+`--test-threads=1`. That figure is a **floor**: 20 tests short-circuited because
+the staged `frontends/` directory lacked `rustfrontend`/`pyfrontend` (main_e2e
+14, splice_e2e 5, plan_cmd_e2e 1). The frontend-crate e2e tiers
+(`src/{structlib,pylib,agentlib,cobollib,pslib}`) run outside the root gate and
+are not counted.
+
+**Top 20 by wall time** — 391.4 s total, ≈36 % of the run:
+
+| test (binary: name) | s |
+|---|---|
+| main_e2e: `acceptance_one_file_rescan_stays_under_the_value_threshold` | 76.305 |
+| ps_scan_e2e: `parity_cross_file_collision_rerenders` | 42.276 |
+| main_e2e: `scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh` | 39.729 |
+| sql_scan_e2e: `incremental_scan_equals_full_scan` | 23.730 |
+| ps_scan_e2e: `parity_new_exporter_resolves_unchanged_caller` | 20.934 |
+| ps_scan_e2e: `parity_renamed_unit_callers_reresolve` | 20.915 |
+| ingest_e2e: `splice_path_is_taken_and_equals_a_full_rebuild` | 19.845 |
+| main_e2e: `scan_and_query_recover_a_pending_state_or_shape_changed_database` | 16.592 |
+| sql_scan_e2e: `tracked_sql_only_and_deletion_equal_full_scan` | 15.227 |
+| main_e2e: `acceptance_targeted_rescan_equivalence_leaf_body_signature_rename` | 14.242 |
+| ps_scan_e2e: `file_dependency_edges_survive_full_and_spliced_builds` | 13.257 |
+| csharp_scan_e2e: `global_namespace_types_scan_end_to_end` | 11.899 |
+| ps_scan_e2e: `parity_removed_collision_drops_suffix` | 11.376 |
+| git_e2e: `staleness_line_agrees_with_is_fresh` | 11.198 |
+| project_cmd_e2e: `merge_strength_refuses_a_component_without_an_implemented_by_claim` | 10.419 |
+| git_e2e: `refusal_message_names_each_differing_freshness_input` | 10.183 |
+| splice_e2e: `batched_dml_statement_count_is_bounded_and_size_independent` | 8.679 |
+| main_e2e: `metadata_mutations_are_immediately_queryable_without_a_scan` | 8.297 |
+| git_e2e: `staleness_line_names_each_differing_freshness_input` | 8.207 |
+| node_cmd_e2e: `node_rm_warns_on_outstanding_feedback_and_keeps_the_record` | 8.123 |
+
+**Per-binary totals (tests / s):**
+
+| binary | tests | s |
+|---|---|---|
+| main_e2e | 82 | 253.65 |
+| ps_scan_e2e | 8 | 117.57 |
+| plan_cmd_e2e | 56 | 115.12 |
+| node_cmd_e2e | 45 | 102.06 |
+| splice_e2e | 36 | 88.62 |
+| project_cmd_e2e | 33 | 75.17 |
+| git_e2e | 43 | 56.19 |
+| artifacts_e2e | 26 | 52.56 |
+| sql_scan_e2e | 6 | 48.80 |
+| ingest_e2e | 29 | 31.87 |
+| csharp_scan_e2e | 4 | 23.55 |
+| layers_e2e | 33 | 22.97 |
+| review_cmd_e2e | 11 | 21.67 |
+| cobol_scan_e2e | 8 | 17.47 |
+| spec_lint_e2e | 7 | 15.01 |
+| progress_e2e | 5 | 14.58 |
+| testutil_e2e | 2 | 8.73 |
+| load_e2e | 8 | 6.26 |
+| cache_e2e | 6 | 3.08 |
+| incremental_e2e | 6 | 2.54 |
+| degree_query_e2e | 1 | 2.15 |
+| delta_e2e | 7 | 0.67 |
+| version_gate_e2e | 8 | 0.01 |
+| specs_e2e | 2 | 0.00 |
+
+Batch-contended rows are inflated ~10–25 %, except main_e2e/splice_e2e, which
+ran alone.
+
+**Build vs run.** A clean `cargo build --tests` took **142 s** in an isolated
+scratch target (a lower bound — frontend caches warm); the no-rebuild build was
+**0.17 s** and `cargo test --no-run` **0.29 s**. The split is ≈**11.6 % build /
+88.4 % run** against the ~1080 s run, so run dominates. There is **no shared
+`CARGO_TARGET_DIR`** — the worktree uses its own `target/`.
+
+**Fixture costs.** `touch_db` (`Database::new` + `create_schema`) ≈**0.6 s**,
+upper bound **0.70 s** (the no-DB fixture floor is 0.016 s; a later
+`ArtifactDb::open` ≈0.15 s each). One full in-process `scan_checkout`
+≈**0.74–0.82 s** (fixture floor ≈0.02 s); the closest real-scan test (4-file
+fixture, 3 scans) **3.75–3.89 s** total. A warm second scan's
+`[timing]`/`[timing-json]` (contended) reported **startup 0.879 s / frontend
+0.163 s / ingest-assembly 0.0025 s / db-load 0.542 s**; the cold first scan's
+`db-load` is a full load and is a **floor** at 0.54 s. The fixture timings above
+are wall-clock measurements around `touch_db`/`scan_checkout`/the real scan
+itself, not `[timing]` output, except the breakdown line which is read from that
+scan's `[timing]`/`[timing-json]` records.
+
 ## Testing a new binary (scratch repo in /tmp)
 
 **Never point a freshly built `apg` at the apg repo** (or any project you care
