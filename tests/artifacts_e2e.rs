@@ -4052,9 +4052,9 @@ mod e2e {
     /// --force` is a TRUE REBUILD. It discards `db.lbug` (with its `.wal`/`.shm`
     /// sidecars) through the one shared discard and rebuilds it from freshly
     /// emitted facts, while every `apg/layers/**` node file and every source
-    /// file stays byte-identical and the shared fact store's `scan.json`
-    /// survives untouched. The database is the only derived artifact: a scan
-    /// writes no `graph.jsonl`.
+    /// file stays byte-identical and the shared fact store's per-worktree
+    /// `scans` row survives untouched. The database is the only derived
+    /// artifact: a scan writes no `graph.jsonl`.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/facts store); run via cargo test-e2e"]
     fn forced_scan_discards_the_derived_index_and_rebuilds_it_from_scratch() {
@@ -4073,8 +4073,8 @@ mod e2e {
         // `write_project`: the latter resolves its code universes from the
         // worktree database, which does not exist before the cold scan — yet the
         // authored `apg/layers/**` node must already be on disk when that scan
-        // records the shared fact store's `scan.json` baseline, or the forced
-        // rebuild cannot reproduce it byte-identically.
+        // records the shared fact store's per-worktree `scans` row baseline, or
+        // the forced rebuild cannot reproduce it byte-identically.
         layers::write_node(
             &apg_root,
             &layers::NodeFile {
@@ -4100,7 +4100,7 @@ mod e2e {
         };
 
         // The cold scan: a real pipeline run that builds the database and
-        // records the shared store's baseline.
+        // records the shared store's per-worktree scans row baseline.
         assert!(
             run(&["scan", "."]).contains("[scan] running go frontend"),
             "the cold scan must run the go frontend"
@@ -4127,8 +4127,8 @@ mod e2e {
                 .map(|rel| (rel.to_string(), std::fs::read(wt.join(rel)).unwrap()))
                 .collect();
         let store = apg::cache::FactStore::resolve(&apg_root).unwrap().root;
-        let record = store.join("scan.json");
-        let record_before = std::fs::read(&record).unwrap();
+        let record_before = apg::delta::ScanRecord::load(&store, &wt)
+            .expect("the cold scan records this worktree's scan row");
         let inode_before = std::fs::metadata(&db).unwrap().ino();
 
         // The forced rebuild: the pre-force verdict is still printed, then the
@@ -4167,8 +4167,8 @@ mod e2e {
             );
         }
 
-        // The durable node files, every source file and the shared store record
-        // are untouched.
+        // The durable node files, every source file and the shared store's
+        // per-worktree scans row are untouched.
         assert_eq!(
             snapshot(&apg_root.join(layers::LAYERS_DIR)),
             layers_before,
@@ -4183,10 +4183,11 @@ mod e2e {
             sources_after, sources_before,
             "the scanned sources must stay byte-identical"
         );
+        let record_after = apg::delta::ScanRecord::load(&store, &wt)
+            .expect("the forced scan re-records this worktree's scan row");
         assert_eq!(
-            std::fs::read(&record).unwrap(),
-            record_before,
-            "the shared fact store's scan.json must survive untouched"
+            record_after, record_before,
+            "the shared fact store's per-worktree scans row must survive --force unchanged"
         );
 
         testutil::remove(&repo);
