@@ -62,13 +62,18 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         graph.nodes.remove(fqn);
         nodes_removed += 1;
     }
-    // Keep an edge endpoint that is still a node, or that lives only in the
-    // pre-scan universe because this delta graph never carried its file — but
-    // never one this call removed for exclusion/blacklisting.
+    // The closed-graph invariant: every surviving edge endpoint is a live node
+    // (a real Module/File/Struct/Function, an authored/plan node, or a live
+    // `UnresolvedTarget` placeholder) or — on the delta path — the
+    // not-yet-landed endpoint the splice seeds, recorded in `opts.universe`. An
+    // endpoint absent from both is a vanished target whose edge is dropped;
+    // never one this call removed for exclusion/blacklisting, whose universe
+    // membership must not rescue it.
     let removed_fqns: HashSet<&str> = removed.iter().map(String::as_str).collect();
     let keep = |fqn: &String| {
-        graph.nodes.contains_key(fqn)
-            || (opts.universe.contains(fqn) && !removed_fqns.contains(fqn.as_str()))
+        let live_node = graph.nodes.contains_key(fqn);
+        let pending_seed = opts.universe.contains(fqn) && !removed_fqns.contains(fqn.as_str());
+        live_node || pending_seed
     };
 
     graph.contains.retain(|(a, b)| keep(a) && keep(b));

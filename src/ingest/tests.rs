@@ -1330,6 +1330,145 @@ mod unit {
         assert!(!valid_contains_pair(&NodeKind::File, &NodeKind::Language));
         assert!(!valid_contains_pair(&NodeKind::Language, &NodeKind::Struct));
     }
+
+    /// phase-04 task-10: [`finalize_graph`] closes the graph over one live-FQN
+    /// set. An edge whose target FQN names no node at all is dropped — never
+    /// recycled into a fabricated `UnresolvedTarget` — while an
+    /// `unresolved_call`/`unresolved_use` whose target **is** a live
+    /// `UnresolvedTarget` placeholder survives, because that placeholder's FQN
+    /// is in the live set. Pure in-memory: the graph is built by hand and the
+    /// finalizer is the one unit under test.
+    #[test]
+    fn finalize_graph_drops_vanished_targets_and_keeps_live_unresolved_edges() {
+        let caller_fn = "rust.apg.caller";
+        let caller_struct = "rust.apg.caller_struct";
+        let live_fn = "rust.apg.live_fn";
+        let live_struct = "rust.apg.live_struct";
+        let vanished_fn = "rust.apg.vanished_fn";
+        let vanished_struct = "rust.apg.vanished_struct";
+        let live_call_target = "external.LiveCall";
+        let live_use_target = "external.LiveUse";
+        let vanished_call_target = "external.VanishedCall";
+        let vanished_use_target = "external.VanishedUse";
+        let real = |kind| Node {
+            kind,
+            ..Node::default()
+        };
+
+        let mut graph = Graph::default();
+        for (fqn, kind) in [
+            (caller_fn, NodeKind::Function),
+            (caller_struct, NodeKind::Struct),
+            (live_fn, NodeKind::Function),
+            (live_struct, NodeKind::Struct),
+            // Live unresolved-target placeholders: their FQNs are graph nodes,
+            // so their edges stay part of the closed graph.
+            (live_call_target, NodeKind::UnresolvedTarget),
+            (live_use_target, NodeKind::UnresolvedTarget),
+        ] {
+            graph.nodes.insert(fqn.to_string(), real(kind));
+        }
+
+        // Resolved edges: one to a live declaration, one to a vanished FQN.
+        graph
+            .calls
+            .insert((caller_fn.to_string(), live_fn.to_string()));
+        graph
+            .calls
+            .insert((caller_fn.to_string(), vanished_fn.to_string()));
+        graph
+            .uses
+            .insert((caller_struct.to_string(), live_struct.to_string()));
+        graph
+            .uses
+            .insert((caller_struct.to_string(), vanished_struct.to_string()));
+        // Unresolved edges: one to a live placeholder, one to a vanished FQN.
+        graph.unresolved_calls.insert((
+            caller_fn.to_string(),
+            live_call_target.to_string(),
+            String::new(),
+        ));
+        graph.unresolved_calls.insert((
+            caller_fn.to_string(),
+            vanished_call_target.to_string(),
+            String::new(),
+        ));
+        graph
+            .unresolved_uses
+            .insert((caller_struct.to_string(), live_use_target.to_string()));
+        graph
+            .unresolved_uses
+            .insert((caller_struct.to_string(), vanished_use_target.to_string()));
+        // A containment row whose parent vanished drops too.
+        graph
+            .contains
+            .insert((vanished_fn.to_string(), caller_fn.to_string()));
+
+        let fqns_before: HashSet<String> = graph.nodes.keys().cloned().collect();
+
+        finalize_graph(&mut graph);
+
+        // (a) Every edge to a vanished target is dropped, in both the resolved
+        // and the unresolved tables.
+        assert!(
+            !graph
+                .calls
+                .contains(&(caller_fn.to_string(), vanished_fn.to_string()))
+        );
+        assert!(
+            !graph
+                .uses
+                .contains(&(caller_struct.to_string(), vanished_struct.to_string()))
+        );
+        assert!(
+            !graph
+                .unresolved_calls
+                .iter()
+                .any(|(_, to, _)| to == vanished_call_target)
+        );
+        assert!(
+            !graph
+                .unresolved_uses
+                .contains(&(caller_struct.to_string(), vanished_use_target.to_string(),))
+        );
+        assert!(
+            !graph
+                .contains
+                .contains(&(vanished_fn.to_string(), caller_fn.to_string()))
+        );
+
+        // Live declaration edges survive.
+        assert!(
+            graph
+                .calls
+                .contains(&(caller_fn.to_string(), live_fn.to_string()))
+        );
+        assert!(
+            graph
+                .uses
+                .contains(&(caller_struct.to_string(), live_struct.to_string()))
+        );
+
+        // (b) An edge to a live `UnresolvedTarget` placeholder survives.
+        assert!(graph.unresolved_calls.contains(&(
+            caller_fn.to_string(),
+            live_call_target.to_string(),
+            String::new(),
+        )));
+        assert!(
+            graph
+                .unresolved_uses
+                .contains(&(caller_struct.to_string(), live_use_target.to_string()))
+        );
+
+        // (c) No node — `UnresolvedTarget` or otherwise — is fabricated for a
+        // vanished target: the node set is unchanged by the finalize pass.
+        let fqns_after: HashSet<String> = graph.nodes.keys().cloned().collect();
+        assert_eq!(fqns_before, fqns_after);
+        assert!(!graph.nodes.contains_key(vanished_fn));
+        assert!(!graph.nodes.contains_key(vanished_call_target));
+        assert!(!graph.nodes.contains_key(vanished_use_target));
+    }
 }
 
 /// int tier -- two or more units wired together, pure in-memory (no

@@ -2120,6 +2120,15 @@ fn filter_task_ops(
 /// idempotent and the retain still drops only a dangling or wrong-kind
 /// endpoint.
 pub(crate) fn finalize_graph(graph: &mut Graph) {
+    // The closed-graph invariant (SPEC R2/R21): every surviving edge endpoint
+    // must name a live node — a real Module/File/Struct/Function, an authored
+    // or plan node, or a shared `UnresolvedTarget` placeholder. One membership
+    // pass over this live-FQN set drops a vanished endpoint from every edge
+    // table rather than leaving it dangling or fabricating a replacement
+    // unresolved target. The per-table predicates below still enforce the
+    // endpoint-kind pairing (`kind_is` looks the endpoint up in the same set).
+    let live: HashSet<&str> = graph.nodes.keys().map(String::as_str).collect();
+
     // Drop edges whose endpoints do not exist (dangling ids, blacklisted nodes).
     // Containment is a strict tree: the code pairs (Language→Module,
     // Module→Module, Module→File, File→Struct, File→Function, Struct→Struct,
@@ -2128,13 +2137,13 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     // ownership pairs (Group→Group/Entity/Service, Entity→Value), and the
     // solution hierarchy (System→Container→Component) (SPEC §7, R2, R21).
     graph.contains.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
+        live.contains(a.as_str())
+            && live.contains(b.as_str())
             && valid_contains_pair(&graph.nodes[a].kind, &graph.nodes[b].kind)
     });
     graph.calls.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
+        live.contains(a.as_str())
+            && live.contains(b.as_str())
             && ((graph.nodes[a].kind == NodeKind::Function
                 && graph.nodes[b].kind == NodeKind::Function)
                 || (graph.nodes[a].kind == NodeKind::Service
@@ -2143,8 +2152,8 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
                     && graph.nodes[b].kind == NodeKind::Service))
     });
     graph.uses.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
+        live.contains(a.as_str())
+            && live.contains(b.as_str())
             && ((graph.nodes[b].kind == NodeKind::Struct
                 && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct))
                 || (graph.nodes[a].kind == NodeKind::Person
@@ -2158,14 +2167,14 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
                         .is_some_and(|k| k == "copy" || crate::ps::is_file_edge_kind(k))))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
+        live.contains(a.as_str())
+            && live.contains(b.as_str())
             && graph.nodes[a].kind == NodeKind::Function
             && graph.nodes[b].kind == NodeKind::UnresolvedTarget
     });
     graph.unresolved_uses.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
+        live.contains(a.as_str())
+            && live.contains(b.as_str())
             && graph.nodes[b].kind == NodeKind::UnresolvedTarget
             && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
     });
@@ -2173,7 +2182,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     // Spec/plan edge validation (SPEC R2/R21). Spec records carry no ids, so
     // dangling here means a JSONL referenced a node that isn't in the graph.
     graph.details = filter_edges(graph, &graph.details, |g, a, b| {
-        g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Note
+        live.contains(a) && live.contains(b) && g.nodes[a].kind == NodeKind::Note
     });
     // An implementation constraint's `applies-to` target is a Language node
     // (materialised at admission when no scanned stream rooted it).
@@ -2181,7 +2190,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
         kind_is(g, a, NodeKind::Constraint) && kind_is(g, b, NodeKind::Language)
     });
     graph.reviews = filter_edges(graph, &graph.reviews, |g, a, b| {
-        g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Feedback
+        live.contains(a) && live.contains(b) && g.nodes[a].kind == NodeKind::Feedback
     });
     graph.gates = filter_edges(graph, &graph.gates, |g, a, b| {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::PlanPhase)
@@ -2206,7 +2215,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     // Service/Actor → Entity.
     graph.spec_implemented_by = filter_edges(graph, &graph.spec_implemented_by, |g, a, b| {
         kind_is(g, a, NodeKind::Component)
-            && g.nodes.contains_key(b)
+            && live.contains(b)
             && matches!(
                 g.nodes[b].kind,
                 NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
