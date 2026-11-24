@@ -2,7 +2,103 @@ mod common;
 
 use apg::cache::*;
 use apg::graph::{Graph, Location, Node, NodeKind};
+use redb::{ReadableDatabase, ReadableTable};
 use std::path::{Path, PathBuf};
+
+// ---------------------------------------------------------------------------
+// Shared e2e helpers (file scope, outside the tier, as the layout requires):
+// every one does real I/O, so only the `e2e` tier calls them.
+// ---------------------------------------------------------------------------
+
+/// A scratch isolated `HOME` for a spawned `apg` — never the real one.
+fn scratch_home(tag: &str) -> PathBuf {
+    let home = std::env::temp_dir().join(format!("apg-cache-home-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    home
+}
+
+/// Runs `apg scan .` in `dir` with an isolated `HOME`, capturing its output.
+fn scan_in(dir: &Path, home: &str) -> std::process::Output {
+    apg::testutil::ApgCommand::new(&["scan", "."])
+        .cwd(dir)
+        .env("HOME", home)
+        .output()
+}
+
+/// The code identities a scan's database carries — the oracle a rebuilt store
+/// must reproduce. Read from `db.lbug`, never a JSONL export.
+fn code_identities(dir: &Path) -> std::collections::BTreeSet<String> {
+    let db_path = dir.join("apg/.trans/db.lbug");
+    let db = lbug::Database::new(&db_path, apg::testutil::fixture_db_config().read_only(true))
+        .unwrap_or_else(|e| panic!("open {}: {e}", db_path.display()));
+    let conn = lbug::Connection::new(&db).unwrap();
+    let mut ids = std::collections::BTreeSet::new();
+    for (label, property) in [
+        ("Module", "fqn"),
+        ("File", "fqn"),
+        ("Struct", "path"),
+        ("Function", "path"),
+    ] {
+        let (_, rows) =
+            apg::splice::query_rows(&conn, &format!("MATCH (n:{label}) RETURN n.{property}"))
+                .unwrap();
+        ids.extend(rows.into_iter().filter_map(|row| row.into_iter().next()));
+    }
+    ids
+}
+
+/// Opens a fact store directly, with the same builder settings as
+/// `src/cache/store.rs` (`Store::database`).
+fn open_store_db(path: &Path) -> redb::Database {
+    redb::Database::builder()
+        .set_concurrency_mode(redb::ConcurrencyMode::MultiWriter)
+        .set_check_integrity_on_open(true)
+        .open(path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
+}
+
+/// The facts format marker the store records (redb has no `user_version`, so
+/// the `meta` row is it).
+fn stored_format(path: &Path) -> Option<u32> {
+    let db = open_store_db(path);
+    let txn = db.begin_read().unwrap();
+    let table = txn
+        .open_table(redb::TableDefinition::<&str, u32>::new("meta"))
+        .unwrap();
+    table.get("format").unwrap().map(|guard| guard.value())
+}
+
+/// Overwrites the facts format marker in one committed write transaction.
+fn overwrite_format_marker(path: &Path, format: u32) {
+    let db = open_store_db(path);
+    let txn = db.begin_write().unwrap();
+    {
+        let mut table = txn
+            .open_table(redb::TableDefinition::<&str, u32>::new("meta"))
+            .unwrap();
+        table.insert("format", format).unwrap();
+    }
+    txn.commit().unwrap();
+}
+
+/// Every stored fact-unit key in the redb `units` table (the five-part key is
+/// postcard-encoded, exactly as `src/cache/store.rs` writes it).
+fn stored_unit_keys(path: &Path) -> Vec<UnitKey> {
+    let db = open_store_db(path);
+    let txn = db.begin_read().unwrap();
+    let table = match txn.open_table(redb::TableDefinition::<&[u8], &[u8]>::new("units")) {
+        Ok(table) => table,
+        Err(redb::TableError::TableDoesNotExist(_)) => return Vec::new(),
+        Err(err) => panic!("open the units table: {err}"),
+    };
+    let mut keys = Vec::new();
+    for row in table.iter().unwrap() {
+        let (key, _) = row.unwrap();
+        keys.push(postcard::from_bytes::<UnitKey>(key.value()).unwrap());
+    }
+    keys
+}
 
 /// e2e tier -- real I/O: every test here writes files / the content-addressed
 /// store under the temp dir. Each is `#[ignore]`d, so a plain `cargo test`
@@ -424,7 +520,8 @@ mod e2e {
             ids
         };
 
-        // The cold main-checkout scan records the shared store.
+        // The cold main-checkout scan records the shared store: one redb
+        // database at the git common dir, shared by every worktree.
         let cold = scan(&repo.root);
         assert!(
             cold.status.success(),
@@ -436,9 +533,12 @@ mod e2e {
             main_ids.contains("a/a.go"),
             "repo-relative File identity: {main_ids:?}"
         );
+        let shared_db = repo.root.join(".git/apg/facts.db");
+        let store_meta = std::fs::metadata(&shared_db)
+            .unwrap_or_else(|e| panic!("the shared fact store {}: {e}", shared_db.display()));
         assert!(
-            repo.root.join(".git/apg/facts/index.json").is_file(),
-            "the shared fact store must be indexed after a scan"
+            store_meta.is_file() && store_meta.len() > 0,
+            "the shared fact store must hold the recorded facts after a scan"
         );
 
         // A clean second worktree at the same commit reuses that store, and
@@ -557,5 +657,485 @@ mod e2e {
         assert!(!sub_manifest.entries.contains_key("sub/a.rs"));
 
         let _ = std::fs::remove_dir_all(&repo.root);
+    }
+
+    /// The store is ONE redb database per repository at
+    /// `<git-common-dir>/apg/facts.db`, beside its `facts.lock` writer gate,
+    /// shared by every worktree and branch — never a per-worktree copy.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktrees/spawned apg); run via cargo test-e2e"]
+    fn one_store_file_shared_by_every_worktree() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("store-one-file");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.commit_all("source");
+        let home = scratch_home("one-store");
+        let home_s = home.to_string_lossy().into_owned();
+
+        let cold = scan_in(&repo.root, &home_s);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        let shared_db = repo.root.join(".git/apg/facts.db");
+        let meta = std::fs::metadata(&shared_db)
+            .unwrap_or_else(|e| panic!("the shared store {}: {e}", shared_db.display()));
+        assert!(
+            meta.is_file() && meta.len() > 0,
+            "the shared store is one non-empty redb file at {}",
+            shared_db.display()
+        );
+        assert!(
+            repo.root.join(".git/apg/facts.lock").exists(),
+            "the writer gate sits beside facts.db"
+        );
+
+        // A second worktree at the same commit scans off the SAME one store.
+        let wt = repo.start_project("wt");
+        let fresh = scan_in(&wt, &home_s);
+        assert!(
+            fresh.status.success(),
+            "worktree scan: {}",
+            String::from_utf8_lossy(&fresh.stderr)
+        );
+        let meta = std::fs::metadata(&shared_db)
+            .unwrap_or_else(|e| panic!("the shared store after a worktree scan: {e}"));
+        assert!(
+            meta.is_file() && meta.len() > 0,
+            "the shared store still serves the worktree"
+        );
+
+        // ...and no worktree keeps its own facts.db anywhere.
+        for stray in [
+            wt.join("apg").join("facts.db"),
+            wt.join("apg/.trans/facts.db"),
+            repo.root.join(".git/worktrees/wt/apg/facts.db"),
+        ] {
+            assert!(
+                !stray.exists(),
+                "a worktree never keeps a local store: {}",
+                stray.display()
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The decisive two-process case
+    /// (`requirements.requirement.concurrent-fact-writers-wait-then-fail-named`):
+    /// a scan that finds another process writing the store waits the bounded
+    /// budget, then exits NON-ZERO with the named contention on stderr; a scan
+    /// that acquires the gate after the release succeeds.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/two processes/facts.lock); run via cargo test-e2e"]
+    fn concurrent_writers_wait_then_fail_with_the_named_contention_error() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("store-contention");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.commit_all("source");
+        let home = scratch_home("contention");
+        let home_s = home.to_string_lossy().into_owned();
+
+        let cold = scan_in(&repo.root, &home_s);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+
+        // A source edit so the contending child cannot take the unchanged-tree
+        // fast path (which returns BEFORE the contention probe).
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 2.\nfunc Leaf() int { return 2 }\n",
+        );
+
+        // Hold the external writer gate: the write transaction owns
+        // `<store>/facts.lock` for its lifetime.
+        let store_path = repo.root.join(".git/apg/facts.db");
+        let store = Store::open(&store_path).unwrap();
+        let held = store.begin_write().unwrap();
+
+        let mut child = apg::testutil::ApgCommand::new(&["scan", "."])
+            .cwd(&repo.root)
+            .env("HOME", &home_s)
+            .spawn();
+        let started = std::time::Instant::now();
+        let bound = std::time::Duration::from_secs(45);
+        let status = loop {
+            match child.try_wait().unwrap() {
+                Some(status) => break status,
+                None => {
+                    if started.elapsed() >= bound {
+                        let _ = child.kill();
+                        let out = child.wait_with_output().unwrap();
+                        panic!(
+                            "the contended scan was still running after {bound:?} — the \
+                             facts.lock gate is not gating; stderr: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        );
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        };
+        let elapsed = started.elapsed();
+        let out = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            !status.success(),
+            "the contended scan must exit non-zero; stderr: {stderr}"
+        );
+        for needle in ["held by another writer", "facts.db", "waited"] {
+            assert!(
+                stderr.contains(needle),
+                "the contention error must name {needle:?}; stderr: {stderr}"
+            );
+        }
+        eprintln!(
+            "contended scan: exit {:?} after {elapsed:?}: {}",
+            status.code(),
+            stderr
+                .lines()
+                .find(|line| line.contains("held by another writer"))
+                .unwrap_or("")
+        );
+
+        // Release the gate (dropping the transaction aborts it) and rescan.
+        drop(held);
+        let retry = scan_in(&repo.root, &home_s);
+        let retry_err = String::from_utf8_lossy(&retry.stderr).into_owned();
+        assert!(
+            retry.status.success(),
+            "the scan after the release must succeed: {retry_err}"
+        );
+        assert!(
+            !retry_err.contains("held by another writer"),
+            "the released gate is not reported as contention: {retry_err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A format-marker mismatch drops and rebuilds the store on open: the scan
+    /// re-emits the facts rather than warming from incompatible rows, and the
+    /// graph equals a cold scan's.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/redb store/spawned apg); run via cargo test-e2e"]
+    fn wrong_format_marker_rebuilds_the_store_on_open() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("store-format");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.commit_all("source");
+        let home = scratch_home("store-format");
+        let home_s = home.to_string_lossy().into_owned();
+
+        let cold = scan_in(&repo.root, &home_s);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        let oracle = code_identities(&repo.root);
+        let db = repo.root.join(".git/apg/facts.db");
+        assert_eq!(
+            stored_format(&db),
+            Some(FACTS_FORMAT_VERSION),
+            "the cold scan stamps the current facts format"
+        );
+        let stale = stored_unit_keys(&db)
+            .into_iter()
+            .find(|key| key.rel == "a/a.go")
+            .expect("the cold scan records a/a.go's fact unit");
+        let stale_oid = stale.oid;
+
+        // A foreign/older writer's marker: the store is no longer current.
+        overwrite_format_marker(&db, 999);
+
+        // A body edit changes the blob OID (so no old-format row can satisfy the
+        // reuse) while every code identity stays the same.
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 2.\nfunc Leaf() int { return 2 }\n",
+        );
+
+        let rebuilt = scan_in(&repo.root, &home_s);
+        assert!(
+            rebuilt.status.success(),
+            "rebuild scan: {}",
+            String::from_utf8_lossy(&rebuilt.stderr)
+        );
+        assert_eq!(
+            stored_format(&db),
+            Some(FACTS_FORMAT_VERSION),
+            "the rebuild stamps the current facts format again"
+        );
+        let keys = stored_unit_keys(&db);
+        assert!(
+            !keys.iter().any(|key| key.oid == stale_oid),
+            "the rebuilt store holds no pre-rebuild fact: {keys:?}"
+        );
+        assert!(
+            keys.iter()
+                .any(|key| key.rel == "a/a.go" && key.oid != stale_oid),
+            "the rebuild's scan re-records a/a.go under the new blob OID: {keys:?}"
+        );
+        assert_eq!(
+            code_identities(&repo.root),
+            oracle,
+            "the rebuilt store yields the cold-scan identities"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// An externally corrupted `facts.db` (integrity failure on open) is rebuilt
+    /// just like a stale format marker: the scan succeeds at the cost of one full
+    /// scan, and the graph equals a cold scan's.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/redb store/spawned apg); run via cargo test-e2e"]
+    fn corrupt_facts_db_is_rebuilt_on_open() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("store-corrupt");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.commit_all("source");
+        let home = scratch_home("store-corrupt");
+        let home_s = home.to_string_lossy().into_owned();
+
+        let cold = scan_in(&repo.root, &home_s);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        let oracle = code_identities(&repo.root);
+        let db = repo.root.join(".git/apg/facts.db");
+        let stale = stored_unit_keys(&db)
+            .into_iter()
+            .find(|key| key.rel == "a/a.go")
+            .expect("the cold scan records a/a.go's fact unit");
+        let stale_oid = stale.oid;
+
+        // Truncated/foreign bytes where the database should be.
+        std::fs::write(&db, vec![0xA5u8; 4096]).unwrap();
+
+        // Keep the tree off the unchanged-tree fast path; the body edit keeps
+        // the identities intact while changing the blob OID.
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 2.\nfunc Leaf() int { return 2 }\n",
+        );
+
+        let rebuilt = scan_in(&repo.root, &home_s);
+        assert!(
+            rebuilt.status.success(),
+            "the scan over a corrupt store must succeed: {}",
+            String::from_utf8_lossy(&rebuilt.stderr)
+        );
+        let meta = std::fs::metadata(&db)
+            .unwrap_or_else(|e| panic!("the store is recreated at {}: {e}", db.display()));
+        assert!(meta.is_file() && meta.len() > 0, "the store is recreated");
+        assert_eq!(
+            stored_format(&db),
+            Some(FACTS_FORMAT_VERSION),
+            "the recreated store carries the current facts format"
+        );
+        let keys = stored_unit_keys(&db);
+        assert!(
+            !keys.iter().any(|key| key.oid == stale_oid),
+            "the corrupt store's rows are gone: {keys:?}"
+        );
+        assert_eq!(
+            code_identities(&repo.root),
+            oracle,
+            "the rebuilt store yields the cold-scan identities"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A write transaction that never commits leaves the last committed snapshot
+    /// readable and never exposes its own pending rows.
+    #[test]
+    #[ignore = "e2e tier: real I/O (store on disk); run via cargo test-e2e"]
+    fn uncommitted_write_transaction_leaves_the_previous_snapshot_readable() {
+        let dir =
+            std::env::temp_dir().join(format!("apg-cache-uncommitted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("facts.db")).unwrap();
+        let first = [1u8; 32];
+        let second = [2u8; 32];
+
+        let txn = store.begin_write().unwrap();
+        txn.put_body(first, b"first").unwrap();
+        txn.commit().unwrap();
+
+        // Begin a second transaction, write, and drop it without committing.
+        let txn = store.begin_write().unwrap();
+        txn.put_body(second, b"second").unwrap();
+        drop(txn);
+
+        let read = store.read().unwrap();
+        assert_eq!(
+            read.get_body(first).unwrap().as_deref(),
+            Some(&b"first"[..]),
+            "the last committed snapshot stays readable"
+        );
+        assert!(
+            read.get_body(second).unwrap().is_none(),
+            "an uncommitted write is never visible"
+        );
+        assert!(!read.body_exists(second).unwrap());
+        drop(read);
+        drop(store);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The first successful open retires the legacy `<store>/facts/` directory
+    /// once (reporting the bytes reclaimed) while the checkout-local toolchain
+    /// cache survives; a retirement that cannot delete it warns and continues.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/legacy dir/spawned apg); run via cargo test-e2e"]
+    fn legacy_fact_directory_is_retired_once_and_the_toolchain_cache_survives() {
+        use apg::testutil::Repo;
+        use std::os::unix::fs::PermissionsExt;
+
+        /// Seeds `<repo>/.git/apg/facts/` (1 KiB of known bytes) and the
+        /// toolchain-cache marker, then cold-scans.
+        fn seed(repo: &Repo, home: &str) -> std::process::Output {
+            let legacy = repo.root.join(".git/apg/facts");
+            std::fs::create_dir_all(&legacy).unwrap();
+            std::fs::write(legacy.join("legacy.json"), vec![b'x'; 1024]).unwrap();
+            let marker = repo.root.join("apg/.trans/cache/go/marker");
+            std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+            std::fs::write(&marker, "toolchain\n").unwrap();
+            scan_in(&repo.root, home)
+        }
+
+        // Arm 1: the legacy directory is retired, its bytes reported.
+        let repo = Repo::new("store-legacy");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.commit_all("source");
+        let home = scratch_home("legacy");
+        let home_s = home.to_string_lossy().into_owned();
+        let out = seed(&repo, &home_s);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(out.status.success(), "scan: {stderr}");
+        let legacy = repo.root.join(".git/apg/facts");
+        assert!(!legacy.exists(), "the legacy fact directory is retired");
+        assert!(
+            stderr.contains("retired the legacy fact store"),
+            "the retirement is reported: {stderr}"
+        );
+        assert!(
+            stderr.contains("bytes reclaimed"),
+            "the reclaimed bytes are reported: {stderr}"
+        );
+        assert!(
+            stderr.contains("1024 bytes reclaimed"),
+            "the known legacy bytes are counted: {stderr}"
+        );
+        assert!(
+            repo.root.join("apg/.trans/cache/go/marker").is_file(),
+            "the per-worktree toolchain cache is not the fact store and survives"
+        );
+        assert!(
+            repo.root.join(".git/apg/facts.db").is_file(),
+            "the redb store stands in for the retired directory"
+        );
+        eprintln!(
+            "legacy retirement: {}",
+            stderr
+                .lines()
+                .find(|line| line.contains("bytes reclaimed"))
+                .unwrap_or("")
+        );
+
+        // Arm 2: a legacy directory that cannot be deleted warns and continues.
+        let guarded = Repo::new("store-legacy-readonly");
+        guarded.write("go.mod", "module scratch\n\ngo 1.21\n");
+        guarded.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        guarded.commit_all("source");
+        let home2 = scratch_home("legacy-readonly");
+        let home2_s = home2.to_string_lossy().into_owned();
+        let legacy2 = guarded.root.join(".git/apg/facts");
+        let marker2 = guarded.root.join("apg/.trans/cache/go/marker");
+        std::fs::create_dir_all(&legacy2).unwrap();
+        std::fs::write(legacy2.join("legacy.json"), "legacy\n").unwrap();
+        std::fs::create_dir_all(marker2.parent().unwrap()).unwrap();
+        std::fs::write(&marker2, "toolchain\n").unwrap();
+        // A read-only directory: a non-root process cannot unlink its contents.
+        std::fs::set_permissions(&legacy2, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let out = scan_in(&guarded.root, &home2_s);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            out.status.success(),
+            "the warned scan still succeeds: {stderr}"
+        );
+        if stderr.contains("could not retire") {
+            assert!(
+                legacy2.is_dir(),
+                "a refused retirement leaves the legacy store in place"
+            );
+            assert!(
+                marker2.is_file(),
+                "the toolchain cache survives a refused retirement"
+            );
+        }
+        // else: root could delete it anyway — the removal arm is accepted and
+        // this read-only arm is skipped; never a test failure.
+        eprintln!(
+            "read-only legacy arm: {}",
+            if stderr.contains("could not retire") {
+                "warned and survived"
+            } else {
+                "removed anyway (running as root?) — arm skipped"
+            }
+        );
+        assert!(
+            guarded.root.join(".git/apg/facts.db").is_file(),
+            "the store is created regardless of the legacy directory"
+        );
+
+        // Restore permissions so cleanup can remove the scratch repo.
+        std::fs::set_permissions(&legacy2, std::fs::Permissions::from_mode(0o755)).ok();
+        let _ = std::fs::remove_dir_all(&guarded.root);
+        let _ = std::fs::remove_dir_all(&home2);
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
