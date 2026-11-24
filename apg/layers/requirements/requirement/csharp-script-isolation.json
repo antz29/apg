@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "csharp-script-isolation",
-  "body": "Each `.csx` script compiles alone with the default metadata references and binds only its own declarations, so its reference to a repository `.cs` declaration is an unresolved target, while a `.cs` compilation binds only `.cs` declarations.",
+  "body": "Each `.csx` script compiles alone with the default metadata references and binds only its own declarations, so its reference to a repository `.cs` declaration is an unresolved target and a script member is an unresolved target from `.cs` code.",
   "properties": {
     "feature": "csharp-projects"
   },
