@@ -749,7 +749,7 @@ for a crate root) reached by a `#[cfg(test)] mod tests;` declaration, in inner
 `tests/common/mod.rs`; so the tiers run separately:
 
 ```sh
-cargo test          # fast default gate: unit+int only, seconds, no e2e
+cargo test --lib    # fast default gate: unit+int only, seconds, no e2e
 cargo test-unit     # unit tier only       (cargo test tests::unit::)
 cargo test-int      # int tier only        (cargo test tests::int::)
 cargo test-e2e      # e2e tier only, opt-in (cargo test e2e:: -- --ignored --test-threads=4)
@@ -758,13 +758,13 @@ cargo test-e2e      # e2e tier only, opt-in (cargo test e2e:: -- --ignored --tes
 The e2e tier is the opt-in final gate; it exercises a scratch `/tmp` git repo and
 also runs the release-version guard (which reads `Cargo.toml`/`Cargo.lock`/
 `README.md` and is therefore e2e), so a release gate is `scripts/gate.sh --e2e`
-(`cargo build` + `cargo test` + `cargo test-e2e`).
+(`cargo build` + `cargo test --lib` + `cargo test-e2e`).
 
 The gate is `scripts/gate.sh` — the single command that runs, stopping at the
 first failure, `actionlint` over `.github/workflows/*.yml` (skipped with a
 warning where the dev-machine tool is absent), a per-file `ruby -c` over
 `Formula/*.rb`, `cargo fmt --check`, `cargo check --all-targets`,
-`cargo clippy --all-targets -- -D warnings`, `cargo build`, `cargo test`
+`cargo clippy --all-targets -- -D warnings`, `cargo build`, `cargo test --lib`
 (the fast unit+int default), the `opencode-suite/node_modules` bootstrap from
 the committed `opencode-suite/bun.lock` (skipped when the directory is
 present), `bun test` (in `opencode-suite/`) and `node --test` (in
