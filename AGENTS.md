@@ -461,7 +461,9 @@ cargo test-e2e      # e2e tier only, opt-in (= cargo test e2e:: -- --ignored --t
 The `--test-threads=4` bound is **required**, not cosmetic: lbug reserves ~8 TiB
 of virtual address space per `Database`, and the heavy `tests/splice_e2e.rs`
 exhausts the process address space at libtest's default thread count (`Buffer manager exception: Mmap for size 8796093022208 failed`) while
-passing at `--test-threads=4` with byte-identical test bodies.
+passing at `--test-threads=4` with byte-identical test bodies. The alias is one
+libtest process; the gate's e2e step is the per-binary runner described below,
+which keeps the same thread default (4) and caps the heavy binaries lower.
 
 `cargo test --lib` runs the lib target's **unit+int** tiers only and stays
 seconds-fast: the e2e tests are `#[ignore]`d and live in the per-crate
@@ -484,11 +486,20 @@ the type-check toolchain — typescript 5.9.3, @types/bun 1.4.5; skipped when
 the toolchain is present) → the type check (the suite-local `tsc --noEmit -p
 opencode-suite/tsconfig.json` over `opencode-suite/tools/**`) → `bun test` (in
 `opencode-suite/`) → `node --test` (in `src/tslib/`); `scripts/gate.sh --e2e`
-appends
-the cargo e2e tier (`cargo test e2e:: -- --ignored`, thread-bounded by
-`E2E_THREADS`, default 1) and the opencode-suite boundary e2e
-(`bun test tests/boundary.e2e.test.ts` against the `cargo build` candidate;
-the boundary cases self-skip unless `APG_SUITE_E2E=1`). It is **run-only for
+appends the e2e tier — the per-binary runner `bash scripts/test-e2e.sh`, which
+builds every discovered `*_e2e` test binary once (`cargo test --no-run`, so a
+new `tests/foo_e2e.rs` joins automatically) and runs each as its own process
+under a bounded pool: `E2E_JOBS` concurrent binaries (default `min(8, CPU
+cores)`) at `E2E_THREADS` libtest threads each (default 4), heavy binaries
+(`splice_e2e`) capped at `min(2, E2E_THREADS)`, one log per binary under
+`target/e2e-logs/`, and a non-zero exit if any binary fails — and the
+opencode-suite boundary e2e (`bun test tests/boundary.e2e.test.ts` against the
+`cargo build` candidate; the boundary cases self-skip unless `APG_SUITE_E2E=1`)
+on scratch `/tmp` repos only, never a real project. Unlike the single-process
+`cargo test-e2e` alias (one libtest pool at `--test-threads=4`), the runner
+gives each binary its own process and log; its bounded pool is also what keeps
+concurrent `db.lbug` opens in check — many at once have been observed to flake
+with LadybugDB `Mmap ... failed`. It is **run-only for
 every agent except `build-implementer`, which owns `scripts/**`** and may
 change a step — the safety property is that no *other* agent can rewrite the
 gate beneath itself while it is running.
@@ -753,7 +764,8 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `tsc --noEmit -p opencode-suite/tsconfig.json` over
    `opencode-suite/tools/**`) → `bun test` (in `opencode-suite/`) →
    `node --test` (in `src/tslib/`), and
-   `--e2e` appends the cargo e2e tier and the opencode-suite boundary e2e. In
+   `--e2e` appends the e2e tier (run by the `scripts/test-e2e.sh` per-binary
+   runner) and the opencode-suite boundary e2e. In
    practice that means `cargo build` first, then **`cargo test --lib` AND
    `cargo test-e2e`** pass (not just `cargo check`). `cargo test --lib` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
