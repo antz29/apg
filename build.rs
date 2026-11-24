@@ -151,6 +151,16 @@ fn frontend_artifact(lib: &str, bin: &str) -> PathBuf {
     }
 }
 
+/// Whether this build must force every standalone-crate frontend to rebuild
+/// (`APG_REBUILD_FRONTENDS=1`/`true`, case-insensitive): each stage removes the
+/// resolved artifact and its staged copy first, so a shared target dir is
+/// refreshed without a manual `cargo clean`. Unset = no removal at all.
+fn frontend_rebuild_requested() -> bool {
+    println!("cargo:rerun-if-env-changed=APG_REBUILD_FRONTENDS");
+    std::env::var("APG_REBUILD_FRONTENDS")
+        .is_ok_and(|v| v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true"))
+}
+
 fn main() {
     watch_frontend_sources();
 
@@ -197,6 +207,11 @@ fn main() {
         // unlike the others: the root gate's `cargo build` is this staging's only
         // verification, so a failed build or copy must abort instead of skipping.
         let agentfrontend = frontend_artifact("agentlib", "agentfrontend");
+        let staged = stage_dir.join("agentfrontend");
+        if frontend_rebuild_requested() {
+            let _ = std::fs::remove_file(&agentfrontend);
+            let _ = std::fs::remove_file(&staged);
+        }
         let status = Command::new("cargo")
             .arg("build")
             .arg("--manifest-path")
@@ -207,7 +222,6 @@ fn main() {
             .status()
             .expect("failed to run cargo build for src/agentlib");
         assert!(status.success(), "cargo build for src/agentlib failed");
-        let staged = stage_dir.join("agentfrontend");
         std::fs::copy(&agentfrontend, &staged).expect("failed to stage agentfrontend");
         println!("cargo:rustc-env=APG_FRONTEND_AGENT={}", staged.display());
         languages.push("agent".into());
@@ -381,6 +395,10 @@ fn stage_rust(stage_dir: &Path) -> Vec<String> {
     // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
     // than aborting the whole build (like the other frontends).
     let rustfrontend = frontend_artifact("rustlib", "rustfrontend");
+    if frontend_rebuild_requested() {
+        let _ = std::fs::remove_file(&rustfrontend);
+        let _ = std::fs::remove_file(stage_dir.join("rustfrontend"));
+    }
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -415,6 +433,10 @@ fn stage_struct(stage_dir: &Path) -> Vec<String> {
     // id). On failure, skip the structural scanner rather than aborting the
     // whole build (like the other frontends).
     let structfrontend = frontend_artifact("structlib", "structfrontend");
+    if frontend_rebuild_requested() {
+        let _ = std::fs::remove_file(&structfrontend);
+        let _ = std::fs::remove_file(stage_dir.join("structfrontend"));
+    }
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -464,6 +486,10 @@ fn stage_py(stage_dir: &Path) -> Vec<String> {
     // the `[package]` name). On failure, skip py rather than aborting the
     // whole build (like the other frontends).
     let pyfrontend = frontend_artifact("pylib", "pyfrontend");
+    if frontend_rebuild_requested() {
+        let _ = std::fs::remove_file(&pyfrontend);
+        let _ = std::fs::remove_file(stage_dir.join("pyfrontend"));
+    }
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -491,6 +517,10 @@ fn stage_cobol(stage_dir: &Path) -> Vec<String> {
     // The staged artifact is the `cobolfrontend` binary. On failure, skip
     // cobol rather than aborting the whole build (like the other frontends).
     let cobolfrontend = frontend_artifact("cobollib", "cobolfrontend");
+    if frontend_rebuild_requested() {
+        let _ = std::fs::remove_file(&cobolfrontend);
+        let _ = std::fs::remove_file(stage_dir.join("cobolfrontend"));
+    }
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -516,6 +546,10 @@ fn stage_ps(stage_dir: &Path) -> Vec<String> {
     // Same shape as stage_cobol: always `--release` into src/pslib/target,
     // staged into the active profile's frontends dir; skip on failure.
     let psfrontend = frontend_artifact("pslib", "psfrontend");
+    if frontend_rebuild_requested() {
+        let _ = std::fs::remove_file(&psfrontend);
+        let _ = std::fs::remove_file(stage_dir.join("psfrontend"));
+    }
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
