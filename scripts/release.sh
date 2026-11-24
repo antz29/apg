@@ -40,14 +40,16 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short >&2
   exit 1
 fi
-# The release gate is the repo's single gate command WITH the e2e tier. The
+# The release gate runs the repo's single gate command with the COMPLETE e2e
+# selection — `--e2e-full`, not the hermetic `--e2e`: every e2e scenario runs,
+# the real-frontend acceptance scans and the pinned-scale rescan included. The
 # version-guard tests (RELEASE_VERSION literal, README pins, Cargo.lock
 # consistency) read files from disk, so they are e2e-tier and are NOT reached
-# by a plain `cargo test` (which runs unit+int only): a release that ran only
-# the default suite would ship a red release HEAD (the 0.11.0 miss:
-# RELEASE_VERSION stayed 0.10.4 at the tagged HEAD).
-echo "==> Gate: scripts/gate.sh --e2e (fmt/check/clippy/build/test + e2e guards)"
-scripts/gate.sh --e2e
+# by the default `cargo test --lib` suite: a release that ran only the default
+# gate would ship a red release HEAD (the 0.11.0 miss: RELEASE_VERSION stayed
+# 0.10.4 at the tagged HEAD).
+echo "==> Gate: scripts/gate.sh --e2e-full (fmt/check/clippy/build/test + complete e2e tier)"
+scripts/gate.sh --e2e-full
 
 RELEASE_SHA="$(git rev-parse HEAD)"
 echo "==> Release HEAD: $RELEASE_SHA"
