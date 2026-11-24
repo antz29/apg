@@ -6,9 +6,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use lbug::{Connection, Database, SystemConfig};
+use lbug::{Connection, Database};
 
 use crate::artifacts::PreviousScan;
+use crate::artifacts::db::system_config;
 use crate::graph::{Graph, Node, NodeKind};
 use crate::load;
 use crate::schema::Record;
@@ -48,7 +49,8 @@ pub fn seed(previous: &Path) -> SeedDecision {
         )));
     }
 
-    match Database::new(&temp_path, SystemConfig::default()) {
+    let opened = system_config(false).and_then(|config| Ok(Database::new(&temp_path, config)?));
+    match opened {
         Ok(db) => SeedDecision::Seed(SeededDb {
             db,
             temp_path,
@@ -73,7 +75,7 @@ pub fn seed_from_apg_root(apg_root: &Path) -> SeedDecision {
 /// pre-hardening DB). This is the identity of the tree the DB was BUILT from —
 /// the seed's own account of itself.
 pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
-    let db = Database::new(previous, SystemConfig::default().read_only(true))?;
+    let db = Database::new(previous, system_config(true)?)?;
     let conn = Connection::new(&db)?;
     let (_, rows) = query_rows(&conn, "MATCH (s:Scan) RETURN s.content_key AS content_key")?;
     Ok(rows.first().map(|r| cell(r, 0)).filter(|s| !s.is_empty()))
@@ -515,7 +517,7 @@ fn snapshot_code_kind(label: &str) -> Option<NodeKind> {
 /// and never panics: a missing, locked, or corrupt DB — or one missing a table —
 /// is returned as an `Err`.
 pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
-    let db = Database::new(previous, SystemConfig::default().read_only(true))?;
+    let db = Database::new(previous, system_config(true)?)?;
     let conn = Connection::new(&db)?;
 
     // Every authored/transient node table and its columns in `create_schema`
@@ -747,8 +749,9 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
 /// eligibility, and scan freshness and session recovery ask the same one
 /// comparison rather than probing the previous database a second time.
 pub(crate) fn validate_compatible(previous: &Path) -> Result<(), SeedFallback> {
-    let db = Database::new(previous, SystemConfig::default().read_only(true))
-        .map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
+    let config = system_config(true).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
+    let db =
+        Database::new(previous, config).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
     let conn = Connection::new(&db).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
     let actual = extract_schema(&conn).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
     let expected = expected_schema()
@@ -791,7 +794,7 @@ pub type SchemaFingerprint = BTreeMap<String, TableShape>;
 /// from the very DDL the full load uses makes the check self-maintaining — a
 /// schema change can never leave a stale expectation behind.
 fn expected_schema() -> anyhow::Result<SchemaFingerprint> {
-    let db = Database::in_memory(SystemConfig::default())?;
+    let db = Database::in_memory(system_config(false)?)?;
     let conn = Connection::new(&db)?;
     load::create_schema(&conn)?;
     extract_schema(&conn)
