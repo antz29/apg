@@ -16,8 +16,8 @@ use crate::frontends::{
 use crate::logging::{Log, emit_timing};
 use crate::warm::{reuse_universe, warm_prepared, warm_universe};
 use crate::{
-    artifacts, cache, classify, cobol, find_or_create_apg_root, git, graph, incremental, ingest,
-    layers, progress, run_pipeline, schema, session, specs, timing, version_gate,
+    artifacts, cache, classify, cobol, delta, find_or_create_apg_root, git, graph, incremental,
+    ingest, layers, progress, run_pipeline, schema, session, specs, timing, version_gate,
 };
 
 pub fn temp_dir() -> PathBuf {
@@ -355,12 +355,14 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // path too, so each frontend's full-scan native-artifact seeding (the
         // Java class surface behind tasks 17/32) is reachable through the CLI.
         // `targets_enabled` stays FALSE — a full scan emits everything and must
-        // carry NO `--targets` (phase-02 task-9). The no-store case
-        // (`FullScanReason::NotAGitRepo` leaves `store_root` empty) yields
-        // `None`/`None`: never a fabricated or defaulted cache path (AC (c)).
-        if !incremental.store_root.as_os_str().is_empty() {
-            handoff.cache_dir = Some(incremental.store_root.clone());
-            handoff.cache_key = Some(incremental.cache_key.token());
+        // carry NO `--targets` (phase-02 task-9). The hand-off value is the
+        // checkout's per-worktree toolchain cache root
+        // (`<checkout>/apg/.trans/cache`), never the shared fact-store root. A
+        // tree outside a git repository has no `apg/` root to resolve against
+        // (`FullScanReason::NotAGitRepo`), so the hand-off stays unset — never
+        // a fabricated or defaulted cache path (AC (c)).
+        if !matches!(reason, delta::FullScanReason::NotAGitRepo) {
+            handoff.cache_dir = Some(cache::cache_root(&apg_root));
         }
     } else if warm_complete {
         log.ln(&format!(
@@ -370,8 +372,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // No `--targets`: nothing is re-emitted; the per-file units are spliced
         // from the store and their languages' scaffolding is replayed from the
         // store's `skipped_langs` set.
-        handoff.cache_dir = Some(incremental.store_root.clone());
-        handoff.cache_key = Some(incremental.cache_key.token());
+        handoff.cache_dir = Some(cache::cache_root(&apg_root));
         reuse_plan = Some(incremental::ReusePlan {
             store_root: incremental.store_root.clone(),
             cache_key: incremental.cache_key.clone(),
@@ -391,12 +392,11 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             incremental.targets_rel.len(),
             incremental.reuse_candidates.len(),
         ));
-        // The pinned target-set hand-off contract (task-9): `--targets`,
-        // `--cache-dir`, `--cache-key` on every language's argv. The target
-        // files live in the scan's own temp dir (removed with it).
+        // The pinned target-set hand-off contract (task-9): `--targets` and
+        // `--cache-dir` on every language's argv. The target files live in the
+        // scan's own temp dir (removed with it).
         handoff.targets_enabled = true;
-        handoff.cache_dir = Some(incremental.store_root.clone());
-        handoff.cache_key = Some(incremental.cache_key.token());
+        handoff.cache_dir = Some(cache::cache_root(&apg_root));
         reuse_plan = Some(incremental::ReusePlan {
             store_root: incremental.store_root.clone(),
             cache_key: incremental.cache_key.clone(),

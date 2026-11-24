@@ -488,23 +488,20 @@ pub fn id_prefix_for(language: &str) -> &'static str {
 ///   target set is unchanged and empty is skipped entirely (phase-03 task-5).
 ///   For `sql` the list is ALWAYS present (full scan and no-store scan alike)
 ///   and is the emission universe: an empty list emits no `.sql` file.
-/// * `--cache-dir <abs dir>`: the shared content-addressed store root
-///   (`<git-common-dir>/apg/facts`).
-/// * `--cache-key <key>`: the global cache key (`domain.value.cache-key`),
-///   computed once by APG and passed unchanged to every frontend.
+/// * `--cache-dir <abs dir>`: the per-worktree toolchain cache root,
+///   `<checkout>/apg/.trans/cache`. No cache key is passed: each frontend
+///   appends its own language directory under it (`<cache-dir>/<language>/`).
 ///
 /// The frontend persists its native incremental artifact under
-/// `<cache-dir>/<lang>/<cache-key>/`. Every frontend resolves against the FULL
+/// `<cache-dir>/<language>/`. Every frontend resolves against the FULL
 /// context and only emission is filtered (`global.constraint.frontend-full-context`).
 #[derive(Debug, Clone, Default)]
 pub struct FrontendHandoff {
     /// When true, a `--targets <file>` list is written into the scan's temp dir
     /// and passed. `false` = no emission filter.
     pub targets_enabled: bool,
-    /// The shared store root (`<git-common-dir>/apg/facts`).
+    /// The per-worktree toolchain cache root (`<checkout>/apg/.trans/cache`).
     pub cache_dir: Option<PathBuf>,
-    /// The global cache key token.
-    pub cache_key: Option<String>,
 }
 
 impl FrontendHandoff {
@@ -532,9 +529,6 @@ impl FrontendHandoff {
         }
         if let Some(dir) = &self.cache_dir {
             child.arg("--cache-dir").arg(dir);
-        }
-        if let Some(key) = &self.cache_key {
-            child.arg("--cache-key").arg(key);
         }
     }
 }
@@ -867,17 +861,14 @@ pub fn spawn_frontend_args(
     // Win-B target-set hand-off (task-9) plus the pinned cache hand-off on the
     // full-scan path (phase-04 tasks 33/34): append whenever ANY part of the
     // hand-off is present. `--targets` is still emitted only when
-    // `targets_enabled`, while `--cache-dir`/`--cache-key` are appended whenever
-    // set — so a full scan (`targets_enabled == false`) passes the cache flags
-    // and NO `--targets`, and the incremental argv is unchanged in flags AND
-    // order (AC (b)). With no hand-off at all (no store / `NotAGitRepo`) nothing
+    // `targets_enabled`, while `--cache-dir` is appended whenever set — so a
+    // full scan (`targets_enabled == false`) passes the cache dir and NO
+    // `--targets`, and the incremental argv is unchanged in flags AND order
+    // (AC (b)). With no hand-off at all (no cache dir / `NotAGitRepo`) nothing
     // is appended (AC (c)) — except for `sql`, whose `--targets` list is always
-    // present (even empty, even with no store) as its emission universe: an
+    // present (even empty, even with no cache dir) as its emission universe: an
     // empty list emits no `.sql` file.
-    if passes_targets_flag(lang, handoff.targets_enabled)
-        || handoff.cache_dir.is_some()
-        || handoff.cache_key.is_some()
-    {
+    if passes_targets_flag(lang, handoff.targets_enabled) || handoff.cache_dir.is_some() {
         handoff.append(&mut child, tmp, lang, targets);
     }
     child

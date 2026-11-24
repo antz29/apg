@@ -6277,7 +6277,6 @@ mod e2e {
         let handoff = FrontendHandoff {
             targets_enabled: true,
             cache_dir: Some(PathBuf::from("/common/apg/facts")),
-            cache_key: Some("cache-key-token".to_string()),
         };
         let targets = vec!["/root/b.go".to_string(), "/root/a.go".to_string()];
         let path = handoff.write_targets(&tmp, "go", &targets);
@@ -6311,7 +6310,7 @@ mod e2e {
         assert_eq!(cpp, vec!["/root/c/thing.hxx"]);
 
         // The pinned flags are the ONLY channel: a command built with the
-        // hand-off carries `--targets`, `--cache-dir`, `--cache-key`.
+        // hand-off carries `--targets` and `--cache-dir` (no cache key).
         let mut cmd = Command::new("true");
         handoff.append(&mut cmd, &tmp, "go", &targets);
         let args: Vec<String> = cmd
@@ -6325,8 +6324,6 @@ mod e2e {
                 path.display().to_string(),
                 "--cache-dir".to_string(),
                 "/common/apg/facts".to_string(),
-                "--cache-key".to_string(),
-                "cache-key-token".to_string(),
             ]
         );
 
