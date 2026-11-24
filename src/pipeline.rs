@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use lbug::{Connection, Database};
+use lbug::{Connection, Database, SystemConfig};
 
 use crate::cleanup::{CleanupOptions, cleanup};
 use crate::logging::Log;
@@ -27,6 +27,10 @@ use crate::{cache, classify, graph, incremental, ingest, load, schema, session, 
 /// `progress` streams one symbol per admitted code node through the whole
 /// assembly (the spool and, on the win-B path, the cached-fact splice); the
 /// caller supplies the emitter, or `None` for a silent assembly.
+///
+/// Production always opens the derived database at the engine default (see
+/// [`run_pipeline_with`]); an in-process caller that needs a different
+/// `SystemConfig` calls that entry point directly.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_pipeline(
     records: impl IntoIterator<Item = schema::Record>,
@@ -38,6 +42,37 @@ pub(crate) fn run_pipeline(
     base: Option<&Path>,
     log: &mut Log,
     progress: Option<&mut Progress<'_>>,
+) -> timing::PipelineTimings {
+    run_pipeline_with(
+        records,
+        blacklist,
+        path_excludes,
+        language,
+        config,
+        input,
+        base,
+        log,
+        progress,
+        None,
+    )
+}
+
+/// [`run_pipeline`] with the derived database's engine config supplied by the
+/// caller. `db_config` is applied at the full load's read-write
+/// `Database::new("db.lbug", …)`; `None` is exactly `SystemConfig::default()`,
+/// the engine default every production scan opens with.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_pipeline_with(
+    records: impl IntoIterator<Item = schema::Record>,
+    blacklist: &[String],
+    path_excludes: &[String],
+    language: &str,
+    config: Option<&classify::ApgConfig>,
+    input: Option<&incremental::PipelineInput>,
+    base: Option<&Path>,
+    log: &mut Log,
+    progress: Option<&mut Progress<'_>>,
+    db_config: Option<SystemConfig>,
 ) -> timing::PipelineTimings {
     // Phase-04 task-4: this function owns two reported phases. Ingest-assembly
     // covers the ingestor passes, cleanup, and the fact-store recording from
@@ -373,7 +408,7 @@ pub(crate) fn run_pipeline(
             );
         }
         log.ln("[load] Database::new...");
-        let db = Database::new("db.lbug", Default::default()).unwrap();
+        let db = Database::new("db.lbug", db_config.unwrap_or_default()).unwrap();
         log.ln("[load] Database::new done");
         let conn = Connection::new(&db).unwrap();
         log.ln("[load] create_schema...");
