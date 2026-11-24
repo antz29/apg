@@ -5,10 +5,12 @@
 //! beside the external `<git-common-dir>/apg/facts.lock` writer gate — shared by
 //! every worktree and branch of the repository, so a fresh worktree reuses the
 //! main checkout's units. [`FactStore::root`] is the store *directory*
-//! (`<git-common-dir>/apg`): the phase-2 JSON records the phase-4 tasks have not
-//! yet moved into redb (`manifest.json`, `scan.json`, the `index/` state) still
-//! live there beside `facts.db`, and every call site (`pipeline`, `record`,
-//! `warm`, `prepare`) passes that directory around.
+//! (`<git-common-dir>/apg`) holding `facts.db` and its `facts.lock` sibling:
+//! every recorded fact lives in the database's redb tables — the units, bodies
+//! and scaffolding, plus the per-worktree
+//! `refs`/`scans`/`deps`/`signatures`/`overloads` rows — and there are no
+//! `manifest.json`, `scan.json` or `index/*.json` files. Every call site
+//! (`pipeline`, `record`, `warm`, `prepare`) passes that directory around.
 //!
 //! Opening is **lazy** and never takes a write transaction: [`FactStore::at`]
 //! and [`FactStore::load`] only resolve the path, and the first read or write
