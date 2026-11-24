@@ -20,6 +20,12 @@
 //!    back from a fresh, near-identical worktree (same relative path + content
 //!    OID) and re-based onto the reading worktree's absolute paths.
 //!
+//! 3. The per-worktree toolchain cache layout ([`toolchain`]) — each frontend's
+//!    own native build cache lives under the checkout's
+//!    `apg/.trans/cache/<language>/`, resolved from the apg root alone. It is
+//!    **not** the shared fact store: a store format or config change leaves it
+//!    intact, and every worktree keeps its own.
+//!
 //! The global cache key ([`CacheKey`], `domain.value.cache-key`) is the
 //! version/format/config identity that invalidates the whole cache on drift:
 //! binary version, scanner JSONL schema/format, ingestor projection rules, the
@@ -35,17 +41,20 @@
 //
 // The implementation is split across cohesive submodules — the manifest and
 // global cache key ([`manifest`]), the per-file fact units, single-pass index
-// and module scaffolding ([`fragment`]), and the shared store ([`factstore`])
-// — all re-exported here so `crate::cache::<name>` keeps resolving.
+// and module scaffolding ([`fragment`]), the shared store ([`factstore`]), and
+// the checkout-local toolchain cache layout ([`toolchain`]) — all re-exported
+// here so `crate::cache::<name>` keeps resolving.
 #![allow(dead_code)]
 
 pub mod factstore;
 pub mod fragment;
 pub mod manifest;
+pub mod toolchain;
 
 pub use factstore::*;
 pub use fragment::*;
 pub use manifest::*;
+pub use toolchain::*;
 
 // Test-only reaches: `src/cache/tests.rs` gets these through `use super::*;`,
 // gated so the non-test library carries no unused import.

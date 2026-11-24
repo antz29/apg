@@ -743,4 +743,51 @@ mod unit {
         assert!(csharp.modules.is_empty(), "{csharp:?}");
         assert!(csharp.language_edges.is_empty(), "{csharp:?}");
     }
+
+    /// scan-cache-redb phase-01 task-2: the toolchain cache root is the
+    /// checkout's own `apg/.trans/cache`, resolved from the apg root alone —
+    /// two distinct checkouts therefore resolve two distinct roots, and no
+    /// part of the path comes from the git common dir.
+    #[test]
+    fn toolchain_cache_root_is_the_checkout_apg_trans_cache() {
+        let checkout = cache_root(Path::new("/checkout/apg"));
+        assert_eq!(checkout, Path::new("/checkout/apg/.trans/cache"));
+        // A trailing separator on the apg root changes nothing.
+        assert_eq!(cache_root(Path::new("/checkout/apg/")), checkout);
+        // A different checkout yields a different root.
+        let other = cache_root(Path::new("/other-checkout/apg"));
+        assert_eq!(other, Path::new("/other-checkout/apg/.trans/cache"));
+        assert_ne!(checkout, other);
+        // The root is checkout-local: no git common dir, no fact-store root.
+        assert!(!checkout.to_string_lossy().contains(".git"));
+        assert!(!checkout.to_string_lossy().contains("facts"));
+    }
+
+    /// scan-cache-redb phase-01 task-2: each language's directory is a direct
+    /// child of the cache root — `<root>/<language>`, with no cache-key or
+    /// version segment — so the Go, Java and TypeScript caches sit side by
+    /// side under one checkout-local root.
+    #[test]
+    fn toolchain_language_dir_is_a_direct_child_with_no_cache_key() {
+        let root = cache_root(Path::new("/checkout/apg"));
+        for language in ["go", "java", "ts"] {
+            let dir = language_dir(&root, language);
+            assert_eq!(dir, root.join(language));
+            assert!(dir.starts_with(&root));
+            // Exactly one segment below the root: no cache-key segment.
+            assert_eq!(dir.components().count(), root.components().count() + 1);
+        }
+        assert_eq!(
+            language_dir(&root, "go"),
+            Path::new("/checkout/apg/.trans/cache/go")
+        );
+        assert_eq!(
+            language_dir(&root, "java").join("surface.tsv"),
+            Path::new("/checkout/apg/.trans/cache/java/surface.tsv")
+        );
+        assert_eq!(
+            language_dir(&root, "ts").join("tsconfig.tsbuildinfo"),
+            Path::new("/checkout/apg/.trans/cache/ts/tsconfig.tsbuildinfo")
+        );
+    }
 }
