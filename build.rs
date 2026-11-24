@@ -44,17 +44,21 @@ fn enabled(langs: &[String], lang: &str) -> bool {
 /// `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
 /// instead of reusing a stale build-script fingerprint.
 fn watch_frontend_sources() {
-    // Walk each frontend's SOURCE tree and emit one `cargo:rerun-if-changed`
-    // per regular file, so ANY edit to a frontend file re-runs the build
-    // script (and therefore re-stages the frontend). A hand-listed watch set
-    // went stale the moment a frontend was split into new submodule files: a
-    // brand-new file the list never named left the build-script fingerprint
-    // unchanged, so `cargo build` could stage a STALE frontend. The worklist
-    // is iterative (no recursion) and the emitted paths stay relative to the
-    // crate root. Pruned directory names never carry frontend source: vendored
-    // trees (`src/cpplib/vendor`), npm installs (`node_modules`), cargo build
-    // output (`target`), csharp build output (`bin`/`obj`) and VCS metadata
-    // (`.git`).
+    // Walk each frontend's PRODUCTION source tree and emit one
+    // `cargo:rerun-if-changed` per regular file, so ANY edit to a production
+    // frontend file re-runs the build script (and therefore re-stages the
+    // frontend). A hand-listed watch set went stale the moment a frontend was
+    // split into new submodule files: a brand-new file the list never named
+    // left the build-script fingerprint unchanged, so `cargo build` could
+    // stage a STALE frontend. The worklist is iterative (no recursion) and the
+    // emitted paths stay relative to the crate root. Pruned directory names
+    // never carry frontend source: vendored trees (`src/cpplib/vendor`), npm
+    // installs (`node_modules`), cargo build output (`target`), csharp build
+    // output (`bin`/`obj`), VCS metadata (`.git`) and each frontend's test
+    // tree (`tests`). Test-only files are skipped too — `tests.rs`,
+    // `*_test.go`, `*Test.java`, `*.test.ts`, `*_test.rs` — because they never
+    // reach the shipped frontend, while a production file that merely has
+    // "test" in its name (`src/cpplib/self_test.h`) stays watched.
     let roots = [
         "src/golib",
         "src/javalib",
@@ -85,12 +89,20 @@ fn watch_frontend_sources() {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if !matches!(
                     name,
-                    "vendor" | "node_modules" | "target" | "bin" | "obj" | ".git"
+                    "vendor" | "node_modules" | "target" | "bin" | "obj" | ".git" | "tests"
                 ) {
                     stack.push(path);
                 }
             } else if file_type.is_file() {
-                println!("cargo:rerun-if-changed={}", path.display());
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let test_only = name == "tests.rs"
+                    || name.ends_with("_test.go")
+                    || name.ends_with("Test.java")
+                    || name.ends_with(".test.ts")
+                    || name.ends_with("_test.rs");
+                if !test_only {
+                    println!("cargo:rerun-if-changed={}", path.display());
+                }
             }
         }
     }
