@@ -31,3 +31,9 @@ test-int = "test tests::int::"
 # (`Buffer manager exception: Mmap for size 8796093022208 failed`), while they
 # pass at this bound.
 test-e2e = "test e2e:: -- --ignored --test-threads=4"
+
+# Dev profile (stable since Rust 1.43): keep file/line backtraces while dropping
+# full dependency debug information, so the root crate and its 24 test-target
+# links build and link faster.
+[profile.dev]
+debug = "line-tables-only"
