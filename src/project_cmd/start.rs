@@ -7,6 +7,7 @@ use crate::git;
 use crate::specs;
 use crate::version_gate;
 
+use super::cache_copy::{materialise, resolve_policy};
 use super::{require_apg_root, validate_project_name, worktree_hosting};
 
 /// `apg project start <name>` — the one-command project context creation.
@@ -15,8 +16,12 @@ pub(crate) fn project_start(args: &[String]) -> anyhow::Result<()> {
     let Some(name) = p.positional.first() else {
         anyhow::bail!("usage: apg project start <name>");
     };
+    let cache_copy = p.get("cache-copy");
+    if cache_copy.is_none() && p.has("cache-copy") {
+        anyhow::bail!("usage: `--cache-copy` needs a value (auto, clone, copy or skip)");
+    }
     let apg_root = require_apg_root()?;
-    let path = project_start_at(&apg_root, name)?;
+    let path = project_start_at_with(&apg_root, name, cache_copy.as_deref())?;
     println!("Project `{name}` started at {}", path.display());
     Ok(())
 }
@@ -33,8 +38,21 @@ pub(crate) type ScanFn = dyn Fn(&Path) -> anyhow::Result<()>;
 /// Core of `project start` (split from the CLI wrapper so tests drive it
 /// against a fixture root). Refuses when the main checkout's scan is stale or
 /// missing, else creates the branch + worktree and copies main's `apg/.trans`
-/// into the branch — no frontend scan.
+/// into the branch — no frontend scan. The toolchain cache is materialised
+/// separately, by [`project_start_at_with`] under its resolved policy.
 pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> {
+    project_start_at_with(apg_root, name, None)
+}
+
+/// [`project_start_at`] with the `--cache-copy` CLI value (the highest-priority
+/// cache-copy policy source). Takes the spec lock before the freshness gate and
+/// holds it through the `.trans` seed copy and the cache materialisation, so a
+/// running scan is waited out rather than mis-read as stale.
+pub fn project_start_at_with(
+    apg_root: &Path,
+    name: &str,
+    cache_copy: Option<&str>,
+) -> anyhow::Result<PathBuf> {
     // Identity first: non-git dirs refuse here (R2: suggest apg init).
     let identity = git::repo_identity(apg_root)?;
     let wt_dir = git::project_worktree_dir(&identity.main_root, name);
@@ -76,6 +94,13 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
     version_gate::require_layout_version(apg_root, &format!("re-run `apg project start {name}`"))?;
 
     refuse_start(&identity, name)?;
+
+    // Spec lock: taken AFTER the refusals and the version gate (a refusing
+    // start must not hold it) and BEFORE the freshness gate, held through the
+    // seed copy and the cache materialisation. A running scan holds the same
+    // flock, so start waits it out instead of reading a half-written scan as
+    // stale and refusing.
+    let _lock = crate::artifacts::acquire_spec_lock(apg_root)?;
 
     // Freshness gate: start seeds the branch DB by copying main's scan, so
     // main must have a CURRENT scan for main's HEAD. `!git::is_fresh` (never
@@ -163,6 +188,22 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
     // during walk-up discovery.
     let wt_apg = wt_dir.join(specs::LAYOUT);
     copy_trans_artifacts(&apg_root.join(specs::TRANS), &wt_apg.join(specs::TRANS))?;
+    // Materialise the worktree's toolchain cache from the main checkout's by
+    // the policy resolved CLI > `APG_CACHE_COPY` > `apg/config.json`
+    // `cache.project-start` > auto. A missing source cache or an existing
+    // destination is a no-op; a clone/copy failure fails the start (the
+    // materialiser leaves no partial destination behind).
+    let src_cache = apg_root.join(specs::TRANS).join("cache");
+    let dst_cache = wt_apg.join(specs::TRANS).join("cache");
+    let env_value = std::env::var("APG_CACHE_COPY")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let config_value = crate::classify::ApgConfig::load(&identity.main_root)
+        .and_then(|c| c.cache)
+        .and_then(|s| s.project_start)
+        .filter(|v| !v.trim().is_empty());
+    let policy = resolve_policy(cache_copy, env_value.as_deref(), config_value.as_deref())?;
+    materialise(&src_cache, &dst_cache, policy)?;
     // The copy only seeds `.trans`; the worktree also needs the scratch dir
     // the researcher writes its result markdown into.
     std::fs::create_dir_all(wt_apg.join(specs::SCRATCH))?;
@@ -170,19 +211,29 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
 }
 
 /// Recursively copies the main checkout's `apg/.trans` scan into the new
-/// worktree's `apg/.trans` (files and nested directories). Reads only the
-/// `.trans` tree — never the source tree — creates `dst`, and is a no-op when
-/// `src` and `dst` are the same directory.
+/// worktree's `apg/.trans` (files and nested directories), skipping the
+/// **top-level** `cache` entry — the toolchain cache is materialised separately
+/// by the cache-copy policy (a nested directory merely named `cache` is an
+/// ordinary scan artifact and still copies). Reads only the `.trans` tree —
+/// never the source tree — creates `dst`, and is a no-op when `src` and `dst`
+/// are the same directory.
 fn copy_trans_artifacts(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    copy_trans_contents(src, dst, true)
+}
+
+fn copy_trans_contents(src: &Path, dst: &Path, top_level: bool) -> anyhow::Result<()> {
     if src == dst {
         return Ok(());
     }
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        if top_level && entry.file_name().as_os_str() == std::ffi::OsStr::new("cache") {
+            continue;
+        }
         let to = dst.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_trans_artifacts(&entry.path(), &to)?;
+            copy_trans_contents(&entry.path(), &to, false)?;
         } else {
             std::fs::copy(entry.path(), &to)?;
         }
