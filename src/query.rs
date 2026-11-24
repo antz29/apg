@@ -4,7 +4,7 @@
 //! (phase-04 decomposition); no behaviour change — byte-identical output for
 //! both the direct path and the session coordinator's routed-read branch.
 
-use lbug::{Connection, Database, SystemConfig};
+use lbug::{Connection, Database};
 
 use crate::find_apg_root;
 use crate::session;
@@ -62,7 +62,7 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
             db_path.display()
         );
     }
-    let db = Database::new(&db_path, SystemConfig::default().read_only(true))?;
+    let db = Database::new(&db_path, crate::artifacts::db::system_config(true)?)?;
     println!("{}", render_query(&db, &query, json)?);
     Ok(())
 }
