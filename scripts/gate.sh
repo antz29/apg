@@ -54,8 +54,9 @@
 # crates are never built by the default step; `cargo clippy --all-targets` above
 # is unchanged and still type-checks every target, and `--e2e` builds and runs
 # the e2e crates (or `cargo test-e2e` on its own). E2E_THREADS bounds their
-# parallelism (default 1: many concurrent `db.lbug` opens have been observed to
-# flake with LadybugDB `Mmap ... failed`).
+# parallelism (default 4, the documented `cargo test-e2e` alias value; many
+# concurrent `db.lbug` opens have been observed to flake with LadybugDB
+# `Mmap ... failed`).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -80,7 +81,7 @@ STEPS=(
 )
 if [ "${1:-}" = "--e2e" ]; then
   STEPS+=(
-    "cargo test e2e:: -- --ignored --test-threads=${E2E_THREADS:-1}"
+    "cargo test e2e:: -- --ignored --test-threads=${E2E_THREADS:-4}"
     "bun test e2e   (opencode-suite boundary; candidate $BIN)"
   )
 fi
@@ -173,7 +174,7 @@ step
 
 if [ "${1:-}" = "--e2e" ]; then
   step
-  cargo test e2e:: -- --ignored --test-threads="${E2E_THREADS:-1}"
+  cargo test e2e:: -- --ignored --test-threads="${E2E_THREADS:-4}"
 
   # The suite e2e is opt-in via APG_SUITE_E2E=1 (the boundary cases self-skip
   # otherwise), and every agent's shell grant is deny-by-default exact patterns
