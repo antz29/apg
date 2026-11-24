@@ -206,6 +206,8 @@ mod e2e {
         let frag = FileFragment::from_graph(&g, "/w/a.go", "a.go", "oid-a", "go");
         let inputs = frag.inputs_digest();
         store.put(&frag, "/w", &cache_key).unwrap();
+        // Commit the write round: the facade's reads see committed state only.
+        store.save_index().unwrap();
 
         // Same bytes + same inputs + same key ⇒ reusable.
         assert!(store.has("go", "a.go", "oid-a", &inputs, &cache_key));
@@ -297,6 +299,7 @@ mod e2e {
         let frag = FileFragment::from_graph(&g, "/main/src/a.go", "src/a.go", "oid-a", "go");
         let inputs = frag.inputs_digest();
         store.put(&frag, "/main", &cache_key).unwrap();
+        store.save_index().unwrap();
 
         // The fresh worktree has the SAME relative path + bytes (sharing keys
         // are relative), so it reuses the unit; its repo-relative identities
@@ -454,6 +457,7 @@ mod e2e {
         );
 
         store.put_scaffolding_all(&by_lang, &cache_key).unwrap();
+        store.save_index().unwrap();
         assert_eq!(store.scaffolding("csharp", &cache_key).as_ref(), Some(cs));
         // The `Language` root and every module's edge survive the round-trip.
         let replayed_go = store

@@ -1085,6 +1085,8 @@ mod e2e {
             let frag = FileFragment::from_graph(&g, abs, rel, &format!("oid-{rel}"), "go");
             store.put(&frag, "/w", &cache_key).unwrap();
         }
+        // Commit the write round: the facade's reads see committed state only.
+        store.save_index().unwrap();
 
         // The reuse list puts b/b.go (the caller) BEFORE a/a.go (the callee).
         let reuse = Reuse {
@@ -1210,6 +1212,7 @@ mod e2e {
             .insert(("b.go".to_string(), "go.scratch.Model".to_string()));
         let frag = FileFragment::from_graph(&cached, "b.go", "b.go", "oid-b", "go");
         store.put(&frag, "/fresh", &cache_key).unwrap();
+        store.save_index().unwrap();
 
         // The freshly re-emitted spool: a.go's Caller authors unresolved edges
         // at BOTH cached real FQNs plus one genuinely-unresolved target.
@@ -1475,6 +1478,7 @@ mod e2e {
         store.put(&frag, "/x", &cache_key).unwrap();
         let scaffolding = ModuleScaffolding::extract(&prev, std::path::Path::new("/x"));
         store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+        store.save_index().unwrap();
 
         // The whole assembly comes from the cache (the changed language
         // contributes no records in this unit test).
@@ -1614,6 +1618,7 @@ mod e2e {
         }
         let scaffolding = ModuleScaffolding::extract(&full, Path::new("/x"));
         store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+        store.save_index().unwrap();
 
         let reuse = Reuse {
             store: &store,
@@ -2050,6 +2055,7 @@ mod e2e {
                 &cache_key,
             )
             .unwrap();
+        store.save_index().unwrap();
 
         // The freshly re-emitted spool: `Shared` is declared again (the kept
         // incumbent) and the two cached real FQNs appear as unresolved
@@ -2656,6 +2662,7 @@ mod e2e {
             "the Module is the unit's module identity, not a per-unit node"
         );
         store.put(&frag, "/fresh", &cache_key).unwrap();
+        store.save_index().unwrap();
 
         // The equality reference: the same real declarations WITH the plan
         // store's seven placeholders — the fact set the assembled graph must
@@ -3049,6 +3056,7 @@ mod e2e {
         store.put(&frag, "/x", &cache_key).unwrap();
         let scaffolding = ModuleScaffolding::extract(&full, Path::new("/x"));
         store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+        store.save_index().unwrap();
         let reuse = Reuse {
             store: &store,
             cache_key: &cache_key,
@@ -3220,6 +3228,7 @@ mod e2e {
             let mut store = FactStore::at(dir.join("facts"));
             store.put(&cached.1, "/x", &cache_key).unwrap();
             store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+            store.save_index().unwrap();
             let reuse = Reuse {
                 store: &store,
                 cache_key: &cache_key,
@@ -3696,6 +3705,7 @@ mod e2e {
             store.put(&frag, "/w", &cache_key).unwrap();
             reuse_files.push((rel.to_string(), lang.to_string(), oid));
         }
+        store.save_index().unwrap();
         let reuse = Reuse {
             store: &store,
             cache_key: &cache_key,
@@ -3925,6 +3935,7 @@ mod e2e {
         let index = FileIndex::build(&full);
         let frag = FileFragment::from_index(&index, "cs/A.cs", "cs/A.cs", "oid-a", "csharp");
         store.put(&frag, "/x", &cache_key).unwrap();
+        store.save_index().unwrap();
         let reuse = Reuse {
             store: &store,
             cache_key: &cache_key,

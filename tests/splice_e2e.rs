@@ -2132,6 +2132,8 @@ mod e2e {
         store.put(&frag, "/x", &cache_key).unwrap();
         let scaffolding = ModuleScaffolding::extract(&previous, Path::new("/x"));
         store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+        // Commit the write round: the facade's reads see committed state only.
+        store.save_index().unwrap();
 
         // The win-B assembly: only the changed language re-emits facts; the
         // skipped file comes from the cache and its scaffolding from the store.
@@ -2298,6 +2300,7 @@ mod e2e {
             let frag = FileFragment::from_graph(&reference, abs, rel, oid, "java");
             store.put(&frag, "/x", &cache_key).unwrap();
         }
+        store.save_index().unwrap();
         // Deliberately NO stored scaffolding: pass 2b only replays for a SKIPPED
         // language, and `skipped_langs` below is empty.
 
@@ -7677,6 +7680,7 @@ mod e2e {
                 )
                 .unwrap();
         }
+        store.save_index().unwrap();
 
         // Seeds the v1 DB, splices the target-only spool + the reused unit, and
         // proves the published DB equals a full rebuild of the new tree.
