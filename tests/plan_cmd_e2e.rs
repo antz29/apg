@@ -310,7 +310,7 @@ fn db_at(dir: &Path) {
     load::build_load_files(&g, &ldir).unwrap();
     let db = Database::new(
         dir.join("apg").join(specs::TRANS).join("db.lbug"),
-        Default::default(),
+        testutil::fixture_db_config(),
     )
     .unwrap();
     let conn = Connection::new(&db).unwrap();
