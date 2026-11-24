@@ -791,9 +791,12 @@ fn java_run(
         .output()
 }
 
-/// The shared `<git-common-dir>/apg/facts` store for a scratch repo.
+/// The per-worktree toolchain cache root (`<checkout>/apg/.trans/cache`) for a
+/// scratch repo — where the Go, Java and TypeScript frontends keep their own
+/// native build caches. Deliberately NOT the shared fact store
+/// (`<git-common-dir>/apg/facts`).
 fn java_store(repo_dir: &Path) -> PathBuf {
-    repo_dir.join(".git/apg/facts")
+    repo_dir.join("apg/.trans/cache")
 }
 
 /// The enumerated per-rel-type oracle: rel type -> row count for the four Java
@@ -862,29 +865,18 @@ fn java_project_class_simple_names(repo_dir: &Path) -> std::collections::BTreeSe
         .collect()
 }
 
-/// True when the shared store holds a Java CLASS-cache artifact — the
-/// `<cache-dir>/java/<cache-key>/surface.tsv` (or `classes/` dir) the
-/// targeted path consumes. The `<cache-dir>/java/<cache-key>/` directory
-/// itself is ALSO the FactStore's per-language fact-unit bucket, so its mere
-/// existence is not a class-cache artifact.
+/// True when the per-worktree toolchain cache holds a Java CLASS-cache
+/// artifact — the keyless `<cache-dir>/java/{surface.tsv,classes}` the
+/// targeted path consumes.
 fn java_class_cache_seeded(store: &Path) -> bool {
     let java = store.join("java");
-    let Ok(keys) = std::fs::read_dir(&java) else {
-        return false;
-    };
-    for k in keys.flatten() {
-        let d = k.path();
-        if d.join("surface.tsv").exists() || d.join("classes").is_dir() {
-            return true;
-        }
-    }
-    false
+    java.join("surface.tsv").exists() || java.join("classes").is_dir()
 }
 
 /// Recursively collects every Java class-cache artifact (`surface.tsv` file
 /// or `classes/` directory) under `root`. The task-25 no-hand-off control
 /// uses it to catch a fabricated/defaulted cache path ANYWHERE in the
-/// scratch tree, not merely under the shared store.
+/// scratch tree, not merely under the per-worktree cache root.
 fn collect_class_cache_artifacts(root: &Path, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -916,8 +908,8 @@ fn java_unchanged_package_compiles(log: &str) -> Option<usize> {
     None
 }
 
-/// The number of `.class` files anywhere under the shared store's Java class
-/// caches (`<store>/java/<cache-key>/classes`). The task-23 nested-root
+/// The number of `.class` files under the per-worktree Java class cache
+/// (`<store>/java/classes`). The task-23 nested-root
 /// fixture carries a source javac cannot compile (`pkg.a.Broken`), so the
 /// compile batch cannot emit bytecode and the count is ZERO — the positive
 /// proof that the targeted scan's exact facts came from the corrected
@@ -925,13 +917,7 @@ fn java_unchanged_package_compiles(log: &str) -> Option<usize> {
 /// non-zero count would mean the fixture could pass vacuously via the
 /// classpath, so the test asserts this observable.
 fn java_class_file_count(store: &Path) -> usize {
-    let java = store.join("java");
-    let Ok(keys) = std::fs::read_dir(&java) else {
-        return 0;
-    };
-    keys.flatten()
-        .map(|k| count_class_files(&k.path().join("classes")))
-        .sum()
+    count_class_files(&store.join("java/classes"))
 }
 
 /// Recursively counts `.class` files under a class dir.
@@ -6267,6 +6253,8 @@ mod e2e {
     /// the `--targets <file>` list is newline-delimited absolute paths (blank
     /// lines ignored), and the same list is written per language from the
     /// checkout-relative target set. The channel is argv — stdin stays null.
+    /// The only other hand-off flag is `--cache-dir`, naming the per-worktree
+    /// toolchain cache root `<checkout>/apg/.trans/cache` (no cache key).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn frontend_handoff_targets_file_is_newline_delimited_absolute_paths() {
@@ -6276,7 +6264,7 @@ mod e2e {
 
         let handoff = FrontendHandoff {
             targets_enabled: true,
-            cache_dir: Some(PathBuf::from("/common/apg/facts")),
+            cache_dir: Some(PathBuf::from("/checkout/apg/.trans/cache")),
         };
         let targets = vec!["/root/b.go".to_string(), "/root/a.go".to_string()];
         let path = handoff.write_targets(&tmp, "go", &targets);
@@ -6310,7 +6298,8 @@ mod e2e {
         assert_eq!(cpp, vec!["/root/c/thing.hxx"]);
 
         // The pinned flags are the ONLY channel: a command built with the
-        // hand-off carries `--targets` and `--cache-dir` (no cache key).
+        // hand-off carries `--targets` and `--cache-dir` (the per-worktree
+        // toolchain cache root; no cache key).
         let mut cmd = Command::new("true");
         handoff.append(&mut cmd, &tmp, "go", &targets);
         let args: Vec<String> = cmd
@@ -6323,7 +6312,7 @@ mod e2e {
                 "--targets".to_string(),
                 path.display().to_string(),
                 "--cache-dir".to_string(),
-                "/common/apg/facts".to_string(),
+                "/checkout/apg/.trans/cache".to_string(),
             ]
         );
 
@@ -6750,9 +6739,9 @@ mod e2e {
 
     /// fix-module-identity phase-03 task-7 (e2e): scan hygiene. A scratch
     /// /tmp git repo carries a Go test package (whose compile writes a
-    /// generated `_testmain` into the shared Go build cache under
-    /// `.git/apg/facts`), a `target/**` build tree (a `.ts` the unified
-    /// frontend would otherwise scan, exactly like the observed
+    /// generated `_testmain` into the per-worktree Go build cache under
+    /// `<checkout>/apg/.trans/cache/go`), a `target/**` build tree (a `.ts`
+    /// the unified frontend would otherwise scan, exactly like the observed
     /// `target/debug/frontends/tsfrontend/scanner.mjs`), and a gitignored
     /// build tree. After `apg scan`, ZERO File/Struct/Function record may
     /// carry a path under `.git/**` or `target/**` (or the gitignored
@@ -6904,8 +6893,8 @@ mod e2e {
             );
         };
 
-        // (1) The main checkout: the Go build cache lands under
-        // `<repo>/.git/apg/facts`, inside the scanned tree.
+        // (1) The main checkout: the Go build cache lands under the
+        // checkout's own `apg/.trans/cache`, inside the scanned tree.
         let scan = winb_run(&repo_dir, &home, &["scan", "."]);
         assert!(
             scan.status.success(),
@@ -6918,6 +6907,31 @@ mod e2e {
             "the fixture must scan go + ts: {stderr}"
         );
         assert_hygienic(&repo_dir, "main");
+
+        // The per-worktree toolchain caches: the Go GOCACHE and the
+        // TypeScript build-info land under the checkout's own
+        // `apg/.trans/cache/<language>/`, never the shared fact store under
+        // the git common dir. Assert the cache MARKERS (the shared store's
+        // per-language fact-unit buckets legitimately live under
+        // `.git/apg/facts`; Go's are indistinguishable from GOCACHE
+        // artifacts, so only its positive location is asserted).
+        let cache = repo_dir.join("apg/.trans/cache");
+        assert!(
+            cache.join("go").is_dir(),
+            "the Go GOCACHE must live at {} after a scan",
+            cache.join("go").display()
+        );
+        assert!(
+            cache.join("ts/tsconfig.tsbuildinfo").is_file(),
+            "the TypeScript build-info must live at {} after a scan with a TS source",
+            cache.join("ts/tsconfig.tsbuildinfo").display()
+        );
+        let shared = repo_dir.join(".git/apg/facts");
+        assert!(
+            !shared.join("ts/tsconfig.tsbuildinfo").exists(),
+            "the TypeScript build-info must not live under the shared fact store {}",
+            shared.display()
+        );
 
         // (2) A linked worktree of the same repo: the committed target
         // tree materializes; the gitignored one is recreated untracked.
@@ -7672,11 +7686,13 @@ mod e2e {
                  bytecode classpath"
         );
 
-        // Forced from-scratch FULL scan of the SAME tree: db.lbug + the
-        // shared fact store cleared — never the incremental run compared
+        // Forced from-scratch FULL scan of the SAME tree: db.lbug, the shared
+        // fact store (`<git-common-dir>/apg/facts`) AND the per-worktree
+        // toolchain cache cleared — never the incremental run compared
         // against itself.
         std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
         let _ = std::fs::remove_dir_all(java_store(&repo_dir));
+        let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
         let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
             full.status.success(),
@@ -7752,19 +7768,19 @@ mod e2e {
     /// scratch /tmp Java repo and an isolated java-only frontend dir:
     /// (a) the first incremental frontend log reports ZERO
     /// `compiling … unchanged-package file(s)` — the cold full scan seeded
-    /// the class cache (phase-04 tasks 33/34 carry the pinned
-    /// `--cache-dir`/`--cache-key` hand-off through the full-scan path), and
-    /// the pre-fix rebuild of every unchanged file fails this; (b) the
+    /// the class cache (the full-scan branch carries the pinned `--cache-dir`
+    /// hand-off, with no cache key), and the pre-fix rebuild of every
+    /// unchanged file fails this; (b) the
     /// incremental graph still equals a full scan of the same changed tree
     /// under the enumerated per-rel-type + UnresolvedTarget oracle; (c) the
     /// control — RE-POINTED (feedback-131) at a SEPARATE invocation that
     /// genuinely has no cache hand-off, NEVER the (a) cold scan: once tasks
-    /// 33/34 land, that cold scan always carries the cache flags on the
+    /// 33/34 land, that cold scan always carries the cache flag on the
     /// full-scan branch, so requiring it to write no artifact is
     /// unsatisfiable. Invocation: a full scan in a NON-GIT scratch layout,
     /// where `FactStore::resolve` fails and `incremental::prepare` returns an
     /// empty `store_root` with `FullScanReason::NotAGitRepo`, so
-    /// `handoff.cache_dir`/`handoff.cache_key` stay `None`. It asserts
+    /// `handoff.cache_dir` stays `None` (there is no cache key). It asserts
     /// non-vacuously that (i) that run's frontend log carries NO
     /// `seeding java class cache for …` line, (ii) NO `surface.tsv`/`classes/`
     /// artifact exists ANYWHERE under that scratch tree — not merely under
@@ -7785,10 +7801,10 @@ mod e2e {
         );
         scratch_commit_all(&repo_dir, "apg init");
 
-        // Cold FULL scan. With phase-04 tasks 33/34 the full-scan branch now
-        // carries the pinned `--cache-dir`/`--cache-key` hand-off (and still
-        // NO `--targets`), so this scan seeds the Java class surface that the
-        // first targeted re-scan consumes.
+        // Cold FULL scan. The full-scan branch carries the pinned
+        // `--cache-dir` hand-off (no cache key, keyless `<cache-dir>/java`
+        // layout) and still NO `--targets`, so this scan seeds the Java class
+        // surface that the first targeted re-scan consumes.
         let cold = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
             cold.status.success(),
@@ -7798,7 +7814,7 @@ mod e2e {
         let store = java_store(&repo_dir);
         assert!(
             store.is_dir(),
-            "the cold scan must record the shared fact store"
+            "the cold scan must create the per-worktree toolchain cache root"
         );
         // Task-33 AC (b): the cold full scan — now carrying the pinned cache
         // hand-off — must actually seed the Java class surface the first
@@ -7807,6 +7823,15 @@ mod e2e {
             java_class_cache_seeded(&store),
             "the cold full scan must seed the java class cache under {}",
             store.display()
+        );
+        // The class cache is the per-worktree toolchain cache, never the
+        // shared fact store: no class-cache MARKER may live under the git
+        // common dir (its per-language fact-unit buckets legitimately do).
+        let shared = repo_dir.join(".git/apg/facts");
+        assert!(
+            !shared.join("java/surface.tsv").exists() && !shared.join("java/classes").is_dir(),
+            "the java class cache must not live under the shared fact store {}",
+            shared.display()
         );
 
         // Localized body-only edit of the target package.
@@ -7842,9 +7867,11 @@ mod e2e {
         let inc_counts = java_rel_counts(&repo_dir);
         let inc_unresolved = java_unresolved(&repo_dir);
 
-        // (b) forced from-scratch FULL scan oracle of the same changed tree.
+        // (b) forced from-scratch FULL scan oracle of the same changed tree:
+        // db.lbug, the shared fact store AND the toolchain cache cleared.
         std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
         let _ = std::fs::remove_dir_all(&store);
+        let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
         let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
             full.status.success(),
@@ -7901,7 +7928,7 @@ mod e2e {
         if !nongit_repo.join("apg/.trans/db.lbug").is_file() {
             c_failures.push("(c) the no-hand-off scan wrote no db.lbug".to_string());
         }
-        // (i) no seeding line (there was no --cache-dir/--cache-key flag).
+        // (i) no seeding line (there was no --cache-dir flag).
         if nongit_log.contains("seeding java class cache for") {
             c_failures
                 .push("(c) the no-hand-off full scan seeded the java class cache".to_string());
