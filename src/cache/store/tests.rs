@@ -1,7 +1,7 @@
 //! Unit-tier tests for the fact store's in-memory surface — pure in-memory, no
 //! database, filesystem, git or process.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::*;
@@ -56,6 +56,36 @@ mod unit {
     }
 
     #[test]
+    fn the_writer_wait_budget_boundary_is_inclusive() {
+        assert!(!writer_wait_exhausted(
+            WRITER_WAIT_BUDGET - Duration::from_millis(1)
+        ));
+        assert!(writer_wait_exhausted(WRITER_WAIT_BUDGET));
+        assert!(writer_wait_exhausted(
+            WRITER_WAIT_BUDGET + Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
+    fn the_lock_path_is_the_facts_lock_sibling_of_the_database() {
+        assert_eq!(
+            lock_path(Path::new("/root/apg/facts.db")),
+            PathBuf::from("/root/apg/facts.lock")
+        );
+        assert_eq!(LOCK_FILE, "facts.lock");
+        // Any database name in the directory maps to the one `facts.lock`
+        // gate beside it.
+        assert_eq!(
+            lock_path(Path::new("/root/apg/store.db")),
+            PathBuf::from("/root/apg/facts.lock")
+        );
+        assert_eq!(
+            lock_path(Path::new("facts.db")),
+            PathBuf::from("facts.lock")
+        );
+    }
+
+    #[test]
     fn the_contention_error_names_the_path_the_contention_and_the_wait() {
         let message =
             contention_error(Path::new("/x/facts.db"), Duration::from_secs(30)).to_string();
@@ -71,6 +101,26 @@ mod unit {
         assert!(
             message.contains("write lock"),
             "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn the_contention_error_is_typed_while_an_ordinary_failure_is_not() {
+        let err = contention_error(Path::new("/root/apg/facts.db"), Duration::from_secs(30));
+        assert!(is_contention(&err), "the named contention must be typed");
+        let contention = err
+            .downcast_ref::<Contention>()
+            .expect("the contention error downcasts to `Contention`");
+        assert_eq!(contention.path, PathBuf::from("/root/apg/facts.db"));
+        assert_eq!(contention.waited, Duration::from_secs(30));
+        assert!(
+            err.to_string()
+                .contains(&format!("budget {WRITER_WAIT_BUDGET:?}")),
+            "the message must name the budget"
+        );
+        assert!(
+            !is_contention(&anyhow::anyhow!("an ordinary store failure")),
+            "an ordinary failure must not read as contention"
         );
     }
 

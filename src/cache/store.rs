@@ -2,15 +2,20 @@
 //! at `<git-common-dir>/apg/facts.db`, shared by every worktree and branch of
 //! the repository.
 //!
-//! Opening ([`Store::open`]) sets [`ConcurrencyMode::MultiWriter`] and an
-//! integrity check on open, and records [`FACTS_FORMAT_VERSION`] in the `meta`
+//! Opening ([`Store::open`]) first takes the external advisory writer gate
+//! [`StoreLock`] on `facts.lock` beside the database, so an open behind another
+//! process's live open/write transaction waits at most [`WRITER_WAIT_BUDGET`]
+//! and then fails with the named [`contention_error`] rather than blocking
+//! inside redb. With the gate held it sets [`ConcurrencyMode::MultiWriter`] and
+//! an integrity check on open, and records [`FACTS_FORMAT_VERSION`] in the `meta`
 //! table — redb 5.0.0 exposes no database `user_version`, so the meta row is
 //! the format marker. A recorded format other than [`FACTS_FORMAT_VERSION`], an
 //! integrity failure, or any other open failure drops the handle, removes the
-//! database file (with its sidecars) and rebuilds it empty. Open and read never
-//! take a write lock; a caller opens the one write transaction it needs through
-//! [`Store::begin_write`], which waits out a competing writer for at most
-//! [`WRITER_WAIT_BUDGET`] and then fails with [`contention_error`].
+//! database file (with its sidecars) and rebuilds it empty. Reads take no lock.
+//! A caller opens the one write transaction it needs through
+//! [`Store::begin_write`], which carries the same `facts.lock` for exactly that
+//! transaction's lifetime and releases it at `commit`/drop — the gate is never
+//! held while a frontend runs.
 //!
 //! The row shapes are fixed here because the phases 4 and 5 consumers may not
 //! change them: every `refs`, `scans`, `deps`, `signatures` and `overloads` row
@@ -45,6 +50,17 @@ pub const WRITER_WAIT_BUDGET: Duration = Duration::from_secs(30);
 /// The pause between `try_begin_write` attempts while waiting out a competing
 /// writer.
 const WRITER_WAIT_POLL: Duration = Duration::from_millis(50);
+
+/// The external advisory lock file beside `facts.db`: the cross-process gate
+/// redb's own open cannot provide.
+pub const LOCK_FILE: &str = "facts.lock";
+
+/// The lock path for a store at `db`: [`LOCK_FILE`] beside it in the same
+/// directory (`<root>/facts.db` -> `<root>/facts.lock`).
+pub fn lock_path(db: &Path) -> PathBuf {
+    let dir = db.parent().unwrap_or_else(|| Path::new(""));
+    dir.join(LOCK_FILE)
+}
 
 /// The `meta` table key holding [`FACTS_FORMAT_VERSION`].
 const META_FORMAT_KEY: &str = "format";
@@ -125,13 +141,41 @@ pub fn format_needs_rebuild(recorded: Option<u32>) -> bool {
     recorded != Some(FACTS_FORMAT_VERSION)
 }
 
-/// The named contention failure: the store file and the fact that another
-/// writer held the single write lock past the budget.
+/// The named contention failure: the store file, and how long the caller waited
+/// on the external `facts.lock` gate before giving up. Typed so callers can
+/// distinguish contention ([`is_contention`]) from every other store failure.
+#[derive(Debug)]
+pub struct Contention {
+    pub path: PathBuf,
+    pub waited: Duration,
+}
+
+impl std::fmt::Display for Contention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "fact store `{}` is held by another writer; waited {:?} for the write lock (budget {WRITER_WAIT_BUDGET:?})",
+            self.path.display(),
+            self.waited
+        )
+    }
+}
+
+impl std::error::Error for Contention {}
+
+/// The named contention error: another writer held the external `facts.lock`
+/// gate past the budget.
 pub fn contention_error(path: &Path, waited: Duration) -> anyhow::Error {
-    anyhow::anyhow!(
-        "fact store `{}` is held by another writer; waited {waited:?} for the write lock (budget {WRITER_WAIT_BUDGET:?})",
-        path.display()
-    )
+    anyhow::Error::new(Contention {
+        path: path.to_path_buf(),
+        waited,
+    })
+}
+
+/// True when `err` is the named writer contention, not an ordinary store
+/// failure.
+pub fn is_contention(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<Contention>().is_some()
 }
 
 /// True once the writer wait has spent its whole budget.
@@ -139,26 +183,83 @@ fn writer_wait_exhausted(waited: Duration) -> bool {
     waited >= WRITER_WAIT_BUDGET
 }
 
+/// The held external writer gate: an exclusive advisory lock on `facts.lock`,
+/// released when the owned file is dropped (or explicitly unlocked).
+pub struct StoreLock {
+    file: std::fs::File,
+    path: PathBuf,
+}
+
+impl StoreLock {
+    /// Takes the external writer gate for the store at `db`, creating the
+    /// lock file (and its directory) on demand. A live holder is waited out for
+    /// at most [`WRITER_WAIT_BUDGET`], then failure is the named
+    /// [`contention_error`]; every other I/O failure propagates.
+    pub fn acquire(db: &Path) -> Result<StoreLock> {
+        let path = lock_path(db);
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("creating the fact-store directory `{}`", parent.display())
+            })?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .with_context(|| format!("opening the fact-store lock `{}`", path.display()))?;
+        let started = Instant::now();
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(StoreLock { file, path }),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    let waited = started.elapsed();
+                    if writer_wait_exhausted(waited) {
+                        return Err(contention_error(db, waited));
+                    }
+                    std::thread::sleep(WRITER_WAIT_POLL);
+                }
+                Err(std::fs::TryLockError::Error(err)) => {
+                    return Err(err).with_context(|| {
+                        format!("locking the fact-store lock `{}`", path.display())
+                    });
+                }
+            }
+        }
+    }
+
+    /// The lock file path this guard holds.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// The opened fact store. Reads and writes happen through explicit
 /// [`ReadTxn`]/[`WriteTxn`] handles so a caller can hold exactly one write
-/// transaction across a record sequence; opening the store locks nothing.
+/// transaction across a record sequence; the handle itself holds no lock — the
+/// external gate is taken during open and for a write transaction only.
 pub struct Store {
     db: Database,
     path: PathBuf,
 }
 
 impl Store {
-    /// Opens (or creates) the store at `path`, creating its parent directory.
-    /// A missing format marker, another format version, or any open/integrity
-    /// failure discards the file and rebuilds it empty at
-    /// [`FACTS_FORMAT_VERSION`]. No write transaction is taken to open an
-    /// already-valid store.
+    /// Opens (or creates) the store at `path` under the external
+    /// [`StoreLock`], creating its parent directory. A live holder is waited
+    /// out for at most [`WRITER_WAIT_BUDGET`] and then fails with
+    /// [`contention_error`]. A missing format marker, another format version,
+    /// or any open/integrity failure discards the file and rebuilds it empty at
+    /// [`FACTS_FORMAT_VERSION`]. The gate is released before the handle is
+    /// returned; no write transaction is taken to open an already-valid store.
     pub fn open(path: &Path) -> Result<Store> {
-        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("creating the fact-store directory `{}`", parent.display())
-            })?;
-        }
+        let lock = StoreLock::acquire(path)?;
         let db = if path.exists() {
             match Self::database(path, false) {
                 Ok(db) => match recorded_format(&db) {
@@ -180,6 +281,9 @@ impl Store {
         } else {
             Self::rebuild(path, "the fact store does not exist yet")?
         };
+        // The cached handle holds no external lock: release the gate before
+        // handing the store back.
+        drop(lock);
         Ok(Store {
             db,
             path: path.to_path_buf(),
@@ -217,13 +321,19 @@ impl Store {
     }
 
     /// Opens the one write transaction a caller holds across a record
-    /// sequence, waiting out a competing writer for at most
-    /// [`WRITER_WAIT_BUDGET`]. Any error other than contention propagates.
+    /// sequence under the external `facts.lock` gate, waiting out a competing
+    /// writer for at most [`WRITER_WAIT_BUDGET`] and carrying the held gate in
+    /// the [`WriteTxn`] until `commit`/drop. The bounded `try_begin_write` loop
+    /// stays as defence in depth for direct in-process contenders. Any error
+    /// other than contention propagates.
     pub fn begin_write(&self) -> Result<WriteTxn> {
+        let lock = StoreLock::acquire(&self.path)?;
         let started = Instant::now();
         loop {
             match self.db.try_begin_write() {
-                Ok(txn) => return Ok(WriteTxn { txn }),
+                Ok(txn) => {
+                    return Ok(WriteTxn { txn, _lock: lock });
+                }
                 Err(redb::TransactionError::WouldBlock) => {
                     let waited = started.elapsed();
                     if writer_wait_exhausted(waited) {
@@ -346,10 +456,12 @@ fn read_table<K: Key + 'static, V: Value + 'static>(
 }
 
 /// One write transaction, held by the caller from the first write to
-/// [`WriteTxn::commit`]. Every mutation is a method here so the whole record
-/// sequence lands atomically.
+/// [`WriteTxn::commit`], carrying the external `facts.lock` gate for exactly
+/// that lifetime (released at commit/drop). Every mutation is a method here so
+/// the whole record sequence lands atomically.
 pub struct WriteTxn {
     txn: redb::WriteTransaction,
+    _lock: StoreLock,
 }
 
 impl WriteTxn {

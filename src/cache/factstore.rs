@@ -2,22 +2,28 @@
 //! ([`crate::cache::store`]).
 //!
 //! The store is **one redb database per repository** — `<git-common-dir>/apg/facts.db`
-//! — shared by every worktree and branch of the repository, so a fresh worktree
-//! reuses the main checkout's units. [`FactStore::root`] is the store
-//! *directory* (`<git-common-dir>/apg`): the phase-2 JSON records the phase-4
-//! tasks have not yet moved into redb (`manifest.json`, `scan.json`, the
-//! `index/` state) still live there beside `facts.db`, and every call site
-//! (`pipeline`, `record`, `warm`, `prepare`) passes that directory around.
+//! beside the external `<git-common-dir>/apg/facts.lock` writer gate — shared by
+//! every worktree and branch of the repository, so a fresh worktree reuses the
+//! main checkout's units. [`FactStore::root`] is the store *directory*
+//! (`<git-common-dir>/apg`): the phase-2 JSON records the phase-4 tasks have not
+//! yet moved into redb (`manifest.json`, `scan.json`, the `index/` state) still
+//! live there beside `facts.db`, and every call site (`pipeline`, `record`,
+//! `warm`, `prepare`) passes that directory around.
 //!
 //! Opening is **lazy** and never takes a write transaction: [`FactStore::at`]
 //! and [`FactStore::load`] only resolve the path, and the first read or write
-//! opens the database. An open failure degrades every read to a cache miss
-//! (`None`/`false`/`0`) and surfaces on the write path. Reads run in a read
-//! transaction over the last committed state, so a read during `record` sees the
-//! previously committed rows — exactly what the delta scaffolding merge needs.
+//! opens the database. The open runs under the external `facts.lock` gate, so a
+//! contended open waits a bounded time and then surfaces the named, typed
+//! contention error ([`crate::cache::store::is_contention`]) instead of blocking
+//! inside redb; the facade caches that failure and replays it as contention on
+//! every later call. An ordinary open failure still degrades every read to a
+//! cache miss (`None`/`false`/`0`) and surfaces on the write path. Reads run in a
+//! read transaction over the last committed state, so a read during `record` sees
+//! the previously committed rows — exactly what the delta scaffolding merge needs.
 //! The first write ([`FactStore::put`] / [`FactStore::put_scaffolding`]) opens
-//! **one** write transaction that stays held — never across a frontend run, and
-//! never on open or on a read — until [`FactStore::save_index`] commits it.
+//! **one** write transaction under the same gate that stays held — never across a
+//! frontend run, and never on open or on a read — until
+//! [`FactStore::save_index`] commits it.
 //!
 //! The legacy phase-2 `<store>/facts/` directory is retired once, on the first
 //! successful open ([`retire_legacy_store`]): its bytes are reported and it is
@@ -28,12 +34,14 @@
 use std::cell::{OnceCell, Ref, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::cache::body;
 use crate::cache::store::{
-    FACTS_FORMAT_VERSION, ReadTxn, ScaffoldingKey, Store, UnitKey, WriteTxn,
+    Contention, FACTS_FORMAT_VERSION, ReadTxn, ScaffoldingKey, Store, UnitKey, WriteTxn,
+    contention_error,
 };
 use crate::cache::{CacheKey, FileFragment, ModuleScaffolding};
 use crate::graph::NodeKind;
@@ -53,15 +61,43 @@ pub const FACTS_DIR: &str = "facts";
 /// [`FACTS_DIR`]. Module scaffolding now lives in the redb `scaffolding` table.
 pub const SCAFFOLDING_FILE: &str = "scaffolding.json";
 
+/// A cached open failure: enough to replay the typed contention error on every
+/// later call, or an ordinary rendered message. A plain `String` is not enough —
+/// it would flatten the named contention into an ordinary failure.
+enum OpenFailure {
+    Contention { path: PathBuf, waited: Duration },
+    Other(String),
+}
+
+impl OpenFailure {
+    fn from_error(err: anyhow::Error) -> OpenFailure {
+        match err.downcast::<Contention>() {
+            Ok(contention) => OpenFailure::Contention {
+                path: contention.path,
+                waited: contention.waited,
+            },
+            Err(err) => OpenFailure::Other(format!("{err:#}")),
+        }
+    }
+
+    fn replay(&self) -> anyhow::Error {
+        match self {
+            OpenFailure::Contention { path, waited } => contention_error(path, *waited),
+            OpenFailure::Other(message) => anyhow::anyhow!("{message}"),
+        }
+    }
+}
+
 /// The shared content-addressed fact store: the facade over the repository's one
 /// redb database, rooted at the store directory `<git-common-dir>/apg`.
 pub struct FactStore {
     /// The store **directory** (`<git-common-dir>/apg`); the database itself is
     /// `<root>/facts.db`.
     pub root: PathBuf,
-    /// The lazily opened database, or the rendered error its one open attempt
-    /// raised — kept so a write surfaces it instead of silently dropping facts.
-    db: OnceCell<Result<Store, String>>,
+    /// The lazily opened database, or the cached open failure — kept so a write
+    /// surfaces it instead of silently dropping facts, and a contention replays
+    /// as the typed, named error on every later call.
+    db: OnceCell<Result<Store, OpenFailure>>,
     /// The one write transaction, opened by the first write and committed (and
     /// cleared) by [`FactStore::save_index`].
     write: RefCell<Option<WriteTxn>>,
@@ -71,7 +107,8 @@ impl FactStore {
     /// Resolves the store for the repository containing `apg_root`: the repo's
     /// **common** git dir (shared by linked worktrees) plus `apg`, opening
     /// `<root>/facts.db` and retiring the legacy `<root>/facts/` directory on
-    /// the first successful open. A real open error propagates.
+    /// the first successful open. A real open error — the named, typed
+    /// contention included — propagates.
     pub fn resolve(apg_root: &Path) -> Result<FactStore> {
         let repo = git2::Repository::discover(apg_root)?;
         let root = common_git_dir(&repo).join(STORE_DIR);
@@ -100,17 +137,19 @@ impl FactStore {
         self
     }
 
-    /// The opened database, opening it once on first use.
+    /// The opened database, opening it once on first use underneath the external
+    /// store gate. A contended open caches the typed contention and replays it
+    /// on every later call; any other failure caches its rendered message.
     fn store(&self) -> Result<&Store> {
         let db = self.root.join(FACTS_DB);
         let opened = self.db.get_or_init(|| {
             Store::open(&db)
                 .inspect(|_| retire_legacy_store(&self.root))
-                .map_err(|err| format!("{err:#}"))
+                .map_err(OpenFailure::from_error)
         });
         match opened {
             Ok(store) => Ok(store),
-            Err(message) => Err(anyhow::anyhow!("{message}")),
+            Err(failure) => Err(failure.replay()),
         }
     }
 
