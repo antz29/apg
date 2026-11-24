@@ -504,6 +504,33 @@ its branch DB). Main is never a mutation place — `apg node`/`apg edge`/`apg
 plan`/`apg review`/`apg session start` refuse outside a project context (the
 default branch is never a mutation place).
 
+`apg project start <name> --cache-copy auto|clone|copy|skip` (both
+`--flag=value` and `--flag value` are accepted) seeds the new worktree's
+toolchain cache from the main checkout's. `auto` (the default) attempts a
+copy-on-write clone and falls back to a full recursive copy where the
+filesystem cannot clone; `clone` fails there with a named error naming the
+path and the OS error; `copy` always copies; `skip` creates no cache subtree.
+`APG_CACHE_COPY` and the `apg/config.json` key `cache.project-start` supply
+the same choice, resolved `--cache-copy` > `APG_CACHE_COPY` >
+`cache.project-start` > `auto`.
+
+That cache is **per-worktree**: each frontend's native build cache lives under
+the checkout's own `apg/.trans/cache/<language>/` — Go at `<…>/go` (its
+`GOCACHE`), Java at `<…>/java/{classes,surface.tsv}`, TypeScript at
+`<…>/ts/tsconfig.tsbuildinfo`. It is not the shared fact store: it is
+checkout-local, never read from the git common dir, and a fact-store format or
+config change leaves it intact.
+
+The **shared fact store** is one redb database per repository at
+`<git-common-dir>/apg/facts.db`, shared by every worktree and branch. The
+`<git-common-dir>/apg/facts.lock` writer gate serialises writers: a scan that
+finds another process writing the store waits a bounded ~30 s and then **exits
+non-zero** with an error naming the contention. The gate is held for the
+record transaction alone, never while a frontend runs. The legacy
+`<git-common-dir>/apg/facts/` directory is retired on the first successful
+open and deleted best-effort — the bytes reclaimed are reported, and a failure
+is warned and the scan continues.
+
 `apg project delete <name>` — also run from the main checkout — is the abandon
 path for a project that is not merged: it removes the project's worktree and
 deletes its branch, discarding that branch's commits. It refuses unsafe states
@@ -675,6 +702,24 @@ frontends don't claim is graphed. Structural records take the `code_type`
 `config` unless `code_type` overrides it — except Markdown (`md`), which keeps
 the built-in `docs` classification; a matching `types` rule still takes
 precedence over this structural fallback.
+
+### Cache materialisation at project start
+
+`apg/config.json` may carry a `cache` section selecting how `apg project start`
+seeds the new worktree's toolchain cache:
+
+```json
+{
+  "cache": { "project-start": "auto" }
+}
+```
+
+`project-start` is `auto` | `clone` | `copy` | `skip`; the clone fallback
+matrix is described under
+[the project model](#graph-native-specs-and-plans-the-project-model).
+`--cache-copy` and `APG_CACHE_COPY` override it — `--cache-copy` >
+`APG_CACHE_COPY` > config > `auto` — and an unknown value is rejected with
+`invalid cache-copy policy … — accepted values: auto, clone, copy, skip`.
 
 ## Java projects
 
