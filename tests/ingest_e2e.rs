@@ -4,7 +4,7 @@ use apg::graph::NodeKind;
 use apg::ingest::*;
 use apg::layers::NodeProperties;
 use apg::schema::{Record, SCAN_HEAD};
-use apg::testutil::fixture_db_config;
+use apg::testutil::{fixture_db_config, schema_db_at};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -180,16 +180,17 @@ fn db_contains_pairs(path: &Path, from: &str, to: &str) -> BTreeSet<Vec<String>>
     .collect()
 }
 
-/// Bulk-loads `graph` into a real on-disk `db.lbug` at `path` through the same
-/// `create_schema + copy_from` full load the scan path uses — the database,
-/// not the JSONL export, is the oracle.
+/// Bulk-loads `graph` into a real on-disk `db.lbug` at `path`: the schema half
+/// is the process [`schema_db_at`] template copy (not a per-call
+/// `create_schema`), and the data half is the same `build_load_files +
+/// copy_from` full load the scan path uses — the database, not the JSONL
+/// export, is the oracle.
 fn build_db(path: &Path, graph: &apg::graph::Graph) {
     let ldir = path.parent().unwrap().join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     apg::load::build_load_files(graph, &ldir).unwrap();
-    let db = lbug::Database::new(path, fixture_db_config()).unwrap();
+    let db = schema_db_at(path);
     let conn = lbug::Connection::new(&db).unwrap();
-    apg::load::create_schema(&conn).unwrap();
     apg::load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
@@ -2459,8 +2460,8 @@ mod e2e {
     /// row-equal to a no-reuse full rebuild of the same facts.
     ///
     /// The oracle is the two `db.lbug` files, not the JSONL export: both graphs
-    /// are bulk-loaded through the same `create_schema + copy_from` full load
-    /// the scan path uses, then compared on the four code tables' counts and
+    /// are bulk-loaded through [`build_db`] (the `schema_db_at` template plus a
+    /// `copy_from` load), then compared on the four code tables' counts and
     /// full row sets, each realized planned row's own status/location, and the
     /// incident code-side `Contains` edges (both halves). The LANGUAGE ROOT is
     /// scaffolding-only and scoped out: this spool carries no module record, so
