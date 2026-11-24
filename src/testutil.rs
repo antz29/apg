@@ -227,14 +227,46 @@ pub fn write_scan_meta_keyed(
     }
 }
 
+/// The fixture database's `APG_DB_MAX_SIZE` (see [`fixture_db_config`]).
+const FIXTURE_DB_MAX_SIZE: &str = "1G";
+/// The fixture database's `APG_DB_BUFFER_POOL` byte size.
+const FIXTURE_DB_BUFFER_POOL: u64 = 128 * 1024 * 1024;
+/// The fixture database's `APG_DB_THREADS` count.
+const FIXTURE_DB_THREADS: u64 = 2;
+
+/// The fixture-sized engine config every test-side database open uses: the
+/// engine default with a `1 GiB` ceiling, a `128 MiB` buffer pool and `2`
+/// threads folded in through [`crate::artifacts::db::apply_db_overrides`], built
+/// once per process. A fixture database is tiny, so the engine's ~8 TiB
+/// reservation buys nothing; the small ceiling is what keeps many concurrent
+/// opens (and a spawned child) inside one process's address space.
+///
+/// Built as a value, never through the process environment: `set_var` is
+/// process-wide and would leak across parallel tests (edition 2024).
+pub fn fixture_db_config() -> lbug::SystemConfig {
+    static CONFIG: std::sync::OnceLock<lbug::SystemConfig> = std::sync::OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            crate::artifacts::db::apply_db_overrides(
+                lbug::SystemConfig::default(),
+                Some(FIXTURE_DB_MAX_SIZE),
+                Some(FIXTURE_DB_BUFFER_POOL),
+                Some(FIXTURE_DB_THREADS),
+            )
+            .expect("fixture database config")
+        })
+        .clone()
+}
+
 /// A real, empty `apg/.trans/db.lbug` with the full schema but no rows — the
 /// DB-existence fixture the staleness predicates need (they open the DB to read
 /// its `Scan` row; a raw empty marker is not a database). A test that wants the
-/// DB to carry a `Scan` row pairs this with [`write_scan_meta`].
+/// DB to carry a `Scan` row pairs this with [`write_scan_meta`]. Opens at
+/// [`fixture_db_config`], not the engine default.
 pub fn touch_db(apg_root: &Path) {
     let trans = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans).unwrap();
-    let db = lbug::Database::new(trans.join("db.lbug"), Default::default()).unwrap();
+    let db = lbug::Database::new(trans.join("db.lbug"), fixture_db_config()).unwrap();
     let conn = lbug::Connection::new(&db).unwrap();
     load::create_schema(&conn).unwrap();
 }
@@ -652,12 +684,24 @@ impl ApgCommand {
 
     /// The configured `Command`: stdout/stderr captured, so a test can
     /// attribute a failure's lock by message and N parallel children never
-    /// interleave output into the harness log.
+    /// interleave output into the harness log. Every child opens its fixture
+    /// database at [`fixture_db_config`]'s size through the `APG_DB_*`
+    /// variables, unless the parent environment already names one; an explicit
+    /// per-child [`ApgCommand::env`] override still wins.
     pub fn command(self) -> Command {
         let mut c = Command::new(&self.bin);
         c.args(&self.args);
         if let Some(dir) = &self.cwd {
             c.current_dir(dir);
+        }
+        for (k, v) in [
+            ("APG_DB_MAX_SIZE", FIXTURE_DB_MAX_SIZE.to_string()),
+            ("APG_DB_BUFFER_POOL", FIXTURE_DB_BUFFER_POOL.to_string()),
+            ("APG_DB_THREADS", FIXTURE_DB_THREADS.to_string()),
+        ] {
+            if std::env::var_os(k).is_none() {
+                c.env(k, v);
+            }
         }
         for (k, v) in &self.envs {
             c.env(k, v);
@@ -1188,7 +1232,21 @@ pub fn scan_checkout_locked(project_dir: &Path) -> anyhow::Result<()> {
     std::env::set_current_dir(&trans_dir)?;
     let result = {
         let mut log = crate::Log::new();
-        crate::run_pipeline(records, &[], &[], "go", None, None, None, &mut log, None);
+        // The fixture-sized config: the test process never sets `APG_DB_*`
+        // (process-wide `set_var` is banned), so `system_config` alone would
+        // open at the engine default here.
+        crate::pipeline::run_pipeline_with(
+            records,
+            &[],
+            &[],
+            "go",
+            None,
+            None,
+            None,
+            &mut log,
+            None,
+            Some(fixture_db_config()),
+        );
         Ok(())
     };
     std::env::set_current_dir(old)?;
