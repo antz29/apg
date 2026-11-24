@@ -553,6 +553,33 @@ type whose globs (`tests/**`, `**/tests/**`, `**/tests.rs`, `**/*.test.ts`,
 are queryable with `WHERE f.code_type = 'test'` while production modules stay
 `src`.
 
+**Fixture database configuration.** The engine default reserves ~8 TiB of
+virtual address space per `Database`, which a fixture does not need and a test
+process cannot afford many times over, so an in-process test fixture that opens
+a database directly uses a fixture-sized config:
+
+- The production `SystemConfig` builder is
+  `apg::artifacts::db::system_config(read_only)`: it reads `APG_DB_MAX_SIZE` (a
+  byte size — a plain integer or a binary `K`/`M`/`G` suffix in either case,
+  which must be a power of two and at least 8 MiB), `APG_DB_BUFFER_POOL` (bytes)
+  and `APG_DB_THREADS` (count) and folds them in through `apply_db_overrides`.
+  With all three unset it returns the engine default unchanged (the caller's
+  `read_only` flag included), so production behaviour is identical. The one
+  exception is the scan pipeline's full-load `Database::new`, which
+  `run_pipeline` always opens at the engine default.
+- In-process test fixtures never touch the process environment (a process-wide
+  `set_var` is banned under edition 2024 and would leak across parallel tests):
+  `apg::testutil::fixture_db_config()` is a process-wide `OnceLock` built once
+  from `apply_db_overrides(SystemConfig::default(), "1G", 128 MiB, 2)` — a
+  1 GiB ceiling, a 128 MiB buffer pool and 2 threads. A read-only fixture open
+  adds `.read_only(true)`.
+- A spawned CLI child inherits the same fixture-sized overrides per child:
+  `ApgCommand::command` sets all three on the child unless the variable is
+  already present in the parent, and an explicit `ApgCommand::env` still wins.
+- Never reopen an existing database with a ceiling below its current size; test
+  databases stay far below the 1 GiB ceiling. All of this is test-only — the
+  production default is not lowered.
+
 ### Pre-change e2e baseline (dated snapshot — 2026-11-24)
 
 This is the **pre-change** baseline for the test-speed work: later phases record
