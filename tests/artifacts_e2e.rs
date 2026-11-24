@@ -32,7 +32,9 @@ fn project_fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
 }
 
 /// Builds a real DB + load files under `dir/apg` (used by `project_fixture`
-/// — the git-aware fixtures init the repo around the worktree first).
+/// — the git-aware fixtures init the repo around the worktree first). The
+/// schema half is the process [`testutil::schema_db_at`] template; only the
+/// rows come from the load files.
 fn db_at(dir: &Path) {
     std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
     std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
@@ -83,13 +85,8 @@ fn db_at(dir: &Path) {
     let ldir = dir.join("apg").join(specs::TRANS).join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(&g, &ldir).unwrap();
-    let db = Database::new(
-        dir.join("apg").join(specs::TRANS).join("db.lbug"),
-        testutil::fixture_db_config(),
-    )
-    .unwrap();
+    let db = testutil::schema_db_at(&dir.join("apg").join(specs::TRANS).join("db.lbug"));
     let conn = Connection::new(&db).unwrap();
-    load::create_schema(&conn).unwrap();
     load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
