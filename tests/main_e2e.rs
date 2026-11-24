@@ -266,6 +266,28 @@ fn winb_graph(
     (nodes, edges, unresolved)
 }
 
+/// The shared redb fact store's root: one database per repository.
+fn shared_store_root(repo: &std::path::Path) -> std::path::PathBuf {
+    repo.join(".git/apg")
+}
+
+/// Force the next scan onto a cold path: discard the redb store (+sidecars)
+/// and the transitional JSON records beside it, plus any pre-cutover `facts/`.
+fn clear_shared_fact_store(repo: &std::path::Path) {
+    let root = shared_store_root(repo);
+    for name in [
+        "facts.db",
+        "facts.db-wal",
+        "facts.db-shm",
+        "manifest.json",
+        "scan.json",
+    ] {
+        let _ = std::fs::remove_file(root.join(name));
+    }
+    let _ = std::fs::remove_dir_all(root.join("index"));
+    let _ = std::fs::remove_dir_all(root.join("facts"));
+}
+
 // -----------------------------------------------------------------------
 // Scan-database readers (the retired `graph.jsonl` export helpers).
 // Non-#[test] helpers, so they live at the `mod tests` root.
@@ -794,7 +816,7 @@ fn java_run(
 /// The per-worktree toolchain cache root (`<checkout>/apg/.trans/cache`) for a
 /// scratch repo — where the Go, Java and TypeScript frontends keep their own
 /// native build caches. Deliberately NOT the shared fact store
-/// (`<git-common-dir>/apg/facts`).
+/// (`.git/apg/facts.db`).
 fn java_store(repo_dir: &Path) -> PathBuf {
     repo_dir.join("apg/.trans/cache")
 }
@@ -6396,8 +6418,7 @@ mod e2e {
             // Oracle: a fresh FULL scan of the SAME tree with the fast-path,
             // the DB, AND the shared fact cache cleared — no reuse/splice.
             std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-            let store = repo_dir.join(".git/apg/facts");
-            let _ = std::fs::remove_dir_all(&store);
+            clear_shared_fact_store(&repo_dir);
             let full = winb_run(&repo_dir, &home, &["scan", "."]);
             assert!(
                 full.status.success(),
@@ -6527,7 +6548,7 @@ mod e2e {
     /// Phase-02 task-19 (int): cross-worktree cache sharing — the reuse half AND
     /// the exactness half. A cold full scan of a scratch repo records the
     /// reference graph; a SECOND clean near-identical worktree started from the
-    /// same repo must (a) reuse the shared `<git-common-dir>/apg/facts` cache
+    /// same repo must (a) reuse the shared `.git/apg/facts.db` store
     /// (no cold full frontend run) AND (b) produce a graph exactly equal to the
     /// full scan (same node set, edge set, unresolved targets). Candidate
     /// binary only, scratch /tmp repo.
@@ -6546,10 +6567,10 @@ mod e2e {
             "cold scan: {}",
             String::from_utf8_lossy(&cold.stderr)
         );
-        let store = repo_dir.join(".git/apg/facts");
-        assert!(store.is_dir(), "the shared store must exist after a scan");
+        let store = shared_store_root(&repo_dir).join("facts.db");
+        assert!(store.is_file(), "the shared store must exist after a scan");
         assert!(
-            store.join("index.json").is_file(),
+            std::fs::metadata(&store).map(|m| m.len()).unwrap_or(0) > 0,
             "the shared store must index the per-file fact units"
         );
 
@@ -6792,9 +6813,9 @@ mod e2e {
         );
         let home = base.join("home");
 
-        // A file under `.git/**` cannot be committed; mirror the per-scan
-        // Go build-cache layout so a stray emission is caught.
-        let cache_file = repo_dir.join(".git/apg/facts/go/key/53/deadbeef-d");
+        // A file under `.git/**` cannot be committed; place a stray file
+        // under the shared store root so a stray emission is caught.
+        let cache_file = repo_dir.join(".git/apg/stray/deadbeef-d");
         std::fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
         std::fs::write(&cache_file, "not source\n").unwrap();
         // The gitignored build tree: untracked, so git's ignore rules
@@ -6911,10 +6932,10 @@ mod e2e {
         // The per-worktree toolchain caches: the Go GOCACHE and the
         // TypeScript build-info land under the checkout's own
         // `apg/.trans/cache/<language>/`, never the shared fact store under
-        // the git common dir. Assert the cache MARKERS (the shared store's
-        // per-language fact-unit buckets legitimately live under
-        // `.git/apg/facts`; Go's are indistinguishable from GOCACHE
-        // artifacts, so only its positive location is asserted).
+        // the git common dir. Assert the cache MARKERS (the shared store
+        // legitimately holds `facts.db` and its `facts.lock` gate under
+        // `.git/apg`; the Go GOCACHE is indistinguishable from any other
+        // cache artifact, so only its positive location is asserted).
         let cache = repo_dir.join("apg/.trans/cache");
         assert!(
             cache.join("go").is_dir(),
@@ -6926,7 +6947,7 @@ mod e2e {
             "the TypeScript build-info must live at {} after a scan with a TS source",
             cache.join("ts/tsconfig.tsbuildinfo").display()
         );
-        let shared = repo_dir.join(".git/apg/facts");
+        let shared = shared_store_root(&repo_dir);
         assert!(
             !shared.join("ts/tsconfig.tsbuildinfo").exists(),
             "the TypeScript build-info must not live under the shared fact store {}",
@@ -7687,12 +7708,12 @@ mod e2e {
         );
 
         // Forced from-scratch FULL scan of the SAME tree: db.lbug, the shared
-        // fact store (`<git-common-dir>/apg/facts`) AND the per-worktree
+        // fact store (`.git/apg/facts.db`) AND the per-worktree
         // toolchain cache cleared — never the incremental run compared
         // against itself.
         std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
         let _ = std::fs::remove_dir_all(java_store(&repo_dir));
-        let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+        clear_shared_fact_store(&repo_dir);
         let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
             full.status.success(),
@@ -7827,7 +7848,7 @@ mod e2e {
         // The class cache is the per-worktree toolchain cache, never the
         // shared fact store: no class-cache MARKER may live under the git
         // common dir (its per-language fact-unit buckets legitimately do).
-        let shared = repo_dir.join(".git/apg/facts");
+        let shared = shared_store_root(&repo_dir);
         assert!(
             !shared.join("java/surface.tsv").exists() && !shared.join("java/classes").is_dir(),
             "the java class cache must not live under the shared fact store {}",
@@ -7871,7 +7892,7 @@ mod e2e {
         // db.lbug, the shared fact store AND the toolchain cache cleared.
         std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
         let _ = std::fs::remove_dir_all(&store);
-        let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+        clear_shared_fact_store(&repo_dir);
         let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
         assert!(
             full.status.success(),
@@ -9603,7 +9624,7 @@ mod e2e {
             // Oracle: a fresh FULL scan with the DB AND the shared fact cache
             // cleared — no reuse/splice.
             std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-            let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+            clear_shared_fact_store(&repo_dir);
             let full = winb_run(&repo_dir, &home, &["scan", "."]);
             assert!(
                 full.status.success(),
@@ -9826,7 +9847,7 @@ mod e2e {
             // Force a re-scan (the fast-path would otherwise reuse the DB),
             // then install the real pyfrontend and re-run.
             let _ = std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug"));
-            let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+            clear_shared_fact_store(&repo_dir);
             let real = testutil::apg_bin()
                 .parent()
                 .expect("apg binary has a parent")
@@ -9924,7 +9945,7 @@ mod e2e {
             // each probe re-runs the language selection.
             let force_rescan = || {
                 let _ = std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug"));
-                let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+                clear_shared_fact_store(&repo_dir);
             };
 
             let scan = run(&fe);
@@ -11867,7 +11888,6 @@ mod e2e {
         run(&repo_dir, &["project", "start", "demo"]);
         let wt = repo_dir.join("apg").join(".worktrees").join("demo");
         assert!(wt.is_dir(), "the project worktree must exist");
-        let facts = repo_dir.join(".git/apg/facts");
 
         // Declare the delta through the real authoring surface: the separate
         // crate's Module + File + Struct + Function, and the root crate's
@@ -11907,7 +11927,7 @@ mod e2e {
         // realization must replace. Dropping the database and the shared fact
         // store forces the full path (the plan store survives).
         let _ = std::fs::remove_file(wt.join("apg/.trans/db.lbug"));
-        let _ = std::fs::remove_dir_all(&facts);
+        clear_shared_fact_store(&repo_dir);
         let pre = run(&wt, &["scan", ".", "--language", "rust"]);
         assert!(
             !stderr_of(&pre).contains("full load skipped"),
@@ -12009,7 +12029,7 @@ mod e2e {
         // arrive (the plan store survives) and the scanned declarations must
         // still win.
         let _ = std::fs::remove_file(wt.join("apg/.trans/db.lbug"));
-        let _ = std::fs::remove_dir_all(&facts);
+        clear_shared_fact_store(&repo_dir);
         let full_err = stderr_of(&run(&wt, &["scan", ".", "--language", "rust"]));
         assert!(
             !full_err.contains("full load skipped"),
@@ -12259,9 +12279,9 @@ mod e2e {
         run(&repo_dir, &["project", "start", "demo"]);
         let wt = repo_dir.join("apg").join(".worktrees").join("demo");
         assert!(wt.is_dir(), "the project worktree must exist");
-        let facts = repo_dir.join(".git/apg/facts");
+        let facts = shared_store_root(&repo_dir).join("facts.db");
         assert!(
-            facts.is_dir(),
+            facts.is_file(),
             "the shared fact store must exist at {}",
             facts.display()
         );
