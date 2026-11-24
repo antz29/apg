@@ -15,7 +15,10 @@ import java.util.regex.Pattern;
  * `requirements.requirement.exact-ongoing-equivalence` and
  * `global.constraint.frontend-full-context`). Plus: an all-targets request and
  * an absent/empty target file are byte-identical to a full scan, and a warm
- * class-cache scan reuses unchanged packages instead of recompiling them.
+ * class-cache scan reuses unchanged packages instead of recompiling them. The
+ * class cache lives at the keyless `<cache-dir>/java` layout and is reused only
+ * while `surface.tsv` and every class file it references are intact; a missing
+ * or corrupt marker wipes `classes/` and reseeds.
  *
  * Run (from src/javalib after CallGraphBuilder.java is compiled):
  *   java CallGraphBuilderTest
@@ -35,6 +38,7 @@ public class CallGraphBuilderTest {
             testTargetedEqualsFullForTargetPackage(proj, base);
             testWarmCacheReusesUnchangedPackages(proj, base);
             testFullScanSeedsClassCache(proj, base);
+            testClassCacheSurfaceMarkerWipesAndReseeds(proj, base);
             testSurfaceFromSourceRecoversDroppedDeclarations(proj);
             testEmptyTargetsMeansNoFilter(proj, base);
             testNoMatchingTargetsEmitsScaffoldingOnly(proj, base);
@@ -266,7 +270,7 @@ public class CallGraphBuilderTest {
         Files.writeString(targets, sb.toString(), StandardCharsets.UTF_8);
         Path cache = base.resolve("cache-all");
         String targeted = run(proj, "--targets", targets.toString(),
-            "--cache-dir", cache.toString(), "--cache-key", "k1").out;
+            "--cache-dir", cache.toString()).out;
         check("all-targets scan is byte-identical to the full scan",
             full.equals(targeted), diff(full, targeted));
     }
@@ -278,7 +282,7 @@ public class CallGraphBuilderTest {
         Files.writeString(targets, bFile(proj) + "\n", StandardCharsets.UTF_8);
         Path cache = base.resolve("cache-b");
         Result incR = run(proj, "--targets", targets.toString(),
-            "--cache-dir", cache.toString(), "--cache-key", "k1");
+            "--cache-dir", cache.toString());
         String incRaw = incR.out;
 
         Set<String> fullForTarget = filterToTarget(normalize(fullRaw), bFile(proj));
@@ -307,9 +311,9 @@ public class CallGraphBuilderTest {
         Files.writeString(targets, bFile(proj) + "\n", StandardCharsets.UTF_8);
         Path cache = base.resolve("cache-warm");
         Result r1 = run(proj, "--targets", targets.toString(),
-            "--cache-dir", cache.toString(), "--cache-key", "k1");
+            "--cache-dir", cache.toString());
         Result r2 = run(proj, "--targets", targets.toString(),
-            "--cache-dir", cache.toString(), "--cache-key", "k1");
+            "--cache-dir", cache.toString());
         check("cold targeted scan compiles the unchanged packages",
             r1.err.contains("unchanged-package"), "stderr was:\n" + r1.err);
         check("warm targeted scan reuses the class cache (no recompile)",
@@ -319,26 +323,26 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-17/-32: a cold full scan invoked with the pinned
-     * --cache-dir/--cache-key hand-off persists the SAME class dir + surface the
-     * targeted path consumes, so the FIRST targeted scan after it recompiles no
-     * unchanged packages and still emits the full scan's facts. Without both
-     * flags no artifact is written (today's behaviour).
+     * Phase-04 task-17/-32, retargeted onto the keyless per-worktree layout: a
+     * cold full scan invoked with the pinned `--cache-dir` hand-off persists the
+     * SAME `<cache-dir>/java/{classes,surface.tsv}` the targeted path consumes,
+     * so the FIRST targeted scan after it recompiles no unchanged packages and
+     * still emits the full scan's facts. Without the flag no artifact is written
+     * (there is no persistent java root to fabricate).
      */
     static void testFullScanSeedsClassCache(Path proj, Path base) throws Exception {
         String full = run(proj).out;
 
-        // A flag absent either way writes no cache artifact.
-        Path halfCache = base.resolve("cache-half");
-        run(proj, "--cache-dir", halfCache.toString());
-        check("full scan without --cache-key writes no cache artifact",
-            !Files.exists(halfCache.resolve("java")), "unexpected artifact under " + halfCache);
+        // No --cache-dir: no persistent java root, hence no cache artifact.
+        check("full scan without --cache-dir has no persistent java root",
+            ScanRunner.persistentJavaRoot(null) == null,
+            "persistentJavaRoot(null) was " + ScanRunner.persistentJavaRoot(null));
 
-        // Cold full scan WITH both flags seeds <cache-dir>/java/<cache-key>/.
+        // Cold full scan WITH --cache-dir seeds <cache-dir>/java/.
         Path cache = base.resolve("cache-seed");
-        Result seeded = run(proj, "--cache-dir", cache.toString(), "--cache-key", "k1");
-        Path javaRoot = cache.resolve("java").resolve("k1");
-        check("full scan with both flags writes the class dir + surface",
+        Result seeded = run(proj, "--cache-dir", cache.toString());
+        Path javaRoot = cache.resolve("java");
+        check("full scan with --cache-dir writes the class dir + surface",
             Files.isDirectory(javaRoot.resolve("classes")) && Files.exists(javaRoot.resolve("surface.tsv")),
             "contents of " + javaRoot + ": " + listRec(javaRoot));
         check("a seeded full scan's facts are byte-identical to a plain full scan",
@@ -348,13 +352,78 @@ public class CallGraphBuilderTest {
         Path targets = base.resolve("seed-b.targets");
         Files.writeString(targets, bFile(proj) + "\n", StandardCharsets.UTF_8);
         Result r = run(proj, "--targets", targets.toString(),
-            "--cache-dir", cache.toString(), "--cache-key", "k1");
+            "--cache-dir", cache.toString());
         check("first targeted scan after the cold full scan recompiles no unchanged package",
             !r.err.contains("unchanged-package"), "stderr was:\n" + r.err);
         Set<String> fullForTarget = filterToTarget(normalize(full), bFile(proj));
         check("seeded targeted scan's pkg.b facts still equal the full scan's",
             fullForTarget.equals(normalize(r.out)),
             setDiff(fullForTarget, normalize(r.out)) + "\nSTDERR:\n" + r.err);
+    }
+
+    /**
+     * The class cache's integrity surface (phase-01 task-11): `surface.tsv`
+     * plus every class file it references is what makes `<cache-dir>/java`
+     * reusable. A missing marker, and a magic-invalid/truncated class file,
+     * each wipe `classes/` and reseed (the `compiling N unchanged-package
+     * file(s)` marker); an intact surface with matching per-file SHA-1 hashes
+     * reuses the cache with no reseed.
+     */
+    static void testClassCacheSurfaceMarkerWipesAndReseeds(Path proj, Path base) throws Exception {
+        String full = run(proj).out;
+        Set<String> fullForTarget = filterToTarget(normalize(full), bFile(proj));
+        Path cache = base.resolve("cache-reseed");
+        Path javaRoot = cache.resolve("java");
+        Path classes = javaRoot.resolve("classes");
+        Path surface = javaRoot.resolve("surface.tsv");
+        Path targets = base.resolve("reseed-b.targets");
+        Files.writeString(targets, bFile(proj) + "\n", StandardCharsets.UTF_8);
+
+        run(proj, "--cache-dir", cache.toString());
+        check("cold full scan seeds the class dir + surface marker",
+            Files.isDirectory(classes) && Files.exists(surface),
+            "contents of " + javaRoot + ": " + listRec(javaRoot));
+
+        // 1. A missing surface.tsv: the cache cannot be trusted, so classes/
+        //    is wiped and the unchanged packages are recompiled and reseeded.
+        Files.delete(surface);
+        Result missing = run(proj, "--targets", targets.toString(), "--cache-dir", cache.toString());
+        check("missing surface.tsv forces a reseed",
+            missing.err.contains("compiling") && missing.err.contains("unchanged-package"),
+            "stderr was:\n" + missing.err);
+        check("missing surface.tsv reseeds a fresh surface marker", Files.exists(surface),
+            "contents of " + javaRoot + ": " + listRec(javaRoot));
+        check("missing surface.tsv keeps the target package's facts equal to the full scan",
+            fullForTarget.equals(normalize(missing.out)),
+            setDiff(fullForTarget, normalize(missing.out)) + "\nSTDERR:\n" + missing.err);
+
+        // 2. A magic-invalid/truncated class file: every referenced class file
+        //    must be intact bytecode, so one corrupt file wipes and reseeds the
+        //    whole cache.
+        Path corrupt = classes.resolve("pkg/a/A.class");
+        check("the reseed wrote the referenced class file", Files.isRegularFile(corrupt),
+            "contents of " + classes + ": " + listRec(classes));
+        Files.write(corrupt, new byte[]{0, 1, 2, 3});
+        Result badMagic = run(proj, "--targets", targets.toString(), "--cache-dir", cache.toString());
+        check("a magic-invalid class file forces a reseed",
+            badMagic.err.contains("compiling") && badMagic.err.contains("unchanged-package"),
+            "stderr was:\n" + badMagic.err);
+        check("a magic-invalid class file reseeds valid bytecode",
+            Files.isRegularFile(corrupt) && Files.size(corrupt) >= 8,
+            "class file after reseed: " + (Files.exists(corrupt) ? Files.size(corrupt) + " bytes" : "absent"));
+        check("a magic-invalid class file keeps the target facts equal to the full scan",
+            fullForTarget.equals(normalize(badMagic.out)),
+            setDiff(fullForTarget, normalize(badMagic.out)) + "\nSTDERR:\n" + badMagic.err);
+
+        // 3. An intact surface with matching per-file SHA-1 hashes: reuse, no
+        //    recompile.
+        Result intact = run(proj, "--targets", targets.toString(), "--cache-dir", cache.toString());
+        check("an intact surface reuses the cache (no reseed)",
+            !intact.err.contains("compiling") && !intact.err.contains("unchanged-package"),
+            "stderr was:\n" + intact.err);
+        check("a reused cache keeps the target facts equal to the full scan",
+            fullForTarget.equals(normalize(intact.out)),
+            setDiff(fullForTarget, normalize(intact.out)) + "\nSTDERR:\n" + intact.err);
     }
 
     /**
@@ -407,14 +476,14 @@ public class CallGraphBuilderTest {
         Files.writeString(targets, src.resolve("pkg/b/B.java") + "\n",
             StandardCharsets.UTF_8);
         Result incR = run(proj, "--targets", targets.toString(),
-            "--cache-dir", base.resolve("cache-incomplete").toString(), "--cache-key", "k1");
+            "--cache-dir", base.resolve("cache-incomplete").toString());
         Set<String> inc = normalize(incR.out);
 
         // The class-dir half of the context really is EMPTY: the compile batch
         // fails on Broken.java, so javac emits no bytecode at all. The exact
         // facts asserted below therefore came from the corrected SOURCEPATH,
         // not from a bytecode cache — the property this fix establishes.
-        Path classes = base.resolve("cache-incomplete").resolve("java").resolve("k1").resolve("classes");
+        Path classes = base.resolve("cache-incomplete").resolve("java").resolve("classes");
         long classFiles = 0;
         if (Files.isDirectory(classes)) {
             try (var walk = Files.walk(classes)) {
@@ -518,7 +587,7 @@ public class CallGraphBuilderTest {
         Files.writeString(targets, srcB.resolve("pkg/b/Demo.java") + "\n"
             + descB + "\n", StandardCharsets.UTF_8);
         Result incR = run(proj, "--targets", targets.toString(),
-            "--cache-dir", base.resolve("cache-modules").toString(), "--cache-key", "k1");
+            "--cache-dir", base.resolve("cache-modules").toString());
         Set<String> inc = normalize(incR.out);
         Set<Path> targetFiles = Set.of(
             srcB.resolve("pkg/b/Demo.java"),
@@ -703,7 +772,7 @@ public class CallGraphBuilderTest {
         Path targets = base.resolve("default-targeted.targets");
         Files.writeString(targets, bFile + "\n", StandardCharsets.UTF_8);
         Result incR = run(proj, "--targets", targets.toString(),
-            "--cache-dir", base.resolve("cache-default-targeted").toString(), "--cache-key", "k1");
+            "--cache-dir", base.resolve("cache-default-targeted").toString());
         Set<String> inc = normalize(incR.out);
         check("targeted scan with an unchanged default package emits its module record",
             inc.contains("module|" + def), "targeted output was:\n" + incR.out);
