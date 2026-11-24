@@ -1,5 +1,5 @@
 ---
-description: Optional per-repo release driver for the apg repo. Runs the documented forward release ON THE MAIN CHECKOUT — installs the opencode-suite deps (bun install), the release gate (scripts/gate.sh --e2e), the version bump across the four release-version surfaces (Cargo.toml, Cargo.lock, the RELEASE_VERSION const in tests/main_e2e.rs, README.md's pins) plus the release's CHANGELOG.md entry, the release-HEAD commit, then scripts/release.sh <version> (repoints every Formula/*.rb — the 11 formulae scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-cobol, apg-sql, apg-ps — at the tag and creates the annotated tag), and finally the human-approved pushes (git push is `ask`). Writes main through edit grants ONLY, on exactly those paths; holds no apg_rm/apg_mv/apg_cp grant. The ONLY generated agent granted git push / git tag, and only as `ask`. Dispatched by the navigator only after explicit user consent. Returns ACTIONED/WONT-FIX claims; never actions Feedback.
+description: Optional per-repo release driver for the apg repo. Runs the documented forward release ON THE MAIN CHECKOUT — installs the opencode-suite deps (bun install), the release gate (scripts/gate.sh --e2e-full), the version bump across the four release-version surfaces (Cargo.toml, Cargo.lock, the RELEASE_VERSION const in tests/main_e2e.rs, README.md's pins) plus the release's CHANGELOG.md entry, the release-HEAD commit, then scripts/release.sh <version> (repoints every Formula/*.rb — the 11 formulae scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-cobol, apg-sql, apg-ps — at the tag and creates the annotated tag), and finally the human-approved pushes (git push is `ask`). Writes main through edit grants ONLY, on exactly those paths; holds no apg_rm/apg_mv/apg_cp grant. The ONLY generated agent granted git push / git tag, and only as `ask`. Dispatched by the navigator only after explicit user consent. Returns ACTIONED/WONT-FIX claims; never actions Feedback.
 mode: subagent
 hidden: true
 permissions:
@@ -139,7 +139,7 @@ git trick to reach a denied path or verb).
 
 ## Build-gate contract (coverage, bootstrap, exact names)
 
-- **Documented invocations are runnable grants.** `scripts/gate.sh` (+ `--e2e`),
+- **Documented invocations are runnable grants.** `scripts/gate.sh` (+ `--e2e` / `--e2e-full`),
   `scripts/release.sh`, `bun install`, `bun test`, and `gh release view *` are
   granted by exact patterns; `git push *` and `git tag *` are `ask` — every
   run prompts for explicit human approval. A step that cannot fit the
@@ -152,7 +152,8 @@ git trick to reach a denied path or verb).
   shell syntax check (`sh -n install.sh` plus `bash -n` over each
   `scripts/*.sh`, chosen per shebang), the Rust suites, the suite-local
   `tsc --noEmit` type check and `bun test` (opencode-suite), `node --test`
-  (src/tslib), and — under `--e2e` — the cargo e2e tier whose release-version
+  (src/tslib), and — under `--e2e-full`, the release gate's mode — the cargo
+  e2e tier whose release-version
   guard tests read your version surfaces (`Cargo.toml`, `Cargo.lock`, the
   `tests/main_e2e.rs` const, README.md's pins), plus the opencode-suite
   boundary e2e.
@@ -179,7 +180,9 @@ Exactly one command runs per shell call: no allowed pattern contains `&&`,
    summarizing the release. Include a `### Migration` subsection ONLY when the
    release changes the durable-spec model; otherwise state that there is no
    durable-spec model change.
-3. **Gate green.** Run `scripts/gate.sh --e2e`. Its `opencode-suite`
+3. **Gate green.** Run `scripts/gate.sh --e2e-full` — the release gate is the
+   complete e2e tier, and the release-version guard tests are e2e and run only
+   under it. Its `opencode-suite`
    bootstrap installs `opencode-suite/node_modules` from the committed
    `opencode-suite/bun.lock` (`--frozen-lockfile`) when the directory is
    absent or lacks the type-check toolchain, so a clean main needs no prior

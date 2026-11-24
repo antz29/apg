@@ -555,14 +555,17 @@ reviewer:    apg_review_reject <f>                               → status = op
   `Formula/*.rb` → the shell syntax check (`sh -n install.sh` plus `bash -n`
   over each `scripts/*.sh`, per shebang) → `cargo fmt --check` →
   `cargo check --all-targets` → `cargo clippy --all-targets -- -D warnings` →
-  `cargo build` → `cargo test` (the unit+int default suite) → the
+  `cargo build` → `cargo test --lib` (the unit+int default suite) → the
   `opencode-suite/node_modules` bootstrap (when absent or lacking the
   type-check toolchain) → the suite-local `tsc --noEmit -p tsconfig.json` (in
   `opencode-suite/`) → `bun test` (in `opencode-suite/`) → `node --test` (in
   `src/tslib/`), stopping at the first failure; `scripts/gate.sh --e2e`
-  appends the cargo e2e tier and the opencode-suite boundary e2e. Every run,
-  green or red, ends with a per-step summary (passed / failed / skipped / not
-  run) — quote it when you report a gate result. Running it is the whole done-contract; the steps as separate
+  appends the cargo e2e tier through the per-binary runner
+  `scripts/test-e2e.sh` (its hermetic selection — the built `apg` binary
+  alone; the per-language-frontend and pinned-scale scenarios are excluded)
+  plus the opencode-suite boundary e2e — `--e2e-full` is the complete
+  selection. Every run, green or red, ends with a per-step summary (passed /
+  failed / skipped / not run) — quote it when you report a gate result. Running it is the whole done-contract; the steps as separate
   calls are the same contract. Clippy standard is **zero warnings**.
 - **Fast core-only build**: `cargo build --config 'env.APG_BUILD_FRONTENDS="0"'`
   (matches `cargo build *`). Env-prefixed forms are deliberately not granted.

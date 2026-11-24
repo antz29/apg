@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's build/packaging/CI surface — scripts/** (the repo gate), build.rs, Cargo.toml/Cargo.lock, rust-toolchain.toml/.cargo/config.toml (the cargo test-tier aliases), install.sh, Formula/**, .github/**, and AGENTS.md (the build/process/release contract). Works under the Ponytail discipline (fixed level ultra). Runs the repo done-gate `scripts/gate.sh` (and `--e2e`) plus the standalone cargo crates' own tests; reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits the root/frontend Rust source, opencode-suite/**, README.md, or .opencode/**.
+description: Implements plan tasks on the apg repo's build/packaging/CI surface — scripts/** (the repo gate), build.rs, Cargo.toml/Cargo.lock, rust-toolchain.toml/.cargo/config.toml (the cargo test-tier aliases), install.sh, Formula/**, .github/**, and AGENTS.md (the build/process/release contract). Works under the Ponytail discipline (fixed level ultra). Runs the repo done-gate `scripts/gate.sh` (and `--e2e` / `--e2e-full`) plus the standalone cargo crates' own tests; reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never calls apg_review_action), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits the root/frontend Rust source, opencode-suite/**, README.md, or .opencode/**.
 mode: subagent
 hidden: true
 permissions:
@@ -363,14 +363,22 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   `ruby -c` over `Formula/*.rb` → the shell syntax check (`sh -n install.sh`
   plus `bash -n` over each `scripts/*.sh`, per shebang) → `cargo fmt --check`
   → `cargo check --all-targets` → `cargo clippy --all-targets -- -D warnings`
-  → `cargo build` → `cargo test` (the unit+int default suite) → the
+  → `cargo build` → `cargo test --lib` (the unit+int default suite; the lib
+  target links no test target under `tests/`, so the e2e crates are never
+  built by the default step) → the
   `opencode-suite/node_modules` bootstrap (when absent or lacking the
   type-check toolchain) → the suite-local `tsc --noEmit -p tsconfig.json` (in
   `opencode-suite/`) → `bun test` → `node --test`, stopping at the first
-  failure; `--e2e` appends the cargo e2e tier and the opencode-suite boundary
-  e2e. Every run, green or red, ends with a per-step summary (passed / failed
-  / skipped / not run); keep the declared `STEPS` list in lockstep with the
-  steps whenever you change one.
+  failure; `--e2e` appends the e2e tier's HERMETIC selection — the per-binary
+  runner `bash scripts/test-e2e.sh` (it discovers every `*_e2e` integration
+  binary and runs each as its own process under the E2E_JOBS × E2E_THREADS
+  pool, heavy binaries capped; `HERMETIC_E2E_EXCLUDES` excludes every
+  per-language-frontend and pinned-scale scenario) plus the opencode-suite
+  boundary e2e — and `--e2e-full` appends the complete selection (the same
+  runner, no excludes). Every run, green or red, ends with a per-step summary (passed / failed
+  / skipped / not run); keep the declared `STEPS` list — and the
+  `HERMETIC_E2E_EXCLUDES` classification, one entry per scenario, never a
+  glob — in lockstep with the steps whenever you change one.
 - **Also run the standalone crates' tests** (`cargo test --manifest-path
   src/{rustlib,pylib,structlib,agentlib}/Cargo.toml`).
 - **A `kind=gate` task is done only on a real, observed green run.**
@@ -378,7 +386,8 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
   report a code fault owned by another agent to the coordinator. Never commit
   red.
 - The release-version guard tests are e2e (`cargo test-e2e` /
-  `scripts/gate.sh --e2e`).
+  `scripts/gate.sh --e2e-full` — the complete e2e tier, which is also the
+  release gate).
 
 ## Workflow
 
