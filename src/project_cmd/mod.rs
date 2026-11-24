@@ -37,13 +37,15 @@
 //!   never touched (never-touch-default-branch).
 //!
 //! The cohesive groups live in submodules — the start path ([`start`]), the
-//! merge path ([`merge`]), and the abandon path ([`delete`]) — all
-//! re-exported here so `crate::project_cmd::<name>` keeps resolving.
+//! merge path ([`merge`]), the abandon path ([`delete`]), and the start-time
+//! toolchain-cache seeder ([`cache_copy`]) — all re-exported here so
+//! `crate::project_cmd::<name>` keeps resolving.
 
 use std::path::PathBuf;
 
 use crate::specs;
 
+pub mod cache_copy;
 pub mod delete;
 pub mod merge;
 pub mod start;
@@ -51,6 +53,7 @@ pub mod start;
 #[cfg(test)]
 mod tests;
 
+pub use cache_copy::*;
 pub use delete::*;
 pub use merge::*;
 pub use start::*;
