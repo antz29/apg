@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "task-edge-target-absent-drift-prune",
-  "body": "finalize_graph drops a task edge whose target FQN is absent from the branch graph: a creates/target edge to an FQN not declared as a planned node is pruned, the same drift policy as implemented-by. Limit: the plan surface cannot deliberately name an undeclared planned destination. Upgrade if that surface starts naming undeclared planned destinations: add explicit admission rather than the silent prune.",
+  "body": "finalize_graph drops a task edge whose target FQN is absent from the branch graph: a creates/target edge to an FQN not declared as a planned node is pruned, the same drift policy as implemented-by. Limit: the plan surface cannot deliberately name an undeclared planned destination. Upgrade if that surface starts naming undeclared planned destinations: add explicit admission rather than the silent prune. Two further limits. (1) finalize_graph does not GC unreferenced UnresolvedTarget nodes (only the delta path does); upgrade if a stray orphan placeholder ever needs pruning on a full scan — the closed-graph rule (every edge endpoint is a real node or a live unresolved target) holds without it. (2) The kind_is-based authored/plan tables carry the membership invariant through their node lookup rather than an explicit live-set test; upgrade to a literal per-table live check if the pass must be mechanically uniform.",
   "properties": {},
   "out": [
     {
