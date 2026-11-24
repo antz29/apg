@@ -307,7 +307,13 @@ The project builds a single `apg` binary (package `apg`):
 - `apg project <sub> …` — project contexts (worktrees, git2-operated):
   `start <name>` (from the main checkout: worktree + branch + branch DB off
   the default branch, prints `apg/.worktrees/<name>`), `merge <name>` (from
-  the main checkout: verify gate → merge → unguarded main rebuild),
+  the main checkout: verify gate → merge → unguarded main rebuild; a rebuild
+  that fails — a returned error or a panic — unlands the merge rather than
+  leaving a stale main graph: the default branch is hard-reset to the
+  pre-merge commit, the stale main derived index is discarded, and the project
+  branch and worktree stay so re-running `apg project merge <name>` retries,
+  with no manual main scan; a verify-gate staleness refusal names every
+  differing freshness input as `differing: …`),
   `delete <name>` (from the main checkout: abandon a project — remove its
   worktree and delete its branch, discarding the branch's commits; refuses an
   invalid name, the default branch, a branch the main checkout has checked
@@ -740,9 +746,14 @@ FQN rendering. See *The installed binary is the contract* above.
    ```
 
 2. **Spin up a scratch repo with at least one real source file.** The source
-   matters: `apg project merge` rebuilds the main graph and **self-cleans only
-   on success**, so a source-less repo makes the rebuild fail and skips
-   worktree/branch removal.
+   matters: `apg project merge` rebuilds the main graph after merging and
+   **self-cleans only on success**. A rebuild that fails — a returned error or
+   a panic — unlands the merge instead of leaving a stale main graph: the
+   default branch is hard-reset to the pre-merge commit, the stale main derived
+   index (`apg/.trans/db.lbug`) is discarded, and the project branch and
+   worktree stay so re-running `apg project merge <name>` retries — no manual
+   main scan. A source-less repo therefore fails the rebuild and keeps the
+   worktree and branch (the retry fails the same way until a source exists).
 
    ```sh
    BASE=/tmp/apg-spin              # throwaway; rm -rf when done
@@ -789,7 +800,12 @@ FQN rendering. See *The installed binary is the contract* above.
 Traps the gate enforces that surprise first-timers: `project merge` refuses with
 *"no plan for project …"* until `apg plan add <project>` has run; durable
 `node`/`edge` mutations refuse on the default branch (author **inside** the
-worktree); and a refused/failed merge leaves the worktree and branch untouched.
+worktree); and a refused merge leaves the worktree and branch untouched, while a
+merge that fails **after** landing is unlanded the same way — the default branch
+is hard-reset to the pre-merge commit, the stale main derived index is
+discarded, and the worktree and branch stay so `apg project merge <name>`
+retries with no manual main scan. A staleness refusal and the scan preamble name
+every differing freshness input as `differing: …`.
 
 ## Deploying a release (cutting a tag)
 
