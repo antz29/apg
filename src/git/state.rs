@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use lbug::{Connection, Database, SystemConfig};
+use lbug::{Connection, Database};
 
+use crate::artifacts::db::system_config;
 use crate::specs;
 use crate::splice::seed::{cell, query_rows};
 
@@ -283,7 +284,7 @@ pub struct RecordedScan {
 /// non-git, `git_clean` is `"true"`/`"false"`, and an empty `content_key` is
 /// `None`.
 pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
-    let db = Database::new(db_path(apg_root), SystemConfig::default().read_only(true)).ok()?;
+    let db = Database::new(db_path(apg_root), system_config(true).ok()?).ok()?;
     let conn = Connection::new(&db).ok()?;
     let (_, rows) = query_rows(
         &conn,
