@@ -22,12 +22,12 @@ use crate::{cache, delta, git, graph, incremental};
 /// describes the same tree, so a fresh worktree assembles from the first such
 /// row written by any worktree. A row recorded under a different cache key
 /// cannot resolve its units under the current key and is refused. Completeness
-/// is then judged without a source walk: every source-language entry of the
-/// recorded manifest must have a stored fact unit under the current key
-/// (non-source entries never get units and are ignored), and every such
-/// language must have stored module scaffolding. A single missing
-/// unit/scaffold is a miss (the caller falls back), so the warm path can never
-/// assemble an incomplete graph.
+/// is then judged without a source walk: every entry of the recorded manifest
+/// outside the tool-owned top-level `apg/` layout must have a stored fact unit
+/// under the current key (the layout itself is never scanned as code, so it is
+/// ignored), and every such language must have stored module scaffolding. A
+/// single missing unit/scaffold is a miss (the caller falls back), so the warm
+/// path can never assemble an incomplete graph.
 pub fn warm_prepared(
     project_dir: &Path,
     apg_root: &Path,
@@ -50,11 +50,10 @@ pub fn warm_prepared(
     let mut languages: BTreeSet<String> = BTreeSet::new();
     let mut reuse_candidates: Vec<incremental::ReuseFile> = Vec::new();
     for (rel, oid) in &record.manifest.entries {
-        let lang = incremental::language_of(rel);
-        if lang == "other" {
-            // Not a scanned source file: it never carries a fact unit.
+        if tool_owned_layout(rel) {
             continue;
         }
+        let lang = incremental::language_of(rel);
         // A source file with no stored unit means the cache is not complete
         // for this tree — fall back (conservative, never a partial assembly).
         store.candidate(lang, rel, oid, &cache_key)?;
@@ -107,10 +106,10 @@ pub fn warm_universe(
     let store = cache::FactStore::at(store_root.to_path_buf()).load();
     let mut out: BTreeSet<String> = BTreeSet::new();
     for (rel, oid) in &manifest.entries {
-        let lang = incremental::language_of(rel);
-        if lang == "other" {
+        if tool_owned_layout(rel) {
             continue;
         }
+        let lang = incremental::language_of(rel);
         let Some((frag, stored_root)) = store.candidate(lang, rel, oid, cache_key) else {
             continue;
         };
@@ -159,6 +158,9 @@ pub fn reuse_universe(
     let store = cache::FactStore::at(store_root.to_path_buf()).load();
     let mut out: BTreeSet<String> = BTreeSet::new();
     for (rel, lang, oid) in files {
+        if tool_owned_layout(rel) {
+            continue;
+        }
         let Some((frag, stored_root)) = store.candidate(lang, rel, oid, cache_key) else {
             continue;
         };
@@ -184,4 +186,15 @@ pub fn reuse_universe(
         }
     }
     out
+}
+
+/// True when a checkout-relative path is the tool-owned top-level `apg/` layout
+/// itself or anything below it — config, layers and transient state, never
+/// authored source. The structural scanner prunes that directory at the scan
+/// root and the ingestor blacklists it, so such a tracked entry never carries a
+/// fact unit: it must neither demand one (warm completeness) nor contribute
+/// FQNs (the universes). Only the FIRST component is matched, so a source tree
+/// legitimately named `apg` deeper in the repo (`src/apg/...`) is untouched.
+fn tool_owned_layout(rel: &str) -> bool {
+    rel == "apg" || rel.starts_with("apg/")
 }

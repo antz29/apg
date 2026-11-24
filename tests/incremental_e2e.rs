@@ -969,10 +969,12 @@ mod e2e {
     /// same tree, zero frontend spawns — while a worktree whose tree differs
     /// does not take the warm path and runs the frontends.
     ///
-    /// `apg/` is gitignored and `apg/config.json` untracked (the ps cached-
-    /// assembly fixture's recipe) so every tracked path is a located File with a
-    /// fact unit — the warm completeness check needs one per manifest entry,
-    /// and the `apg/` layout is blacklisted from the graph.
+    /// The DEFAULT tracked-`apg/` layout is exercised: `apg/config.json` stays
+    /// tracked (and `.gitignore` carries only the `apg init` scaffold), exactly
+    /// as `apg init` leaves a project. The warm completeness selection ignores
+    /// the tool-owned top-level `apg/` layout, so its tracked config — pruned by
+    /// the structural scanner and blacklisted by the ingestor, so it never has a
+    /// fact unit — does not block the warm path.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktrees/spawned apg/redb store); run via cargo test-e2e"]
     fn fresh_worktree_warm_assembles_from_the_shared_scan_row_with_zero_frontends() {
@@ -985,23 +987,20 @@ mod e2e {
             "b/b.go",
             "package b\n\nimport \"scratch/a\"\n\nfunc Use() int { return a.Leaf() }\n",
         );
-        // The layout is present but out of the scanned tree: tracked `apg/`
-        // content is blacklisted, so it would carry no fact unit and block the
-        // warm completeness check.
-        let config = std::fs::read_to_string(repo.root.join("apg/config.json")).unwrap();
-        let gitignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
-        std::fs::write(repo.root.join(".gitignore"), format!("{gitignore}/apg/\n")).unwrap();
-        let git = git2::Repository::open(&repo.root).unwrap();
-        let mut index = git.index().unwrap();
-        index
-            .remove_path(std::path::Path::new("apg/config.json"))
-            .expect("untrack apg/config.json");
-        index
-            .add_path(std::path::Path::new(".gitignore"))
-            .expect("restage .gitignore");
-        index.write().unwrap();
         repo.commit_all("source");
         assert!(repo.is_clean(), "the fixture tree must be clean");
+        // Prove the arm runs on the default initialized layout: the config is
+        // tracked content that the warm selection must ignore.
+        {
+            let git = git2::Repository::open(&repo.root).unwrap();
+            let index = git.index().unwrap();
+            assert!(
+                index
+                    .get_path(std::path::Path::new("apg/config.json"), 0)
+                    .is_some(),
+                "the default layout's apg/config.json must stay tracked"
+            );
+        }
 
         let home = std::env::temp_dir().join(format!("apg-warm-home-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
@@ -1011,11 +1010,6 @@ mod e2e {
                 .cwd(dir)
                 .env("HOME", &home_s)
                 .output()
-        };
-        // A linked worktree does not inherit the untracked layout config; the
-        // version gate needs it present in every checkout.
-        let seed_layout = |wt: &std::path::Path| {
-            std::fs::write(wt.join("apg/config.json"), &config).unwrap();
         };
 
         // The first worktree records the shared scan row.
@@ -1035,7 +1029,6 @@ mod e2e {
 
         // A second worktree at the same content, with no scan row of its own.
         let wt = repo.start_project("wt2");
-        seed_layout(&wt);
         let wt_id = worktree_id(&wt);
         assert_ne!(wt_id, main_id, "a distinct worktree id");
         let store = FactStore::at(store_root.clone()).load();
@@ -1070,7 +1063,6 @@ mod e2e {
 
         // A worktree whose tree DIFFERS does not warm: it runs the frontends.
         let other = repo.start_project("wt3");
-        seed_layout(&other);
         std::fs::create_dir_all(other.join("c")).unwrap();
         std::fs::write(
             other.join("c/c.go"),
