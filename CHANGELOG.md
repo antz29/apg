@@ -9,6 +9,46 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.30.0
+
+Minor release: merge failure atomicity, scan/graph reliability fixes, a faster
+test harness, plan-phase sizing guidance and docs.
+
+**Merge failure atomicity (headline).** `apg project merge`'s post-merge main
+rebuild now unlands the merge whenever the rebuild fails — a returned error
+**or a panic**. The default branch is hard-reset to the pre-merge commit, the
+stale main derived index (`apg/.trans/db.lbug`) is discarded, and the project
+branch and worktree stay so re-running `apg project merge <name>` retries with
+no manual main scan. This fixes the `project merge` panic on a zero-target
+rebuild (`duplicate project node FQN: agent.<stem>`) and the split-brain where
+the merge landed beside a stale graph. Duplicate code identities are admitted
+once when a source repeats the same declaration, and a genuine cross-source
+collision is reported naming both contributing source paths instead of
+silently overwriting.
+
+**Scan/graph reliability.** A zero-target incremental scan keeps the Agent
+roster — and every task's `assigned-to` edge — from a single emitter; a reused
+stream replays its `Language` root and `Module` rows; a skipped language with no
+scaffolding record replays its modules; an FQN label move no longer leaves an
+orphan row behind; and both the stale-DB refusal and the scan preamble name
+every differing freshness input as `differing: …`.
+
+**Test infrastructure.** The default gate is the lib-only unit+int suite; the
+e2e tier runs through a per-binary runner with a hermetic (`--e2e`) and a
+complete (`--e2e-full`) selection; database fixtures use a fixture-sized config
+(the `APG_DB_*` overrides folded in through `system_config`) built from one
+per-process schema template; development worktrees share one
+`CARGO_TARGET_DIR`, with a forced frontend-rebuild switch
+(`APG_REBUILD_FRONTENDS`); and the dev profile keeps its line tables.
+
+**Plan tooling.** The plan-writer and plan-review prompts state a rough ~15-task
+phase scale and add a phase-decomposition check.
+
+**Docs.** AGENTS.md and README document the merge unlanded/retry contract and
+the `differing:` freshness diagnostics.
+
+No durable-spec model change.
+
 ## v0.29.2
 
 Patch release: two new frontends (T-SQL and PowerShell), a project-aware C#
