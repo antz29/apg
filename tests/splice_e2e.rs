@@ -7822,4 +7822,195 @@ mod e2e {
             "Module",
         );
     }
+
+    /// phase-04 task-13: the delta re-emits a target file whose function was
+    /// RENAMED AWAY, so a CACHED (non-re-emitted) unit's `Calls` edge names a
+    /// vanished FQN. The splice closes the graph: the vanished node is detached
+    /// with its incoming edge, no `UnresolvedTarget` is fabricated for it, and
+    /// the cached unit's LIVE unresolved-target edge survives.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
+    fn cached_edge_to_a_renamed_away_fqn_is_dropped_without_a_fabricated_target() {
+        let dir = scratch("renamed-away-edge");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/a.go".to_string();
+        let b = "/x/b.go".to_string();
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let target = |cat: &str| Node {
+            kind: NodeKind::UnresolvedTarget,
+            category: Some(cat.to_string()),
+            ..Node::default()
+        };
+
+        // prev: a.go declares `m.A.f`; b.go's unit calls it and also references
+        // a live external target.
+        let mut prev = Graph::default();
+        prev.nodes.insert("m".into(), module());
+        prev.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 80));
+        prev.nodes
+            .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+        prev.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 50));
+        prev.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 20));
+        prev.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 30));
+        prev.nodes.insert("ext.Keep".into(), target("stdlib"));
+        prev.contains.insert(("m".into(), a.clone()));
+        prev.contains.insert(("m".into(), b.clone()));
+        prev.contains.insert((a.clone(), "m.A".into()));
+        prev.contains.insert((a.clone(), "m.A.f".into()));
+        prev.contains.insert(("m.A".into(), "m.A.f".into()));
+        prev.contains.insert((b.clone(), "m.B.g".into()));
+        prev.calls.insert(("m.B.g".into(), "m.A.f".into()));
+        prev.unresolved_calls
+            .insert(("m.B.g".into(), "ext.Keep".into(), String::new()));
+        prev.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        build_db(&prev_path, &prev);
+
+        // The delta re-emits ONLY a.go: `m.A.f` is renamed `m.A.f2`, so the old
+        // FQN vanishes while b.go stays a cached, non-re-emitted unit holding
+        // the old `m.B.g -> m.A.f` edge in the seed.
+        let mut new = Graph::default();
+        new.nodes.insert("m".into(), module());
+        new.nodes
+            .insert(a.clone(), located(NodeKind::File, &a, 1, 90));
+        new.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 55));
+        new.nodes
+            .insert("m.A.f2".into(), located(NodeKind::Function, &a, 2, 22));
+        new.contains.insert(("m".into(), a.clone()));
+        new.contains.insert((a.clone(), "m.A".into()));
+        new.contains.insert((a.clone(), "m.A.f2".into()));
+        new.contains.insert(("m.A".into(), "m.A.f2".into()));
+        new.nodes.insert(
+            SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+
+        let seeded = seed_or_panic(&prev_path);
+        let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &new,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+
+        let conn = Connection::new(&seeded.db).unwrap();
+        let count = |query: &str| -> i64 {
+            let (_, rows) = query_rows(&conn, query).unwrap();
+            rows.first()
+                .and_then(|r| r.first())
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(-1)
+        };
+        // The renamed-away FQN is gone from both node and edge space...
+        assert_eq!(
+            count("MATCH (n:Function) WHERE n.fqn = 'm.A.f' RETURN count(*)"),
+            0,
+            "the renamed-away function is gone"
+        );
+        assert_eq!(
+            count("MATCH (n:Function) WHERE n.fqn = 'm.A.f2' RETURN count(*)"),
+            1,
+            "the renamed function landed"
+        );
+        for table in [
+            "Contains",
+            "Calls",
+            "Uses",
+            "UnresolvedCall",
+            "UnresolvedUse",
+        ] {
+            assert_eq!(
+                count(&format!(
+                    "MATCH (a)-[:{table}]->(b) WHERE a.fqn = 'm.A.f' \
+                     OR b.fqn = 'm.A.f' RETURN count(*)"
+                )),
+                0,
+                "no {table} edge names the renamed-away FQN"
+            );
+        }
+        // ...and no UnresolvedTarget was fabricated for it.
+        assert_eq!(
+            count("MATCH (n:UnresolvedTarget) WHERE n.fqn = 'm.A.f' RETURN count(*)"),
+            0,
+            "a vanished real FQN is never recycled into an unresolved target"
+        );
+        // The cached unit's live unresolved-target edge survives.
+        assert_eq!(
+            count(
+                "MATCH (a:Function)-[:UnresolvedCall]->(u:UnresolvedTarget) \
+                 WHERE a.fqn = 'm.B.g' AND u.fqn = 'ext.Keep' RETURN count(*)"
+            ),
+            1,
+            "the cached unit's live unresolved-target edge survives"
+        );
+        assert_eq!(
+            count("MATCH (n:UnresolvedTarget) WHERE n.fqn = 'ext.Keep' RETURN count(*)"),
+            1,
+            "the live unresolved target row survives"
+        );
+
+        // The closed-graph invariant: every surviving edge endpoint is a real
+        // node or a live unresolved target.
+        let mut live: BTreeSet<String> = BTreeSet::new();
+        for label in [
+            "Language",
+            "Module",
+            "File",
+            "Struct",
+            "Function",
+            "Agent",
+            "UnresolvedTarget",
+        ] {
+            let (_, rows) = query_rows(&conn, &format!("MATCH (n:{label}) RETURN n.fqn")).unwrap();
+            live.extend(rows.into_iter().map(|r| cell(&r, 0)));
+        }
+        for table in [
+            "Contains",
+            "Calls",
+            "Uses",
+            "UnresolvedCall",
+            "UnresolvedUse",
+        ] {
+            let (_, rows) = query_rows(
+                &conn,
+                &format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"),
+            )
+            .unwrap();
+            for row in rows {
+                for i in [0, 1] {
+                    let endpoint = cell(&row, i);
+                    assert!(
+                        live.contains(&endpoint),
+                        "a {table} edge has a dangling endpoint {endpoint:?}: {live:?}"
+                    );
+                }
+            }
+        }
+
+        let temp = seeded.temp_path.clone();
+        drop(conn);
+        drop(seeded);
+        std::fs::remove_file(&temp).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
