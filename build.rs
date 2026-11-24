@@ -95,6 +95,23 @@ fn watch_frontend_sources() {
         }
     }
 
+    // The ingestor assembles the graph, so a change there (or to this build
+    // script itself) must re-run staging instead of reusing a stale
+    // fingerprint. Walk the directory rather than hand-listing its files so a
+    // newly added ingestor source is watched automatically; `tests.rs` cannot
+    // affect the shipped binary.
+    println!("cargo:rerun-if-changed=build.rs");
+    if let Ok(entries) = std::fs::read_dir("src/ingest") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_rs = path.extension().is_some_and(|ext| ext == "rs");
+            let is_test = path.file_name().is_some_and(|name| name == "tests.rs");
+            if is_rs && !is_test {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+
     println!("cargo:rerun-if-env-changed=APG_BUILD_FRONTENDS");
 }
 
