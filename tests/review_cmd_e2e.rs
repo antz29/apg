@@ -10,7 +10,7 @@ use apg::schema::Record;
 use apg::specs;
 use apg::testutil::{self, Repo, spawn_apg};
 use common::with_cwd;
-use lbug::{Connection, Database};
+use lbug::Connection;
 use std::path::{Path, PathBuf};
 
 /// A temp repo with a real project context for `foo` (R4 — non-git
@@ -109,13 +109,8 @@ fn db_at(dir: &Path) {
     let ldir = dir.join("apg").join(specs::TRANS).join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(&g, &ldir).unwrap();
-    let db = Database::new(
-        dir.join("apg").join(specs::TRANS).join("db.lbug"),
-        testutil::fixture_db_config(),
-    )
-    .unwrap();
+    let db = testutil::schema_db_at(&dir.join("apg").join(specs::TRANS).join("db.lbug"));
     let conn = Connection::new(&db).unwrap();
-    load::create_schema(&conn).unwrap();
     load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
