@@ -196,6 +196,25 @@ fn build_db(path: &Path, graph: &apg::graph::Graph) {
     drop(db);
 }
 
+/// Force the next scan onto a cold path: discard the redb fact store (+ its
+/// -wal/-shm sidecars) and the transitional JSON records beside it, plus any
+/// pre-cutover `facts/` directory. `facts.lock` is left in place.
+fn clear_shared_fact_store(repo_root: &Path) {
+    let store = repo_root.join(".git").join("apg");
+    for name in [
+        "facts.db",
+        "facts.db-wal",
+        "facts.db-shm",
+        "manifest.json",
+        "scan.json",
+    ] {
+        let _ = std::fs::remove_file(store.join(name));
+    }
+    for name in ["index", "facts"] {
+        let _ = std::fs::remove_dir_all(store.join(name));
+    }
+}
+
 /// e2e tier -- real I/O: these tests drive `ingest`/`ingest_with_reuse`,
 /// whose `ingest_records` spools to `std::env::temp_dir()` (two of them also
 /// stage real temp dirs of their own). Each is `#[ignore]`d, so a plain
@@ -1678,17 +1697,16 @@ mod e2e {
     /// scan reuses reproduces every node it produced. The skipped language's
     /// `Language` root, its `Module` rows and each module's `Language -> Module`
     /// edge are replayed from whichever scaffolding record the store holds — a
-    /// complete one, a legacy one written before it carried `languages`/
-    /// `language_edges` (`#[serde(default)]` decodes both as empty), or none at
-    /// all — while the per-file fact units carry the declarations and their
-    /// containment chain. With no record at all, the record-only pure-intermediate
-    /// module is the one row the reused units cannot attest.
+    /// complete one, a legacy one (a record whose `languages`/`language_edges`
+    /// are empty), or none at all — while the per-file fact units carry the
+    /// declarations and their containment chain. With no record at all, the
+    /// record-only pure-intermediate module is the one row the reused units
+    /// cannot attest.
     #[test]
     #[ignore = "e2e tier: real I/O (temp FactStore + db.lbug); run via cargo test-e2e"]
     fn reused_stream_replays_its_language_root_and_module_rows() {
         use apg::cache::{
-            CacheKey, FactStore, FileFragment, FileIndex, ModuleScaffolding, SCAFFOLDING_FILE,
-            ScanConfigKey,
+            CacheKey, FactStore, FileFragment, FileIndex, ModuleScaffolding, ScanConfigKey,
         };
 
         let dir = std::env::temp_dir().join(format!("apg-reused-stream-{}", std::process::id()));
@@ -1737,42 +1755,45 @@ mod e2e {
         store
             .put_scaffolding("go", &scaffolding["go"], &cache_key)
             .unwrap();
+        store.save_index().unwrap();
 
-        let reuse = || Reuse {
-            store: &store,
-            cache_key: &cache_key,
-            files: files
-                .iter()
-                .map(|(p, oid)| (p.to_string(), "go".to_string(), oid.to_string()))
-                .collect(),
-            reader_root: "/x".to_string(),
-            skipped_langs: ["go".to_string()].into_iter().collect(),
+        let assemble = |store: &FactStore| {
+            let reuse = Reuse {
+                store,
+                cache_key: &cache_key,
+                files: files
+                    .iter()
+                    .map(|(p, oid)| (p.to_string(), "go".to_string(), oid.to_string()))
+                    .collect(),
+                reader_root: "/x".to_string(),
+                skipped_langs: ["go".to_string()].into_iter().collect(),
+            };
+            ingest_with_reuse(Vec::<Record>::new(), &opts, Some(&reuse), None).0
         };
-        let assemble = || ingest_with_reuse(Vec::<Record>::new(), &opts, Some(&reuse()), None).0;
 
         // A complete record: the root, every module and every hierarchy edge.
-        let complete = assemble();
-        // A legacy record: the shape a binary that predates `languages`/
-        // `language_edges` wrote. `#[serde(default)]` decodes both as empty, so
-        // `splice_cached` must derive them from the skipped language instead.
-        let scaffolding_file = store
-            .root
-            .join("go")
-            .join(cache_key.token())
-            .join(SCAFFOLDING_FILE);
-        std::fs::write(
-            &scaffolding_file,
-            serde_json::json!({
-                "modules": &scaffolding["go"].modules,
-                "edges": &scaffolding["go"].edges,
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let legacy = assemble();
-        // No record at all: only the reused units attest their modules.
-        std::fs::remove_file(&scaffolding_file).unwrap();
-        let absent = assemble();
+        let complete = assemble(&store);
+        // A legacy record: one whose `languages`/`language_edges` are empty.
+        // No serialization is involved — the record is replaced by a struct
+        // with those two fields empty, so `splice_cached` must derive them
+        // from the skipped language instead.
+        let mut legacy_record = scaffolding["go"].clone();
+        legacy_record.languages.clear();
+        legacy_record.language_edges.clear();
+        store
+            .put_scaffolding("go", &legacy_record, &cache_key)
+            .unwrap();
+        store.save_index().unwrap();
+        let legacy = assemble(&store);
+        // No record at all: only the reused units attest their modules. The
+        // facade has no delete, so a second store holds just the two units.
+        let mut bare = FactStore::at(dir.join("facts-bare"));
+        for (path, oid) in files {
+            let frag = FileFragment::from_index(&index, path, path, oid, "go");
+            bare.put(&frag, "/x", &cache_key).unwrap();
+        }
+        bare.save_index().unwrap();
+        let absent = assemble(&bare);
 
         // Every record shape reproduces the `Language` root.
         for (shape, graph) in [
@@ -2326,7 +2347,7 @@ mod e2e {
         let spliced_db = snapshot_dir.join("spliced.lbug");
         std::fs::copy(&db_path, &spliced_db).unwrap();
         std::fs::remove_file(&db_path).unwrap();
-        let _ = std::fs::remove_dir_all(repo.root.join(".git/apg/facts"));
+        clear_shared_fact_store(&repo.root);
         let full = run(&["scan", "."]);
         let full_err = String::from_utf8_lossy(&full.stderr).into_owned();
         assert!(full.status.success(), "full rebuild: {full_err}");
