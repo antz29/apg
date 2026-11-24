@@ -10,19 +10,24 @@
 //! writer gate — an opening reader or writer waits on it for a bounded ~30 s
 //! and then fails with a named contention error.
 //!
-//! The per-worktree `refs`, `scans`, `deps`, `signatures` and `overloads` tables
-//! are declared for phase 4. In phase 3 the delta path still persists the JSON
-//! state beside `facts.db`:
+//! This worktree's own orchestration state is kept as redb rows in that same
+//! store, scoped by its [`crate::cache::WorktreeId`]:
 //!
-//! * `manifest.json` — the last scan's content manifest (path → blob OID),
-//! * `scan.json` — the last scan's commit sha + global cache key,
-//! * `index/deps.json` — the file-level dependency index (checkout-relative),
-//! * `index/signatures.json` — each file's exported signature set,
-//! * `index/overloads.json` — overload groups (checkout-relative).
+//! * `scans` — this worktree's scan record (commit sha, global cache key and
+//!   content key),
+//! * `refs` — the last scan's content manifest (path → blob OID),
+//! * `deps` — the file-level dependency index (checkout-relative),
+//! * `signatures` — each file's exported signature set,
+//! * `overloads` — overload groups (checkout-relative).
 //!
-//! Paths are checkout-relative throughout, so a fresh worktree of the same
-//! repository reads the same state and re-bases it onto its own root — the
-//! cross-worktree sharing half of `requirements.requirement.cross-worktree-cache-sharing`.
+//! There are no `manifest.json`, `scan.json` or `index/*.json` files beside
+//! `facts.db` — the store carries every row.
+//!
+//! Paths are checkout-relative throughout, so the content units one worktree
+//! records are reachable from every other worktree of the repository
+//! (`requirements.requirement.fact-store-is-one-redb-database`), while the
+//! refs/scan/delta rows stay this worktree's own
+//! (`requirements.requirement.fact-manifests-are-per-worktree`).
 
 // The phase-02 win-B surface: a few helpers are consumed by the phase-03 splice
 // path and the integration tests rather than by `cmd_scan` directly.
