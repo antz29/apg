@@ -306,14 +306,13 @@ pub fn schema_db_at(path: &Path) -> lbug::Database {
 /// A real, empty `apg/.trans/db.lbug` with the full schema but no rows — the
 /// DB-existence fixture the staleness predicates need (they open the DB to read
 /// its `Scan` row; a raw empty marker is not a database). A test that wants the
-/// DB to carry a `Scan` row pairs this with [`write_scan_meta`]. Opens at
+/// DB to carry a `Scan` row pairs this with [`write_scan_meta`]. Routes through
+/// [`schema_db_at`], so it copies the process [`schema_template_db`] into place
+/// instead of running `create_schema` per call, and opens at
 /// [`fixture_db_config`], not the engine default.
 pub fn touch_db(apg_root: &Path) {
     let trans = apg_root.join(specs::TRANS);
-    std::fs::create_dir_all(&trans).unwrap();
-    let db = lbug::Database::new(trans.join("db.lbug"), fixture_db_config()).unwrap();
-    let conn = lbug::Connection::new(&db).unwrap();
-    load::create_schema(&conn).unwrap();
+    schema_db_at(&trans.join("db.lbug"));
 }
 
 /// DETACH DELETEs the node at `fqn` from the live `db.lbug` under `apg_root`,
