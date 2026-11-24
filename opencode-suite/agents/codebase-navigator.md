@@ -656,7 +656,7 @@ edges (no lost requirements, no cycles) via `apg_query`.
 start|save|end|abort`; `apg plan …`; `apg project start|merge`; `apg review add|action|resolve|reject|list`; `apg --version`.
 Test tiers: **unit** (one unit, pure in-memory), **int** (two or more, still pure), **e2e** (any
 real I/O — filesystem including `temp_dir()`, `db.lbug`, git, a process spawn). The four
-invocations are `cargo test` (unit+int, seconds, the default gate), `cargo test-unit`,
+invocations are `cargo test --lib` (unit+int, seconds, the default gate), `cargo test-unit`,
 `cargo test-int`, and `cargo test-e2e` (`cargo test e2e:: -- --ignored --test-threads=4`);
 **e2e is opt-in and final**, and runs against a scratch `/tmp` repo, never the apg repo. The
 repo gate is `scripts/gate.sh` (fmt → check → clippy `-D warnings` → build → test → the JS/TS
