@@ -35,7 +35,7 @@
 // start_line/end_line are 1-based inclusive line numbers.
 //
 // Usage: node scanner.mjs <dir> [--module <dir>]... [--targets <file>]
-//        [--cache-dir <dir>] [--cache-key <key>] [exclude...]
+//        [--cache-dir <dir>] [exclude...]
 //   node_modules is always skipped (dependency code, like Go's module cache);
 //   --module restricts scanning to the given package dirs; remaining args are
 //   substring path excludes.
@@ -47,12 +47,12 @@
 //                      FULL program context; only the target files' facts are
 //                      emitted, and a reference into a non-emitted (cached)
 //                      file carries that declaration's canonical FQN.
-//   --cache-dir <dir>  the shared cache root (<git-common-dir>/apg/facts).
-//   --cache-key <key>  the global cache key. The TypeScript compiler's native
-//                      incremental build-info is persisted at
-//                      <cache-dir>/ts/<cache-key>/tsconfig.tsbuildinfo so a
-//                      re-scan (or a fresh worktree with the same binary +
-//                      format + config) reuses it; a key mismatch discards it.
+//   --cache-dir <dir>  the per-worktree toolchain cache root
+//                      (`<checkout>/apg/.trans/cache`). The TypeScript
+//                      compiler's native incremental build-info is persisted at
+//                      <cache-dir>/ts/tsconfig.tsbuildinfo, so a re-scan of the
+//                      same worktree reuses it — the compiler version, options
+//                      and file signatures decide reuse.
 //
 // The scanner is a thin orchestrator: the cohesive concerns live in plain-ESM
 // sidecar modules (the `identity.mjs` precedent — a `.mjs` split keeps
@@ -90,7 +90,7 @@ import { walkNode } from "./walk.mjs";
 
 const args = process.argv.slice(2);
 if (args.length < 1) {
-  console.error("Usage: tsfrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]");
+  console.error("Usage: tsfrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [exclude...]");
   process.exit(1);
 }
 const rootArg = args[0];
@@ -99,7 +99,6 @@ let excludes = [];
 let idPrefix = "n";
 let targetsPath = "";
 let cacheDir = "";
-let cacheKey = "";
 for (let i = 1; i < args.length; i++) {
   if (args[i] === "--module" && i + 1 < args.length) {
     moduleDirs.push(args[++i]);
@@ -109,8 +108,6 @@ for (let i = 1; i < args.length; i++) {
     targetsPath = args[++i];
   } else if (args[i] === "--cache-dir" && i + 1 < args.length) {
     cacheDir = args[++i];
-  } else if (args[i] === "--cache-key" && i + 1 < args.length) {
-    cacheKey = args[++i];
   } else {
     excludes.push(args[i]);
   }
@@ -168,13 +165,14 @@ const programCompilerOptions = {
 };
 
 // Build the program over the FULL source set (the full resolution context).
-// With a shared cache root the compiler's native incremental engine is used and
-// its build-info is persisted under `<cache-dir>/ts/<cache-key>/` so a re-scan
-// reuses it; only the build-info file is written (the JS output is suppressed,
-// nothing is emitted into the scanned tree).
+// With a per-worktree cache dir the compiler's native incremental engine is
+// used and its build-info is persisted at `<cache-dir>/ts/tsconfig.tsbuildinfo`
+// so a re-scan reuses it; only the build-info file is written (the JS output is
+// suppressed, nothing is emitted into the scanned tree). A corrupt or
+// unreadable build-info is treated as absent, so the scan proceeds full-context.
 let program;
 if (cacheDir) {
-  const tsCacheDir = path.join(cacheDir, "ts", cacheKey || "");
+  const tsCacheDir = path.join(cacheDir, "ts");
   fs.mkdirSync(tsCacheDir, { recursive: true });
   const tsBuildInfoPath = path.join(tsCacheDir, "tsconfig.tsbuildinfo");
   const incrementalOptions = {
@@ -183,11 +181,16 @@ if (cacheDir) {
     incremental: true,
     tsBuildInfoFile: tsBuildInfoPath,
   };
-  const oldProgram = ts.readBuilderProgram(incrementalOptions, {
-    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
-    getCurrentDirectory: () => ts.sys.getCurrentDirectory(),
-    readFile: (f) => ts.sys.readFile(f),
-  });
+  let oldProgram;
+  try {
+    oldProgram = ts.readBuilderProgram(incrementalOptions, {
+      useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+      getCurrentDirectory: () => ts.sys.getCurrentDirectory(),
+      readFile: (f) => ts.sys.readFile(f),
+    });
+  } catch {
+    oldProgram = undefined;
+  }
   const builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(
     ctx.allFiles.map((f) => f.file),
     incrementalOptions,
@@ -197,7 +200,9 @@ if (cacheDir) {
   builder.emit(undefined, (fileName, data) => {
     if (fileName === tsBuildInfoPath) {
       try {
-        fs.writeFileSync(fileName, data);
+        const tmp = fileName + ".tmp";
+        fs.writeFileSync(tmp, data);
+        fs.renameSync(tmp, fileName);
       } catch {
         // A cache write failure is never fatal: the scan continues full-context.
       }
