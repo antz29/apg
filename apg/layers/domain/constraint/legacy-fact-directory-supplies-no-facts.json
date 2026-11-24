@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "legacy-fact-directory-supplies-no-facts",
+  "body": "A repository's legacy `<git-common-dir>/apg/facts/` directory supplies no fact after the cutover, so no scan reads it and its removal touches that directory alone.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

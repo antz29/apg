@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "toolchain-cache-is-per-worktree",
-  "body": "Every language's toolchain cache lives under its own checkout's `apg/.trans/cache/<language>/` and never under the git common directory, so a facts format or config change leaves it intact.",
+  "body": "Every language's toolchain cache lives under its own checkout's `apg/.trans/cache/<language>/`, outside the shared fact store and the git common directory, so a facts format or config change leaves it intact.",
   "properties": {
     "feature": "scan-cache"
   },

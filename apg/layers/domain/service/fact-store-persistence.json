@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "fact-store-persistence",
-  "body": "The capability that persists a scan's facts in one redb write transaction, keeps each worktree's own refs and scan record, and collects every body no live manifest or scaffolding reaches.",
+  "body": "The capability that persists a scan's facts in one redb write transaction, keeps each worktree's own refs and scan record, and collects every body beyond the reach of the live manifests and scaffolding.",
   "properties": {},
   "out": [
     {

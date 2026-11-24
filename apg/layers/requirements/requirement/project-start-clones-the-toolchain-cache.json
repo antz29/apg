@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "project-start-clones-the-toolchain-cache",
-  "body": "`apg project start` materialises the new worktree's toolchain cache from the main checkout's, and a clone or copy failure leaves no partial cache and fails the start with the OS error and path.",
+  "body": "`apg project start` materialises the new worktree's toolchain cache from the main checkout's, and a clone or copy failure leaves the worktree cache absent and fails the start with the OS error and path.",
   "properties": {
     "feature": "scan-cache"
   },

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "legacy-fact-directory-is-deleted-once",
-  "body": "The legacy `<git-common-dir>/apg/facts/` directory is never read and is deleted best-effort on the first successful open, while the per-worktree `apg/.trans/cache` survives.",
+  "body": "The legacy `<git-common-dir>/apg/facts/` directory is retired on the first successful open and deleted best-effort, while the per-worktree `apg/.trans/cache` survives.",
   "properties": {
     "feature": "scan-cache"
   },

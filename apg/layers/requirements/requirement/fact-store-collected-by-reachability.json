@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "fact-store-collected-by-reachability",
-  "body": "The fact store's roots are every live worktree's current manifest together with the live scaffolding, so a body is deleted only when no live ref and no scaffolding reaches it and a newer body never strands an older one.",
+  "body": "The fact store's roots are every live worktree's current manifest together with the live scaffolding, so a body survives while any live ref or scaffolding reaches it and is deleted otherwise.",
   "properties": {
     "feature": "scan-cache"
   },

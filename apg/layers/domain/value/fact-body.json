@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "fact-body",
-  "body": "The canonical bytes of one scanned file's facts — its modules, nodes and edges postcard-encoded behind a one-byte codec header — addressed by their BLAKE3-256 digest and carrying no absolute checkout path.",
+  "body": "The canonical bytes of one scanned file's facts — its modules, nodes and edges postcard-encoded behind a one-byte codec header — addressed by their BLAKE3-256 digest and carrying repo-relative identities alone.",
   "properties": {},
   "out": [],
   "in": [
