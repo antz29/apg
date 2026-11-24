@@ -4,7 +4,8 @@ use ::parquet::file::reader::{FileReader, SerializedFileReader};
 use apg::graph::{Graph, Location, Node, NodeKind};
 use apg::load::*;
 use apg::splice::query_rows;
-use lbug::{Connection, Database, SystemConfig};
+use apg::testutil::fixture_db_config;
+use lbug::{Connection, Database};
 
 fn fixture_graph() -> Graph {
     let mut g = Graph::default();
@@ -166,7 +167,7 @@ mod e2e {
         }
         build_load_files(&graph, &dir).unwrap();
 
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let db = Database::in_memory(fixture_db_config()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
         copy_from(&conn, &dir).unwrap();
@@ -362,7 +363,7 @@ mod e2e {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         build_load_files(&graph, &dir).unwrap();
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let db = Database::in_memory(fixture_db_config()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
         copy_from(&conn, &dir).unwrap();
@@ -803,7 +804,7 @@ mod e2e {
         let graph = fixture_graph_with_scan();
         build_load_files(&graph, &dir).unwrap();
 
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let db = Database::in_memory(fixture_db_config()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
         copy_from(&conn, &dir).unwrap();
@@ -1033,7 +1034,7 @@ mod e2e {
         let ldir = dir.join("load");
         std::fs::create_dir_all(&ldir).unwrap();
         build_load_files(&g, &ldir).unwrap();
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let db = Database::in_memory(fixture_db_config()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
         copy_from(&conn, &ldir).unwrap();
@@ -1170,7 +1171,7 @@ mod e2e {
         let ldir = dir.join("load");
         std::fs::create_dir_all(&ldir).unwrap();
         build_load_files(&graph, &ldir).unwrap();
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let db = Database::in_memory(fixture_db_config()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
         copy_from(&conn, &ldir).unwrap();
@@ -1196,7 +1197,7 @@ mod e2e {
         let graph = fixture_graph_with_scan();
         build_load_files(&graph, &dir).unwrap();
 
-        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let db = Database::in_memory(fixture_db_config()).unwrap();
         let conn = Connection::new(&db).unwrap();
         create_schema(&conn).unwrap();
         copy_from(&conn, &dir).unwrap();
@@ -1225,7 +1226,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir2);
         std::fs::create_dir_all(&dir2).unwrap();
         build_load_files(&fixture_graph(), &dir2).unwrap();
-        let db2 = Database::in_memory(SystemConfig::default()).unwrap();
+        let db2 = Database::in_memory(fixture_db_config()).unwrap();
         let conn2 = Connection::new(&db2).unwrap();
         create_schema(&conn2).unwrap();
         copy_from(&conn2, &dir2).unwrap();
