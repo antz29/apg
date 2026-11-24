@@ -9,14 +9,14 @@ class ApgPy < Formula
   desc "Python scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.29.2",
-      revision: "ee6363e0eef7024791fceeb21ded6dc7bd63fb28"
+      tag:      "v0.30.0",
+      revision: "85b275f1707de9f9b8a93b741db20a2c0fd53e5b"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.29.2"
-    rebuild 11
+    root_url "https://github.com/antz29/apg/releases/download/v0.30.0"
+    rebuild 12
     sha256 cellar: :any_skip_relocation, arm64_sequoia: "29d2128a63cd08cc6808581c1f98f10c31ba29e9e58ca46d10b64910026f0cc7"
   end
 

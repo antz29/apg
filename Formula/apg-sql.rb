@@ -7,14 +7,14 @@ class ApgSql < Formula
   desc "T-SQL scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.29.2",
-      revision: "ee6363e0eef7024791fceeb21ded6dc7bd63fb28"
+      tag:      "v0.30.0",
+      revision: "85b275f1707de9f9b8a93b741db20a2c0fd53e5b"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.29.2"
-    rebuild 1
+    root_url "https://github.com/antz29/apg/releases/download/v0.30.0"
+    rebuild 2
     sha256 cellar: :any_skip_relocation, arm64_sequoia: "cb4f92287725bbd483bcddae54046d7997234566903b19af2c4d586dff535b5e"
   end
 
