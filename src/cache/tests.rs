@@ -157,6 +157,11 @@ mod unit {
         );
     }
 
+    /// The cache key is the version/format/config identity: the store's
+    /// explicit facts format version beside the JSONL schema, the ingestor
+    /// projection rules and the scan-config digest. A format change alone moves
+    /// the token; a binary version bump cannot, because the running package
+    /// version is not a key input.
     #[test]
     fn cache_key_tracks_version_schema_projection_and_config() {
         let base = ScanConfigKey {
@@ -167,8 +172,12 @@ mod unit {
             cobol_dialect: None,
         };
         let k = CacheKey::compute(&base);
-        // The binary version is folded in.
-        assert_eq!(k.binary_version, env!("CARGO_PKG_VERSION"));
+        // The store's explicit facts format version is folded in, beside the
+        // pinned schema/projection versions and the config digest.
+        assert_eq!(k.format, FACTS_FORMAT_VERSION);
+        assert_eq!(k.jsonl_schema, JSONL_SCHEMA_VERSION);
+        assert_eq!(k.projection, PROJECTION_RULES_VERSION);
+        assert!(!k.config.is_empty());
         // A config drift (an added exclude) changes the key.
         let mut cfg2 = base.clone();
         cfg2.excludes.push("vendor".into());
@@ -188,6 +197,19 @@ mod unit {
         );
         // Identical configs render identical keys.
         assert!(CacheKey::compute(&base).matches(&CacheKey::compute(&base)));
+        // A format-version change alone moves the token and the identity.
+        let mut format_bumped = k.clone();
+        format_bumped.format += 1;
+        assert_ne!(format_bumped.token(), k.token());
+        assert!(!format_bumped.matches(&k));
+        // The key carries no binary-version component, so a package version
+        // bump can never move the token: `compute` (the only production
+        // constructor) supplies the facts format version.
+        let rendered = serde_json::to_value(&k).unwrap();
+        for part in ["format", "jsonl_schema", "projection", "config"] {
+            assert!(rendered.get(part).is_some(), "missing key part {part}");
+        }
+        assert!(rendered.get("binary_version").is_none());
     }
 
     /// phase-03 task-4 (Defect B): the loaded classification config

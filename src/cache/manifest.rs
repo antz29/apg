@@ -106,25 +106,28 @@ fn classification_render(cfg: &ApgConfig) -> String {
     out
 }
 
-/// The version/format/config identity that invalidates the whole cache when it
-/// drifts (`domain.value.cache-key`): binary version + JSONL schema/format +
-/// ingestor projection rules + the scan config (languages/excludes/modules) +
-/// the classification config. A mismatch forces a full scan for correctness,
-/// never as a heuristic.
+/// The format/config identity that invalidates the whole cache when it drifts
+/// (`domain.value.cache-key`): the store's explicit facts format version
+/// ([`crate::cache::FACTS_FORMAT_VERSION`]) + JSONL schema/format + ingestor
+/// projection rules + the scan config (languages/excludes/modules) + the
+/// classification config. A mismatch forces a full scan for correctness, never
+/// as a heuristic. The running binary's package version is deliberately not an
+/// input: a binary version bump alone never invalidates the cache, only a facts
+/// format change does.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheKey {
-    pub binary_version: String,
+    pub format: u32,
     pub jsonl_schema: String,
     pub projection: String,
     pub config: String,
 }
 
 impl CacheKey {
-    /// Builds the key for a scan config: the binary's own version plus the
-    /// pinned schema/projection versions plus a stable digest of the scan
-    /// config (a sorted, `\0`-joined rendering so ordering never matters). The
-    /// classification-config identity is already canonical, so it folds in as
-    /// one opaque part.
+    /// Builds the key for a scan config: the store's explicit facts format
+    /// version plus the pinned schema/projection versions plus a stable digest
+    /// of the scan config (a sorted, `\0`-joined rendering so ordering never
+    /// matters). The classification-config identity is already canonical, so it
+    /// folds in as one opaque part.
     pub fn compute(config: &ScanConfigKey) -> CacheKey {
         let mut parts: Vec<String> = Vec::new();
         for (tag, vals) in [
@@ -143,7 +146,7 @@ impl CacheKey {
             parts.push(format!("cobol_dialect={dialect}"));
         }
         CacheKey {
-            binary_version: env!("CARGO_PKG_VERSION").to_string(),
+            format: crate::cache::FACTS_FORMAT_VERSION,
             jsonl_schema: JSONL_SCHEMA_VERSION.to_string(),
             projection: PROJECTION_RULES_VERSION.to_string(),
             config: digest_str(&parts.join("\0")),
@@ -155,7 +158,7 @@ impl CacheKey {
     pub fn token(&self) -> String {
         digest_str(&format!(
             "{}|{}|{}|{}",
-            self.binary_version, self.jsonl_schema, self.projection, self.config
+            self.format, self.jsonl_schema, self.projection, self.config
         ))
     }
 

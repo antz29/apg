@@ -11,7 +11,7 @@ use super::*;
 
 fn sample_cache_key() -> CacheKey {
     CacheKey {
-        binary_version: "0.0.0-test".into(),
+        format: crate::cache::FACTS_FORMAT_VERSION,
         jsonl_schema: "jsonl-test".into(),
         projection: "projection-test".into(),
         config: "config-digest".into(),
