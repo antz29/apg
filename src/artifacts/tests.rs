@@ -245,4 +245,77 @@ mod unit {
             "the ledger alone is pending state, without a table probe"
         );
     }
+
+    /// With every override absent, [`apply_db_overrides`] returns the base
+    /// config untouched — including a non-default `read_only` and every other
+    /// field the caller set. `SystemConfig` has no getters and no `PartialEq`,
+    /// so the comparison is its derived `Debug` rendering (which prints each
+    /// field, `read_only` and `max_db_size` among them).
+    #[test]
+    fn absent_overrides_return_the_base_config_unchanged() {
+        let base = lbug::SystemConfig::default()
+            .read_only(true)
+            .max_db_size(1 << 30)
+            .buffer_pool_size(64 << 20)
+            .max_num_threads(3);
+        let returned = apply_db_overrides(base.clone(), None, None, None).unwrap();
+        assert_eq!(format!("{returned:?}"), format!("{base:?}"));
+        assert!(format!("{returned:?}").contains("read_only: true"));
+    }
+
+    /// A `1 GiB` / `128 MiB` / `2`-thread override folds into the base config:
+    /// the inputs arrive as values (`"1G"`, the pool byte count, the thread
+    /// count), never through the environment.
+    #[test]
+    fn override_applies_max_size_pool_and_threads() {
+        let base = lbug::SystemConfig::default().read_only(false);
+        let returned =
+            apply_db_overrides(base, Some("1G"), Some(128 * 1024 * 1024), Some(2)).unwrap();
+        let expected = lbug::SystemConfig::default()
+            .read_only(false)
+            .max_db_size(1 << 30)
+            .buffer_pool_size(128 << 20)
+            .max_num_threads(2);
+        assert_eq!(format!("{returned:?}"), format!("{expected:?}"));
+        let debug = format!("{returned:?}");
+        assert!(debug.contains("max_db_size: 1073741824"));
+        assert!(debug.contains("buffer_pool_size: 134217728"));
+        assert!(debug.contains("max_num_threads: 2"));
+    }
+
+    /// The caller's `read_only` flag survives the override fold in both
+    /// directions, so a read-only fixture open stays read-only under the
+    /// fixture-sized overrides.
+    #[test]
+    fn read_only_passes_through_both_values() {
+        for read_only in [true, false] {
+            let base = lbug::SystemConfig::default().read_only(read_only);
+            let returned = apply_db_overrides(base, Some("8M"), Some(16 << 20), Some(1)).unwrap();
+            let debug = format!("{returned:?}");
+            assert!(
+                debug.contains(&format!("read_only: {read_only}")),
+                "read_only must survive the overrides: {debug}"
+            );
+        }
+    }
+
+    /// A `max_db_size` that is not a power of two (`12M`) and one below the
+    /// 8 MiB floor (`4M`) are each refused with an error naming the input —
+    /// never clamped or silently dropped.
+    #[test]
+    fn invalid_max_db_size_is_refused() {
+        let base = lbug::SystemConfig::default();
+        let not_power_of_two = apply_db_overrides(base.clone(), Some("12M"), None, None)
+            .expect_err("12 MiB is not a power of two");
+        assert!(
+            not_power_of_two.to_string().contains("not a power of two"),
+            "{not_power_of_two}"
+        );
+        let below_floor = apply_db_overrides(base, Some("4M"), None, None)
+            .expect_err("4 MiB is below the 8 MiB floor");
+        assert!(
+            below_floor.to_string().contains("below the 8 MiB"),
+            "{below_floor}"
+        );
+    }
 }
