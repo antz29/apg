@@ -141,6 +141,33 @@ files — the system of record at rest).
   line `engine-strict` admits — matching the pins in
   `.github/workflows/release.yml`.
 
+### Development artifacts across worktrees (dev/test)
+
+Point every development worktree of a checkout at one shared
+`CARGO_TARGET_DIR`, so the frontends and their staging are built once per
+checkout instead of once per worktree:
+
+- `build.rs` resolves each standalone-crate frontend from
+  `$CARGO_TARGET_DIR/release/<bin>` when that variable is set and non-empty,
+  falling back to `src/<lib>/target/release/<bin>` otherwise. The
+  `OUT_DIR`-based engines (Go, C++, Java, TS, C#, SQL) follow the shared
+  target dir because their `OUT_DIR` lives inside it; staging lands in
+  `<target-dir>/<profile>/frontends`, so `target/<profile>/…` in this guide
+  means `$CARGO_TARGET_DIR/<profile>/…` when the shared dir is set.
+- `APG_REBUILD_FRONTENDS=1` (or `true`, case-insensitive) forces replacement
+  of each resolved artifact and its staged copy, so a shared target dir is
+  refreshed without a manual `cargo clean`. Current limit: cargo may re-uplift
+  a cached `deps/` binary rather than recompile when it considers the crate's
+  inputs unchanged — the variable removes the artifact, it does not force
+  `rustc` to re-run.
+- Re-staging is driven by each frontend's source tree plus the ingestor's
+  top-level `src/ingest/*.rs` (`tests.rs` excluded) and `build.rs` itself;
+  a changed `APG_BUILD_FRONTENDS` also re-runs the build script.
+- `APG_FRONTEND_DIR` remains the runtime override for frontend lookup.
+
+This is a dev/test arrangement only — the release install path and the
+packaging formulae are unchanged.
+
 ## The installed binary is the contract — never self-host a change-set
 
 `apg plan verify` and `apg project merge` are executed by the **installed** `apg`
