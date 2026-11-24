@@ -205,7 +205,7 @@ pub fn project_merge_at(
     // deleted (safe: the merged branch is by definition merged into the default
     // branch; the default branch itself is hard-refused inside delete_branch).
     let rebuild = rebuild.unwrap_or(&real_scan);
-    if let Err(err) = rebuild(&identity.main_root) {
+    if let Err(err) = rebuild_catching_panic(&identity.main_root, rebuild) {
         // The merge landed but main's derived graph did not follow it. Roll the
         // default branch back to the pre-merge commit so the merge is unlanded,
         // then discard a derived index that no longer matches the restored HEAD
@@ -230,6 +230,23 @@ pub fn project_merge_at(
     git::remove_worktree(&identity.main_root, name)?;
     git::delete_branch(&identity.main_root, name)?;
     Ok(())
+}
+
+/// Run the main rebuild, turning a panic into an `Err` so it takes the same
+/// rollback path as a returned rebuild error. The default panic hook still
+/// prints the panic; only the unwind is caught here.
+pub(crate) fn rebuild_catching_panic(dir: &Path, rebuild: &ScanFn) -> anyhow::Result<()> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rebuild(dir))) {
+        Ok(result) => result,
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "non-string panic payload".to_string());
+            Err(anyhow::anyhow!("main rebuild panicked: {detail}"))
+        }
+    }
 }
 
 /// The merge-strength validation the merge act enforces (SPEC §8.2/§9.2): the
