@@ -10416,36 +10416,17 @@ mod e2e {
     /// bundled structural scanner emits a File node for every tracked file it
     /// claims, while the code frontend keeps its own file.
     ///
-    /// `build.rs` does not stage `structfrontend` until phase-04, so the
-    /// test is self-sufficient: it builds the isolated `src/structlib` crate
-    /// and stages its binary into a per-test frontends dir (with the
-    /// profile's `gofrontend`) that the spawned scan resolves via
-    /// `APG_FRONTEND_DIR` — the shared profile dir is never touched.
+    /// `build.rs` stages `structfrontend` beside the profile's `gofrontend`
+    /// into `target/<profile>/frontends`, so the test drives the profile's
+    /// staged artefacts — resolved through [`md_frontend_bin`], the same
+    /// staged-frontend path the candidate itself spawns — and copies them
+    /// into a per-test frontends dir the spawned scan resolves via
+    /// `APG_FRONTEND_DIR`, leaving the shared profile dir untouched. Build
+    /// them first: `cargo build`.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo + staged structfrontend + spawned apg); run via cargo test-e2e"]
     fn structural_scan_emits_file_node_per_tracked_file() {
-        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let struct_bin = manifest_dir.join("src/structlib/target/debug/structfrontend");
-        if !struct_bin.is_file() {
-            let status = std::process::Command::new("cargo")
-                .args([
-                    "build",
-                    "--manifest-path",
-                    "src/structlib/Cargo.toml",
-                    "--bin",
-                    "structfrontend",
-                ])
-                .current_dir(manifest_dir)
-                .status()
-                .expect("run cargo build for src/structlib");
-            assert!(status.success(), "src/structlib must build");
-        }
-        assert!(
-            struct_bin.is_file(),
-            "structfrontend not built at {} — run: cargo build --manifest-path \
-                 src/structlib/Cargo.toml --bin structfrontend",
-            struct_bin.display()
-        );
+        let struct_bin = md_frontend_bin();
 
         let (base, repo_dir, home) = md_scratch(
             "structural-files",
@@ -10463,7 +10444,7 @@ mod e2e {
             ],
         );
 
-        // A per-test frontends dir: the built structfrontend + the profile's
+        // A per-test frontends dir: the staged structfrontend + the profile's
         // real gofrontend (the code frontend whose file the structural
         // scanner must NOT claim).
         let fe = base.join("frontends");
