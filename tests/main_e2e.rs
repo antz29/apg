@@ -10559,33 +10559,14 @@ mod e2e {
     /// only): a REAL scan with a root Markdown file renders the repo-root
     /// module repo-relative as `md.` (never the checkout basename), keeps
     /// the non-root `md.*` module and the heading Structs unchanged, and
-    /// `md.` Contains the repo-root File. Self-sufficient staging (phase-04
-    /// owns the build.rs staging), so the shared profile dir is untouched.
+    /// `md.` Contains the repo-root File. Drives the profile's staged
+    /// `structfrontend` — resolved through [`md_frontend_bin`], the same
+    /// staged-frontend path the candidate itself spawns — copied into a
+    /// per-test frontends dir, leaving the shared profile dir untouched.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo + staged structfrontend + spawned apg); run via cargo test-e2e"]
     fn structural_markdown_repo_root_renders_md_root() {
-        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let struct_bin = manifest_dir.join("src/structlib/target/debug/structfrontend");
-        if !struct_bin.is_file() {
-            let status = std::process::Command::new("cargo")
-                .args([
-                    "build",
-                    "--manifest-path",
-                    "src/structlib/Cargo.toml",
-                    "--bin",
-                    "structfrontend",
-                ])
-                .current_dir(manifest_dir)
-                .status()
-                .expect("run cargo build for src/structlib");
-            assert!(status.success(), "src/structlib must build");
-        }
-        assert!(
-            struct_bin.is_file(),
-            "structfrontend not built at {} — run: cargo build --manifest-path \
-                 src/structlib/Cargo.toml --bin structfrontend",
-            struct_bin.display()
-        );
+        let struct_bin = md_frontend_bin();
 
         let (base, repo_dir, home) = md_scratch(
             "structural-md-root",
