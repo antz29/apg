@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "record-state-preload",
+  "body": "record reads the delta baseline State through a separate store open before it opens its write transaction: loading while the write transaction holds facts.lock would self-contend for the bounded budget, so the pre-read keeps the one-write-transaction commit atomic; upgrade to a FactStore-taking State::load_from if the store ever forbids same-process double-open.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.incremental.record.record",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

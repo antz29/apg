@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "manifest-load-canonical-root",
+  "body": "Manifest::load reconstructs the manifest root from the canonical checkout root rather than returning the exact string a save registered, so a caller that needs a byte-exact round-trip of a non-canonical root must preserve and return the registered string.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.manifest.Manifest.load",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

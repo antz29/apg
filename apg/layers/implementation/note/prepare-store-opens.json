@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "prepare-store-opens",
+  "body": "prepare opens the store once for each row it reads — the scan record, the manifest, the delta State and delta::plan's scan_state — so a scan start pays several sequential opens; upgrade to threading one FactStore through prepare if scan startup needs fewer opens.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.incremental.prepare.prepare",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
