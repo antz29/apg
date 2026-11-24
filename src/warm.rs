@@ -9,23 +9,25 @@ use std::path::Path;
 
 use crate::{cache, delta, git, graph, incremental};
 
-/// The warm-cache seed preparation (phase-06 tasks 3/4/6): when the shared store
-/// holds a COMPLETE recorded scan for exactly this checkout's HEAD under the
-/// current cache key, build the [`incremental::Prepared`] state from the
-/// **recorded manifest alone** — never `Manifest::build`, so no full-tree walk —
-/// and return it. `None` means the caller runs the ordinary
+/// The warm-cache seed preparation (phase-06 tasks 3/4/6; cross-worktree
+/// selection in phase-04 task 5): when the shared store holds a COMPLETE
+/// committed scan row whose content identity equals this checkout's tree under
+/// the current cache key, build the [`incremental::Prepared`] state from that
+/// row's **recorded manifest alone** — never `Manifest::build`, so no
+/// full-tree walk — and return it. `None` means the caller runs the ordinary
 /// `incremental::prepare`.
 ///
-/// The verdict comes from the pure `delta::scan_verdict` wrapper
-/// ([`delta::scan_state`]): the recorded scan is at exactly HEAD under the
-/// current key. Completeness is then judged without a source walk: every
-/// source-language entry of the recorded manifest must have a stored fact unit
-/// under the current key (non-source entries never get units and are ignored),
-/// and every such language must have stored module scaffolding. A single missing
+/// The row need not be this worktree's own: any committed row in the shared
+/// store whose `content_key` equals this checkout's (`git_state.content_key`)
+/// describes the same tree, so a fresh worktree assembles from the first such
+/// row written by any worktree. A row recorded under a different cache key
+/// cannot resolve its units under the current key and is refused. Completeness
+/// is then judged without a source walk: every source-language entry of the
+/// recorded manifest must have a stored fact unit under the current key
+/// (non-source entries never get units and are ignored), and every such
+/// language must have stored module scaffolding. A single missing
 /// unit/scaffold is a miss (the caller falls back), so the warm path can never
-/// assemble an incomplete graph. The recorded content-identity key must equal
-/// this checkout's own, so a record from a different tree at the same sha is
-/// refused.
+/// assemble an incomplete graph.
 pub fn warm_prepared(
     project_dir: &Path,
     apg_root: &Path,
@@ -34,23 +36,17 @@ pub fn warm_prepared(
 ) -> Option<incremental::Prepared> {
     let cache_key = cache::CacheKey::compute(scan_config);
     let store_root = cache::FactStore::resolve(apg_root).ok()?.root;
-    let (record, verdict) = delta::scan_state(apg_root, Some(&store_root), &cache_key);
-    if !verdict.is_warm_cache() {
-        return None;
-    }
-    let record = record?;
-    // The recorded tree content must equal THIS checkout's: a record from a
-    // dirty tree (or another commit's tree at the same sha) is not this tree.
-    let (Some(current_key), Some(recorded_key)) = (
-        git_state.content_key.as_deref(),
-        record.content_key.as_deref(),
-    ) else {
-        return None;
-    };
-    if current_key != recorded_key {
-        return None;
-    }
     let store = cache::FactStore::at(store_root.clone()).load();
+    // This checkout's content identity — the same tree any committed row must
+    // describe to be reusable. A checkout with no recorded identity cannot warm.
+    let current = git_state.content_key.as_deref()?;
+    // Any committed row describing this tree under the current key will do; the
+    // first one found is rebuilt from, whichever worktree wrote it.
+    let record = store.scans().into_iter().find_map(|(_, bytes)| {
+        let record: delta::ScanRecord = postcard::from_bytes(&bytes).ok()?;
+        (record.content_key.as_deref() == Some(current) && record.cache_key.matches(&cache_key))
+            .then_some(record)
+    })?;
     let mut languages: BTreeSet<String> = BTreeSet::new();
     let mut reuse_candidates: Vec<incremental::ReuseFile> = Vec::new();
     for (rel, oid) in &record.manifest.entries {
