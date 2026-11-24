@@ -40,8 +40,8 @@ use anyhow::Result;
 
 use crate::cache::body;
 use crate::cache::store::{
-    Contention, FACTS_FORMAT_VERSION, ReadTxn, ScaffoldingKey, Store, UnitKey, WriteTxn,
-    contention_error,
+    Contention, FACTS_FORMAT_VERSION, ReadTxn, ScaffoldingKey, Store, UnitKey, WorktreeId,
+    WriteTxn, contention_error,
 };
 use crate::cache::{CacheKey, FileFragment, ModuleScaffolding};
 use crate::graph::NodeKind;
@@ -344,6 +344,102 @@ impl FactStore {
             .ok()??;
         let bytes = read.get_body(body_id).ok()??;
         body::decode::<ModuleScaffolding>(&bytes).ok()
+    }
+
+    /// Replaces one worktree's whole `path -> blob OID` manifest. The rows are
+    /// scoped by `worktree`, so another worktree's manifest is untouched; it
+    /// joins the one held write transaction, committed by [`Self::save_index`].
+    pub fn put_refs(&self, worktree: WorktreeId, entries: &BTreeMap<String, String>) -> Result<()> {
+        self.write_txn()?.replace_refs(worktree, entries)
+    }
+
+    /// One worktree's `path -> blob OID` manifest; empty when the store cannot
+    /// be read (a cache miss).
+    pub fn refs(&self, worktree: WorktreeId) -> BTreeMap<String, String> {
+        self.read()
+            .and_then(|read| read.refs(worktree).ok())
+            .unwrap_or_default()
+    }
+
+    /// Persists one worktree's opaque scan row. It joins the one held write
+    /// transaction, committed by [`Self::save_index`]; the row is scoped by
+    /// `worktree`, so another worktree's scan is untouched.
+    pub fn put_scan(&self, worktree: WorktreeId, bytes: &[u8]) -> Result<()> {
+        self.write_txn()?.put_scan(worktree, bytes)
+    }
+
+    /// One worktree's opaque scan row; `None` when none was recorded or the
+    /// store cannot be read.
+    pub fn scan(&self, worktree: WorktreeId) -> Option<Vec<u8>> {
+        self.read()?.get_scan(worktree).ok()?
+    }
+
+    /// Every worktree's opaque scan row; empty when the store cannot be read.
+    pub fn scans(&self) -> Vec<(WorktreeId, Vec<u8>)> {
+        self.read()
+            .and_then(|read| read.iter_scans().ok())
+            .unwrap_or_default()
+    }
+
+    /// Persists one worktree's opaque file-dependency bytes. It joins the one
+    /// held write transaction, committed by [`Self::save_index`]; the row is
+    /// scoped by `worktree`.
+    pub fn put_deps(&self, worktree: WorktreeId, bytes: &[u8]) -> Result<()> {
+        self.write_txn()?.put_deps(worktree, bytes)
+    }
+
+    /// One worktree's opaque file-dependency bytes; `None` when none was
+    /// recorded or the store cannot be read.
+    pub fn deps(&self, worktree: WorktreeId) -> Option<Vec<u8>> {
+        self.read()?.get_deps(worktree).ok()?
+    }
+
+    /// Persists one worktree's opaque signature bytes. It joins the one held
+    /// write transaction, committed by [`Self::save_index`]; the row is scoped
+    /// by `worktree`.
+    pub fn put_signatures(&self, worktree: WorktreeId, bytes: &[u8]) -> Result<()> {
+        self.write_txn()?.put_signatures(worktree, bytes)
+    }
+
+    /// One worktree's opaque signature bytes; `None` when none was recorded or
+    /// the store cannot be read.
+    pub fn signatures(&self, worktree: WorktreeId) -> Option<Vec<u8>> {
+        self.read()?.get_signatures(worktree).ok()?
+    }
+
+    /// Persists one worktree's opaque overload-index bytes. It joins the one
+    /// held write transaction, committed by [`Self::save_index`]; the row is
+    /// scoped by `worktree`.
+    pub fn put_overloads(&self, worktree: WorktreeId, bytes: &[u8]) -> Result<()> {
+        self.write_txn()?.put_overloads(worktree, bytes)
+    }
+
+    /// One worktree's opaque overload-index bytes; `None` when none was
+    /// recorded or the store cannot be read.
+    pub fn overloads(&self, worktree: WorktreeId) -> Option<Vec<u8>> {
+        self.read()?.get_overloads(worktree).ok()?
+    }
+
+    /// Registers one worktree's canonical checkout root. It joins the one held
+    /// write transaction, committed by [`Self::save_index`]; only that
+    /// worktree's registry row is written.
+    pub fn register_worktree(&self, worktree: WorktreeId, root: &str) -> Result<()> {
+        self.write_txn()?.register_worktree(worktree, root)
+    }
+
+    /// Every registered worktree and its checkout root; empty when the store
+    /// cannot be read.
+    pub fn worktrees(&self) -> Vec<(WorktreeId, String)> {
+        self.read()
+            .and_then(|read| read.iter_worktrees().ok())
+            .unwrap_or_default()
+    }
+
+    /// Removes one worktree's registry row and every row scoped to it, leaving
+    /// other worktrees' rows intact. It joins the one held write transaction,
+    /// committed by [`Self::save_index`].
+    pub fn remove_worktree(&self, worktree: WorktreeId) -> Result<()> {
+        self.write_txn()?.remove_worktree(worktree)
     }
 }
 
