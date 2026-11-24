@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "record-scaffolding-merge-limits",
-  "body": "Two limits. (1) The merged files map is unioned and never pruned against the manifest, so a path deleted in an earlier scan can keep a later-retired module alive until a full-scan extraction replaces the record. (2) A pure-intermediate module with no files entry whose only parent module is retired survives as an orphan module with no parent edge until a full scan re-extracts; upgrade if the retirement walk must cascade through the stored Module-to-Module tree or prune stale file paths.",
+  "body": "Three limits. (1) The merged files map is unioned and never pruned against the manifest, so a path deleted in an earlier scan can keep a later-retired module alive until a full-scan extraction replaces the record. (2) A pure-intermediate module with no files entry whose only parent module is retired survives as an orphan module with no parent edge until a full scan re-extracts; upgrade if the retirement walk must cascade through the stored Module-to-Module tree or prune stale file paths. (3) `record` reads the delta baseline `State` through a separate store open before it opens its write transaction, because loading while the write transaction holds `facts.lock` would self-contend for the bounded budget; upgrade to a `FactStore`-taking `State::load_from` if the store ever forbids same-process double-open.",
   "properties": {},
   "out": [
     {
