@@ -123,7 +123,6 @@ fn stage_dir() -> PathBuf {
 /// lands in `<CARGO_TARGET_DIR>/release/<bin>`; without one it lands in the
 /// crate-local `src/<lib>/target/release/<bin>`. The caller keeps its own
 /// existence/skip check on the returned path.
-#[allow(dead_code)] // the stage functions begin calling it in the follow-up change
 fn frontend_artifact(lib: &str, bin: &str) -> PathBuf {
     match std::env::var("CARGO_TARGET_DIR") {
         Ok(dir) if !dir.is_empty() => Path::new(&dir).join("release").join(bin),
@@ -180,10 +179,7 @@ fn main() {
         // Agent frontend (standalone Rust crate, compiled in isolation). Fail-closed
         // unlike the others: the root gate's `cargo build` is this staging's only
         // verification, so a failed build or copy must abort instead of skipping.
-        let agentfrontend = Path::new("src/agentlib")
-            .join("target")
-            .join("release")
-            .join("agentfrontend");
+        let agentfrontend = frontend_artifact("agentlib", "agentfrontend");
         let status = Command::new("cargo")
             .arg("build")
             .arg("--manifest-path")
@@ -367,10 +363,7 @@ fn stage_rust(stage_dir: &Path) -> Vec<String> {
     // src/rustlib/Cargo.lock; bump the pinned rust-analyzer rev in
     // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
     // than aborting the whole build (like the other frontends).
-    let rustfrontend = Path::new("src/rustlib")
-        .join("target")
-        .join("release")
-        .join("rustfrontend");
+    let rustfrontend = frontend_artifact("rustlib", "rustfrontend");
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -404,10 +397,7 @@ fn stage_struct(stage_dir: &Path) -> Vec<String> {
     // its staged path (`frontend_cmd`'s dev fallback for every structural
     // id). On failure, skip the structural scanner rather than aborting the
     // whole build (like the other frontends).
-    let structfrontend = Path::new("src/structlib")
-        .join("target")
-        .join("release")
-        .join("structfrontend");
+    let structfrontend = frontend_artifact("structlib", "structfrontend");
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -456,10 +446,7 @@ fn stage_py(stage_dir: &Path) -> Vec<String> {
     // the `pyfrontend` binary (the crate's `[[bin]]` name — unaffected by
     // the `[package]` name). On failure, skip py rather than aborting the
     // whole build (like the other frontends).
-    let pyfrontend = Path::new("src/pylib")
-        .join("target")
-        .join("release")
-        .join("pyfrontend");
+    let pyfrontend = frontend_artifact("pylib", "pyfrontend");
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -486,10 +473,7 @@ fn stage_cobol(stage_dir: &Path) -> Vec<String> {
     // non-workspace crate, so its lockfile and target tree stay independent.
     // The staged artifact is the `cobolfrontend` binary. On failure, skip
     // cobol rather than aborting the whole build (like the other frontends).
-    let cobolfrontend = Path::new("src/cobollib")
-        .join("target")
-        .join("release")
-        .join("cobolfrontend");
+    let cobolfrontend = frontend_artifact("cobollib", "cobolfrontend");
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
@@ -514,10 +498,7 @@ fn stage_cobol(stage_dir: &Path) -> Vec<String> {
 fn stage_ps(stage_dir: &Path) -> Vec<String> {
     // Same shape as stage_cobol: always `--release` into src/pslib/target,
     // staged into the active profile's frontends dir; skip on failure.
-    let psfrontend = Path::new("src/pslib")
-        .join("target")
-        .join("release")
-        .join("psfrontend");
+    let psfrontend = frontend_artifact("pslib", "psfrontend");
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--manifest-path")
