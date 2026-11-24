@@ -1132,7 +1132,7 @@ fn warm_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output
 /// skipped.
 fn graph_records(dir: &Path) -> std::collections::BTreeSet<String> {
     let path = dir.join(specs::LAYOUT).join(specs::TRANS).join("db.lbug");
-    let db = lbug::Database::new(&path, lbug::SystemConfig::default().read_only(true))
+    let db = lbug::Database::new(&path, testutil::fixture_db_config().read_only(true))
         .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
     let conn = lbug::Connection::new(&db).unwrap();
     let rows = |query: &str| -> Vec<Vec<String>> {
