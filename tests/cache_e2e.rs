@@ -382,7 +382,7 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn cross_worktree_cached_reuse_is_repo_relative() {
-        use apg::testutil::{ApgCommand, Repo};
+        use apg::testutil::{ApgCommand, Repo, fixture_db_config};
         let repo = Repo::new("cache-rebase");
         repo.write("go.mod", "module scratch\n\ngo 1.21\n");
         repo.write(
@@ -404,7 +404,7 @@ mod e2e {
         // JSONL export.
         let code_identities = |dir: &Path| -> std::collections::BTreeSet<String> {
             let db_path = dir.join("apg/.trans/db.lbug");
-            let db = lbug::Database::new(&db_path, lbug::SystemConfig::default().read_only(true))
+            let db = lbug::Database::new(&db_path, fixture_db_config().read_only(true))
                 .unwrap_or_else(|e| panic!("open {}: {e}", db_path.display()));
             let conn = lbug::Connection::new(&db).unwrap();
             let mut ids = std::collections::BTreeSet::new();
