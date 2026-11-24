@@ -1167,6 +1167,62 @@ fn graph_records(dir: &Path) -> std::collections::BTreeSet<String> {
     records
 }
 
+// ------------------------------------------------------------------
+// project-start toolchain-cache seeder (phase 2) fixtures.
+// ------------------------------------------------------------------
+
+/// Seeds the main checkout's toolchain cache at `<apg_root>/.trans/cache` with
+/// a Go build-cache shard and a Java class-cache surface of known bytes. The
+/// `.trans` tree is gitignored, so writing it never dirties the checkout.
+fn seed_main_cache(apg_root: &Path) {
+    let cache = apg_root.join(specs::TRANS).join("cache");
+    let shard = cache.join("go").join("0123456789ab-d");
+    std::fs::create_dir_all(&shard).unwrap();
+    std::fs::write(shard.join("marker"), b"go build cache shard").unwrap();
+    std::fs::create_dir_all(cache.join("java")).unwrap();
+    std::fs::write(cache.join("java").join("surface.tsv"), b"Store\tstruct\n").unwrap();
+}
+
+/// Every regular file under `dir` as (relative path, bytes) — a byte-exact
+/// tree view for the clone-versus-copy equivalence.
+fn tree_contents(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.insert(
+                    path.strip_prefix(root).unwrap().to_path_buf(),
+                    std::fs::read(&path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(dir, dir, &mut out);
+    out
+}
+
+/// Counts the directories named `name` anywhere under `root`.
+fn count_dirs_named(root: &Path, name: &str) -> usize {
+    fn walk(dir: &Path, name: &str, n: &mut usize) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                if entry.file_name().as_os_str() == std::ffi::OsStr::new(name) {
+                    *n += 1;
+                }
+                walk(&entry.path(), name, n);
+            }
+        }
+    }
+    let mut n = 0;
+    walk(root, name, &mut n);
+    n
+}
+
 /// e2e tier -- real I/O: every test here creates/merges/deletes real git
 /// worktrees and branches, or drives the candidate `apg` binary. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -4549,5 +4605,232 @@ mod e2e {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // ------------------------------------------------------------------
+    // phase-2 task-6: the project-start toolchain-cache seeder.
+    // ------------------------------------------------------------------
+
+    /// cache-copy task-6 (e2e): both `copy` and `auto` materialise the main
+    /// checkout's `.trans/cache` byte-for-byte into the new worktree.
+    ///
+    /// This is the observable clone-or-copy equivalence on this filesystem:
+    /// `auto` attempts a CoW clone (`clonefile` on macOS, `FICLONE` on Linux)
+    /// and falls back to a full recursive copy where the filesystem cannot
+    /// clone, and both policies must land the same tree. The CoW-unsupported
+    /// *classification* is unit-tested (`src/project_cmd/tests.rs`, task 2.5),
+    /// so no non-CoW filesystem is fabricated here.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/cache tree); run via cargo test-e2e"]
+    fn project_start_cache_copy_policies_materialise_the_same_cache() {
+        for (tag, policy) in [("start-cache-copy", "copy"), ("start-cache-auto", "auto")] {
+            let repo = Repo::new(tag);
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+            start_scan(&repo.root).unwrap();
+            seed_main_cache(&repo.apg_root());
+            assert!(
+                git::is_fresh(&repo.apg_root()),
+                "{policy}: the gitignored cache tree must not make the main scan stale"
+            );
+
+            let main_cache = repo.apg_root().join(specs::TRANS).join("cache");
+            let main_contents = tree_contents(&main_cache);
+
+            let wt = project_start_at_with(&repo.apg_root(), "demo", Some(policy)).unwrap();
+            let wt_cache = wt.join(specs::LAYOUT).join(specs::TRANS).join("cache");
+            assert!(
+                wt_cache.is_dir(),
+                "{policy}: the worktree cache must be materialised at {}",
+                wt_cache.display()
+            );
+            assert_eq!(
+                tree_contents(&wt_cache),
+                main_contents,
+                "{policy}: the worktree cache must be byte-identical to main's"
+            );
+
+            // The `.trans` seed copy skips the top-level `cache`, so the
+            // destination carries exactly one cache subtree — the materialised
+            // one — not a second copy under a nested path.
+            assert_eq!(
+                count_dirs_named(&wt.join(specs::LAYOUT).join(specs::TRANS), "cache"),
+                1,
+                "{policy}: the seed copy must not duplicate main's cache subtree"
+            );
+
+            testutil::remove(&repo);
+        }
+    }
+
+    /// cache-copy task-6 (e2e): the `skip` policy creates no cache subtree in
+    /// the new worktree (and leaves main's cache in place).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/cache tree); run via cargo test-e2e"]
+    fn project_start_cache_copy_skip_leaves_no_cache_subtree() {
+        let repo = Repo::new("start-cache-skip");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        start_scan(&repo.root).unwrap();
+        seed_main_cache(&repo.apg_root());
+        let main_cache = repo.apg_root().join(specs::TRANS).join("cache");
+        assert!(main_cache.is_dir(), "the fixture must seed main's cache");
+
+        let wt = project_start_at_with(&repo.apg_root(), "demo", Some("skip")).unwrap();
+        let wt_cache = wt.join(specs::LAYOUT).join(specs::TRANS).join("cache");
+        assert!(
+            !wt_cache.exists(),
+            "skip must create no cache subtree at {}",
+            wt_cache.display()
+        );
+        assert!(
+            main_cache.is_dir(),
+            "skip must leave main's cache untouched"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// cache-copy task-6 (e2e): a clone or copy failure leaves no partial
+    /// `cache/` behind and the error names the destination path and the OS
+    /// error. A regular FILE as the destination's parent makes
+    /// `create_dir_all(parent)` fail deterministically with a real OS error on
+    /// every platform and uid — no chmod and no root caveat.
+    #[test]
+    #[ignore = "e2e tier: real I/O (real directories/files); run via cargo test-e2e"]
+    fn materialise_failure_leaves_no_partial_cache_and_names_the_os_error() {
+        let base = std::env::temp_dir().join(format!("apg-cache-copy-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let src = base.join("src");
+        std::fs::create_dir_all(src.join("go").join("shard-d")).unwrap();
+        std::fs::write(src.join("go").join("shard-d").join("marker"), b"bytes").unwrap();
+        let blocker = base.join("blocker");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let dst = blocker.join("cache");
+
+        for policy in [CacheCopyPolicy::Copy, CacheCopyPolicy::Clone] {
+            let err = cache_copy::materialise(&src, &dst, policy).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains(&dst.display().to_string()),
+                "{policy:?}: the error must name the destination {}: {msg}",
+                dst.display()
+            );
+            assert!(
+                msg.contains("(os error "),
+                "{policy:?}: the error must carry the OS error: {msg}"
+            );
+            assert!(
+                !dst.exists(),
+                "{policy:?}: no partial cache may remain at {}",
+                dst.display()
+            );
+            // The temp sibling is `.<dst name>.tmp-<pid>` beside `dst`; the
+            // blocker file cannot host it, and nothing may be left in `base`.
+            assert!(
+                !blocker
+                    .join(format!(".cache.tmp-{}", std::process::id()))
+                    .exists(),
+                "{policy:?}: a temp sibling must not survive"
+            );
+            let leftovers: Vec<_> = std::fs::read_dir(&base)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .filter(|name| name.to_string_lossy().starts_with(".cache.tmp-"))
+                .collect();
+            assert!(
+                leftovers.is_empty(),
+                "{policy:?}: temp cache leftovers survived: {leftovers:?}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// cache-copy task-6 (e2e): `project start` takes the spec lock BEFORE it
+    /// judges freshness, so it waits out a running `--force` scan instead of
+    /// reading a half-written scan as stale.
+    ///
+    /// Deterministic inverse hold: a committed-but-unscanned source change
+    /// makes main genuinely stale; this process holds the cross-process
+    /// `specs.lock` flock (the one a running scan holds for its whole rebuild)
+    /// while a separate `apg project start` child is spawned. A start that
+    /// judged freshness first would exit immediately with the stale refusal;
+    /// blocking on the flock is what proves the lock precedes the gate. Once
+    /// released, the child judges the same still-stale graph and refuses
+    /// unchanged — the fail-closed predicate is not weakened.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/spec flock); run via cargo test-e2e"]
+    fn project_start_waits_on_the_spec_lock_before_the_freshness_gate() {
+        let repo = Repo::new("start-lock-before-freshness");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        start_scan(&repo.root).unwrap();
+        repo.write(
+            "code/more.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Later"]),
+        );
+        repo.commit_all("later change");
+        assert!(
+            !git::is_fresh(&repo.apg_root()),
+            "the recorded scan must now be stale for HEAD"
+        );
+
+        let hold = artifacts::acquire_spec_lock(&repo.apg_root()).unwrap();
+        let started = std::time::Instant::now();
+        let mut child = testutil::ApgCommand::new(&["project", "start", "demo"])
+            .cwd(&repo.root)
+            .spawn();
+        let mut exited_while_held = false;
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                exited_while_held = true;
+                break;
+            }
+            if started.elapsed() >= std::time::Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let held_for = started.elapsed();
+        drop(hold);
+        let out = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !exited_while_held,
+            "the start must block on the held spec lock, not exit while it is held \
+             (observed after {held_for:?}): {stderr}"
+        );
+        assert!(
+            !out.status.success(),
+            "a genuinely stale main must still refuse after the lock is released: {stderr}"
+        );
+        assert!(
+            stderr.contains("stale or missing"),
+            "the released start must carry the unchanged stale refusal: {stderr}"
+        );
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert!(
+            main_repo
+                .find_branch("demo", git2::BranchType::Local)
+                .is_err(),
+            "no project branch may be created"
+        );
+        assert!(
+            main_repo.find_worktree("demo").is_err(),
+            "no project worktree may be created"
+        );
+        assert!(!repo.project_worktree_dir("demo").exists());
+
+        testutil::remove(&repo);
     }
 }
