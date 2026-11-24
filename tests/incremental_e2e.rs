@@ -16,6 +16,28 @@ fn rooted_manifest(root: &std::path::Path) -> apg::cache::Manifest {
     }
 }
 
+/// The code identities a scan's database carries — the oracle a warm assembly
+/// must reproduce. Read from `db.lbug`, never a JSONL export.
+fn code_identities(dir: &std::path::Path) -> BTreeSet<String> {
+    let db_path = dir.join("apg/.trans/db.lbug");
+    let db = lbug::Database::new(&db_path, apg::testutil::fixture_db_config().read_only(true))
+        .unwrap_or_else(|e| panic!("open {}: {e}", db_path.display()));
+    let conn = lbug::Connection::new(&db).unwrap();
+    let mut ids = BTreeSet::new();
+    for (label, property) in [
+        ("Module", "fqn"),
+        ("File", "fqn"),
+        ("Struct", "path"),
+        ("Function", "path"),
+    ] {
+        let (_, rows) =
+            apg::splice::query_rows(&conn, &format!("MATCH (n:{label}) RETURN n.{property}"))
+                .unwrap();
+        ids.extend(rows.into_iter().filter_map(|row| row.into_iter().next()));
+    }
+    ids
+}
+
 /// e2e tier -- real I/O: these tests stage temp dirs, write state files and
 /// run real libgit2 operations. Each is `#[ignore]`d, so a plain `cargo
 /// test` never runs one; the only entry point is the named guard
@@ -940,5 +962,134 @@ mod e2e {
             );
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// phase-04 task-12: a fresh worktree with no scan row of its own warm-
+    /// assembles the graph from the FIRST worktree's committed scan row — the
+    /// same tree, zero frontend spawns — while a worktree whose tree differs
+    /// does not take the warm path and runs the frontends.
+    ///
+    /// `apg/` is gitignored and `apg/config.json` untracked (the ps cached-
+    /// assembly fixture's recipe) so every tracked path is a located File with a
+    /// fact unit — the warm completeness check needs one per manifest entry,
+    /// and the `apg/` layout is blacklisted from the graph.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktrees/spawned apg/redb store); run via cargo test-e2e"]
+    fn fresh_worktree_warm_assembles_from_the_shared_scan_row_with_zero_frontends() {
+        use apg::testutil::{ApgCommand, Repo};
+
+        let repo = Repo::new("warm-shared-row");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write("a/a.go", "package a\n\nfunc Leaf() int { return 1 }\n");
+        repo.write(
+            "b/b.go",
+            "package b\n\nimport \"scratch/a\"\n\nfunc Use() int { return a.Leaf() }\n",
+        );
+        // The layout is present but out of the scanned tree: tracked `apg/`
+        // content is blacklisted, so it would carry no fact unit and block the
+        // warm completeness check.
+        let config = std::fs::read_to_string(repo.root.join("apg/config.json")).unwrap();
+        let gitignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+        std::fs::write(repo.root.join(".gitignore"), format!("{gitignore}/apg/\n")).unwrap();
+        let git = git2::Repository::open(&repo.root).unwrap();
+        let mut index = git.index().unwrap();
+        index
+            .remove_path(std::path::Path::new("apg/config.json"))
+            .expect("untrack apg/config.json");
+        index
+            .add_path(std::path::Path::new(".gitignore"))
+            .expect("restage .gitignore");
+        index.write().unwrap();
+        repo.commit_all("source");
+        assert!(repo.is_clean(), "the fixture tree must be clean");
+
+        let home = std::env::temp_dir().join(format!("apg-warm-home-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let home_s = home.to_string_lossy().into_owned();
+        let scan = |dir: &std::path::Path| -> std::process::Output {
+            ApgCommand::new(&["scan", "."])
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output()
+        };
+        // A linked worktree does not inherit the untracked layout config; the
+        // version gate needs it present in every checkout.
+        let seed_layout = |wt: &std::path::Path| {
+            std::fs::write(wt.join("apg/config.json"), &config).unwrap();
+        };
+
+        // The first worktree records the shared scan row.
+        let cold = scan(&repo.root);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        let main_ids = code_identities(&repo.root);
+        let store_root = repo.root.join(".git/apg");
+        let store = FactStore::at(store_root.clone()).load();
+        let main_id = worktree_id(&repo.root);
+        assert!(store.scan(main_id).is_some(), "the first worktree's row");
+        assert_eq!(store.scans().len(), 1, "one committed scan row so far");
+        drop(store);
+
+        // A second worktree at the same content, with no scan row of its own.
+        let wt = repo.start_project("wt2");
+        seed_layout(&wt);
+        let wt_id = worktree_id(&wt);
+        assert_ne!(wt_id, main_id, "a distinct worktree id");
+        let store = FactStore::at(store_root.clone()).load();
+        assert!(
+            store.scan(wt_id).is_none(),
+            "the fresh worktree has no own scan row"
+        );
+        drop(store);
+
+        let fresh = scan(&wt);
+        let fresh_err = String::from_utf8_lossy(&fresh.stderr).into_owned();
+        assert!(fresh.status.success(), "worktree scan: {fresh_err}");
+        assert!(
+            !fresh_err.contains("[scan] running"),
+            "the warm scan must spawn no frontend: {fresh_err}"
+        );
+        assert!(
+            fresh_err.contains("warm cache") && fresh_err.contains("frontends skipped"),
+            "the warm/frontends-skipped marker must be reported: {fresh_err}"
+        );
+        assert_eq!(
+            code_identities(&wt),
+            main_ids,
+            "the warm assembly reproduces the same tree's graph"
+        );
+        let store = FactStore::at(store_root.clone()).load();
+        assert!(
+            store.scan(wt_id).is_some(),
+            "the warm scan records the reading worktree's own row"
+        );
+        drop(store);
+
+        // A worktree whose tree DIFFERS does not warm: it runs the frontends.
+        let other = repo.start_project("wt3");
+        seed_layout(&other);
+        std::fs::create_dir_all(other.join("c")).unwrap();
+        std::fs::write(
+            other.join("c/c.go"),
+            "package c\n\nfunc N() int { return 3 }\n",
+        )
+        .unwrap();
+        let diff = scan(&other);
+        let diff_err = String::from_utf8_lossy(&diff.stderr).into_owned();
+        assert!(diff.status.success(), "different-tree scan: {diff_err}");
+        assert!(
+            !diff_err.contains("warm cache"),
+            "a different tree must not take the warm path: {diff_err}"
+        );
+        assert!(
+            diff_err.contains("[scan] running"),
+            "a different tree runs the frontends: {diff_err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
