@@ -32,6 +32,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.merge-recovery-and-freshness-guidance-documented",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.no-plan-note-grant",
       "properties": {}
     },

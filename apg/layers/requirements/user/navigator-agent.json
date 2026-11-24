@@ -87,6 +87,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.merge-recovery-and-freshness-guidance-documented",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.merge-validates-against-the-branch-database",
       "properties": {}
     },

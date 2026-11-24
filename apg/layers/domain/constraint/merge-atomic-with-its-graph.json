@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "merge-atomic-with-its-graph",
-  "body": "A project merge and the default branch's graph land together, so the default branch never carries a HEAD whose graph the merge's rebuild did not write, and a failed rebuild leaves the merge unlanded.",
+  "body": "A project merge and the default branch's graph land together, so the default branch never carries a HEAD whose graph the merge's rebuild did not write, and a rebuild that returns an error or panics leaves the merge unlanded.",
   "properties": {},
   "out": [],
   "in": []

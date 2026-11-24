@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "merge-lands-with-a-current-graph",
-  "body": "A project merge lands together with the default branch's graph matching its new HEAD, and a rebuild that fails leaves the merge unlanded with the project branch, worktree and retry intact.",
+  "body": "A project merge lands together with the default branch's graph matching its new HEAD, and a rebuild that errors or panics leaves the merge unlanded, the default branch at its pre-merge commit, and the project branch, worktree and retry intact.",
   "properties": {
     "feature": "splice-equivalence"
   },

@@ -17,6 +17,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.merge-recovery-and-freshness-guidance-documented",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.navigator-cadence-marks-done-only",
       "properties": {}
     },
