@@ -296,6 +296,73 @@ pub fn lit(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
+/// The floor a `max_db_size` override must clear: 8 MiB. Below it the engine's
+/// buffer manager cannot map a working database, so the override is refused
+/// rather than silently clamped.
+const MIN_MAX_DB_SIZE: u64 = 8 * 1024 * 1024;
+
+/// Parse a byte-size override: a plain integer (`8388608`) or an integer with a
+/// binary `K`/`M`/`G` suffix in either case (`64K`, `128M`, `1G`), which
+/// multiplies by 1024, 1024² and 1024³ respectively.
+fn parse_db_size(raw: &str) -> anyhow::Result<u64> {
+    let s = raw.trim();
+    let (digits, multiplier) = match s.chars().last() {
+        Some('k' | 'K') => (&s[..s.len() - 1], 1024),
+        Some('m' | 'M') => (&s[..s.len() - 1], 1024 * 1024),
+        Some('g' | 'G') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+        _ => (s, 1),
+    };
+    let n: u64 = digits.trim().parse().map_err(|_| {
+        anyhow::anyhow!(
+            "database max size `{raw}`: expected a byte size — a plain integer \
+             (e.g. 8388608) or a binary K/M/G suffix (e.g. 8M, 1G)"
+        )
+    })?;
+    n.checked_mul(multiplier)
+        .ok_or_else(|| anyhow::anyhow!("database max size `{raw}` overflows a byte count"))
+}
+
+/// Fold the optional `APG_DB_*` override inputs over an engine [`SystemConfig`],
+/// purely: the inputs arrive as values, so this reads no environment, touches no
+/// file and holds no global state.
+///
+/// `max_size` is a byte size (see [`parse_db_size`]) that must be **a power of
+/// two** and **at least 8 MiB** (`8388608` B) — a value that is neither is
+/// refused with an error naming the input, never clamped or dropped. `pool` sets
+/// the buffer-pool byte size and `threads` the engine thread count as given.
+/// With every input absent the base config is returned **unchanged**, including
+/// `read_only` and every other field the caller set.
+pub fn apply_db_overrides(
+    base: SystemConfig,
+    max_size: Option<&str>,
+    pool: Option<u64>,
+    threads: Option<u64>,
+) -> anyhow::Result<SystemConfig> {
+    if max_size.is_none() && pool.is_none() && threads.is_none() {
+        return Ok(base);
+    }
+    let mut config = base;
+    if let Some(raw) = max_size {
+        let bytes = parse_db_size(raw)?;
+        if bytes < MIN_MAX_DB_SIZE {
+            anyhow::bail!(
+                "database max size `{raw}` = {bytes} B is below the 8 MiB (8388608 B) floor"
+            );
+        }
+        if !bytes.is_power_of_two() {
+            anyhow::bail!("database max size `{raw}` = {bytes} B is not a power of two");
+        }
+        config = config.max_db_size(bytes);
+    }
+    if let Some(pool) = pool {
+        config = config.buffer_pool_size(pool);
+    }
+    if let Some(threads) = threads {
+        config = config.max_num_threads(threads);
+    }
+    Ok(config)
+}
+
 impl ArtifactDb {
     pub fn open(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
