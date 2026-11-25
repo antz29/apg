@@ -31,6 +31,7 @@ namespace SqlFrontend.Tests
                     ("EmitterFixture", TestEmitterFixture),
                     ("EmitterTargetsList", TestEmitterTargetsList),
                     ("EmitterTargetGuards", TestEmitterTargetGuards),
+                    ("EmitterModuleResolution", TestEmitterModuleResolution),
                     ("EmitterCli", TestEmitterCli),
                     ("ReferencesFixture", TestReferencesFixture),
                     ("ReferencesCli", TestReferencesCli),
@@ -1238,6 +1239,45 @@ namespace SqlFrontend.Tests
             return (stdout.ToString(), stderr.ToString());
         }
 
+        // The physical (symlink-free) spelling of `path`, mirroring SchemaEmitter.Physical so temp-root
+        // identities below assert against the path Run splices into them.
+        static string Physical(string path)
+        {
+            string current = Path.GetFullPath(path);
+            for (int guard = 0; guard < 64; guard++)
+            {
+                string next = ResolveFirstLink(current);
+                if (string.Equals(next, current, StringComparison.Ordinal)) break;
+                current = next;
+            }
+            return Path.TrimEndingDirectorySeparator(current);
+        }
+
+        static string ResolveFirstLink(string path)
+        {
+            string root = Path.GetPathRoot(path) ?? "";
+            var parts = path.Substring(root.Length).Split(
+                new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            string current = root;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                current = Path.Combine(current, parts[i]);
+                try
+                {
+                    var info = new DirectoryInfo(current);
+                    var target = info.Exists ? info.ResolveLinkTarget(returnFinalTarget: true) : null;
+                    if (target == null) continue;
+                    string resolved = target.FullName;
+                    for (int j = i + 1; j < parts.Length; j++) resolved = Path.Combine(resolved, parts[j]);
+                    return resolved;
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is PlatformNotSupportedException)
+                {
+                }
+            }
+            return path;
+        }
+
         static List<JsonElement> ParseLines(string text)
         {
             var recs = new List<JsonElement>();
@@ -1320,12 +1360,13 @@ namespace SqlFrontend.Tests
             {
                 Directory.CreateDirectory(dir);
                 string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+                string physical = Physical(root);
                 foreach (var (file, table) in new[] { ("kept.sql", "Kept"), ("Upper.SQL", "Upper"), ("stray.sql", "Stray"), ("skipme.sql", "Skip") })
                     File.WriteAllText(Path.Combine(root, file), $"CREATE TABLE dbo.{table} (id INT)\n");
                 var listed = new[] { "kept.sql", "Upper.SQL", "skipme.sql" }.Select(f => root + "/" + f).ToList();
 
                 var recs = ParseLines(RunTargets(root, listed, new List<string> { "skipme" }, "n").Item1);
-                Eq(string.Join(",", new[] { root + "/Upper.SQL", root + "/kept.sql" }),
+                Eq(string.Join(",", new[] { physical + "/Upper.SQL", physical + "/kept.sql" }),
                     string.Join(",", Of(recs, "file").Select(r => S(r, "path")).OrderBy(p => p, StringComparer.Ordinal)),
                     "only listed, non-excluded files emitted");
                 Eq("Kept,Upper", string.Join(",", Of(recs, "struct").Where(r => S(r, "parent") == "dbo").Select(r => S(r, "name"))
@@ -1360,6 +1401,7 @@ namespace SqlFrontend.Tests
             {
                 Directory.CreateDirectory(Path.Combine(dir, "Bad"));
                 string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+                string physical = Physical(root);
                 File.WriteAllText(Path.Combine(root, "kept.sql"), "CREATE TABLE dbo.Kept (id INT)\n");
                 File.WriteAllText(Path.Combine(root, "Bad", "Bad.sqlproj"), "<Project><ItemGroup><Build Include=\"x.sql\" </ItemGroup>");
                 File.WriteAllText(Path.Combine(root, "Bad", "x.sql"), "CREATE TABLE dbo.X (id INT)\n");
@@ -1369,20 +1411,20 @@ namespace SqlFrontend.Tests
                 var (outA, errA) = RunTargets(root, new[] { root + "/gone.sql", root + "/kept.sql" }, new List<string>(), "n");
                 var recsA = ParseLines(outA);
                 Eq("sql: gone.sql: file not found", string.Join("\n", errA.Split('\n', StringSplitOptions.RemoveEmptyEntries)), "(a) missing .sql diagnostic");
-                Eq(0, Of(recsA, "file").Count(r => S(r, "path") == root + "/gone.sql"), "(a) no file record for missing .sql");
-                Eq(1, Of(recsA, "file").Count(r => S(r, "path") == root + "/kept.sql"), "(a) listed .sql still emitted");
+                Eq(0, Of(recsA, "file").Count(r => S(r, "path") == physical + "/gone.sql"), "(a) no file record for missing .sql");
+                Eq(1, Of(recsA, "file").Count(r => S(r, "path") == physical + "/kept.sql"), "(a) listed .sql still emitted");
 
                 // (b) a line resolving outside rootDir, the file present on disk.
                 var (outB, errB) = RunTargets(root, new[] { root + "/../" + outsideName, root + "/kept.sql" }, new List<string>(), "n");
                 var recsB = ParseLines(outB);
                 Eq("", errB, "(b) outside-root line reports nothing");
-                Eq(root + "/kept.sql", string.Join(",", Of(recsB, "file").Select(r => S(r, "path"))), "(b) outside-root line has no file record");
+                Eq(physical + "/kept.sql", string.Join(",", Of(recsB, "file").Select(r => S(r, "path"))), "(b) outside-root line has no file record");
                 Eq(0, Of(recsB, "struct").Count(r => S(r, "name") == "Outside"), "(b) outside-root table not emitted");
 
                 // (c) the same .sql listed twice.
                 var (outC, errC) = RunTargets(root, new[] { root + "/kept.sql", root + "/kept.sql" }, new List<string>(), "n");
                 var recsC = ParseLines(outC);
-                Eq(1, Of(recsC, "file").Count(r => S(r, "path") == root + "/kept.sql"), "(c) duplicate line gives one file record");
+                Eq(1, Of(recsC, "file").Count(r => S(r, "path") == physical + "/kept.sql"), "(c) duplicate line gives one file record");
                 Eq("", errC, "(c) duplicate line reports nothing");
 
                 // (d) a malformed and a missing .sqlproj: each reported once, the .sql files still emitted.
@@ -1398,18 +1440,72 @@ namespace SqlFrontend.Tests
                 Eq(1, errLines.Count(l => l.StartsWith("sql: Bad/Bad.sqlproj: ", StringComparison.Ordinal)), "(d) malformed .sqlproj diagnostic");
                 Eq(1, errLines.Count(l => l == "sql: Gone/Gone.sqlproj: file not found"), "(d) missing .sqlproj diagnostic");
                 var recsD = ParseLines(outD);
-                Eq(1, Of(recsD, "file").Count(r => S(r, "path") == root + "/kept.sql"), "(d) other listed .sql still emitted");
-                var x = Of(recsD, "file").Where(r => S(r, "path") == root + "/Bad/x.sql").ToList();
+                Eq(1, Of(recsD, "file").Count(r => S(r, "path") == physical + "/kept.sql"), "(d) other listed .sql still emitted");
+                var x = Of(recsD, "file").Where(r => S(r, "path") == physical + "/Bad/x.sql").ToList();
                 Eq(1, x.Count, "(d) .sql under the malformed project emitted once");
-                if (x.Count == 1) Eq(root + "/Bad", S(x[0], "parent"), "(d) .sql under the malformed project is loose");
+                if (x.Count == 1) Eq(physical + "/Bad", S(x[0], "parent"), "(d) .sql under the malformed project is loose");
                 One(recsD, "struct", "dbo", "X");
-                Eq(0, Of(recsD, "module").Count(r => S(r, "fqn") == root + "/Bad/Bad.sqlproj"), "(d) no module for the malformed .sqlproj");
-                Eq(0, Of(recsD, "module").Count(r => S(r, "fqn") == root + "/Gone/Gone.sqlproj"), "(d) no module for the missing .sqlproj");
+                Eq(0, Of(recsD, "module").Count(r => S(r, "fqn") == physical + "/Bad/Bad.sqlproj"), "(d) no module for the malformed .sqlproj");
+                Eq(0, Of(recsD, "module").Count(r => S(r, "fqn") == physical + "/Gone/Gone.sqlproj"), "(d) no module for the missing .sqlproj");
             }
             finally
             {
                 if (Directory.Exists(dir)) Directory.Delete(dir, true);
                 File.Delete(outside);
+            }
+        }
+
+        // e2e: a relative, absolute, `..`-bearing and symlinked --module value select the same subtree.
+        static void TestEmitterModuleResolution()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "sqlfe-e2e-" + Guid.NewGuid().ToString("N"));
+            string listFile = Path.Combine(Path.GetTempPath(), "sqlfe-modules-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+                Directory.CreateDirectory(Path.Combine(root, "moduleA"));
+                Directory.CreateDirectory(Path.Combine(root, "moduleB"));
+                File.WriteAllText(Path.Combine(root, "moduleA", "a.sql"), "CREATE TABLE dbo.A (id INT)\n");
+                File.WriteAllText(Path.Combine(root, "moduleB", "b.sql"), "CREATE TABLE dbo.B (id INT)\n");
+                string physical = Physical(root);
+                File.WriteAllLines(listFile, new[]
+                {
+                    Path.GetFullPath(Path.Combine(root, "moduleA", "a.sql")),
+                    Path.GetFullPath(Path.Combine(root, "moduleB", "b.sql")),
+                });
+
+                string RunWith(string module)
+                {
+                    var (code, stdout, _) = RunMain(root, "--targets", listFile, "--module", module);
+                    Eq(0, code, "module selection exit code");
+                    return stdout;
+                }
+
+                string absolute = Path.GetFullPath(Path.Combine(root, "moduleA"));
+                string baseline = RunWith(absolute);
+                var files = Of(ParseLines(baseline), "file");
+                Eq(1, files.Count, "moduleA selection emits one file");
+                if (files.Count == 1) Eq(physical + "/moduleA/a.sql", S(files[0], "path"), "moduleA file selected");
+                Eq(0, Of(ParseLines(baseline), "struct").Count(r => S(r, "name") == "B"), "moduleB table not selected");
+
+                Eq(baseline, RunWith("moduleA"), "relative --module equals absolute");
+                Eq(baseline, RunWith(Path.Combine(root, "moduleB", "..", "moduleA")), "..-bearing --module equals absolute");
+
+                string alias = Path.Combine(root, "alias");
+                try
+                {
+                    Directory.CreateSymbolicLink(alias, absolute);
+                    Eq(baseline, RunWith(alias), "symlinked --module equals its target");
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is PlatformNotSupportedException)
+                {
+                    Console.WriteLine($"SKIP symlinked --module case: {e.GetType().Name}: {e.Message}");
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                File.Delete(listFile);
             }
         }
 

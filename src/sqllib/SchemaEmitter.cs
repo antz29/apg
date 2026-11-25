@@ -33,14 +33,18 @@ namespace Apg.SqlFrontend
             IEnumerable<string> targetPaths, IReadOnlyList<string> moduleDirs, IReadOnlyList<string> excludePatterns,
             string idPrefix, TextWriter stdout, TextWriter stderr)
         {
-            var mods = moduleDirs.Select(m => Path.TrimEndingDirectorySeparator(Path.GetFullPath(m))).ToList();
+            // A link-spelled root or module (macOS /tmp -> /private/tmp) must see the driver's target list,
+            // whose paths resolve through the same ancestors; one physical spelling keeps IsWithin and
+            // GetRelativePath consistent with the root spliced into every emitted identity.
+            rootDir = Physical(rootDir).Replace('\\', '/');
+            var mods = moduleDirs.Select(Physical).ToList();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var projects = new List<string>();
             var sources = new Dictionary<string, string>(StringComparer.Ordinal);
             var bomFiles = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in targetPaths)
             {
-                string full = Path.GetFullPath(line);
+                string full = Physical(line);
                 string rel = Path.GetRelativePath(rootDir, full).Replace(Path.DirectorySeparatorChar, '/');
                 if (rel == ".." || rel.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(rel) || !seen.Add(rel))
                     continue;
@@ -75,6 +79,49 @@ namespace Apg.SqlFrontend
         static bool IsWithin(string path, string dir) =>
             path.StartsWith(dir, StringComparison.Ordinal)
             && (path.Length == dir.Length || path[dir.Length] == Path.DirectorySeparatorChar || dir.EndsWith(Path.DirectorySeparatorChar));
+
+        // The physical spelling of `path`: each existing component that is a link is replaced by its final
+        // target, re-walking from the start so a target's own ancestor links (/var -> /private/var) resolve
+        // too; an unreadable or unresolvable component keeps its lexical spelling.
+        static string Physical(string path)
+        {
+            string current = Path.GetFullPath(path);
+            for (int guard = 0; guard < 64; guard++)
+            {
+                string next = ResolveFirstLink(current);
+                if (string.Equals(next, current, StringComparison.Ordinal)) break;
+                current = next;
+            }
+            return Path.TrimEndingDirectorySeparator(current);
+        }
+
+        // Replace the first (leftmost) symlinked component of `path` with its final target, keeping the
+        // components after it; `path` itself when no existing component is a link or one cannot be read.
+        static string ResolveFirstLink(string path)
+        {
+            string root = Path.GetPathRoot(path) ?? "";
+            var parts = path.Substring(root.Length).Split(
+                new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            string current = root;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                current = Path.Combine(current, parts[i]);
+                try
+                {
+                    var info = new DirectoryInfo(current);
+                    var target = info.Exists ? info.ResolveLinkTarget(returnFinalTarget: true) : null;
+                    if (target == null) continue;
+                    string resolved = target.FullName;
+                    for (int j = i + 1; j < parts.Length; j++) resolved = Path.Combine(resolved, parts[j]);
+                    return resolved;
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is PlatformNotSupportedException)
+                {
+                    // Fall back to the lexical spelling of an unreadable component.
+                }
+            }
+            return path;
+        }
 
         sealed class Emission
         {
