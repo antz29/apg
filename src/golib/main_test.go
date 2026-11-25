@@ -497,3 +497,41 @@ func TestAbsRestrictResolvesAgainstScanRoot(t *testing.T) {
 		}
 	}
 }
+
+// TestAbsRestrictResolvesSymlinkedModuleDir is the phase-04 task-12 real-I/O
+// case (e2e by body: it creates a real tree and a symlink): an absolute --module
+// value spelled through a symlink must select the same subtree as its canonical
+// spelling. Before this change it selected nothing, because dirAllowed compares
+// against the physical dirs the scan walks, and the symlink spelling never
+// prefix-matched them.
+func TestAbsRestrictResolvesSymlinkedModuleDir(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	subtree := filepath.Join(real, "crates", "a")
+	if err := os.MkdirAll(subtree, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", subtree, err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("os.Symlink unavailable: %v", err)
+	}
+
+	want, err := filepath.EvalSymlinks(subtree)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", subtree, err)
+	}
+
+	fromRel := absRestrict(real, []string{"crates/a"})
+	fromAbs := absRestrict(real, []string{subtree})
+	fromLink := absRestrict(real, []string{filepath.Join(link, "crates", "a")})
+
+	for name, got := range map[string][]string{
+		"relative":          fromRel,
+		"absolute":          fromAbs,
+		"absolute via link": fromLink,
+	} {
+		if !slices.Equal(got, []string{want}) {
+			t.Errorf("%s: absRestrict = %v, want %v", name, got, []string{want})
+		}
+	}
+}

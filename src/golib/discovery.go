@@ -114,15 +114,21 @@ func discoverNestedModules(root string, moduleDirs []string) []moduleInfo {
 
 // absRestrict resolves --module dirs against the scan root: a relative dir
 // joins root (so the process working directory never decides), an absolute dir
-// is cleaned so it prefix-matches the Clean-ed dirs dirAllowed compares against.
+// passes through unchanged, and each is resolved to its physical path so an
+// absolute spelling through a symlink selects the same subtree as its canonical
+// spelling. A path that cannot be resolved falls back to the lexical Clean.
 func absRestrict(root string, moduleDirs []string) []string {
 	restrict := make([]string, 0, len(moduleDirs))
 	for _, d := range moduleDirs {
-		if filepath.IsAbs(d) {
-			restrict = append(restrict, filepath.Clean(d))
-		} else {
-			restrict = append(restrict, filepath.Join(root, d))
+		joined := d
+		if !filepath.IsAbs(d) {
+			joined = filepath.Join(root, d)
 		}
+		resolved, err := filepath.EvalSymlinks(joined)
+		if err != nil {
+			resolved = filepath.Clean(joined)
+		}
+		restrict = append(restrict, resolved)
 	}
 	return restrict
 }
