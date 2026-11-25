@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "intent-e2e-cross-process-open-assumption",
+  "body": "The in-flight intent observation relies on redb's multi-writer open not blocking behind another process's idle handle (only brief write transactions matter); it passed three consecutive runs, but if a future engine serialises cross-process open the test degrades to the deterministic post-exit assertions. Upgrade to a side-channel marker (e.g. an intent-written sentinel file) at that point.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cache_e2e.e2e.scan_writes_its_intent_then_clears_it_after_the_record_commit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
