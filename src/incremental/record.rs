@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::cache::{CacheKey, FactStore, FileFragment, FileIndex, Manifest, ModuleScaffolding};
@@ -35,6 +35,7 @@ pub fn record(
 ) -> anyhow::Result<()> {
     let writer_root = scan_root.to_string_lossy().into_owned();
     let mut store = FactStore::at(store_root.to_path_buf()).load();
+    let id = manifest.worktree_id();
     // The delta path merges the target-only graph into the stored baseline
     // state, so read that baseline BEFORE the first write holds the store gate:
     // a second store open would contend on `facts.lock`.
@@ -42,6 +43,13 @@ pub fn record(
         None
     } else {
         Some(State::load(store_root, scan_root))
+    };
+    // The delta path writes only the changed refs rows, so it diffs against the
+    // stored refs — read here too, before the first write holds the gate.
+    let stored_refs = if targets_rel.is_empty() {
+        BTreeMap::new()
+    } else {
+        store.refs(id)
     };
 
     // Per-file fact units for every located file in the assembled graph, derived
@@ -98,8 +106,22 @@ pub fn record(
             store.put_scaffolding(lang, &merged, cache_key)?;
         }
     }
-    let id = manifest.worktree_id();
-    store.put_refs(id, &manifest.entries)?;
+    if full_scan {
+        store.put_refs(id, &manifest.entries)?;
+    } else {
+        let stored = Manifest {
+            root: manifest.root.clone(),
+            entries: stored_refs,
+        };
+        let delta = stored.diff(manifest);
+        let mut upserts: BTreeMap<String, String> = BTreeMap::new();
+        for rel in delta.added.union(&delta.modified) {
+            if let Some(oid) = manifest.entries.get(rel) {
+                upserts.insert(rel.clone(), oid.clone());
+            }
+        }
+        store.apply_refs(id, &upserts, &delta.removed)?;
+    }
     store.register_worktree(id, &manifest.root)?;
 
     // The scan record (the next scan's baseline).
