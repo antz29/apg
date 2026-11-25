@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.module-flag-documented-surface",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.module-flag-invalid-selection-fails-loudly",
       "properties": {}
     },
