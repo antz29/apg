@@ -204,10 +204,60 @@ pub fn project_start_at_with(
         .filter(|v| !v.trim().is_empty());
     let policy = resolve_policy(cache_copy, env_value.as_deref(), config_value.as_deref())?;
     materialise(&src_cache, &dst_cache, policy)?;
+    // Seed the new worktree's fact-store rows from the main checkout's, under
+    // the spec lock: refs/scan/deps rows are per-worktree, so without this the
+    // worktree's landing scan finds no recorded scan for its own id and
+    // full-scans. A store that cannot be resolved or a missing main row is a
+    // graceful no-op — the landing scan then full-scans as before.
+    seed_fact_rows(apg_root, &identity.main_root, &wt_dir)?;
     // The copy only seeds `.trans`; the worktree also needs the scratch dir
     // the researcher writes its result markdown into.
     std::fs::create_dir_all(wt_apg.join(specs::SCRATCH))?;
     Ok(wt_dir)
+}
+
+/// Seeds the new worktree's fact-store rows from the main checkout's so the
+/// worktree's landing scan is incremental instead of a cold full scan: the main
+/// checkout's refs/manifest, scan record and `deps`/`signatures`/`overloads`
+/// rows are copied under the worktree's own [`crate::cache::worktree_id`] and
+/// committed in one transaction. A store that cannot be resolved or a missing
+/// main row is a graceful no-op (the landing scan then full-scans); a write
+/// failure on the resolved store propagates.
+fn seed_fact_rows(main_apg_root: &Path, main_root: &Path, wt_dir: &Path) -> anyhow::Result<()> {
+    let store = match crate::cache::FactStore::resolve(main_apg_root) {
+        Ok(store) => store,
+        Err(err) => {
+            eprintln!("[project] fact-store seed skipped: {err:#}");
+            return Ok(());
+        }
+    };
+    // No main row means there is no baseline to seed (an unscanned main
+    // checkout); the worktree's first scan records one itself.
+    let Some(main) = crate::cache::Manifest::load(&store.root, main_root) else {
+        return Ok(());
+    };
+    let main_id = main.worktree_id();
+    let wt_id = crate::cache::worktree_id(wt_dir);
+    // The registry string is the worktree's own canonical root — the collector
+    // tests its liveness with `is_dir`, so main's root would be wrong.
+    let wt_root = std::fs::canonicalize(wt_dir).unwrap_or_else(|_| wt_dir.to_path_buf());
+    store.put_refs(wt_id, &main.entries)?;
+    store.register_worktree(wt_id, &wt_root.to_string_lossy())?;
+    // The opaque per-worktree rows: absent rows (a store written before one
+    // existed) simply seed nothing, and the landing scan records them.
+    if let Some(scan) = store.scan(main_id) {
+        store.put_scan(wt_id, &scan)?;
+    }
+    if let Some(deps) = store.deps(main_id) {
+        store.put_deps(wt_id, &deps)?;
+    }
+    if let Some(signatures) = store.signatures(main_id) {
+        store.put_signatures(wt_id, &signatures)?;
+    }
+    if let Some(overloads) = store.overloads(main_id) {
+        store.put_overloads(wt_id, &overloads)?;
+    }
+    store.save_index()
 }
 
 /// Recursively copies the main checkout's `apg/.trans` scan into the new
