@@ -22,7 +22,17 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.bicep-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.csharp-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.ps-source-classification",
       "properties": {}
     },
     {
@@ -32,7 +42,7 @@
     },
     {
       "kind": "realises",
-      "target": "domain.service.ps-source-classification",
+      "target": "domain.service.terraform-source-classification",
       "properties": {}
     }
   ],

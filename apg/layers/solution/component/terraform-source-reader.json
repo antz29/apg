@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "terraform-source-reader",
+  "body": "The Terraform source reader: the claimed-file walk pruning .terraform, UTF-8 decoding, the hcl-edit native-syntax parse, the HCL JSON mapping reader, and byte-offset line derivation.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

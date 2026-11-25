@@ -61,6 +61,21 @@
       "kind": "contains",
       "source": "domain.group.bicep-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-driver",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-registry",
+      "properties": {}
     }
   ]
 }

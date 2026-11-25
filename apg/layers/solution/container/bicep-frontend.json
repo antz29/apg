@@ -1,0 +1,48 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "bicep-frontend",
+  "body": "The Bicep frontend artifact: build-time stable Rust 1.100.0 plus crates.io with zero C compiler, zero scan-time tools, and an unset engine pin, its hand-written parser's ceiling set by the Bicep v0.49.2 published grammar.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.bicep-declaration-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.bicep-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.bicep-reference-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.bicep-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.bicep-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg",
+      "properties": {}
+    }
+  ]
+}

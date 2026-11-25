@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "bicep-fact-emitter",
+  "body": "The Bicep fact emitter and bicepfrontend entry point: the unified JSONL stream on stdout, and the syntax-error lines, diagnostics, error count and failure reason on stderr.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.bicep-declaration-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.bicep-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.bicep-frontend",
+      "properties": {}
+    }
+  ]
+}

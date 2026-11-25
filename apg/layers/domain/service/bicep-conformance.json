@@ -21,6 +21,11 @@
       "kind": "contains",
       "source": "domain.group.bicep-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-test-suite",
+      "properties": {}
     }
   ]
 }

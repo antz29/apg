@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "terraform-fact-emitter",
+  "body": "The Terraform fact emitter and terraformfrontend entry point: the unified JSONL stream on stdout, and the parse-failure lines, diagnostics, error count and failure reason on stderr.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-block-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

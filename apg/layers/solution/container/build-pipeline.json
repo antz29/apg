@@ -9,6 +9,11 @@
   "out": [
     {
       "kind": "contains",
+      "target": "solution.component.bicep-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.cobol-build-artifact",
       "properties": {}
     },
@@ -30,6 +35,11 @@
     {
       "kind": "contains",
       "target": "solution.component.structural-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-build-artifact",
       "properties": {}
     },
     {

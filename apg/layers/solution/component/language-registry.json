@@ -52,12 +52,22 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.bicep-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.graph-identity",
       "properties": {}
     },
     {
       "kind": "realises",
       "target": "domain.service.sql-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-language-integration",
       "properties": {}
     }
   ],

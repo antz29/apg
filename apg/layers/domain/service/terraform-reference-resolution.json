@@ -86,6 +86,11 @@
       "kind": "contains",
       "source": "domain.group.terraform-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-reference-resolver",
+      "properties": {}
     }
   ]
 }

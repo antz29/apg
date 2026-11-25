@@ -61,6 +61,16 @@
       "kind": "contains",
       "source": "domain.group.bicep-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-declaration-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-fact-emitter",
+      "properties": {}
     }
   ]
 }

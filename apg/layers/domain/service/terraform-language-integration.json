@@ -61,6 +61,21 @@
       "kind": "contains",
       "source": "domain.group.terraform-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-registry",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-driver",
+      "properties": {}
     }
   ]
 }

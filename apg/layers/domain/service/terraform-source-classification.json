@@ -41,6 +41,26 @@
       "kind": "contains",
       "source": "domain.group.terraform-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-claim-map",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-claiming",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-source-reader",
+      "properties": {}
     }
   ]
 }

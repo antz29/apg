@@ -1,0 +1,53 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "terraform-frontend",
+  "body": "The Terraform frontend artifact: build-time stable Rust 1.100.0 plus crates.io with zero C compiler, zero scan-time tools, and an engine pin of hcl-edit 0.10.0 for HCL native syntax, JSON syntax read by the HCL JSON mapping.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-block-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-module-mapper",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-reference-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-container",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg",
+      "properties": {}
+    }
+  ]
+}

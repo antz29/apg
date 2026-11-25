@@ -10,6 +10,11 @@
   "in": [
     {
       "kind": "is-role",
+      "source": "solution.component.bicep-build-artifact",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.cobol-build-artifact",
       "properties": {}
     },
@@ -31,6 +36,11 @@
     {
       "kind": "is-role",
       "source": "solution.component.structural-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-build-artifact",
       "properties": {}
     }
   ]

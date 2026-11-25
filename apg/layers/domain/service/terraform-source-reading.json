@@ -51,6 +51,16 @@
       "kind": "contains",
       "source": "domain.group.terraform-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-source-reader",
+      "properties": {}
     }
   ]
 }

@@ -66,6 +66,16 @@
       "kind": "contains",
       "source": "domain.group.terraform-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-block-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-fact-emitter",
+      "properties": {}
     }
   ]
 }
