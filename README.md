@@ -286,12 +286,25 @@ comma-separated values: `java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`,
 `cobol`, `sql`, `ps`; PowerShell (`ps`) claims `.ps1`/`.psm1`/`.psd1` in any
 letter case.
 
+`--module` restricts the scan to the named directory and its subtree
+(repeatable): a relative value resolves against the scan root, while an
+absolute value passes through unchanged. A value naming a missing directory or
+a non-directory fails the scan with a named error. Every frontend apg ships
+honours the flag — the code languages (`java`, `go`, `cpp`, `rust`, `ts`/`js`,
+`csharp`, `py`, `cobol`, `sql`, `ps`), the agent-definition frontend and every
+bundled structural stream (`md`, `sh`, `yaml`, `json`, `toml`, `xml`,
+`dockerfile`, `makefile`, `ini`, `sln`, `misc`) — so it is not confined to the
+monorepo languages. TypeScript is the one granularity exception: its arm
+selects whole npm packages, so a value at or above a package root selects that
+package's subtree, while a value inside a package (e.g. `packages/app/src`)
+selects nothing.
+
 ```
 apg scan
 apg scan --language go /path/to/project
 apg scan --language go,ts /path/to/project   # mixed repo, one graph
 apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
-apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
+apg scan --module dir1 --module dir2     # restrict the scan to the dir1 and dir2 subtrees
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
 apg scan --language cobol --std ibm --copy-path copybooks --copy-path shared/cpy
                                          # COBOL: --std <dialect> overrides cobol.dialect in apg/config.json for this run
