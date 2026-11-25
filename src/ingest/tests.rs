@@ -526,6 +526,57 @@ mod unit {
         );
     }
 
+    /// cpp-module-identity phase-02 task-3: a C++ source directory IS the base
+    /// itself, so its module record, its base-level declaration parent, its
+    /// base-fused namespace parent and its root-level File parent all root at
+    /// the bare `cpp.` root module — never the `file_name(base)` checkout
+    /// basename (`cpp.base`) and never a module-dotted phantom ancestor
+    /// (`cpp.Ns.Sub`). A base-level declaration therefore composes to
+    /// `cpp..Name`, a namespaced one to `cpp..Ns.Sub.Type`.
+    #[test]
+    fn cpp_base_module_renders_as_the_cpp_root() {
+        let base = Path::new("/x/base");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "cpp".to_string(),
+            HashSet::from(["/x/base".to_string(), "/x/base.Ns".to_string()]),
+        )]);
+        // The base module record roots at the empty `cpp.` root, whether it
+        // arrives empty or as the base's own absolute path.
+        let base_module = root_module_fqn("cpp", "/x/base", base);
+        assert_eq!(base_module, "cpp.");
+        assert_eq!(root_module_fqn("cpp", "", base), "cpp.");
+        // A base-level top-level declaration's parent is that same root module.
+        let top = rooted_scope("cpp", "/x/base", &ids, base);
+        assert_eq!(top, "cpp.");
+        assert_eq!(format!("{top}.Name"), "cpp..Name");
+        // A base-level namespaced declaration strips the fused base and roots
+        // under the same empty root module.
+        let ns = rooted_scope("cpp", "/x/base.Ns.Sub", &ids, base);
+        assert_eq!(ns, "cpp..Ns.Sub");
+        assert_eq!(format!("{ns}.Type"), "cpp..Ns.Sub.Type");
+        // The empty-suffix cases: the namespace `Module→Module` contains edge
+        // and the root-level File parent agree with the module record.
+        let ns_module = root_module_endpoint("cpp", "/x/base.Ns", &ids, base);
+        assert_eq!(ns_module, "cpp..Ns");
+        let file_parent = rooted_scope("cpp", "/x/base", &ids, base);
+        assert_eq!(file_parent, "cpp.");
+        // No rendering embeds the checkout basename or the module-dotted
+        // phantom ancestor the name-boundary strip exists to remove.
+        for rendered in [
+            base_module.as_str(),
+            top.as_str(),
+            ns.as_str(),
+            ns_module.as_str(),
+            file_parent.as_str(),
+        ] {
+            assert!(!rendered.contains("base"), "no basename: {rendered}");
+            assert!(
+                rendered == "cpp." || rendered.starts_with("cpp.."),
+                "no module-dotted phantom ancestor: {rendered}"
+            );
+        }
+    }
+
     /// Phase-09 task-9 / task-40: a declaration whose parent is a module
     /// inherits the rooted module FQN through `parent.name` (the renderer
     /// only concatenates, so rooting the parent at record time roots the
