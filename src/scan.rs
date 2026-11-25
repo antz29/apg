@@ -243,8 +243,14 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let mut log = Log::new();
     log.ln(&format!("Project: {}", project_dir.display()));
-    // Staleness of the pre-scan DB vs the tree (STALE/FRESH/N-A).
-    log.ln(&git::staleness_line(&apg_root, &git_state));
+    // Staleness of the pre-scan DB vs the tree (STALE/FRESH/N-A). The resolved
+    // `--module` selection is threaded in so a requested set differing from the
+    // recorded one prints STALE here, exactly as it forces the fast path below.
+    log.ln(&git::staleness_line(
+        &apg_root,
+        &git_state,
+        Some(module_dirs.as_slice()),
+    ));
 
     // `--force` is a TRUE REBUILD: discard the derived index through the ONE
     // shared deletion mechanism, so the freshness fast path below cannot reuse
@@ -266,7 +272,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // printed verdict and the fast-path decision can never disagree. A stale
     // tree falls through to the full pipeline below, and a `--force` scan has
     // already discarded the DB, so the force override always rebuilds.
-    if git::is_fresh_with_state(&apg_root, &git_state) {
+    if git::is_fresh_with_state(&apg_root, &git_state, Some(module_dirs.as_slice())) {
         log.ln(
             "[scan] fast-path: tree unchanged since the recorded scan — reusing db.lbug (frontends skipped)",
         );

@@ -72,7 +72,7 @@ mod e2e {
         assert!(refusal_message(&apg).is_none());
         let cur = git_state(&apg);
         assert_eq!(
-            staleness_line(&apg, &cur),
+            staleness_line(&apg, &cur, None),
             format!("Git state: recorded {sha}@true vs current {sha}@true → FRESH")
         );
         testutil::remove(&repo);
@@ -95,7 +95,7 @@ mod e2e {
             "refusal message: {msg}"
         );
         assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
-        assert!(staleness_line(&apg, &git_state(&apg)).contains("→ STALE"));
+        assert!(staleness_line(&apg, &git_state(&apg), None).contains("→ STALE"));
         testutil::remove(&repo);
     }
 
@@ -179,7 +179,7 @@ mod e2e {
         assert!(!is_fresh(&apg), "not a git repo → nothing to reuse");
         assert!(refusal_message(&apg).is_none());
         assert_eq!(
-            staleness_line(&apg, &git_state(&apg)),
+            staleness_line(&apg, &git_state(&apg), None),
             "Git state: N/A (not a git repo)"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -197,7 +197,7 @@ mod e2e {
         // !is_fresh for this N/A gate case.
         assert!(!is_fresh(&apg));
         assert_eq!(
-            staleness_line(&apg, &git_state(&apg)),
+            staleness_line(&apg, &git_state(&apg), None),
             format!("Git state: no scan yet (current {}@true)", repo.head_sha())
         );
         testutil::remove(&repo);
@@ -307,7 +307,7 @@ mod e2e {
         );
         assert!(!is_fresh(&apg), "a byte edit must invalidate freshness");
         assert!(is_stale(&apg));
-        assert!(staleness_line(&apg, &git_state(&apg)).contains("→ STALE"));
+        assert!(staleness_line(&apg, &git_state(&apg), None).contains("→ STALE"));
         testutil::remove(&repo);
     }
 
@@ -328,7 +328,7 @@ mod e2e {
         // Fresh agreement: the captured state is exactly what is_fresh reads.
         let fresh = git_state(&apg);
         assert!(
-            is_fresh(&apg) && is_fresh_with_state(&apg, &fresh),
+            is_fresh(&apg) && is_fresh_with_state(&apg, &fresh, None),
             "a fresh tree must read fresh through both entry points"
         );
 
@@ -340,7 +340,7 @@ mod e2e {
         drop(f);
         let touched = git_state(&apg);
         assert!(
-            is_fresh(&apg) && is_fresh_with_state(&apg, &touched),
+            is_fresh(&apg) && is_fresh_with_state(&apg, &touched, None),
             "a touch without a byte change must stay fresh through both entry points"
         );
 
@@ -354,7 +354,7 @@ mod e2e {
             "the untracked file must dirty the tree"
         );
         assert!(
-            is_fresh_with_state(&apg, &s1),
+            is_fresh_with_state(&apg, &s1, None),
             "the predicate must consume the captured state, not re-read the tree"
         );
         assert!(
@@ -376,7 +376,7 @@ mod e2e {
         );
         let edited = git_state(&apg);
         assert!(
-            !is_fresh(&apg) && !is_fresh_with_state(&apg, &edited),
+            !is_fresh(&apg) && !is_fresh_with_state(&apg, &edited, None),
             "a one-byte edit at the same sha must read stale through both entry points"
         );
         testutil::remove(&repo);
@@ -429,19 +429,19 @@ mod e2e {
             "an empty pending set and a matching shape is fresh"
         );
         assert!(
-            staleness_line(&apg, &git_state(&apg)).contains("→ FRESH"),
+            staleness_line(&apg, &git_state(&apg), None).contains("→ FRESH"),
             "the baseline line must print FRESH"
         );
         assert_eq!(
             is_fresh(&apg),
-            staleness_line(&apg, &git_state(&apg)).contains("→ FRESH")
+            staleness_line(&apg, &git_state(&apg), None).contains("→ FRESH")
         );
         // Recorded DIRTY tree, then its dirty content changes at the same sha.
         repo.write("scratch.txt", "one");
         testutil::write_scan_meta(&apg, Some(&sha), false, "2026-09-07T00:00:00Z");
         assert!(is_fresh(&apg));
         repo.write("scratch.txt", "two");
-        let line = staleness_line(&apg, &git_state(&apg));
+        let line = staleness_line(&apg, &git_state(&apg), None);
         assert!(!is_fresh(&apg), "content digest changed at the same sha");
         assert!(line.contains("→ STALE"), "printed line: {line}");
         assert!(!line.contains("→ FRESH"), "printed line: {line}");
@@ -486,7 +486,7 @@ mod e2e {
         drop(db);
         assert!(!is_fresh(&apg), "a dirty durable row must never read fresh");
         assert!(is_stale(&apg));
-        let line = staleness_line(&apg, &git_state(&apg));
+        let line = staleness_line(&apg, &git_state(&apg), None);
         assert!(line.contains("→ STALE"), "printed line: {line}");
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
@@ -509,7 +509,7 @@ mod e2e {
             "a pending-removal identity must never read fresh"
         );
         assert!(is_stale(&apg));
-        let line = staleness_line(&apg, &git_state(&apg));
+        let line = staleness_line(&apg, &git_state(&apg), None);
         assert!(line.contains("→ STALE"), "printed line: {line}");
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
@@ -534,7 +534,7 @@ mod e2e {
             "a table shape this binary does not recognise must never read fresh"
         );
         assert!(is_stale(&apg));
-        let line = staleness_line(&apg, &git_state(&apg));
+        let line = staleness_line(&apg, &git_state(&apg), None);
         assert!(line.contains("→ STALE"), "printed line: {line}");
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
@@ -561,12 +561,65 @@ mod e2e {
             vec!["sha", "cleanliness"],
             "collect-all must report BOTH differing inputs in its single result"
         );
-        let line = staleness_line(&apg, &state);
+        let line = staleness_line(&apg, &state, None);
         assert!(
             line.contains("differing: sha, cleanliness"),
             "printed line: {line}"
         );
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
+        testutil::remove(&repo);
+
+        // MODULE SELECTION: a requested set differing from the recorded one is
+        // STALE, and the printed line agrees with the requested-set predicate
+        // (not the flagless `is_fresh`, which skips the comparison). Recording
+        // that same selection makes it FRESH; a whole-tree request (empty) then
+        // differs from the subtree record once more. Both directions hold.
+        let repo = fixture_repo("fresh-modules");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let requested = vec!["/abs/module/a".to_string()];
+        let state = git_state(&apg);
+        assert!(
+            is_fresh(&apg),
+            "a whole-tree recorded scan with no requested set is fresh"
+        );
+        assert!(
+            !is_fresh_with_state(&apg, &state, Some(requested.as_slice())),
+            "a requested subtree against a whole-tree record is not fresh"
+        );
+        let line = staleness_line(&apg, &state, Some(requested.as_slice()));
+        assert!(
+            line.contains("→ STALE (differing: modules)"),
+            "printed line: {line}"
+        );
+        assert_eq!(
+            is_fresh_with_state(&apg, &state, Some(requested.as_slice())),
+            line.contains("→ FRESH")
+        );
+        // The recorded selection now equals the requested one → FRESH.
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query("MATCH (s:Scan) SET s.modules = '/abs/module/a'")
+            .unwrap();
+        drop(db);
+        let state = git_state(&apg);
+        let fresh_line = staleness_line(&apg, &state, Some(requested.as_slice()));
+        assert!(fresh_line.contains("→ FRESH"), "printed line: {fresh_line}");
+        assert_eq!(
+            is_fresh_with_state(&apg, &state, Some(requested.as_slice())),
+            fresh_line.contains("→ FRESH")
+        );
+        // A whole-tree request (empty set) against the subtree record differs.
+        let whole: Vec<String> = Vec::new();
+        let whole_line = staleness_line(&apg, &state, Some(whole.as_slice()));
+        assert!(
+            whole_line.contains("→ STALE (differing: modules)"),
+            "printed line: {whole_line}"
+        );
+        assert!(!is_fresh_with_state(&apg, &state, Some(whole.as_slice())));
         testutil::remove(&repo);
     }
 
@@ -761,25 +814,29 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug/socket); run via cargo test-e2e"]
     fn staleness_line_names_each_differing_freshness_input() {
         // The printed STALE line's `differing:` list is exactly the predicate's
-        // list: the same inputs, in the same order, joined by `, `.
-        let assert_line_names = |apg: &Path, labels: &[&'static str]| {
-            let state = git_state(apg);
-            assert_eq!(
-                freshness_differences(apg, &state)
-                    .expect_err("a differing input must never read fresh"),
-                labels.to_vec(),
-                "the predicate must report exactly the flipped inputs"
-            );
-            let line = staleness_line(apg, &state);
-            assert!(
-                line.contains(&format!("→ STALE (differing: {})", labels.join(", "))),
-                "the printed STALE line must name the same inputs the predicate reports: {line}"
-            );
-            assert!(
-                !line.contains("→ FRESH"),
-                "a line naming a differing input must never read FRESH: {line}"
-            );
-        };
+        // list: the same inputs, in the same order, joined by `, `. The
+        // requested-set form threads the module selection into both.
+        let assert_line_names_with =
+            |apg: &Path, labels: &[&'static str], requested: Option<&[String]>| {
+                let state = git_state(apg);
+                assert_eq!(
+                    freshness_differences_with(apg, &state, requested)
+                        .expect_err("a differing input must never read fresh"),
+                    labels.to_vec(),
+                    "the predicate must report exactly the flipped inputs"
+                );
+                let line = staleness_line(apg, &state, requested);
+                assert!(
+                    line.contains(&format!("→ STALE (differing: {})", labels.join(", "))),
+                    "the printed STALE line must name the same inputs the predicate reports: {line}"
+                );
+                assert!(
+                    !line.contains("→ FRESH"),
+                    "a line naming a differing input must never read FRESH: {line}"
+                );
+            };
+        let assert_line_names =
+            |apg: &Path, labels: &[&'static str]| assert_line_names_with(apg, labels, None);
 
         // FRESH stays bare: the byte-identical pre-collect-all line, no
         // parenthetical.
@@ -789,7 +846,7 @@ mod e2e {
         testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
         assert_eq!(
-            staleness_line(&apg, &git_state(&apg)),
+            staleness_line(&apg, &git_state(&apg), None),
             format!("Git state: recorded {sha}@true vs current {sha}@true → FRESH"),
             "FRESH must stay bare (no differing parenthetical)"
         );
@@ -924,6 +981,28 @@ mod e2e {
         .unwrap();
         drop(db);
         assert_line_names(&apg, &["content key", "sha"]);
+        testutil::remove(&repo);
+
+        // `modules`: the requested resolved `--module` set differs from the
+        // recorded selection. A whole-tree record (empty modules) read with one
+        // requested subtree names `modules` and only it.
+        let repo = fixture_repo("stale-line-modules");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let requested = vec!["/abs/module/a".to_string()];
+        assert_line_names_with(&apg, &["modules"], Some(requested.as_slice()));
+        // A recorded subtree selection read with a whole-tree request (empty
+        // set) differs the same way, in the other direction.
+        let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+        db.conn()
+            .unwrap()
+            .query("MATCH (s:Scan) SET s.modules = '/abs/module/a'")
+            .unwrap();
+        drop(db);
+        let whole: Vec<String> = Vec::new();
+        assert_line_names_with(&apg, &["modules"], Some(whole.as_slice()));
         testutil::remove(&repo);
     }
 

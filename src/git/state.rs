@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database};
@@ -360,9 +361,12 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
 /// never consulted: a touch without a byte change stays fresh, a byte edit is
 /// stale.
 ///
-/// The verdict is exactly [`freshness_differences`]'s — the body is
-/// `freshness_differences(apg_root, state).is_ok()` — so the predicate and the
-/// collect-all form can never disagree.
+/// The verdict is exactly [`freshness_differences_with`]'s — the body is
+/// `freshness_differences_with(apg_root, state, requested).is_ok()` — so the
+/// predicate and the collect-all form can never disagree. `requested` is the
+/// caller's resolved `--module` selection: `None` skips the module comparison
+/// (the gates that carry no selection), `Some(set)` compares it to the recorded
+/// one.
 ///
 /// The DB-existence precondition comes FIRST. The fast-path's action is "reuse
 /// the existing DB", so with no `db.lbug` at all there is nothing to reuse →
@@ -411,8 +415,12 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
 /// The final recorded/git comparison consumes the caller's `state` (its `sha`,
 /// `clean` and `content_key`) instead of re-reading the tree, so a caller that
 /// already captured a [`GitState`] pays for one status walk, not two.
-pub fn is_fresh_with_state(apg_root: &Path, state: &GitState) -> bool {
-    freshness_differences(apg_root, state).is_ok()
+pub fn is_fresh_with_state(
+    apg_root: &Path,
+    state: &GitState,
+    requested: Option<&[String]>,
+) -> bool {
+    freshness_differences_with(apg_root, state, requested).is_ok()
 }
 
 /// The collect-all form of [`is_fresh_with_state`]: `Ok(())` when the DB is
@@ -436,7 +444,15 @@ pub fn is_fresh_with_state(apg_root: &Path, state: &GitState) -> bool {
 /// - `"content key"` — the recorded content-identity key is absent
 ///   (pre-hardening) or differs from the current tree's;
 /// - `"sha"` — the recorded HEAD sha differs from the current one;
-/// - `"cleanliness"` — the recorded cleanliness differs from the current one.
+/// - `"cleanliness"` — the recorded cleanliness differs from the current one;
+/// - `"modules"` — the requested resolved `--module` set differs from the
+///   recorded module selection (order- and duplicate-insensitive). Reported only
+///   by [`freshness_differences_with`] with a `Some` requested set; the two-arg
+///   [`freshness_differences`] passes `None` and never reports it.
+///
+/// [`freshness_differences`] is the no-requested-set comparison: it delegates
+/// with `None`, so `refusal_message` and `plan_verify_at` keep their existing
+/// calls and are unaffected by the module selection.
 ///
 /// The first four are precondition failures — without them the remaining inputs
 /// cannot be evaluated, so each is reported alone. The rest are collected
@@ -444,6 +460,36 @@ pub fn is_fresh_with_state(apg_root: &Path, state: &GitState) -> bool {
 /// schema and authored digest are evaluated only when no live session owns
 /// `db.lbug`; the recorded/git content comparison runs either way.
 pub fn freshness_differences(apg_root: &Path, state: &GitState) -> Result<(), Vec<&'static str>> {
+    freshness_differences_with(apg_root, state, None)
+}
+
+/// Whether the requested resolved module set differs from the recorded
+/// canonical selection (`\n`-joined, empty for a whole-tree scan). Both sides
+/// compare as sets, so request order and duplicates never change the verdict:
+/// empty recorded + empty requested is equal; empty versus non-empty differs.
+fn modules_differ(recorded: &str, requested: &[String]) -> bool {
+    let recorded: BTreeSet<&str> = recorded
+        .split('\n')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let requested: BTreeSet<&str> = requested
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    recorded != requested
+}
+
+/// [`freshness_differences`] with the caller's resolved `--module` selection.
+/// `requested` `None` skips the module comparison (the gates that carry no
+/// selection); `Some(set)` additionally reports `"modules"` when the requested
+/// resolved set differs from the recorded module selection.
+pub fn freshness_differences_with(
+    apg_root: &Path,
+    state: &GitState,
+    requested: Option<&[String]>,
+) -> Result<(), Vec<&'static str>> {
     if !db_path(apg_root).exists() {
         return Err(vec!["database"]);
     }
@@ -495,6 +541,11 @@ pub fn freshness_differences(apg_root: &Path, state: &GitState) -> Result<(), Ve
     if rec.clean != state.clean {
         differing.push("cleanliness");
     }
+    if let Some(requested) = requested
+        && modules_differ(&rec.modules, requested)
+    {
+        differing.push("modules");
+    }
     if differing.is_empty() {
         Ok(())
     } else {
@@ -510,7 +561,7 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     if !db_path(apg_root).exists() {
         return false;
     }
-    is_fresh_with_state(apg_root, &git_state(apg_root))
+    is_fresh_with_state(apg_root, &git_state(apg_root), None)
 }
 
 /// The refuse-on-stale predicate:
@@ -587,19 +638,22 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 /// - `Git state: recorded <rec> vs current <cur> → FRESH` — byte-identical to
 ///   the pre-collect-all line, with no parenthetical;
 /// - `Git state: recorded <rec> vs current <cur> → STALE (differing: <labels>)`
-///   — `<labels>` is [`freshness_differences`]' list joined by `, `, so every
-///   differing freshness input is named. A DB with no readable `Scan` row
-///   reports the single `recorded scan` label with recorded `-@-`.
+///   — `<labels>` is [`freshness_differences_with`]' list joined by `, `, so
+///   every differing freshness input is named, the `modules` selection included
+///   when `requested` is `Some` and differs from the recorded one. A DB with no
+///   readable `Scan` row reports the single `recorded scan` label with recorded
+///   `-@-`.
 ///
-/// The verdict is the SAME content-identity rule [`is_fresh`] uses — it is
-/// [`freshness_differences`] directly — so the printed line and the fast-path
-/// decision can never disagree (a recorded-dirty tree whose content digest
-/// changed at the same sha prints STALE, never FRESH followed by a full
-/// pipeline run). The one exception is `apg scan --force`: it prints this
-/// pre-force verdict and then discards the index and rebuilds anyway, so a
-/// FRESH line there is followed by a full pipeline run by design — the forced
-/// scan is the only path that overrides the verdict it just printed.
-pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
+/// The verdict is the SAME content-identity rule [`is_fresh_with_state`] uses —
+/// it is [`freshness_differences_with`] with the same `requested` selection — so
+/// the printed line and the fast-path decision can never disagree (a
+/// recorded-dirty tree whose content digest changed at the same sha prints
+/// STALE, never FRESH followed by a full pipeline run). The one exception is
+/// `apg scan --force`: it prints this pre-force verdict and then discards the
+/// index and rebuilds anyway, so a FRESH line there is followed by a full
+/// pipeline run by design — the forced scan is the only path that overrides the
+/// verdict it just printed.
+pub fn staleness_line(apg_root: &Path, current: &GitState, requested: Option<&[String]>) -> String {
     let Some(cur_sha) = current.sha.as_deref() else {
         return "Git state: N/A (not a git repo)".to_string();
     };
@@ -614,7 +668,7 @@ pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
         Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
     };
-    match freshness_differences(apg_root, current) {
+    match freshness_differences_with(apg_root, current, requested) {
         Ok(()) => format!("Git state: recorded {rec} vs current {cur} → FRESH"),
         Err(differing) => format!(
             "Git state: recorded {rec} vs current {cur} → STALE (differing: {})",
