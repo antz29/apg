@@ -9,7 +9,7 @@
 //! out and needs nothing on `PATH` at scan time.
 //!
 //! Usage: `agentfrontend <dir> [--id-prefix <p>] [--exclude-path <glob>]...
-//! [exclude...]`.
+//! [--module <dir>]... [exclude...]`.
 
 use std::collections::HashSet;
 use std::io::{self, BufWriter, Write};
@@ -44,10 +44,16 @@ pub fn write_rec<W: Write>(w: &mut W, rec: &Rec) -> io::Result<()> {
 
 /// The agent frontend's claim scope: from the checkout's repo-relative file
 /// listing (each file's line count supplied by the stream writer's walk), the
-/// definition files directly in `.opencode/agents/` alone — never a path
-/// outside it. Yields `(repo-relative path, extension-stripped stem,
+/// definition files directly in `.opencode/agents/` that lie at or under one of
+/// the `--module` subtree roots alone — never a path outside it. `root` is the
+/// scan root the repo-relative paths resolve against, and an empty `modules` is
+/// no selection. Yields `(repo-relative path, extension-stripped stem,
 /// start_line, end_line)` per definition, sorted by path.
-pub fn collect_definitions(files: &[(String, u32)]) -> Vec<(String, String, u32, u32)> {
+pub fn collect_definitions(
+    root: &Path,
+    modules: &[PathBuf],
+    files: &[(String, u32)],
+) -> Vec<(String, String, u32, u32)> {
     const DIR: &str = ".opencode/agents/";
     let mut defs: Vec<(String, String, u32, u32)> = files
         .iter()
@@ -56,6 +62,13 @@ pub fn collect_definitions(files: &[(String, u32)]) -> Vec<(String, String, u32,
             // One normal component: a direct child, never a traversal.
             if name.is_empty() || name.contains('/') || name == "." || name == ".." {
                 return None;
+            }
+            // The selection: at or under one of the resolved subtree roots.
+            if !modules.is_empty() {
+                let absolute = root.join(path);
+                if !modules.iter().any(|m| absolute.starts_with(m)) {
+                    return None;
+                }
             }
             let stem = Path::new(name).file_stem()?.to_string_lossy().into_owned();
             Some((path.clone(), stem, 1, (*lines).max(1)))
@@ -112,17 +125,23 @@ pub struct Args {
     pub id_prefix: String,
     pub excludes: Vec<String>,
     pub targets_path: Option<String>,
+    /// The `--module` subtree selection, each value resolved against `root`
+    /// (an absolute value passes through unchanged); empty means no selection.
+    pub modules: Vec<PathBuf>,
 }
 
 fn usage() -> String {
-    "usage: agentfrontend <dir> [--id-prefix <p>] [--exclude-path <glob>]... [exclude...]"
+    "usage: agentfrontend <dir> [--id-prefix <p>] [--exclude-path <glob>]... [--module <dir>]... [exclude...]"
         .to_string()
 }
 
 /// Parses the frontend command line into `Args`. The scan driver forwards
 /// `--exclude-path` values as bare arguments; the explicit flag form and the
 /// driver's hand-off flags are accepted too. `targets_path` is `None` by
-/// default and carries the driver's `--targets <file>` hand-off path.
+/// default and carries the driver's `--targets <file>` hand-off path, and each
+/// `--module` value joins the scan root into `modules` (an absolute value
+/// passes through unchanged), while `--cache-dir`/`--cache-key` stay
+/// accepted-and-ignored.
 ///
 /// ```
 /// let argv: Vec<String> = ["repo", "--id-prefix", "a1", "--exclude-path", "*.md", "vendor"]
@@ -144,6 +163,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
         id_prefix: "n".to_string(),
         excludes: Vec::new(),
         targets_path: None,
+        modules: Vec::new(),
     };
     let mut i = 1;
     while i < argv.len() {
@@ -177,9 +197,24 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
                 }
                 None => i += 1,
             },
-            // Accepted for the pinned front-end hand-off, then ignored: the
-            // agent stream has no module subtree or native cache.
-            "--module" | "--cache-dir" | "--cache-key" => match next {
+            // The pinned front-end hand-off: `--module` is the subtree
+            // selection, resolved against the scan root (an absolute value
+            // passes through unchanged). `--cache-dir`/`--cache-key` are
+            // accepted for the hand-off, then ignored: the agent stream has no
+            // native cache.
+            "--module" => match next {
+                Some(v) => {
+                    let value = PathBuf::from(v);
+                    args.modules.push(if value.is_absolute() {
+                        value
+                    } else {
+                        args.root.join(value)
+                    });
+                    i += 2;
+                }
+                None => i += 1,
+            },
+            "--cache-dir" | "--cache-key" => match next {
                 Some(_) => i += 2,
                 None => i += 1,
             },
@@ -212,8 +247,9 @@ pub fn main() {
 /// Emits the agent stream: probe the claim path one component at a time
 /// (`.opencode` then `.opencode/agents`) with `symlink_metadata`, declining the
 /// run when a component is absent, a symlink or not a directory; otherwise read
-/// the directory's direct regular children, apply `--exclude-path` globs and the
-/// `--targets` list, and emit over a buffered stdout.
+/// the directory's direct regular children, keep only the `--module` selection,
+/// apply `--exclude-path` globs and the `--targets` list, and emit over a
+/// buffered stdout.
 pub fn run(args: Args) -> io::Result<()> {
     let agents_dir = args.root.join(".opencode/agents");
     for dir in [args.root.join(".opencode"), agents_dir.clone()] {
@@ -307,7 +343,20 @@ pub fn run(args: Args) -> io::Result<()> {
         files.push((identity, lines));
     }
 
-    let defs = collect_definitions(&files);
+    // The `--module` selection resolved once for the claim comparison: the
+    // canonical form where the filesystem can resolve it (so `..`-bearing and
+    // symlinked paths select the same subtree), else a lexical absolute path.
+    // The walk above keeps `args.root` verbatim, so `--targets` matching and
+    // the symlink probes are unchanged.
+    let absolute = |p: &Path| -> PathBuf {
+        std::fs::canonicalize(p)
+            .or_else(|_| std::path::absolute(p))
+            .unwrap_or_else(|_| p.to_path_buf())
+    };
+    let selection_root = absolute(&args.root);
+    let modules: Vec<PathBuf> = args.modules.iter().map(|m| absolute(m)).collect();
+
+    let defs = collect_definitions(&selection_root, &modules, &files);
     let stdout = io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
     emit_stream(&mut writer, &defs)?;

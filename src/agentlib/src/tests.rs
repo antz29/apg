@@ -19,7 +19,7 @@ mod unit {
                 12,
             ),
         ];
-        let defs = collect_definitions(&files);
+        let defs = collect_definitions(std::path::Path::new(""), &[], &files);
         assert_eq!(
             defs,
             vec![
@@ -106,7 +106,7 @@ mod int {
         ];
 
         // The walk alone claims only the directory's direct children.
-        let defs = collect_definitions(&files);
+        let defs = collect_definitions(std::path::Path::new(""), &[], &files);
         assert_eq!(
             defs.iter()
                 .map(|(path, stem, _, _)| (path.as_str(), stem.as_str()))
