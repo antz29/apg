@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "terraform-unmatched-override",
-  "body": "An override-file block whose header matches no base declaration of its module yields zero Structs and is one stderr diagnostic line.",
+  "body": "An override-file block whose header is absent from its module's base declarations yields zero Structs and is one stderr diagnostic line.",
   "properties": {
     "feature": "terraform-frontend"
   },

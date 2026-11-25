@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "bicep-language-ceiling",
-  "body": "bicepfrontend has no engine pin, its hand-written parser being bounded by the Bicep v0.49.2 published grammar, the .bicepparam using, using none, extends and param assignment statements included.",
+  "body": "bicepfrontend's language ceiling is the Bicep v0.49.2 published grammar, the .bicepparam using, using none, extends and param assignment statements included, held by its hand-written parser with an unset engine pin.",
   "properties": {
     "feature": "bicep-frontend"
   },

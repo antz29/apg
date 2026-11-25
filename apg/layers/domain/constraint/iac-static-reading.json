@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "iac-static-reading",
-  "body": "The Terraform and Bicep frontends read syntax alone: they never evaluate an expression, run terraform, tofu, bicep or az, read state, or fetch a module, provider or registry artefact, and a fact needing any of those is a categorised unresolved target.",
+  "body": "The Terraform and Bicep frontends read syntax alone, never evaluating an expression, running terraform, tofu, bicep or az, reading state, or fetching a module, provider or registry artefact.",
   "properties": {},
   "out": [],
   "in": []

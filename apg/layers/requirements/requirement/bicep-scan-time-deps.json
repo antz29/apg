@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "bicep-scan-time-deps",
-  "body": "bicepfrontend is a self-contained binary that never shells out, so a Bicep scan needs zero scan-time tools, zero .NET runtime and zero network, and the scan preflight's tool set for bicep is empty.",
+  "body": "bicepfrontend is a self-contained binary spawning zero child processes, so a Bicep scan needs zero scan-time tools, zero .NET runtime and zero network, and the scan preflight's tool set for bicep is empty.",
   "properties": {
     "feature": "bicep-frontend"
   },

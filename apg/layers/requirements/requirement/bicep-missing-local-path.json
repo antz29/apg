@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "bicep-missing-local-path",
-  "body": "A relative path in a module, using, extends or import statement that names no scanned file is an unresolved use of category unknown from its Struct, named by its normalised path.",
+  "body": "A relative path in a module, using, extends or import statement that resolves outside the scanned files is an unresolved use of category unknown from its Struct, named by its normalised path.",
   "properties": {
     "feature": "bicep-frontend"
   },
