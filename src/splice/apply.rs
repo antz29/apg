@@ -612,8 +612,17 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // git state survives and the spliced DB disagrees with the Scan row a full
     // rebuild records.
     conn.query("MATCH (s:Scan) DELETE s")?;
+    // The recorded module selection is the delta graph's single `Scan` node's
+    // canonical `modules` string (the same value `build_load_files` writes on a
+    // full load), so the re-created row carries it beside the git state.
+    let modules = delta
+        .graph
+        .nodes
+        .get(SCAN_HEAD)
+        .map(|node| node.modules.as_str())
+        .unwrap_or_default();
     conn.query(&format!(
-        "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}}})",
+        "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}, modules: {}}})",
         lit(SCAN_HEAD),
         lit(delta.scan.git_sha.as_deref().unwrap_or("")),
         lit(&delta
@@ -623,6 +632,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
             .unwrap_or_default()),
         lit(delta.scan.content_key.as_deref().unwrap_or("")),
         lit(&delta.scan.scanned_at),
+        lit(modules),
     ))?;
     report.dml_statements += 2;
     report.scan_refreshed = true;
