@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "recorded-module-selection-encoding",
-  "body": "The recorded `--module` selection is one newline-joined string of deduped, sorted resolved roots (empty for a whole-tree scan), and both sides are whitespace-trimmed before comparison, so a rooted path embedding a newline or differing only by leading or trailing whitespace cannot be distinguished; upgrade to a length-prefixed or JSON-encoded column if such paths must round-trip.",
+  "body": "A `--module` selection's identity is the joined path as written (resolution joins the scan root but normalises no symlink or `..` component, so two spellings of one subtree are distinct recorded selections), and the recorded form is one newline-joined string of deduped, sorted resolved roots (empty for a whole-tree scan) compared after whitespace-trimming both sides, so a rooted path embedding a newline or differing only by leading or trailing whitespace cannot be distinguished; upgrade to a length-prefixed or JSON-encoded column and a normalised identity if such spellings must share a recorded selection or round-trip.",
   "properties": {},
   "out": [
     {
