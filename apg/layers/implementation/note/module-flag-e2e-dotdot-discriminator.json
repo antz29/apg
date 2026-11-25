@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "module-flag-e2e-dotdot-discriminator",
+  "body": "The `..`-crossing-symlink CLI leg pins the CLI's canonicalisation through the recorded selection, not through admission: structfrontend's own `absolutize` already canonicalises module dirs, so `--module inner/link/../A` admitted `A`'s files before the fix too; pre-fix the two spellings recorded different selections (`→ STALE (differing: modules)`), post-fix both record one physical selection (`→ FRESH`). The lexically-normalising arms this fixes (TS/C#/SQL) are exercised only by e2e-full scenarios. Upgrade when a hermetic lexical-normalising arm exists (or structfrontend's absolutize fallback is removed), so the admission assertion alone discriminates.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.module_flag_e2e.e2e.dotdot_crossing_a_symlink_selects_the_physical_subtree",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
