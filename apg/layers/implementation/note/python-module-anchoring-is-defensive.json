@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "python-module-anchoring-is-defensive",
+  "body": "`parse_args` composes each `--module` value as `args.root.join(value)`, so `run`'s canonical-root anchoring is defensive rather than the CWD fix the bug write-up described — for a relative scan root the value arrives already root-joined and the two orderings coincide, the only divergence being a symlinked scan root combined with a `..`-bearing value; upgrade by moving the join out of `parse_args` when the resolution rule must be provable from `run` alone.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.pyfrontend.run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

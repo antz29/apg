@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cpp-module-dotdot-identity",
+  "body": "A `..`-bearing relative `--module` is joined lexically without canonicalisation, so the C++ arm's module identity keeps the literal `..` segment, and C++ is outside phase 4's symlink and `..` cross-arm audit; upgrade when C++ joins that audit or a `..`-bearing selection must share an identity with its canonical form.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "cpp.cpplib.scan_root",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

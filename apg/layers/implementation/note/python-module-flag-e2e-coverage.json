@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "python-module-flag-e2e-coverage",
+  "body": "The Python `--module` e2e compares the relative and absolute forms with the scan root `.` and a plain subtree only, so it covers neither a `..`-bearing nor a symlinked module path and cannot catch a `parse_args` re-join for a relative scan root; upgrade when subtree escape or symlink resolution becomes a supported case.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.pylib_e2e.e2e.relative_module_value_resolves_against_the_scan_root",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
