@@ -36,10 +36,14 @@ static int scan_root(const fs::path &root_arg,
         targetFilterActive = !targetFiles.empty();
     }
 
-    // Discover modules: explicit --module dirs, or top-level dirs under root
-    // that contain source files. The root itself is a module if it has sources.
+    // Discovery: explicit --module dirs replace it (they are the only modules,
+    // so their recursive file collection cannot double-claim); otherwise every
+    // directory that directly holds C++ sources is its own module — the scan
+    // root included, and regardless of whether an ancestor directory is also a
+    // module (SPEC 0.9.1).
     std::vector<CppModule> modules;
-    if (!module_dirs.empty()) {
+    const bool explicit_modules = !module_dirs.empty();
+    if (explicit_modules) {
         for (const auto &d : module_dirs) {
             fs::path dir = d == "." ? root : fs::absolute(d);
             if (!fs::exists(dir)) {
@@ -48,25 +52,10 @@ static int scan_root(const fs::path &root_arg,
             }
             std::string name = dir.filename().string();
             if (name.empty()) name = root.filename().string();
-            modules.push_back({name, dir});
+            modules.push_back({name, dir, dir.string()});
         }
     } else {
-        if (dir_has_sources(root)) {
-            modules.push_back({root.filename().string(), root});
-        }
-        for (const auto &entry : fs::directory_iterator(root)) {
-            if (!entry.is_directory()) continue;
-            std::string name = entry.path().filename().string();
-            if (name[0] == '.') continue;
-            if (dir_has_sources(entry.path())) {
-                modules.push_back({name, entry.path()});
-            }
-        }
-        // No shallow module (sources nested below the first level) — search
-        // deeper rather than declaring nothing to scan (SPEC 0.9.1).
-        if (modules.empty()) {
-            find_modules_deep(root, modules, /*depth=*/6);
-        }
+        find_modules_deep(root, modules, /*depth=*/6);
     }
     if (modules.empty()) {
         fprintf(stderr, "Error: no C++ modules found under %s\n", root.string().c_str());
@@ -91,13 +80,16 @@ static int scan_root(const fs::path &root_arg,
 
     for (const auto &mod : modules) {
         std::vector<fs::path> files;
-        get_cpp_files(mod.dir, files, excludes, true);
+        // A discovery module owns only the files directly in it; a nested
+        // source-holding directory is its own module. The explicit --module
+        // arm keeps the recursive collection (it replaced discovery).
+        get_cpp_files(mod.dir, files, excludes, explicit_modules);
         for (const auto &path : files) {
             std::string source = read_file(path);
             if (source.empty()) continue;
             TSTree *tree = ts_parser_parse_string(parser, nullptr, source.c_str(), source.size());
             if (tree) {
-                ast_files.push_back({path.string(), std::move(source), tree, mod.name});
+                ast_files.push_back({path.string(), std::move(source), tree, mod.identity});
             }
         }
     }
@@ -115,9 +107,9 @@ static int scan_root(const fs::path &root_arg,
             .field("end_line", line_of(af.source, (uint32_t)af.source.size())).done());
     }
 
-    // Phase 1: collect declarations + base classes. The module name is pushed
-    // onto the scope so every FQN is module-prefixed (module.namespace.Class),
-    // which keeps FQNs unique across modules.
+    // Phase 1: collect declarations + base classes. The module identity is
+    // pushed onto the scope so every FQN is module-prefixed
+    // (identity.namespace.Class), which keeps FQNs unique across modules.
     std::vector<Decl> all_decls;
     std::vector<BaseRef> base_classes;
     std::vector<std::string> scope;
@@ -173,43 +165,29 @@ static int scan_root(const fs::path &root_arg,
         }
     }
 
-    // Emit each module as a top-level module node.
+    // Emit each module as a top-level module node, under its absolute-path
+    // identity (the same string the file parents and declaration scopes use).
     std::unordered_set<std::string> module_names;
     for (const auto &mod : modules) {
-        module_names.insert(mod.name);
-        emit_json(JsonBuilder().field("type", "module").field("fqn", mod.name).done());
+        module_names.insert(mod.identity);
+        emit_json(JsonBuilder().field("type", "module").field("fqn", mod.identity).done());
     }
 
-    // Emit namespace packages (module.namespace chains).
+    // Namespace packages derive only strictly BEYOND a declaration's module
+    // identity: the walk up the parent chain stops at the module boundary, so a
+    // dot inside a directory name (e.g. `foo.bar`) never fabricates a phantom
+    // ancestor module.
     std::unordered_set<std::string> all_ns;
     for (const auto &d : all_decls) {
         auto pos = d.fqn.rfind('.');
-        if (pos != std::string::npos) {
-            std::string ns = d.fqn.substr(0, pos);
-            auto pos2 = ns.rfind('.');
-            while (true) {
-                if (!decl_fqns.count(ns) && !module_names.count(ns)) {
-                    all_ns.insert(ns);
-                }
-                pos2 = ns.rfind('.');
-                if (pos2 == std::string::npos) break;
-                ns = ns.substr(0, pos2);
-            }
-        }
-    }
-    for (const auto &d : all_decls) {
-        auto pos = d.fqn.rfind('.');
-        if (pos != std::string::npos) {
-            std::string ns = d.fqn.substr(0, pos);
-            while (true) {
-                pos = ns.rfind('.');
-                if (pos == std::string::npos) break;
-                std::string parent = ns.substr(0, pos);
-                if (!decl_fqns.count(parent) && !module_names.count(parent) && parent.find('.') != std::string::npos) {
-                    all_ns.insert(parent);
-                }
-                ns = parent;
-            }
+        if (pos == std::string::npos) continue;
+        std::string ns = d.fqn.substr(0, pos);
+        while (true) {
+            if (module_names.count(ns)) break;
+            if (!decl_fqns.count(ns)) all_ns.insert(ns);
+            auto up = ns.rfind('.');
+            if (up == std::string::npos) break;
+            ns = ns.substr(0, up);
         }
     }
 
@@ -310,7 +288,7 @@ static int scan_root(const fs::path &root_arg,
         name_map[name].push_back(d.fqn);
     }
 
-    // Phase 2: resolve references with type awareness. The module name is
+    // Phase 2: resolve references with type awareness. The module identity is
     // pushed onto the scope so resolution stays within the current module
     // first, matching the module-prefixed FQNs.
     size_t scan_done = 0;
