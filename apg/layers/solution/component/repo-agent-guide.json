@@ -17,12 +17,17 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.agent-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.agent-roster",
       "properties": {}
     },
     {
       "kind": "realises",
-      "target": "domain.service.agent-navigation",
+      "target": "domain.service.module-selection",
       "properties": {}
     }
   ],

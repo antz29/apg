@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.module-flag-documented-surface",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.module-flag-invalid-selection-fails-loudly",
       "properties": {}
     },
@@ -29,12 +34,27 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.cli-session-docs",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.java-package-hierarchy",
       "properties": {}
     },
     {
       "kind": "realises",
       "source": "solution.component.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-docs",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.repo-agent-guide",
       "properties": {}
     },
     {
