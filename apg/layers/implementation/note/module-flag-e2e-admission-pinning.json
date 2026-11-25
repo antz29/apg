@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "module-flag-e2e-admission-pinning",
+  "body": "The suite pins admission to the Markdown `File` FQNs only and runs every structural stream (`--language md` does not narrow the driver's structural set), so it asserts no Markdown `Module` hierarchy and no non-md structural claim; upgrade when a selected subtree's module hierarchy becomes the asserted contract or the suite must time-box one stream.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.module_flag_e2e.e2e.recorded_module_selection_drives_freshness_and_admission",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

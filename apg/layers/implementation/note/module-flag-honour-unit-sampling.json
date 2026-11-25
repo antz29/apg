@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "module-flag-honour-unit-sampling",
+  "body": "The unit regression samples one shipped id per registry arm (code, agent, structural) rather than enumerating every accepted id; upgrade when the registry grows a new arm kind that needs the flag.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.frontends.tests.unit.module_flag_honour_admits_shipped_and_refuses_unshipped",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

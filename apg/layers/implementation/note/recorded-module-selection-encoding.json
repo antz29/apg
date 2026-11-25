@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "recorded-module-selection-encoding",
+  "body": "The recorded `--module` selection is one newline-joined string of deduped, sorted resolved roots (empty for a whole-tree scan), and both sides are whitespace-trimmed before comparison, so a rooted path embedding a newline or differing only by leading or trailing whitespace cannot be distinguished; upgrade to a length-prefixed or JSON-encoded column if such paths must round-trip.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.scan.canonical_modules",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

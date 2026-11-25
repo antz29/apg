@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "module-flag-honour-registry",
+  "body": "`honours_module_flag` is a static registry of the ids the driver ships, so it cannot know a frontend's installed state or a future frontend's real capability and the refusal fires only for an id the driver does not ship; upgrade when a shipped frontend genuinely cannot apply `--module` (have it report the capability) or a non-CLI caller passes an unvalidated language id with a module selection.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.frontends.honours_module_flag",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

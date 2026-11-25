@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-modules-column-coverage",
+  "body": "The `Scan` row's `modules` column lands through the positional parquet-to-COPY path, which no lib-tier full-load fixture covers, so it is proven only by the e2e load, ingest and module_flag tiers; upgrade when an in-memory full-load fixture can assert the Scan row's columns.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.load.tables.build_load_files",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

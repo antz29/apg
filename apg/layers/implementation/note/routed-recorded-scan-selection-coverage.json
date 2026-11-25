@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "routed-recorded-scan-selection-coverage",
+  "body": "The routed (live-session) read of the recorded selection is proven only by construction-parity with the direct read and indirectly by the session-save e2e; upgrade when a live-session fixture can compare the routed selection against the recorded row directly.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.db_recorded_scan_routed",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
