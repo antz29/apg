@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -443,5 +444,38 @@ func TestEmitFactsNoFilterMatchesAllTargets(t *testing.T) {
 	allTargets := emitToBuffer(t, projectPkgs, all)
 	if noFilter != allTargets {
 		t.Errorf("no-filter stream differs from the all-targets stream:\n--- no filter ---\n%s\n--- all targets ---\n%s", noFilter, allTargets)
+	}
+}
+
+// TestAbsRestrictResolvesAgainstScanRoot is the phase-02 task-2 unit: a
+// relative --module value joins the scan root, an absolute value passes
+// through unchanged, and the two forms of the same dir yield the identical
+// restrict set (the process working directory never decides).
+func TestAbsRestrictResolvesAgainstScanRoot(t *testing.T) {
+	const root = "/scan/root"
+	cases := []struct {
+		name string
+		dirs []string
+		want []string
+	}{
+		{"relative", []string{"alpha"}, []string{"/scan/root/alpha"}},
+		{"absolute", []string{"/scan/root/alpha"}, []string{"/scan/root/alpha"}},
+		{"absolute outside root", []string{"/elsewhere/beta"}, []string{"/elsewhere/beta"}},
+		{"dot-dot cleaned lexically", []string{"alpha/../beta"}, []string{"/scan/root/beta"}},
+		{"multiple values each resolved", []string{"alpha", "/elsewhere/beta"}, []string{"/scan/root/alpha", "/elsewhere/beta"}},
+		{"empty input", nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := absRestrict(root, tc.dirs); !slices.Equal(got, tc.want) {
+				t.Fatalf("absRestrict(%q, %v) = %v want %v", root, tc.dirs, got, tc.want)
+			}
+		})
+	}
+
+	rel := absRestrict(root, []string{"alpha"})
+	abs := absRestrict(root, []string{filepath.Join(root, "alpha")})
+	if !slices.Equal(rel, abs) {
+		t.Fatalf("relative and absolute forms differ: %v vs %v", rel, abs)
 	}
 }

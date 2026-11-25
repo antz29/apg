@@ -39,7 +39,7 @@ func discoverModulesViaGoList(root string, moduleDirs []string) []moduleInfo {
 		return nil
 	}
 
-	restrict := absRestrict(moduleDirs)
+	restrict := absRestrict(root, moduleDirs)
 
 	var mods []moduleInfo
 	dec := json.NewDecoder(strings.NewReader(string(out)))
@@ -71,7 +71,7 @@ func discoverModulesViaGoList(root string, moduleDirs []string) []moduleInfo {
 // node_modules, target, and dot dirs) and resolves each module's path with
 // `go list -m` from its own directory.
 func discoverNestedModules(root string, moduleDirs []string) []moduleInfo {
-	restrict := absRestrict(moduleDirs)
+	restrict := absRestrict(root, moduleDirs)
 	var mods []moduleInfo
 	seen := map[string]bool{}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -112,12 +112,16 @@ func discoverNestedModules(root string, moduleDirs []string) []moduleInfo {
 	return mods
 }
 
-// absRestrict resolves --module dirs to absolute paths.
-func absRestrict(moduleDirs []string) []string {
+// absRestrict resolves --module dirs against the scan root: a relative dir
+// joins root (so the process working directory never decides), an absolute dir
+// passes through unchanged.
+func absRestrict(root string, moduleDirs []string) []string {
 	restrict := make([]string, 0, len(moduleDirs))
 	for _, d := range moduleDirs {
-		if abs, err := filepath.Abs(d); err == nil {
-			restrict = append(restrict, abs)
+		if filepath.IsAbs(d) {
+			restrict = append(restrict, d)
+		} else {
+			restrict = append(restrict, filepath.Join(root, d))
 		}
 	}
 	return restrict
