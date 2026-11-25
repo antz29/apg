@@ -109,6 +109,12 @@ pub enum Record {
         git_clean: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         content_key: Option<String>,
+        /// The resolved `--module` selection the scan ran with, canonicalised:
+        /// deduplicated, sorted absolute subtree roots joined by `\n` — empty
+        /// for a whole-tree scan. Recorded beside the git state so a later scan
+        /// can tell whether the selection the frontends received still matches.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        modules: String,
         scanned_at: String,
     },
 

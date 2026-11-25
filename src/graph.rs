@@ -230,6 +230,12 @@ pub struct Node {
     /// `None` on every non-`Scan` node and on a pre-hardening scan.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_key: Option<String>,
+    /// The resolved module selection the scan ran under, in the same canonical
+    /// form the `scan_meta` record carries: deduplicated, sorted absolute
+    /// subtree roots joined by `\n`, empty for a whole-tree scan. Only the
+    /// `Scan` kind sets it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub modules: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scanned_at: Option<String>,
     /// The authored node's **full** node-file properties map (apg-projects
@@ -266,6 +272,7 @@ impl Default for Node {
             git_sha: None,
             git_clean: None,
             content_key: None,
+            modules: String::new(),
             scanned_at: None,
             properties: NodeProperties::new(),
         }

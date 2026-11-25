@@ -1092,6 +1092,7 @@ fn cs_records(
             git_sha: Some(sha.into()),
             git_clean: Some(true),
             content_key: Some(format!("{sha}-key")),
+            modules: String::new(),
             scanned_at: "2026-01-02T00:00:00Z".into(),
         },
         Record::LangSwitch {
@@ -2157,6 +2158,7 @@ mod e2e {
                 git_sha: Some("newsha".into()),
                 git_clean: Some(true),
                 content_key: Some("newkey".into()),
+                modules: String::new(),
                 scanned_at: "2026-01-02T00:00:00Z".into(),
             },
             Record::LangSwitch {
@@ -2384,6 +2386,7 @@ mod e2e {
             git_sha: Some("newsha".into()),
             git_clean: Some(true),
             content_key: Some("newkey".into()),
+            modules: String::new(),
             scanned_at: "2026-01-02T00:00:00Z".into(),
         };
 

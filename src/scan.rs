@@ -37,6 +37,7 @@ pub fn temp_dir() -> PathBuf {
 pub fn scanner_records<'a>(
     spools: &'a [(String, PathBuf)],
     git_state: &'a git::GitState,
+    modules: &[String],
 ) -> impl Iterator<Item = schema::Record> + 'a {
     let iterators = spools.iter().map(|(lang, spool)| {
         let lines = BufReader::new(std::fs::File::open(spool).unwrap()).lines();
@@ -57,9 +58,20 @@ pub fn scanner_records<'a>(
         git_sha: git_state.sha.clone(),
         git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
         content_key: git_state.content_key.clone(),
+        modules: canonical_modules(modules),
         scanned_at: git::now_iso8601(),
     })
     .chain(records)
+}
+
+/// The canonical recorded module-selection identity: the resolved `--module`
+/// subtree roots deduplicated and sorted, so two equal selections compare equal
+/// regardless of request order, joined by `\n`; empty for a whole-tree scan.
+fn canonical_modules(modules: &[String]) -> String {
+    let mut paths: Vec<&str> = modules.iter().map(String::as_str).collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths.join("\n")
 }
 
 /// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
@@ -576,7 +588,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 languages.join(",")
             };
             let (phase1_graph, _) = ingest::ingest(
-                scanner_records(&spools[..], &git_state),
+                scanner_records(&spools[..], &git_state, &module_dirs),
                 &ingest::IngestOptions {
                     blacklist: &blacklist,
                     language: &phase1_lang,
@@ -675,7 +687,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // after that in `run_pipeline` is the db-load phase.
     let assembly_start = std::time::Instant::now();
 
-    let records = scanner_records(&spools, &git_state);
+    let records = scanner_records(&spools, &git_state, &module_dirs);
 
     // Cleanup span validation is per-language: keep the single-language value,
     // and disable it (by joining) for mixed scans where the check cannot be
@@ -712,7 +724,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         )
     } else if incremental.full_scan.is_some() {
         let (pre, _) = ingest::ingest(
-            scanner_records(&spools, &git_state),
+            scanner_records(&spools, &git_state, &module_dirs),
             &ingest::IngestOptions {
                 blacklist: &blacklist,
                 language: &cleanup_language,
@@ -738,7 +750,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // The delta's emitted real code FQNs: pre-ingest the target-only spool
         // to discover exactly which FQNs this scan's frontends produced.
         let (emitted, _) = ingest::ingest(
-            scanner_records(&spools, &git_state),
+            scanner_records(&spools, &git_state, &module_dirs),
             &ingest::IngestOptions {
                 blacklist: &blacklist,
                 language: &cleanup_language,

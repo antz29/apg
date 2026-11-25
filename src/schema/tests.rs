@@ -19,10 +19,11 @@ mod unit {
     )
     .unwrap();
         assert!(
-            matches!(r, Record::ScanMeta { ref git_sha, ref git_clean, ref content_key, ref scanned_at }
+            matches!(r, Record::ScanMeta { ref git_sha, ref git_clean, ref content_key, ref modules, ref scanned_at }
             if git_sha.as_deref() == Some("abc123")
                 && *git_clean == Some(true)
                 && content_key.as_deref() == Some("deadbeef")
+                && modules.is_empty()
                 && scanned_at == "2026-09-07T00:00:00Z")
         );
         // ...and omitted when the scanned dir is not a git repo.
@@ -35,8 +36,9 @@ mod unit {
                 git_sha: None,
                 git_clean: None,
                 content_key: None,
+                ref modules,
                 ..
-            }
+            } if modules.is_empty()
         ));
         // Serialization omits the absent git fields (round-trips the input).
         let s = serde_json::to_string(&r).unwrap();

@@ -1203,6 +1203,7 @@ pub fn scan_checkout_locked(project_dir: &Path) -> anyhow::Result<()> {
         git_sha: state.sha.clone(),
         git_clean: state.sha.as_ref().map(|_| state.clean),
         content_key: state.content_key.clone(),
+        modules: String::new(),
         scanned_at: crate::git::now_iso8601(),
     });
     for p in payload_files(project_dir) {

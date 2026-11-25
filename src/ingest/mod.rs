@@ -970,6 +970,7 @@ fn ingest_records(
                     git_sha,
                     git_clean,
                     content_key,
+                    modules,
                     scanned_at,
                 } => insert_node(
                     &mut graph,
@@ -978,6 +979,7 @@ fn ingest_records(
                         git_sha,
                         git_clean,
                         content_key,
+                        modules,
                         scanned_at: Some(scanned_at),
                         ..spec_node(NodeKind::Scan)
                     },

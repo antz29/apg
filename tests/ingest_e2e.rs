@@ -622,6 +622,7 @@ mod e2e {
                 git_sha: Some("abc123".to_string()),
                 git_clean: Some(true),
                 content_key: Some("deadbeef".to_string()),
+                modules: String::new(),
                 scanned_at: "2026-09-07T00:00:00Z".to_string(),
             },
             Record::Module {
@@ -656,6 +657,7 @@ mod e2e {
                 git_sha: None,
                 git_clean: None,
                 content_key: None,
+                modules: String::new(),
                 scanned_at: "2026-09-07T00:00:00Z".to_string(),
             }],
             &IngestOptions {
@@ -2535,6 +2537,7 @@ mod e2e {
             git_sha: Some("abc123".to_string()),
             git_clean: Some(true),
             content_key: Some("deadbeef".to_string()),
+            modules: String::new(),
             scanned_at: "2026-10-27T00:00:00Z".to_string(),
         };
         // The four realized identities the warm fact unit holds. A File FQN is
