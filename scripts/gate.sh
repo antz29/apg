@@ -257,6 +257,14 @@ HERMETIC_E2E_EXCLUDES=(
   main_e2e:planned_node_in_a_separate_cargo_project_realizes_like_the_root_crate
   main_e2e:planned_node_realizes_when_its_file_is_reused
 
+  # module_flag_e2e — the two scenarios that spawn real frontends: a
+  # rustfrontend over a cargo workspace (and cargo metadata), and the
+  # per-language `--module` admission scan that spawns every code frontend.
+  # The suite's md-fixture scenarios (missing/non-directory, recorded
+  # selection, the `..`-crossing symlink) stay hermetic.
+  module_flag_e2e:rust_module_value_excludes_the_prefix_sibling_crate
+  module_flag_e2e:per_language_relative_and_absolute_admission
+
   # main_e2e — TypeScript fixtures (spawned tsfrontend).
   main_e2e:js_only_repo_accepts_all_four_js_extensions
   main_e2e:mixed_js_ts_repo_resolves_both_directions
