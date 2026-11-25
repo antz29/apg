@@ -1341,4 +1341,264 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// phase-05 task-6: a body written one minute ago — inside the intent grace
+    /// window — is rooted by its worktree's live intent even though no manifest
+    /// reaches it, so a collection leaves the body and its unit intact. An
+    /// unrooted orphan body proves the collector actually ran.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/redb store/git); run via cargo test-e2e"]
+    fn one_minute_old_body_survives_collection() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("gc-intent-grace");
+        let store_root = repo.root.join(".git/apg");
+        let db = store_root.join(FACTS_DB);
+        let root = std::fs::canonicalize(&repo.root)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let wt_id = worktree_id(&repo.root);
+        let key = UnitKey {
+            format: FACTS_FORMAT_VERSION,
+            config_digest: "cfg-grace".to_string(),
+            lang: "go".to_string(),
+            rel: "a/a.go".to_string(),
+            oid: "oid-grace".to_string(),
+        };
+        let payload = b"a body written one minute ago".to_vec();
+        let payload_id = body_id(&payload);
+        let orphan = b"a body nothing roots".to_vec();
+        let orphan_id = body_id(&orphan);
+
+        {
+            let store = Store::open(&db).unwrap();
+            let txn = store.begin_write().unwrap();
+            txn.put_body(payload_id, &payload).unwrap();
+            txn.put_unit(&key, payload_id, "inputs", &root).unwrap();
+            txn.put_body(orphan_id, &orphan).unwrap();
+            txn.register_worktree(wt_id, &root).unwrap();
+            // One minute old — inside INTENT_GRACE_SECS, so the scan that wrote
+            // the body is still in flight and the collector must not reap it.
+            txn.put_intent(wt_id, unix_now().saturating_sub(60))
+                .unwrap();
+            txn.commit().unwrap();
+        }
+
+        let collection = collect(&store_root, unix_now(), INTENT_GRACE_SECS).unwrap();
+        assert!(
+            collection.bodies.contains(&orphan_id),
+            "the unrooted body is collected: {collection:?}"
+        );
+        assert!(
+            !collection.bodies.contains(&payload_id),
+            "a one-minute-old body is protected by its live intent: {collection:?}"
+        );
+        assert!(
+            !collection.units.contains(&key),
+            "its unit is not collected: {collection:?}"
+        );
+
+        let store = Store::open(&db).unwrap();
+        let read = store.read().unwrap();
+        assert_eq!(
+            read.get_body(payload_id).unwrap().as_deref(),
+            Some(&payload[..]),
+            "the protected body really survives in facts.db"
+        );
+        assert!(
+            !read.body_exists(orphan_id).unwrap(),
+            "the orphan body is really gone from facts.db"
+        );
+        assert!(
+            read.get_unit(&key).unwrap().is_some(),
+            "the protected unit really survives in facts.db"
+        );
+        drop(read);
+        drop(store);
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+    }
+
+    /// phase-05 task-6: a second worktree's scan is in flight — it has committed
+    /// an unreferenced body + unit (no manifest row) and holds a live intent —
+    /// while a collection runs against the same store. The intent still roots
+    /// the body, so the body survives; an unrooted orphan body proves the
+    /// collector ran.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktree + redb store/git); run via cargo test-e2e"]
+    fn fresh_worktrees_unreferenced_body_survives_a_concurrent_collection() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("gc-in-flight");
+        let wt = repo.start_project("wt");
+        let store_root = repo.root.join(".git/apg");
+        let db = store_root.join(FACTS_DB);
+        let wt_root = std::fs::canonicalize(&wt)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let wt_id = worktree_id(&wt);
+        let key = UnitKey {
+            format: FACTS_FORMAT_VERSION,
+            config_digest: "cfg-in-flight".to_string(),
+            lang: "go".to_string(),
+            rel: "b/b.go".to_string(),
+            oid: "oid-in-flight".to_string(),
+        };
+        let payload = b"a fresh worktree's unreferenced body".to_vec();
+        let payload_id = body_id(&payload);
+        let orphan = b"an orphan under concurrent collection".to_vec();
+        let orphan_id = body_id(&orphan);
+
+        // The second worktree's scan: write its unreferenced body + unit and a
+        // live intent, then stay "in flight" (holding the store open) while the
+        // collector runs.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let scan = std::thread::spawn({
+            let db = db.clone();
+            let wt_root = wt_root.clone();
+            let key = key.clone();
+            let payload = payload.clone();
+            let orphan = orphan.clone();
+            move || {
+                let store = Store::open(&db).unwrap();
+                let txn = store.begin_write().unwrap();
+                txn.put_body(payload_id, &payload).unwrap();
+                txn.put_unit(&key, payload_id, "inputs", &wt_root).unwrap();
+                txn.put_body(orphan_id, &orphan).unwrap();
+                txn.register_worktree(wt_id, &wt_root).unwrap();
+                txn.put_intent(wt_id, unix_now()).unwrap();
+                txn.commit().unwrap();
+                ready_tx.send(()).unwrap();
+                // Still in flight: keep the store in use while the collector
+                // runs against the same facts.db.
+                std::thread::sleep(std::time::Duration::from_millis(750));
+                drop(store);
+            }
+        });
+        ready_rx.recv().unwrap();
+
+        let collection = collect(&store_root, unix_now(), INTENT_GRACE_SECS).unwrap();
+        scan.join().unwrap();
+
+        assert!(
+            collection.bodies.contains(&orphan_id),
+            "the unrooted orphan is collected: {collection:?}"
+        );
+        assert!(
+            !collection.bodies.contains(&payload_id),
+            "the in-flight worktree's body is protected by its live intent: {collection:?}"
+        );
+        assert!(
+            !collection.units.contains(&key),
+            "the in-flight unit is not collected: {collection:?}"
+        );
+
+        let store = Store::open(&db).unwrap();
+        let read = store.read().unwrap();
+        assert_eq!(
+            read.get_body(payload_id).unwrap().as_deref(),
+            Some(&payload[..]),
+            "the in-flight body really survives in facts.db"
+        );
+        assert!(
+            !read.body_exists(orphan_id).unwrap(),
+            "the orphan body is really gone from facts.db"
+        );
+        assert!(
+            read.get_unit(&key).unwrap().is_some(),
+            "the in-flight unit really survives in facts.db"
+        );
+        drop(read);
+        drop(store);
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+    }
+
+    /// phase-05 task-6: the collector takes its own write transaction, so it
+    /// waits on the external gate the record's held transaction owns — the
+    /// record commit is never blocked by it and never loses its row. The record
+    /// commit completes promptly while the collector is still waiting; the
+    /// collector then completes with nothing to collect.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/redb store/git); run via cargo test-e2e"]
+    fn collection_waits_for_the_record_commit_without_blocking_it() {
+        use apg::testutil::Repo;
+
+        let repo = Repo::new("gc-record-gate");
+        let store_root = repo.root.join(".git/apg");
+        let db = store_root.join(FACTS_DB);
+        let root = std::fs::canonicalize(&repo.root)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let wt_id = worktree_id(&repo.root);
+        let key = UnitKey {
+            format: FACTS_FORMAT_VERSION,
+            config_digest: "cfg-gate".to_string(),
+            lang: "go".to_string(),
+            rel: "a/a.go".to_string(),
+            oid: "oid-gate".to_string(),
+        };
+        let payload = b"a record body committed under the gate".to_vec();
+        let payload_id = body_id(&payload);
+        let mut refs = std::collections::BTreeMap::new();
+        refs.insert("a/a.go".to_string(), "oid-gate".to_string());
+
+        // A record-style write transaction holds the external gate across the
+        // writes; it is committed once below.
+        let store = Store::open(&db).unwrap();
+        let txn = store.begin_write().unwrap();
+        txn.put_body(payload_id, &payload).unwrap();
+        txn.put_unit(&key, payload_id, "inputs", &root).unwrap();
+        txn.register_worktree(wt_id, &root).unwrap();
+        txn.replace_refs(wt_id, &refs).unwrap();
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let collector = std::thread::spawn({
+            let store_root = store_root.clone();
+            move || {
+                let result = collect(&store_root, unix_now(), INTENT_GRACE_SECS);
+                done_tx.send(()).unwrap();
+                result
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            done_rx.try_recv().is_err(),
+            "the collector must still be waiting for the record commit's gate"
+        );
+
+        let started = std::time::Instant::now();
+        txn.commit().unwrap();
+        let commit_elapsed = started.elapsed();
+        assert!(
+            commit_elapsed < std::time::Duration::from_secs(5),
+            "the record commit completes promptly, not behind the collector: {commit_elapsed:?}"
+        );
+        drop(store);
+
+        let collection = collector.join().unwrap().unwrap();
+        assert!(
+            collection.bodies.is_empty() && collection.units.is_empty(),
+            "the committed record row is reached, not collected: {collection:?}"
+        );
+
+        let store = Store::open(&db).unwrap();
+        let read = store.read().unwrap();
+        assert_eq!(
+            read.get_body(payload_id).unwrap().as_deref(),
+            Some(&payload[..]),
+            "the record body is not lost"
+        );
+        assert!(
+            read.get_unit(&key).unwrap().is_some(),
+            "the record unit row is not lost"
+        );
+        drop(read);
+        drop(store);
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+    }
 }
