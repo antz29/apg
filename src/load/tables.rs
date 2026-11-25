@@ -38,6 +38,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut scan_git_clean = Vec::new();
     let mut scan_content_key = Vec::new();
     let mut scan_scanned_at = Vec::new();
+    let mut scan_modules = Vec::new();
     let mut struct_fqn = Vec::new();
     let mut struct_path = Vec::new();
     let mut struct_start = Vec::new();
@@ -169,6 +170,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 scan_git_clean.push(node.git_clean.map(|c| c.to_string()).unwrap_or_default());
                 scan_content_key.push(node.content_key.clone().unwrap_or_default());
                 scan_scanned_at.push(node.scanned_at.clone().unwrap_or_default());
+                // The resolved `--module` selection the scan ran with, in the
+                // record's canonical form (deduped + sorted absolute roots,
+                // newline-joined; empty for a whole-tree scan).
+                scan_modules.push(node.modules.clone());
             }
             NodeKind::Struct => {
                 struct_fqn.push(fqn.clone());
@@ -358,6 +363,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("git_clean", Col::Str(scan_git_clean)),
             ("content_key", Col::Str(scan_content_key)),
             ("scanned_at", Col::Str(scan_scanned_at)),
+            ("modules", Col::Str(scan_modules)),
         ],
     )?;
     write_parquet(
@@ -1344,8 +1350,13 @@ pub fn label_of(k: NodeKind) -> &'static str {
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
     conn.query("CREATE NODE TABLE Language(fqn STRING PRIMARY KEY)")?;
+    // The `Scan` table's `modules` column is the scan's resolved `--module`
+    // selection (empty = whole-tree), written by `build_load_files` from the
+    // `scan_meta` record beside the git state — and part of the schema
+    // fingerprint, so a pre-selection database fails `validate_compatible`
+    // into a rebuild instead of being read with an unknown selection.
     conn.query(
-        "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, content_key STRING, scanned_at STRING)",
+        "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, content_key STRING, scanned_at STRING, modules STRING)",
     )?;
     conn.query(
         "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING, status STRING)",
@@ -1527,9 +1538,10 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             format!(r#"COPY Language FROM "{}""#, p("language.parquet")),
         ),
         // The Scan row (SCAN_HEAD) carries the phase-01 content-identity key
-        // (`content_key`) beside git_sha/git_clean/scanned_at; the parquet
-        // columns are emitted in this exact DDL order, so the key lands in the
-        // live DB's Scan node with no extra statement.
+        // (`content_key`) beside git_sha/git_clean/scanned_at and the scan's
+        // resolved module selection (`modules`); the parquet columns are
+        // emitted in this exact DDL order, so each lands in the live DB's Scan
+        // node with no extra statement.
         (
             "scan.parquet",
             format!(r#"COPY Scan FROM "{}""#, p("scan.parquet")),
