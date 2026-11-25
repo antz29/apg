@@ -241,7 +241,18 @@ The project builds a single `apg` binary (package `apg`):
   like a Go backend + TS frontend gets a single `apg/.trans/db.lbug`). Each frontend's
   opaque ids are namespaced per language (`--id-prefix`), and the ingestor
   classifies `code_type` and renders FQNs per record (a `lang_switch` control
-  record precedes each frontend's stream). `--no-build-scripts` is Rust-only
+  record precedes each frontend's stream). `--module` restricts the scan to the
+  named directory and its subtree (repeatable): a relative value resolves
+  against the canonicalised scan root, while an absolute value passes through
+  unchanged; a value naming a missing directory or a non-directory fails the
+  scan with a named error. Every frontend apg ships honours the flag — the code
+  languages (`java`, `go`, `cpp`, `rust`, `ts`/`js`, `csharp`, `py`, `cobol`,
+  `sql`, `ps`), the agent-definition frontend and every bundled structural
+  stream (`md`, `sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`,
+  `ini`, `sln`, `misc`). TypeScript is the one granularity exception: its arm
+  selects whole npm packages, so a value at or above a package root selects
+  that package's subtree, while a value inside a package (e.g.
+  `packages/app/src`) selects nothing. `--no-build-scripts` is Rust-only
   (skip cargo build scripts and the proc-macro server); the Rust frontend
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
@@ -1298,7 +1309,16 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   under each solution module listing it; FQNs are module-prefixed so they stay unique
   across modules.
   Pass `modules: "dir1,dir2"` to `apg_scan` to restrict scanning to specific
-  modules (Go/C++/Rust/TS/C#).
+  directories and their subtrees; the values are passed as `--module` under the
+  same rule — a relative value resolves against the canonicalised scan root, an
+  absolute value passes through unchanged, and a missing directory or a
+  non-directory fails the scan with a named error — and every frontend apg
+  ships honours it, not just the monorepo languages: the code languages
+  (`java`, `go`, `cpp`, `rust`, `ts`/`js`, `csharp`, `py`, `cobol`, `sql`, `ps`),
+  the agent-definition frontend and every bundled structural stream. TypeScript
+  selects whole npm packages: a value at or above a package root selects that
+  package's subtree, while a value inside a package (e.g. `packages/app/src`)
+  selects nothing.
 - **Multi-language repos** (a Go backend + TS frontend, say): `apg scan`
   auto-detects every language present and merges their graphs into one
   database. Opaque ids are namespaced per language (`--id-prefix`, `g1`/`t1`/…);
