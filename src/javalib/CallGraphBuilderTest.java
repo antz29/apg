@@ -11,8 +11,9 @@ import java.util.regex.Pattern;
  * Gate tests for the phase-02 task-11 targeted (package-granularity) scan.
  *
  * The load-bearing invariant: a targeted scan's facts for the target packages
- * must equal what a full scan emits for them — a targeted scan still walks the
- * whole tree, so each target package is attributed in the full scan's context.
+ * must equal what a full scan emits for them — a targeted scan walks the same
+ * tree as its full counterpart (the whole tree when no `--module` is given), so
+ * each target package is attributed in that scan's context.
  * Plus: an all-targets request and
  * an absent/empty target file are byte-identical to a full scan, and a warm
  * class-cache scan reuses unchanged packages instead of recompiling them. The
