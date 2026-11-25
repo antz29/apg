@@ -4833,4 +4833,76 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// phase-6 task-3 (e2e): `apg project start` seeds the new worktree's
+    /// per-worktree fact-store rows (refs/manifest, scan record, deps,
+    /// signatures, overloads) from the main checkout's. A cold main scan, then
+    /// start, then a one-file commit in the worktree, must make the worktree's
+    /// FIRST scan a one-file delta over the copied database — `[scan]
+    /// incremental:` and a `[load] splice: … full load skipped` — instead of
+    /// the cold `no recorded scan/manifest — full scan` the absent per-worktree
+    /// rows produce. Fails without the start-time seeding.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn project_start_seeds_fact_rows_so_the_worktree_first_scan_is_incremental() {
+        let (base, repo_dir, home) = warm_scratch("seed-rows");
+
+        // (1) Cold full scan of main: records main's refs/manifest, scan record
+        // and deps/signatures/overloads rows — and lands the `db.lbug` the
+        // worktree's start copies.
+        let main_scan = warm_run(&repo_dir, &home, &["scan", "."]);
+        let main_err = String::from_utf8_lossy(&main_scan.stderr);
+        assert!(main_scan.status.success(), "main scan: {main_err}");
+        assert!(
+            !main_err.contains("[scan] incremental:"),
+            "the main checkout's cold scan must be a full scan: {main_err}"
+        );
+
+        // (2) Project start: branch + worktree + the copied `.trans` scan, plus
+        // the seeded per-worktree store rows.
+        let start = warm_run(&repo_dir, &home, &["project", "start", "demo"]);
+        assert!(
+            start.status.success(),
+            "project start: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        let wt = repo_dir.join(specs::LAYOUT).join(".worktrees").join("demo");
+        let wt_trans = wt.join(specs::LAYOUT).join(specs::TRANS);
+        assert!(wt.is_dir(), "the worktree must exist at {}", wt.display());
+        assert!(
+            wt_trans.join("db.lbug").exists(),
+            "the branch db.lbug must be seeded from main's scan"
+        );
+
+        // (3) One tracked source file changes and is committed in the worktree:
+        // HEAD advances by exactly one file relative to the seeded manifest.
+        std::fs::write(
+            wt.join("c/c.go"),
+            "package c\n\nimport \"scratch/b\"\n\nfunc Bar() int { return b.Foo() + 1 }\n",
+        )
+        .unwrap();
+        warm_commit_all(&wt, "edit one file");
+
+        // (4) The worktree's first scan must be the delta against the SEEDED
+        // rows — one target file, spliced onto the copied database (no full
+        // load) — proving the per-worktree manifest/scan/deps rows were seeded,
+        // not re-derived from a cold full scan.
+        let scan = warm_run(&wt, &home, &["scan", "."]);
+        let stderr = String::from_utf8_lossy(&scan.stderr);
+        assert!(scan.status.success(), "worktree scan: {stderr}");
+        assert!(
+            stderr.contains("[scan] incremental: 1 target file(s),"),
+            "the worktree's first scan must be a one-file delta: {stderr}"
+        );
+        assert!(
+            stderr.contains("[load] splice:") && stderr.contains("full load skipped"),
+            "the delta must splice onto the seeded database instead of a full load: {stderr}"
+        );
+        assert!(
+            !stderr.contains("no recorded scan/manifest — full scan"),
+            "the worktree's per-worktree store rows were not seeded — the scan fell back to a cold full scan: {stderr}"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
