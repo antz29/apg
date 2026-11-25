@@ -213,9 +213,10 @@ step
 # One entry per scenario — no prefix globs — so a newly added test joins BOTH
 # modes until it is classified here (see the header's E2E SELECTION note).
 HERMETIC_E2E_EXCLUDES=(
-  # The four per-language acceptance binaries: every scenario in each spawns
-  # that language's frontend (cobol/csharp/ps/sql respectively).
+  # The five per-language acceptance binaries: every scenario in each spawns
+  # that language's frontend (cobol/cpp/csharp/ps/sql respectively).
   cobol_scan_e2e
+  cpp_scan_e2e
   csharp_scan_e2e
   ps_scan_e2e
   sql_scan_e2e
