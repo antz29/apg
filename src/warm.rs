@@ -13,16 +13,17 @@ use crate::{cache, delta, git, graph, incremental};
 /// selection in phase-04 task 5): when the shared store holds a COMPLETE
 /// committed scan row whose content identity equals this checkout's tree under
 /// the current cache key, build the [`incremental::Prepared`] state from that
-/// row's **recorded manifest alone** — never `Manifest::build`, so no
-/// full-tree walk — and return it. `None` means the caller runs the ordinary
-/// `incremental::prepare`.
+/// row's worktree's **refs rows alone** — the row no longer embeds a manifest,
+/// and nothing calls `Manifest::build`, so no full-tree walk — and return it.
+/// `None` means the caller runs the ordinary `incremental::prepare`.
 ///
 /// The row need not be this worktree's own: any committed row in the shared
 /// store whose `content_key` equals this checkout's (`git_state.content_key`)
 /// describes the same tree, so a fresh worktree assembles from the first such
-/// row written by any worktree. A row recorded under a different cache key
+/// row written by any worktree — building its manifest from that row's own
+/// worktree id. A row recorded under a different cache key
 /// cannot resolve its units under the current key and is refused. Completeness
-/// is then judged without a source walk: every entry of the recorded manifest
+/// is then judged without a source walk: every entry of that manifest
 /// outside the tool-owned top-level `apg/` layout must have a stored fact unit
 /// under the current key (the layout itself is never scanned as code, so it is
 /// ignored), and every such language must have stored module scaffolding. A
@@ -41,15 +42,21 @@ pub fn warm_prepared(
     // describe to be reusable. A checkout with no recorded identity cannot warm.
     let current = git_state.content_key.as_deref()?;
     // Any committed row describing this tree under the current key will do; the
-    // first one found is rebuilt from, whichever worktree wrote it.
-    let record = store.scans().into_iter().find_map(|(_, bytes)| {
+    // first one found is rebuilt from, whichever worktree wrote it. The row
+    // carries no manifest, so keep the row's worktree id to read its refs.
+    let (row_id, record) = store.scans().into_iter().find_map(|(row_id, bytes)| {
         let record: delta::ScanRecord = postcard::from_bytes(&bytes).ok()?;
         (record.content_key.as_deref() == Some(current) && record.cache_key.matches(&cache_key))
-            .then_some(record)
+            .then_some((row_id, record))
     })?;
+    // The row's worktree refs rows ARE its manifest (O(files), no source walk).
+    let manifest = cache::Manifest {
+        root: project_dir.to_string_lossy().into_owned(),
+        entries: store.refs(row_id),
+    };
     let mut languages: BTreeSet<String> = BTreeSet::new();
     let mut reuse_candidates: Vec<incremental::ReuseFile> = Vec::new();
-    for (rel, oid) in &record.manifest.entries {
+    for (rel, oid) in &manifest.entries {
         if tool_owned_layout(rel) {
             continue;
         }
@@ -73,10 +80,8 @@ pub fn warm_prepared(
         // the cache — fall back.
         store.scaffolding(lang, &cache_key)?;
     }
-    // The recorded manifest describes this tree; re-base its recorded root onto
-    // the reading checkout so the re-recorded baseline stays coherent.
-    let mut manifest = record.manifest.clone();
-    manifest.root = project_dir.to_string_lossy().into_owned();
+    // The row's refs describe this tree; `manifest.root` is already the reading
+    // checkout, so the re-recorded baseline stays coherent.
     Some(incremental::Prepared {
         store_root,
         cache_key,
