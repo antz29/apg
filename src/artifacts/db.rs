@@ -560,9 +560,9 @@ impl ArtifactDb {
     /// ([`crate::splice::apply`]) and [`crate::load::tables::build_load_files`]'s
     /// `Scan` table: `git_sha`/`content_key` are empty strings when `None`,
     /// `git_clean` renders `"true"`/`"false"` (empty when `None`), and
-    /// `scanned_at` is **preserved** from the row being replaced — a metadata
-    /// mutation re-anchors, it never re-scans, so the scan's own timestamp must
-    /// survive.
+    /// `scanned_at` and `modules` are **preserved** from the row being replaced —
+    /// a metadata mutation re-anchors, it never re-scans, so the scan's own
+    /// timestamp and its recorded `--module` selection must survive.
     ///
     /// Runs on a fresh connection over the caller's handle, so the caller never
     /// reopens `db.lbug`.
@@ -573,20 +573,25 @@ impl ArtifactDb {
         content_key: Option<&str>,
     ) -> anyhow::Result<()> {
         let conn = self.conn()?;
-        let (_, rows) = query_rows(&conn, "MATCH (s:Scan) RETURN s.scanned_at AS scanned_at")?;
+        let (_, rows) = query_rows(
+            &conn,
+            "MATCH (s:Scan) RETURN s.scanned_at AS scanned_at, s.modules AS modules",
+        )?;
         let scanned_at = rows
             .first()
             .map(|row| cell(row, 0))
             .filter(|s| !s.is_empty())
             .unwrap_or_else(crate::git::now_iso8601);
+        let modules = rows.first().map(|row| cell(row, 1)).unwrap_or_default();
         conn.query("MATCH (s:Scan) DELETE s")?;
         conn.query(&format!(
-            "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}}})",
+            "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}, modules: {}}})",
             lit(crate::schema::SCAN_HEAD),
             lit(git_sha.unwrap_or("")),
             lit(&git_clean.map(|c| c.to_string()).unwrap_or_default()),
             lit(content_key.unwrap_or("")),
             lit(&scanned_at),
+            lit(&modules),
         ))?;
         Ok(())
     }
