@@ -37,6 +37,34 @@ pub(crate) fn file_basename(file: &str) -> String {
         .unwrap_or_else(|| file.to_string())
 }
 
+/// The bare tail of a base-fused identity: a path whose single component under
+/// `base`'s parent begins with `base`'s last component followed by a `.` name
+/// boundary (`base` `/x/base`, path `/x/base.Ns.Sub` yields `Ns.Sub`). The C++
+/// frontend concatenates a namespace chain onto a module directory's absolute
+/// path, so that dot is a name boundary the path-component-wise `strip_prefix`
+/// cannot see. `None` for a base with no last component, a path not directly
+/// beside `base` (the fused identity is one component, so `/x/base.Ns/sub` is
+/// not fused), or a string prefix with no `.` boundary (`/x/basement`).
+fn base_fused_tail(base: &Path, path: &Path) -> Option<String> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let base_name = base.file_name()?.to_str()?;
+    let rel = path.strip_prefix(base.parent()?).ok()?;
+    let mut comps = rel.components();
+    let Some(std::path::Component::Normal(first)) = comps.next() else {
+        return None;
+    };
+    if comps.next().is_some() {
+        return None;
+    }
+    let tail = first.to_str()?.strip_prefix(base_name)?.strip_prefix('.')?;
+    if tail.is_empty() {
+        return None;
+    }
+    Some(tail.replace('\\', "/"))
+}
+
 /// Renders a scanner path as its checkout-independent identity relative to
 /// `base` (the git toplevel, or the scan root when the scanned tree is not a
 /// git repository): a `/`-separated path with no leading separator, no `.`
@@ -54,6 +82,15 @@ pub(crate) fn file_basename(file: &str) -> String {
 /// falls back to its file name so an identity can never embed a checkout
 /// component (a leading `/` or a `..` segment is a violation —
 /// `requirements.constraint.file-identity-is-repo-relative`).
+///
+/// The one exception to the fallback is the base-fused boundary
+/// ([`base_fused_tail`]): a C++ module/scope identity concatenates a namespace
+/// chain onto a module directory's absolute path, so `/base` + `.Ns.Sub` is one
+/// path component, and `strip_prefix` (path-component-wise) cannot match it.
+/// Such a path strips at the `.` name boundary to its bare tail (`Ns.Sub`)
+/// instead of falling back to `file_name(base)` (the checkout-named
+/// `<base>.Ns.Sub`). This name-boundary strip owns ONLY that base-level fused
+/// boundary; an under-base path keeps the ordinary path-component strip.
 ///
 /// An empty `base` is the pure pass-through sentinel the in-memory renderer
 /// tests use: the input is returned verbatim.
@@ -76,7 +113,14 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
     let candidate = if p.is_absolute() {
         match p.strip_prefix(base) {
             Ok(rel) => rel.to_path_buf(),
-            Err(_) => return fallback(),
+            Err(_) => {
+                // `/base.Ns.Sub` fuses the base with a namespace chain: strip at
+                // that `.` name boundary, not to the checkout-named basename.
+                if let Some(tail) = base_fused_tail(base, p) {
+                    return tail;
+                }
+                return fallback();
+            }
         }
     } else {
         p.to_path_buf()
@@ -117,7 +161,17 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
 /// root_module_fqn("md",   "/abs/docs",  base) -> "md.docs"
 /// root_module_fqn("md",   "",           base) -> "md."     // the repo root
 /// root_module_fqn("sh",   "",           base) -> "sh."     // the repo root
+/// root_module_fqn("cpp",  "/base.Ns",   base) -> "cpp..Ns" // base-fused namespace
 /// ```
+///
+/// A C++ base-fused identity (`/base.Ns[.Sub…]`, the base module fused with a
+/// namespace chain) strips to its bare tail and roots under the EMPTY base
+/// module — `root_module_fqn(language, "")` = `<language>.` re-joined with the
+/// tail — so a base-level declaration's parent renders `cpp..Ns` and its FQN
+/// `cpp..Ns.Type`, never the module-dotted `cpp.Ns` phantom ancestor. This
+/// re-join lives here, not in a downstream scope/endpoint renderer, so module
+/// records, namespace `Module→Module` contains edges, file parents, declaration
+/// scopes and `--targets` endpoints all agree.
 ///
 /// The bundled structural scanner emits each module identity repo-relative to
 /// the repository base — EMPTY at the repo root. Rooting an empty identity
@@ -141,6 +195,10 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
 pub fn root_module_fqn(language: &str, identity: &str, base: &Path) -> String {
     if language == "ps" {
         return format!("ps.{identity}");
+    }
+    if let Some(tail) = base_fused_tail(base, Path::new(identity)) {
+        // The empty base module (`cpp.`) re-joined with the tail: `cpp..Ns`.
+        return format!("{language}..{tail}");
     }
     format!("{language}.{}", repo_relative_identity(base, identity))
 }
@@ -167,6 +225,10 @@ fn has_module_prefix(identities: &HashSet<String>, name: &str) -> bool {
 /// PowerShell bypasses all of the above: psfrontend emits every scope parent as
 /// its identity key, rendered `ps.` + key verbatim — an empty parent is the
 /// root module `ps.`, and a root-level key `.build.ps1` renders `ps..build.ps1`.
+/// A C++ base-fused parent (`/base.Ns[.Sub…]`) roots through [`root_module_fqn`]
+/// as `cpp..Ns[.Sub…]` — the same form its namespace module record renders — and
+/// a parent exactly at the base (`/base`) roots as `cpp.`, so a base-level
+/// declaration's FQN is `cpp..Name`.
 pub(crate) fn rooted_scope(
     language: &str,
     parent: &str,
@@ -243,6 +305,11 @@ pub(crate) fn root_module_endpoint(
 /// its parent); an opaque id or a foreign name has no such prefix and is left
 /// unchanged. Only the CURRENT stream's language identities are consulted, so
 /// two languages that both define `apg` can never cross.
+///
+/// A C++ base-fused endpoint (`/base.Ns.Type`) is matched by the base module
+/// identity and roots through [`root_module_fqn`] to `cpp..Ns.Type`, exactly the
+/// declaration parent's rendering; an under-base endpoint keeps the ordinary
+/// path-component strip (`/base/src/cpplib.Ns.Name` → `cpp.src/cpplib.Ns.Name`).
 pub(crate) fn root_edge_endpoint(
     language: &str,
     endpoint: &str,
