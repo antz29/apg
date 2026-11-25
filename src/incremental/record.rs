@@ -18,6 +18,12 @@ use super::prepare::State;
 /// full scan (empty) every located file's unit is written so the shared store
 /// stays complete and reusable. A target the assembled graph does not carry is
 /// skipped — a stale unit would be a correctness bug, not a saving.
+///
+/// The one record commit ([`FactStore::save_index`]) is followed by the
+/// housekeeping hand-off, each step in a transaction of its own and never inside
+/// that commit: the scan's intent is cleared, then the reachability collector
+/// ([`crate::cache::gc::collect`]) runs. Both are best-effort — the scan is
+/// already durably recorded by then.
 pub fn record(
     store_root: &Path,
     cache_key: &CacheKey,
@@ -130,6 +136,26 @@ pub fn record(
     // ONE commit: the per-file units, scaffolding, refs/registry, the scan row
     // and the delta rows land together.
     store.save_index()?;
+
+    // Only once that commit has returned: clear the scan intent in its own
+    // transaction (the held one was committed and taken, so this opens a new
+    // one), then let the collector run in the collector's own transaction —
+    // never inside the record transaction, and never on its error path. Both are
+    // best-effort: the scan is durably recorded by now, so a reclamation hiccup
+    // must not turn it into a failed scan. A missed clear is bounded by the
+    // intent grace period (and clearing an absent intent is a no-op, so the
+    // scan driver's own post-pipeline clear stays harmless); a missed collection
+    // is simply retried by the next scan.
+    if let Err(err) = store.remove_intent(id).and_then(|()| store.save_index()) {
+        eprintln!("[scan] scan intent clear skipped: {err:#}");
+    }
+    if let Err(err) = crate::cache::gc::collect(
+        store_root,
+        crate::cache::gc::unix_now(),
+        crate::cache::gc::INTENT_GRACE_SECS,
+    ) {
+        eprintln!("[scan] fact collection skipped: {err:#}");
+    }
     Ok(())
 }
 
