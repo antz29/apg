@@ -140,8 +140,21 @@ SCAN OPTIONS:
                                repeated; auto-detected for every language
                                present if omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
-  --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
-                               repeatable)
+  --module <dir>              Restrict the scan to this directory and its
+                               subtree (repeatable): a relative value resolves
+                               against the scan root, an absolute value passes
+                               through unchanged, and a missing directory or a
+                               non-directory fails the scan with a named error.
+                               Honoured by every frontend apg ships — the code
+                               languages (java, go, cpp, rust, ts/js, csharp,
+                               py, cobol, sql, ps), the agent-definition
+                               frontend and every bundled structural stream
+                               (md, sh, yaml, json, toml, xml, dockerfile,
+                               makefile, ini, sln, misc). TypeScript selects
+                               whole npm packages: a value at or above a
+                               package root selects that package's subtree, a
+                               value inside a package (e.g. packages/app/src)
+                               selects nothing.
   --std <dialect>             COBOL dialect: cobol85 (default), cobol2002,
                                cobol2014 or ibm (overrides cobol.dialect in
                                apg/config.json; cobol2023 is refused)

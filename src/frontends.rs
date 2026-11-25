@@ -493,8 +493,13 @@ pub fn id_prefix_for(language: &str) -> &'static str {
 ///   appends its own language directory under it (`<cache-dir>/<language>/`).
 ///
 /// The frontend persists its native incremental artifact under
-/// `<cache-dir>/<language>/`. Every frontend resolves against the FULL
-/// context and only emission is filtered (`global.constraint.frontend-full-context`).
+/// `<cache-dir>/<language>/`. A language selected by `--module` restricts its
+/// scan at discovery or load to the named directory and its subtree, so only an
+/// unselected whole-tree scan resolves against the full context; `--targets`
+/// filters emission — which files' declarations and file records are emitted —
+/// not loading. The TypeScript arm selects whole npm packages: a `--module`
+/// value at or above a package root selects that package's subtree, while a
+/// value inside a package (e.g. `packages/app/src`) selects nothing.
 #[derive(Debug, Clone, Default)]
 pub struct FrontendHandoff {
     /// When true, a `--targets <file>` list is written into the scan's temp dir
