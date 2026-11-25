@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "gc-collectable-root-scope-limits",
+  "body": "Unit reachability is ref-based `(rel, oid)` only, and every stored scaffolding row roots its body, so a unit under a superseded format/config digest that still matches a live ref survives, and a superseded config-digest's scaffolding row is never retired. The leak is bounded (one scaffolding body per language x config) and costs store growth, never a wrong fact; upgrade when store growth across config changes must be reaped, by scoping units and scaffolding to the live worktree's current cache key.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.gc.collectable",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

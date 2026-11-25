@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "gc-collect-dead-worktree-and-snapshot-window",
+  "body": "A dead worktree's refs/scans/deps rows are never removed - only its bodies and units are collected - so its manifest rows linger; and the read view is taken before the write transaction opens, so a unit another worktree reuses and commits a manifest for in that window can be collected (the next scan re-derives it: a cache miss, never a wrong fact). Upgrade when `WriteTxn::remove_worktree` should be driven from the collector, or when taking the write transaction before the snapshot is confirmed safe for redb readers.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.gc.collect",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
