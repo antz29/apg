@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-build-deps",
+  "body": "bicepfrontend builds from the standalone src/biceplib crate with stable Rust 1.100.0, pinned by the repo-root rust-toolchain.toml, and crates.io access, with zero C compiler.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

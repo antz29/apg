@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-source-claim",
+  "body": "The Terraform frontend claims .tf, .tf.json, .tfvars, .tfvars.json, .tofu, .tofu.json, .tftest.hcl, .tofutest.hcl and .terraform.lock.hcl files in any letter case, and language detection and the incremental language map name the same claim.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-scan-integration",
+      "properties": {}
+    }
+  ]
+}

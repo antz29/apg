@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-scan-integration",
+  "body": "The apg scan admits Bicep as one language with its own claim, code types, language root, build artefact and packaging.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.bicep-frontend",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-reference-unresolved",
+  "body": "A declaration traversal naming no declaration of its own module is an unresolved use of category unknown, named by its declaration prefix as written, such as var.region or aws_vpc.main.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

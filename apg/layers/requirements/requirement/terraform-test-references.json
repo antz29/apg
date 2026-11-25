@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-test-references",
+  "body": "A reference inside a test file resolves against the test file's owning module from the run Struct that holds it, and a run block's module source resolves as a module block's source does.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

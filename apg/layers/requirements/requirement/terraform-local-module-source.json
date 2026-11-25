@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-local-module-source",
+  "body": "A literal module source beginning ./ or ../ resolves against the calling module's directory to one uses edge of kind module-source from the module Struct to each configuration File of the target directory's module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

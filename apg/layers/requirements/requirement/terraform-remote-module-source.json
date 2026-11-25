@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-remote-module-source",
+  "body": "Any other literal module source, a registry, git, mercurial, http, s3, gcs or oci address or an absolute path, is an unresolved use of category external from the module Struct, named by the source string as written.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

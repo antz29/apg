@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-missing-local-module",
+  "body": "A local module source whose target directory holds zero claimed configuration files, or lies above the repository root, is an unresolved use of category unknown named by its normalised path.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

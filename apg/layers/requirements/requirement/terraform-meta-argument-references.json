@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-meta-argument-references",
+  "body": "Each depends_on and replace_triggered_by entry resolves as a declaration traversal, and a provider or providers value such as aws.west resolves to the provider.aws.west Struct of its own module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

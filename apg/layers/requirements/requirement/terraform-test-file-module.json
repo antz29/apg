@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-test-file-module",
+  "body": "A .tftest.hcl or .tofutest.hcl file directly inside a directory named tests belongs to its parent directory's module, and any other test file belongs to its own directory's module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-module-identity",
+      "properties": {}
+    }
+  ]
+}

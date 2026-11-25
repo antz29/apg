@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-source-claim",
+  "body": "The Bicep frontend claims .bicep and .bicepparam files in any letter case, and language detection and the incremental language map name the same claim.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

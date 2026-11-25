@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-tfvars-unresolved",
+  "body": "A variable-definition key naming no variable of the same-directory module is an unresolved use of category unknown named var.<key>.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

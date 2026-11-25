@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-id-prefix",
+  "body": "A merged scan gives the Bicep stream the opaque-id prefix bp, distinct from every other stream's prefix and from the unknown-language fallback.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

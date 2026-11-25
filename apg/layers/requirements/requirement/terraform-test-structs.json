@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-test-structs",
+  "body": "A test file is one Struct named test.<path relative to its module's directory>, and each run block in it is a Struct named run.<name> contained by that test Struct.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

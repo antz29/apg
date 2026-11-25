@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-duplicate-declaration",
+  "body": "A Bicep unit whose Struct or Function name repeats an earlier one in the same scope keeps the earlier declaration, and the repeat is one stderr diagnostic line.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-tfvars-binding",
+  "body": "A .tfvars or .tfvars.json file is one Struct named tfvars.<file name>, and each of its top-level keys is a uses edge from that Struct to the var.<key> Struct of the module in the same directory.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

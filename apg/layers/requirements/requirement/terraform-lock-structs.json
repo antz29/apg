@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-lock-structs",
+  "body": "Each provider block of a .terraform.lock.hcl file is a Struct named lock.<provider source address>, contained by the lock File and rooted under its directory's module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

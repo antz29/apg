@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-id-prefix",
+  "body": "A merged scan gives the Terraform stream the opaque-id prefix tf, distinct from every other stream's prefix and from the unknown-language fallback.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-scan-integration",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-extends-dependency",
+  "body": "An extends statement whose path names a scanned .bicepparam file is one uses edge of kind extends from the extends Struct to that File.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

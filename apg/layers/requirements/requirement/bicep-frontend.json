@@ -1,0 +1,48 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-frontend",
+  "body": "An Azure Bicep template or parameter file's facts reach the program graph through the standalone bicepfrontend binary under the bicep language id, streamed in the unified JSONL schema.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-declaration-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.iac-codebase-owner",
+      "properties": {}
+    }
+  ]
+}

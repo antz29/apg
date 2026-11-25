@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-param-file-structs",
+  "body": "In a .bicepparam file each param assignment is a Struct named param.<name>, a using statement a Struct named using, and an extends statement a Struct named extends, each contained by its File.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

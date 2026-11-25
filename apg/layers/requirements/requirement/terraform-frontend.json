@@ -1,0 +1,48 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-frontend",
+  "body": "A Terraform or OpenTofu source file's facts reach the program graph through the standalone terraformfrontend binary under the terraform language id, streamed in the unified JSONL schema.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-block-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-scan-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "requires",
+      "source": "requirements.user.iac-codebase-owner",
+      "properties": {}
+    }
+  ]
+}

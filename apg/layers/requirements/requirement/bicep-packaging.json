@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-packaging",
+  "body": "The apg-bicep formula is a per-language formula in the release set beside the base scanner formula, the Linux release builds bicepfrontend as its own apg-bicep package, and install.sh offers it as a language.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

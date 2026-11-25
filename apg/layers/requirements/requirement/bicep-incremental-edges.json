@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-incremental-edges",
+  "body": "An incremental rescan after a change to any Bicep files yields the same Bicep nodes and edges, across the whole graph, as a full scan of the same tree.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

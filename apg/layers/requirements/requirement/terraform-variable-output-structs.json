@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-variable-output-structs",
+  "body": "A variable block is a Struct named var.<name> and an output block a Struct named output.<name>, each contained by its File and rooted under its module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-block-facts",
+      "properties": {}
+    }
+  ]
+}

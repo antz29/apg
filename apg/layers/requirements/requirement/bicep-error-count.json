@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-error-count",
+  "body": "The Bicep frontend closes each scan with one stderr line stating the number of Bicep files that had syntax errors.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

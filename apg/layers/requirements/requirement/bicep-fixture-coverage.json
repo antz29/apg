@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-fixture-coverage",
+  "body": "Fixtures cover every declaration kind, child and existing resources, decorators, interpolated strings, local and registry modules, imports, funcs, parameter files with using, using none and extends, and a file with syntax errors.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

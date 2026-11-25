@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-auto-detection",
+  "body": "Auto-detection selects the Bicep frontend whenever bicepfrontend is installed and the scanned tree holds a .bicep or .bicepparam file in any letter case.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

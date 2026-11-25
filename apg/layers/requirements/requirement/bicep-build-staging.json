@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-build-staging",
+  "body": "The build compiles bicepfrontend from src/biceplib when APG_BUILD_FRONTENDS names bicep, and stages it into the frontends directory beside the other frontends.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

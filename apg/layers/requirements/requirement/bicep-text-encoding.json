@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-text-encoding",
+  "body": "A Bicep file is read as UTF-8 text with an optional byte-order mark and LF or CRLF line endings, and its line spans count the lines of that text.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

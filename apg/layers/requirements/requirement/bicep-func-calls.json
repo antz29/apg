@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-func-calls",
+  "body": "A call inside a func body to a func of the same file is a calls edge from the calling func's Function to the called func's Function.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

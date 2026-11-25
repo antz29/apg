@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-scan-time-deps",
+  "body": "terraformfrontend is a self-contained binary that never shells out, so a Terraform scan needs zero scan-time tools and zero network, and the scan preflight's tool set for terraform is empty.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-scan-integration",
+      "properties": {}
+    }
+  ]
+}

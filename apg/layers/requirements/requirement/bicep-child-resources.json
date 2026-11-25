@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-child-resources",
+  "body": "A resource declared inside another resource's body is a Struct named by its symbolic name and contained by its parent resource's Struct, at any nesting depth.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

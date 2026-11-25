@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-scan-language-flag",
+  "body": "apg scan accepts bicep as a --language value, and the apg_scan suite tool lists bicep among its scannable languages.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

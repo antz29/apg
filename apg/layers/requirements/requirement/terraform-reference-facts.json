@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-reference-facts",
+  "body": "Each reference, meta-argument reference and module source in a Terraform file is an edge to the target the scan proves it reaches, or else to a categorised unresolved target.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

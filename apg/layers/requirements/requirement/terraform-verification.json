@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-verification",
+  "body": "The Terraform frontend is verified by its own crate's unit, int and e2e tiers and by the root scan e2e tests/terraform_scan_e2e.rs, against fixture configurations built inside the tests.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-fixture-coverage",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

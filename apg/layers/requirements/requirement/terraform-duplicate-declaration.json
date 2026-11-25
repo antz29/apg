@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-duplicate-declaration",
+  "body": "A base-file declaration whose Struct name repeats an earlier one of its module, ordered by file path then source position, keeps the earlier declaration, and the repeat is one stderr diagnostic line.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}

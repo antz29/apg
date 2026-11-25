@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-local-structs",
+  "body": "Each entry of a locals block is a Struct named local.<name>, spanning that entry, contained by its File and rooted under its module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-block-facts",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-registry-reference",
+  "body": "A br:, br/<alias>:, ts: or ts/<alias>: reference in a module, using or import statement is an unresolved use of category external from its Struct, named by the reference string as written.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

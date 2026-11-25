@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-local-module-path",
+  "body": "A relative module path, resolved against the referencing file's directory, that names a scanned .bicep or ARM .json template is one uses edge of kind module from the module Struct to that File.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

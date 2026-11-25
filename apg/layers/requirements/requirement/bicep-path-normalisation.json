@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-path-normalisation",
+  "body": "A relative Bicep path normalises to a repository-relative path by dropping each . segment and each .. segment together with the segment before it, and a path rising above the repository root names no scanned file.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

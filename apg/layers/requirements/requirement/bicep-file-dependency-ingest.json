@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-file-dependency-ingest",
+  "body": "The ingestor keeps each Bicep Struct-to-File uses edge of kind module, using, extends or import whose File target is repo-relative, in both a full build and a spliced incremental build.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

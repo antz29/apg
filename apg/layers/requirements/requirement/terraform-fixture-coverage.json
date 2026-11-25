@@ -1,0 +1,17 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-fixture-coverage",
+  "body": "Fixtures cover every claimed suffix, resources, data, variables, outputs, locals, providers, local and remote module calls, overrides, tfvars, tests, a lock file, .tofu shadowing and a file that fails to parse.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-verification",
+      "properties": {}
+    }
+  ]
+}

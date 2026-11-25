@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-using-dependency",
+  "body": "A using statement whose path names a scanned file is one uses edge of kind using from the using Struct to that File, and a using none statement is a using Struct with zero edges.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

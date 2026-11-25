@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-declaration-structs",
+  "body": "A param, var, resource, existing resources included, module, output or type declaration is a Struct named <keyword>.<name>, such as resource.stg, contained by its File and rooted under its file module.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

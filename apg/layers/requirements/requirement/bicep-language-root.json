@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-language-root",
+  "body": "The language id bicep is a member of the canonical language-root set, so Bicep modules, files and symbols root under the bicep Language node and an implementation constraint's applies-to edge may name it.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

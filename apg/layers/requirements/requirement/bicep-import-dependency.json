@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-import-dependency",
+  "body": "Each import Struct whose source path names a scanned file is one uses edge of kind import to that File, plus a uses edge to the source's exported type or var Struct of the imported name.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

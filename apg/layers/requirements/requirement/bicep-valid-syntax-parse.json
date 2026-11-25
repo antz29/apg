@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-valid-syntax-parse",
+  "body": "Bicep valid within the language ceiling parses with zero errors, decorators, interpolated and multi-line strings, spreads, lambdas, typed vars, resource-typed params and outputs, and nested child resources included.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": []
+}

@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-context-values",
+  "body": "A count, each, self, path or terraform traversal, a for-expression or dynamic-block iterator variable, and a function call are evaluation-context values that draw zero edges.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": []
+}
