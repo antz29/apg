@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-node-modifies-is-licensed-by-an-earlier-creates",
+  "body": "A modifies task authored against a planned node is licensed at verify only when another task creates that FQN in an earlier phase and the branch graph carries the realized node.",
+  "properties": {
+    "feature": "task-assignment"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}
