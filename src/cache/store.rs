@@ -39,9 +39,14 @@ use serde::de::DeserializeOwned;
 
 use crate::cache::body::BodyId;
 
-/// The fact store's explicit format version: the rebuild predicate. A stored
-/// database recording any other value is discarded and rebuilt on open.
-pub const FACTS_FORMAT_VERSION: u32 = 1;
+/// The fact store's explicit format version: the rebuild predicate. This
+/// generation carries the manifest-free per-worktree scan row and the per-path
+/// refs writes, so a store written at format 1 is dropped and rebuilt on open —
+/// the one full scan the `fact-format-change-rebuilds-the-store` requirement
+/// sanctions for correctness. [`crate::cache::CacheKey`] folds this constant in
+/// its `format` field, so no pre-change scan row or refs set is ever mixed with
+/// the new encoding.
+pub const FACTS_FORMAT_VERSION: u32 = 2;
 
 /// How long [`Store::begin_write`] waits for a competing writer before failing
 /// with [`contention_error`].
