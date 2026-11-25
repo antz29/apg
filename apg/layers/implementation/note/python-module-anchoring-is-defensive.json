@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "python-module-anchoring-is-defensive",
-  "body": "`parse_args` composes each `--module` value as `args.root.join(value)`, so `run`'s canonical-root anchoring is defensive rather than the CWD fix the bug write-up described — for a relative scan root the value arrives already root-joined and the two orderings coincide, the only divergence being a symlinked scan root combined with a `..`-bearing value; upgrade by moving the join out of `parse_args` when the resolution rule must be provable from `run` alone.",
+  "body": "`parse_args` composes each `--module` value as `args.root.join(value)`, so `run`'s canonical-root anchoring is defensive rather than the CWD fix the bug write-up described — for a relative scan root the value arrives already root-joined, and the old and new orderings resolve to the same real path for every traced input (plain relative, `..`-bearing under a relative or absolute root, a symlinked root, and a symlinked root with a `..`); the only real delta is on canonicalize failure, where the fallback switches from a raw possibly-relative value to the anchored absolute (emission-invisible, since a nonexistent dir admits nothing); upgrade by moving the join out of `parse_args` when the resolution rule must be provable from `run` alone.",
   "properties": {},
   "out": [
     {
