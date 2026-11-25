@@ -199,4 +199,96 @@ mod e2e {
             "each file contains its own module-nested function"
         );
     }
+
+    /// A source directory whose name contains a dot (`src/foo.bar`) is ONE
+    /// module identity — `cpp.src/foo.bar` — with no phantom ancestor module
+    /// (`cpp.src/foo`) and no checkout-named identity: the module record, its
+    /// file's parent and the declaration's scope all agree on that path.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/cppfrontend/db.lbug/git); run via cargo test-e2e"]
+    fn dotted_directory_name_is_one_module_identity() {
+        let repo = cpp_repo(
+            "cpp-dotted-dir",
+            &[("src/foo.bar/one.cpp", "int dotted() { return 7; }\n")],
+        );
+        scan_cpp(&repo, &[]);
+
+        let modules = column(
+            &query_rows(
+                &repo,
+                "MATCH (n:Module) WHERE n.fqn STARTS WITH 'cpp.' RETURN n.fqn ORDER BY n.fqn",
+            ),
+            "n.fqn",
+        );
+        assert_eq!(
+            modules,
+            vec!["cpp.src/foo.bar".to_string()],
+            "a dotted directory name is exactly one module identity"
+        );
+        assert!(
+            !modules.iter().any(|m| m == "cpp.src/foo"),
+            "the dot in `foo.bar` must not fabricate the ancestor module `cpp.src/foo`: {modules:?}"
+        );
+
+        let checkout = repo
+            .root
+            .file_name()
+            .expect("checkout basename")
+            .to_string_lossy();
+        for fqn in &modules {
+            assert!(
+                !fqn.contains(checkout.as_ref()),
+                "module {fqn} must not carry the checkout basename {checkout}"
+            );
+        }
+
+        let module_files = pairs(
+            &query_rows(
+                &repo,
+                "MATCH (m:Module)-[:Contains]->(f:File) WHERE m.fqn STARTS WITH 'cpp.' \
+                 RETURN m.fqn, f.fqn ORDER BY f.fqn",
+            ),
+            "m.fqn",
+            "f.fqn",
+        );
+        assert_eq!(
+            module_files,
+            vec![(
+                "cpp.src/foo.bar".to_string(),
+                "src/foo.bar/one.cpp".to_string()
+            )],
+            "the file's parent is the one dotted-path identity"
+        );
+
+        let functions = column(
+            &query_rows(
+                &repo,
+                "MATCH (n:Function) WHERE n.fqn STARTS WITH 'cpp.' RETURN n.fqn ORDER BY n.fqn",
+            ),
+            "n.fqn",
+        );
+        assert_eq!(
+            functions,
+            vec!["cpp.src/foo.bar.dotted".to_string()],
+            "the declaration's scope agrees on the dotted-path module"
+        );
+
+        let file_functions = pairs(
+            &query_rows(
+                &repo,
+                "MATCH (f:File)-[:Contains]->(fn:Function) WHERE fn.fqn STARTS WITH 'cpp.' \
+                 RETURN f.fqn, fn.fqn ORDER BY fn.fqn",
+            ),
+            "f.fqn",
+            "fn.fqn",
+        );
+        assert_eq!(
+            file_functions,
+            vec![(
+                "src/foo.bar/one.cpp".to_string(),
+                "cpp.src/foo.bar.dotted".to_string()
+            )],
+            "the file contains its dotted-module-nested function"
+        );
+    }
 }
