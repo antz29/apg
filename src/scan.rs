@@ -151,6 +151,27 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         .iter()
         .map(|d| project_dir.join(d).display().to_string())
         .collect();
+    // `--module` values resolve against the scan root, never the process CWD: a
+    // relative value joins the canonicalised project dir, an absolute value
+    // passes through verbatim, and a value that names a missing directory or a
+    // non-directory fails here — before the version gate, the fact store, the
+    // `apg/.trans` chdir and any frontend spawn.
+    let mut resolved_modules: Vec<String> = Vec::with_capacity(module_dirs.len());
+    for requested in &module_dirs {
+        let path = if PathBuf::from(requested).is_absolute() {
+            PathBuf::from(requested)
+        } else {
+            project_dir.join(requested)
+        };
+        if !path.is_dir() {
+            anyhow::bail!(
+                "`--module {requested}` does not name a directory: {} is missing or not a directory",
+                path.display()
+            );
+        }
+        resolved_modules.push(path.display().to_string());
+    }
+    module_dirs = resolved_modules;
 
     // The checkout-independent identity base (`requirements.requirement.
     // repo-relative-file-identity`): the git toplevel, or the scan root when
