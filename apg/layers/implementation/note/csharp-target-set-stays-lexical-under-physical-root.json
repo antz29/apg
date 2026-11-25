@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "csharp-target-set-stays-lexical-under-physical-root",
+  "body": "`ReadTargetSet` keeps `--targets` entries lexically normalised while `Program.Main` resolves the scan root physically, so a target list spelled through a symlink would not match a physically-resolved root. Production target lists are canonical today. Upgrade when the ingestor can hand lexical target spellings.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.CsharpFrontend.Program.ReadTargetSet",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

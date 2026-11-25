@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "java-module-selection-relies-on-lexical-walk",
+  "body": "`CallGraphBuilder.main` physically resolves each `--module` root but re-expresses it under the scan root's lexical spelling when it lies inside it, so selection relies on `SourceDiscovery.collect` continuing to emit `p.toAbsolutePath().normalize()` lexical paths for a possibly symlink-spelled root; an out-of-tree absolute value keeps its physical spelling, which is harmless because the walk never visits outside the root. Upgrade to resolving the scan root once and passing it to `collect`/`ScanRunner` when the walk's path spelling changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "java.SourceDiscovery.collect",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

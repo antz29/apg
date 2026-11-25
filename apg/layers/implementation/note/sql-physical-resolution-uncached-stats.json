@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sql-physical-resolution-uncached-stats",
+  "body": "`SchemaEmitter.Physical` stats every path component of every target with no cache, so a long `--targets` list performs one component walk per target per scan. Upgrade when per-scan target-list sizes make those stats measurable.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.Physical",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

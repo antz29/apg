@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "sql-symlinked-leaf-target-not-resolved",
+  "body": "`ResolveFirstLink` resolves symlinked directory components of a target path but leaves a symlinked leaf `.sql`/`.sqlproj` file's own link unresolved, so a target list naming a symlinked file keeps the link spelling. Upgrade when a target list may itself name a symlinked file.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "csharp.Apg.SqlFrontend.SchemaEmitter.ResolveFirstLink",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

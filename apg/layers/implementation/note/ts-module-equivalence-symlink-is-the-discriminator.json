@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ts-module-equivalence-symlink-is-the-discriminator",
+  "body": "In `scanner.test.ts` the relative/absolute `--module` equivalence case also passes under the pre-change lexical code (both spellings agree inside one temp dir); the symlinked-package case is the one that distinguishes physical from lexical resolution. Upgrade to a symlinked-root equivalence case if `cmd_scan` ever stops resolving the scan root before spawning.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "ts.apg-tsfrontend.scanner.test.scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

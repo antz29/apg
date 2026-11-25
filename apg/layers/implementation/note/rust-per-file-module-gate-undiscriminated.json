@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "rust-per-file-module-gate-undiscriminated",
+  "body": "The per-file module-containment gate in `scanner::scan` has no discriminating test at the pinned rust-analyzer tag 2026-08-17: `load-cargo` populates the VFS only from package manifest dirs, target roots and out dirs, so every emitted file of an admitted crate already lies under its crate root and under the selected dir, and the gate can only withhold a file after a loader change widens the VFS. Upgrade when a loader change can make an out-of-root file reachable and the guard becomes testable.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg-rustfrontend.scanner.scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

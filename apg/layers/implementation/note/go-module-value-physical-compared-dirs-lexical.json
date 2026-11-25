@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "go-module-value-physical-compared-dirs-lexical",
+  "body": "`absRestrict` resolves each `--module` value to its physical path, but `dirAllowed` still compares it against the lexical `filepath.Abs`/walk dirs, so a scan root whose own spelling differs physically from its canonical path is reconciled only for the module value, not the walked dir; today `go list -m` emits physical dirs and the CLI roots the walk at the canonicalised scan root. Upgrade when a `go list -m` Dir or a walk path can itself arrive symlink-spelled and diverge from the resolved module dir.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "go.apg/gofrontend.absRestrict",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

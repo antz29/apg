@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "rust-module-limit-assumes-canonical-paths",
+  "body": "`within_module_limit` compares a VFS file path against the canonicalised `--module` dirs with `Path::starts_with`, assuming the VFS yields absolute crate-root paths and the dirs are canonical. A loader that yields relative VFS paths would make a non-empty selection reject every file. Upgrade when the VFS path source changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg-rustfrontend.identity.within_module_limit",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
