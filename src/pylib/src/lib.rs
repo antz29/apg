@@ -239,11 +239,28 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
 }
 
 pub fn run(args: Args) -> io::Result<()> {
-    let root = std::fs::canonicalize(&args.root).unwrap_or(args.root);
+    let root = std::fs::canonicalize(&args.root).unwrap_or_else(|_| args.root.clone());
     let module_dirs: Vec<PathBuf> = args
         .module_dirs
         .iter()
-        .map(|d| std::fs::canonicalize(d).unwrap_or_else(|_| d.clone()))
+        .map(|d| {
+            // A relative `--module` value resolves against the canonicalised
+            // scan root, never the process CWD; an absolute value passes
+            // through unchanged. `parse_args` composed each relative value as
+            // `args.root.join(value)`, so strip that (possibly relative) root
+            // prefix first — otherwise a relative scan root would be joined
+            // twice. A value that did not come from `args.root` (already raw)
+            // falls through to the direct join.
+            let anchored = if d.is_absolute() {
+                d.clone()
+            } else {
+                match d.strip_prefix(&args.root) {
+                    Ok(rel) => root.join(rel),
+                    Err(_) => root.join(d),
+                }
+            };
+            std::fs::canonicalize(&anchored).unwrap_or(anchored)
+        })
         .collect();
     let target_set = read_target_set(args.targets_path.as_deref());
     ensure_artifact_dir(args.cache_dir.as_deref(), args.cache_key.as_deref());

@@ -6,7 +6,8 @@
 mod common;
 
 use common::{
-    edge_target, has_edge, module_fqns, node_id, records, run_frontend, scratch_dir, write_file,
+    edge_target, frontend_bin, has_edge, module_fqns, node_id, records, run_frontend, scratch_dir,
+    write_file,
 };
 
 /// e2e tier -- real I/O: every test here writes a scratch `/tmp` fixture
@@ -429,6 +430,65 @@ mod e2e {
         assert!(
             unresolved.iter().all(|(_, category)| category != "stdlib"),
             "a venv dependency must never be classified stdlib: {unresolved:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: spawns the built frontend over a scratch temp dir; run via cargo test-e2e"]
+    fn relative_module_value_resolves_against_the_scan_root() {
+        // A relative `--module A` (cwd = the tree, scan root given as `.`)
+        // and the absolute form must emit the identical restricted record
+        // set: A's records and no B record. The value resolves against the
+        // scan root, not the process CWD.
+        let root = scratch_dir("module-relative");
+        write_file(&root, "A/__init__.py", "");
+        write_file(&root, "A/mod_a.py", "def a():\n    return 1\n");
+        write_file(&root, "B/__init__.py", "");
+        write_file(&root, "B/mod_b.py", "def b():\n    return 2\n");
+        let abs_a = root.join("A").to_string_lossy().into_owned();
+
+        let run = |scan_root: &std::ffi::OsStr, module: &str| -> String {
+            let output = std::process::Command::new(frontend_bin())
+                .current_dir(&root)
+                .arg(scan_root)
+                .arg("--module")
+                .arg(module)
+                .env("PATH", "")
+                .output()
+                .expect("spawn pyfrontend");
+            assert!(
+                output.status.success(),
+                "pyfrontend failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+
+        let relative = run(std::ffi::OsStr::new("."), "A");
+        let absolute = run(root.as_os_str(), &abs_a);
+
+        let mut relative_recs = records(&relative);
+        let mut absolute_recs = records(&absolute);
+        relative_recs.sort_by_key(|r| r.to_string());
+        absolute_recs.sort_by_key(|r| r.to_string());
+        assert_eq!(
+            relative_recs, absolute_recs,
+            "a relative `--module` and its absolute form must select the identical records"
+        );
+
+        // The restricted set contains A's file and no B record.
+        let file_paths: Vec<String> = relative_recs
+            .iter()
+            .filter(|r| r["type"] == "file")
+            .filter_map(|r| r["path"].as_str().map(str::to_string))
+            .collect();
+        assert!(
+            file_paths.iter().any(|p| p.ends_with("A/mod_a.py")),
+            "the selected subtree's file must be emitted: {file_paths:?}"
+        );
+        assert!(
+            file_paths.iter().all(|p| !p.contains("mod_b.py")),
+            "no file outside the selected subtree may be emitted: {file_paths:?}"
         );
     }
 }
