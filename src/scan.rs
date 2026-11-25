@@ -163,11 +163,16 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         .iter()
         .map(|d| project_dir.join(d).display().to_string())
         .collect();
-    // `--module` values resolve against the scan root, never the process CWD: a
-    // relative value joins the canonicalised project dir, an absolute value
-    // passes through verbatim, and a value that names a missing directory or a
-    // non-directory fails here — before the version gate, the fact store, the
-    // `apg/.trans` chdir and any frontend spawn.
+    // `--module` values resolve against the canonical scan root, never the
+    // process CWD: a relative value joins that root, an absolute value passes
+    // through unchanged. A value naming a missing directory or a non-directory
+    // fails here — before the version gate, the fact store, the `apg/.trans`
+    // chdir and any frontend spawn — and a resolved directory is canonicalised
+    // to its physical, `..`-free absolute form, so every frontend receives one
+    // spelling and a `..` crossing a symlink selects the same subtree in all of
+    // them (lexical normalisation would name a different, possibly absent,
+    // path). The lexical path stays the fallback when an existing directory
+    // cannot be canonicalised, so a working scan never regresses.
     let mut resolved_modules: Vec<String> = Vec::with_capacity(module_dirs.len());
     for requested in &module_dirs {
         let path = if PathBuf::from(requested).is_absolute() {
@@ -181,6 +186,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 path.display()
             );
         }
+        let path = path.canonicalize().unwrap_or(path);
         resolved_modules.push(path.display().to_string());
     }
     module_dirs = resolved_modules;

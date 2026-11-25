@@ -173,6 +173,57 @@ mod e2e {
         remove(&repo);
     }
 
+    /// A `--module` value whose `..` crosses a symlink names the PHYSICAL
+    /// subtree: with `inner/link -> ../A`, `inner/link/../A` is physically
+    /// `A`. A lexical normalisation yields the non-existent `inner/A` and
+    /// admits nothing, so this pins the one spelling every frontend receives.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo under /tmp, spawned apg); run via cargo test-e2e"]
+    fn dotdot_crossing_a_symlink_selects_the_physical_subtree() {
+        let repo = module_repo("module-flag-symlink-dotdot");
+        std::fs::create_dir_all(repo.root.join("inner")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../A", repo.root.join("inner/link")).unwrap();
+        #[cfg(not(unix))]
+        {
+            println!(
+                "skipping dotdot_crossing_a_symlink_selects_the_physical_subtree: \
+                 symlink creation is unavailable on this platform"
+            );
+            return;
+        }
+        repo.commit_all("fixture symlink");
+
+        let (out, log) = scan(&repo, &["--module", "inner/link/../A"]);
+        assert!(
+            out.status.success(),
+            "`--module inner/link/../A` scan: {log}"
+        );
+        assert_admits(
+            &repo,
+            "symlink-crossing .. resolves physically",
+            &["A/one.md"],
+        );
+
+        // The driver resolved that value to the physical `A`, so re-requesting
+        // the subtree as the plain `A` names the same recorded selection and
+        // reuses it. A driver that carried the `..`-bearing spelling would
+        // record a different selection and report STALE here.
+        let (out, log) = scan(&repo, &["--module", "A"]);
+        assert!(out.status.success(), "`--module A` re-scan: {log}");
+        assert!(
+            log.contains("→ FRESH") && log.contains("fast-path"),
+            "`A` and `inner/link/../A` must resolve to one recorded selection: {log}"
+        );
+        assert_admits(
+            &repo,
+            "the same physical subtree re-requested",
+            &["A/one.md"],
+        );
+
+        remove(&repo);
+    }
+
     /// One unchanged scratch tree: a flagless whole-tree scan, a `--module A`
     /// re-scan, a `--module B` re-scan and a final flagless re-scan prove both
     /// freshness directions (whole→subtree and subtree→whole) plus subtree→
