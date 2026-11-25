@@ -6,7 +6,13 @@
   "properties": {
     "feature": "bicep-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-fixture-coverage",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

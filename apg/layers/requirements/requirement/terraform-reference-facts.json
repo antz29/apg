@@ -6,7 +6,58 @@
   "properties": {
     "feature": "terraform-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-context-values",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-dynamic-module-source",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-local-module-source",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-meta-argument-references",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-missing-local-module",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-path-normalisation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-reference-unresolved",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-reference-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-remote-module-source",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-test-references",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

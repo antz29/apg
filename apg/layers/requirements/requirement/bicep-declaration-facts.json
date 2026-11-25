@@ -6,7 +6,38 @@
   "properties": {
     "feature": "bicep-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-child-resources",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-declaration-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-duplicate-declaration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-func-functions",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-import-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-param-file-structs",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

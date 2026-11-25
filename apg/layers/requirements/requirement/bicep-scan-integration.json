@@ -6,7 +6,78 @@
   "properties": {
     "feature": "bicep-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-auto-detection",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-build-deps",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-build-staging",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-code-type",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-file-dependency-ingest",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-id-prefix",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-incremental-edges",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-language-ceiling",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-language-root",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-packaging",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-scan-language-flag",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-scan-time-deps",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-structural-handoff",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

@@ -6,7 +6,63 @@
   "properties": {
     "feature": "bicep-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-child-references",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-context-values",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-extends-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-func-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-import-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-local-module-path",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-missing-local-path",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-path-normalisation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-registry-reference",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-symbol-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-using-dependency",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

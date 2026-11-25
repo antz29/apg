@@ -9,7 +9,17 @@
   "out": [
     {
       "kind": "contains",
+      "target": "requirements.requirement.terraform-duplicate-declaration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.terraform-local-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-lock-structs",
       "properties": {}
     },
     {
@@ -19,7 +29,37 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.terraform-override-merge",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-provider-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.terraform-resource-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-test-structs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-tfvars-binding",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-tfvars-unresolved",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-unmatched-override",
       "properties": {}
     },
     {

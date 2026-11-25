@@ -6,7 +6,13 @@
   "properties": {
     "feature": "bicep-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-file-module",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
