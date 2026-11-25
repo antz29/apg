@@ -138,11 +138,19 @@ impl FullScanReason {
 }
 
 /// The prior scan record persisted under the shared store root: the commit the
-/// scan ran at, the global cache key it ran under, and its content manifest.
+/// scan ran at, the global cache key it ran under, and its content-identity
+/// key. The per-file manifest is NOT part of the row — a worktree's refs rows
+/// are its manifest — so the row stays O(1) rather than one postcard entry per
+/// tracked file. The in-memory `manifest` is populated by the recording scan
+/// only (for [`ScanRecord::save`]'s worktree id); a loaded record decodes with
+/// an empty one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanRecord {
     pub sha: String,
     pub cache_key: CacheKey,
+    /// Never persisted: this worktree's per-file manifest lives in its refs
+    /// rows, and the recording scan keeps this copy in memory.
+    #[serde(skip)]
     pub manifest: Manifest,
     /// The content-identity key of the tree this scan ran on (win A,
     /// phase-01) — the same key the scan records in the database's `Scan` row
@@ -272,8 +280,10 @@ pub fn scan_verdict(
 }
 
 /// The in-memory recorded scan plus its verdict at a checkout — ONE git
-/// discovery, no filesystem walk. The warm-cache seed path consumes the
-/// returned record's manifest; [`full_scan_reason`]/[`plan`] are thin wrappers.
+/// discovery, no filesystem walk. The stored row is manifest-free: this
+/// worktree's refs rows are its manifest (see [`ScanRecord`]), so the decoded
+/// record carries only `sha`/`cache_key`/`content_key`.
+/// [`full_scan_reason`]/[`plan`] are thin wrappers.
 pub fn scan_state(
     apg_root: &Path,
     store_root: Option<&Path>,
