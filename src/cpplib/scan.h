@@ -45,7 +45,12 @@ static int scan_root(const fs::path &root_arg,
     const bool explicit_modules = !module_dirs.empty();
     if (explicit_modules) {
         for (const auto &d : module_dirs) {
-            fs::path dir = d == "." ? root : fs::absolute(d);
+            // A relative --module value joins the scan-root argument, so the
+            // process working directory never decides; an absolute value is
+            // kept as given.
+            fs::path given(d);
+            fs::path dir = d == "." ? root
+                : (given.is_absolute() ? given : root / given);
             if (!fs::exists(dir)) {
                 fprintf(stderr, "Warning: module dir %s does not exist\n", d.c_str());
                 continue;

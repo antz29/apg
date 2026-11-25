@@ -20,6 +20,9 @@
 //       non-target file's own facts are absent;
 //   (c) the cross-file endpoint of an overloaded group carries the ingestor's
 //       `parent.name(params)` rendering (the overload suffix).
+// It also proves a relative --module value resolves against the scan-root
+// argument: it selects exactly the same subtree (the same record set) as its
+// absolute form, regardless of the process working directory.
 // It also pins the module identity: each source-holding directory's ABSOLUTE
 // path, with the module record, the file parent and the declaration scope in
 // agreement — a base-level source, a nested source-holding directory beside it,
@@ -168,6 +171,25 @@ static int run_self_test() {
     check(json_has(filtered, "\"name\":\"Derived\"") &&
             json_has(filtered, "\"name\":\"add\""),
         "(b) target file's declarations are still emitted");
+
+    // A relative --module value resolves against the scan-root argument, so it
+    // selects the same subtree as its absolute form whatever the process
+    // working directory is (the self-test never changes directory).
+    std::string rel_module, abs_module;
+    captureOut = &rel_module;
+    scan_root(dir, {"alpha"}, "", {});
+    captureOut = &abs_module;
+    scan_root(dir, {(dir / "alpha").string()}, "", {});
+    captureOut = nullptr;
+    check(rel_module == abs_module,
+        "a relative --module selects the same record set as the absolute form");
+    check(json_has(rel_module, "\"type\":\"file\",\"path\":\"" + base.string() + "\"") &&
+            json_has(rel_module, "\"type\":\"file\",\"path\":\"" + mainf.string() + "\""),
+        "the module selection admits the requested subtree's files");
+    check(!json_has(rel_module, rooted.string()) &&
+            !json_has(rel_module, nested.string()) &&
+            !json_has(rel_module, dotted.string()),
+        "the module selection admits no file outside the requested subtree");
 
     // The formerly depth-capped deep walk: a separate fixture root whose only
     // sources sit more than six levels down must be discovered.
