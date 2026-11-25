@@ -80,6 +80,62 @@ fn assert_admits(repo: &Repo, leg: &str, expected: &[&str]) {
     );
 }
 
+/// A committed scratch VIRTUAL Cargo workspace whose members are `crates/a`
+/// and its string-prefix sibling `crates/ab`. The Rust frontend needs a Cargo
+/// manifest, and the two members make the `--module crates/a` sibling-prefix
+/// admission case real (a string prefix would wrongly admit `crates/ab`).
+fn cargo_workspace_repo(tag: &str) -> Repo {
+    let repo = Repo::new(tag);
+    repo.write(
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/a\", \"crates/ab\"]\nresolver = \"2\"\n",
+    );
+    repo.write(
+        "crates/a/Cargo.toml",
+        "[package]\nname = \"crate-a\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    );
+    repo.write("crates/a/src/lib.rs", "pub fn a() {}\n");
+    repo.write(
+        "crates/ab/Cargo.toml",
+        "[package]\nname = \"crate-ab\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    );
+    repo.write("crates/ab/src/lib.rs", "pub fn ab() {}\n");
+    repo.commit_all("fixture");
+    repo
+}
+
+/// Runs `apg scan . --language rust --no-build-scripts [args]` in `repo` and
+/// returns the output plus its stderr text.
+fn scan_rust(repo: &Repo, args: &[&str]) -> (Output, String) {
+    let mut full = vec!["scan", ".", "--language", "rust", "--no-build-scripts"];
+    full.extend_from_slice(args);
+    let out = ApgCommand::new(&full).cwd(&repo.root).output();
+    let log = String::from_utf8_lossy(&out.stderr).to_string();
+    (out, log)
+}
+
+/// The admitted Rust source-file File FQNs under the fixture workspace's
+/// `crates/` tree, sorted.
+fn crate_files(repo: &Repo) -> Vec<String> {
+    let cypher =
+        "MATCH (f:File) WHERE f.fqn STARTS WITH 'crates/' AND f.fqn ENDS WITH '.rs' RETURN f.fqn";
+    let out = ApgCommand::new(&["query", "--json", cypher])
+        .cwd(&repo.root)
+        .output();
+    assert!(
+        out.status.success(),
+        "query {cypher}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).expect("json rows");
+    let mut files: Vec<String> = rows
+        .iter()
+        .map(|r| r["f.fqn"].as_str().unwrap_or_default().to_string())
+        .collect();
+    files.sort();
+    files
+}
+
 mod e2e {
     use super::*;
 
@@ -205,6 +261,42 @@ mod e2e {
             "the same whole-tree selection must reuse the recorded graph: {log}"
         );
         assert_admits(&repo, "whole tree reuse", &WHOLE);
+
+        remove(&repo);
+    }
+
+    /// RUST sibling-prefix containment: on one unchanged virtual Cargo
+    /// workspace, `--module crates/a` admits exactly crate a's sources and
+    /// never its string-prefix sibling `crates/ab`, while the same tree
+    /// scanned flagless admits both members. Admission only — the freshness
+    /// legs are the other tests' concern.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch cargo workspace under /tmp, spawned apg + rustfrontend); run via cargo test-e2e"]
+    fn rust_module_value_excludes_the_prefix_sibling_crate() {
+        let repo = cargo_workspace_repo("module-flag-rust-prefix");
+
+        // (1) `--module crates/a`: the component-wise comparison stops at the
+        // directory boundary, so `crates/ab` — which a string prefix would have
+        // admitted — is excluded.
+        let (out, log) = scan_rust(&repo, &["--module", "crates/a"]);
+        assert!(out.status.success(), "`--module crates/a` rust scan: {log}");
+        assert_eq!(
+            crate_files(&repo),
+            vec!["crates/a/src/lib.rs".to_string()],
+            "`--module crates/a` must admit only crate a's sources, never crates/ab"
+        );
+
+        // (2) The same tree, flagless: every workspace member is admitted.
+        let (out, log) = scan_rust(&repo, &[]);
+        assert!(out.status.success(), "flagless rust scan: {log}");
+        assert_eq!(
+            crate_files(&repo),
+            vec![
+                "crates/a/src/lib.rs".to_string(),
+                "crates/ab/src/lib.rs".to_string(),
+            ],
+            "a flagless rust scan must admit both workspace members"
+        );
 
         remove(&repo);
     }
