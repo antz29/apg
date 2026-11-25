@@ -22,15 +22,16 @@ fn open_worktree_sha(wt: &Path) -> String {
 }
 
 /// The live database's own single `Scan` row, as
-/// `(git_sha, git_clean, content_key, scanned_at)` — the recorded state the DB
-/// accounts for itself. `apg::git::db_recorded_scan` reads the same row; this
-/// also exposes the scan's `scanned_at`, which a re-anchor must preserve.
-fn db_scan_row(apg: &Path) -> (String, String, String, String) {
+/// `(git_sha, git_clean, content_key, scanned_at, modules)` — the recorded state
+/// the DB accounts for itself. `apg::git::db_recorded_scan` reads the same row;
+/// this also exposes the scan's `scanned_at` (a re-anchor must preserve it) and
+/// its `--module` selection (a re-anchor must preserve that too).
+fn db_scan_row(apg: &Path) -> (String, String, String, String, String) {
     let db = apg::artifacts::ArtifactDb::open(apg).unwrap();
     let conn = db.conn().unwrap();
     let (_, rows) = apg::splice::seed::query_rows(
         &conn,
-        "MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key, s.scanned_at",
+        "MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key, s.scanned_at, s.modules",
     )
     .unwrap();
     assert_eq!(rows.len(), 1, "the database carries exactly one Scan row");
@@ -40,6 +41,7 @@ fn db_scan_row(apg: &Path) -> (String, String, String, String) {
         apg::splice::seed::cell(row, 1),
         apg::splice::seed::cell(row, 2),
         apg::splice::seed::cell(row, 3),
+        apg::splice::seed::cell(row, 4),
     )
 }
 
@@ -1467,8 +1469,9 @@ mod e2e {
 
     /// A durable commit re-anchors the staleness gate's recorded state: the
     /// database's own `Scan` row is rewritten to the post-commit git state
-    /// (sha, clean, content-identity key), while the scan's `scanned_at` is
-    /// preserved — a re-anchor never re-scans.
+    /// (sha, clean, content-identity key), while the scan's `scanned_at` and
+    /// its resolved `--module` selection are preserved — a re-anchor never
+    /// re-scans.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn reanchor_rewrites_the_database_scan_row() {
@@ -1478,7 +1481,23 @@ mod e2e {
         let sha0 = repo.head_sha();
         testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha0), true, "2026-09-07T00:00:00Z");
-        let scanned_at = db_scan_row(&apg).3;
+        // A narrowed scan records its resolved `--module` selection on the row;
+        // record one here so the re-anchor has a non-empty value to carry.
+        let selection = "/tmp/one\n/tmp/two";
+        {
+            let db = apg::artifacts::ArtifactDb::open(&apg).unwrap();
+            let conn = db.conn().unwrap();
+            conn.query(&format!(
+                "MATCH (s:Scan) SET s.modules = {}",
+                apg::artifacts::lit(selection)
+            ))
+            .unwrap();
+        }
+        let (_, _, _, scanned_at, recorded_modules) = db_scan_row(&apg);
+        assert_eq!(
+            recorded_modules, selection,
+            "the fixture row records the module selection before the re-anchor"
+        );
         let new_sha = "abcd1234";
         reanchor_scan_meta(
             &apg,
@@ -1489,7 +1508,7 @@ mod e2e {
             },
         )
         .unwrap();
-        let (sha, clean, key, at) = db_scan_row(&apg);
+        let (sha, clean, key, at, modules) = db_scan_row(&apg);
         assert_eq!(sha, new_sha, "the row records the re-anchored sha");
         assert_eq!(
             clean, "false",
@@ -1500,6 +1519,10 @@ mod e2e {
             "the content-identity key is rewritten across the re-anchor"
         );
         assert_eq!(at, scanned_at, "a re-anchor preserves the scan's timestamp");
+        assert_eq!(
+            modules, selection,
+            "a re-anchor preserves the recorded module selection byte-for-byte"
+        );
         // The recorded state now matches the new state → fresh.
         assert_eq!(
             db_recorded_scan(&apg),
@@ -1507,6 +1530,7 @@ mod e2e {
                 sha: new_sha.to_string(),
                 clean: false,
                 content_key: Some("reanchored-key".to_string()),
+                modules: selection.to_string(),
             })
         );
         testutil::remove(&repo);

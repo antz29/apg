@@ -269,6 +269,9 @@ pub struct RecordedScan {
     /// The content-identity key; `None` on a pre-hardening record (freshness
     /// cannot be verified then).
     pub content_key: Option<String>,
+    /// The scan's resolved `--module` selection — canonical absolute roots,
+    /// newline-joined; empty for a whole-tree scan.
+    pub modules: String,
 }
 
 /// The recorded state of the scan that built the live DB, read from the DB's
@@ -281,14 +284,15 @@ pub struct RecordedScan {
 /// `Scan` row; an empty `git_sha` (a non-git scan); a `git_clean` that is
 /// neither `"true"` nor `"false"`; or an empty `content_key` (a pre-hardening
 /// DB). Every field is parsed from the row itself: an empty `git_sha` means
-/// non-git, `git_clean` is `"true"`/`"false"`, and an empty `content_key` is
-/// `None`.
+/// non-git, `git_clean` is `"true"`/`"false"`, an empty `content_key` is
+/// `None`, and the module selection is the `modules` column verbatim (empty for
+/// a whole-tree scan).
 pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
     let db = Database::new(db_path(apg_root), system_config(true).ok()?).ok()?;
     let conn = Connection::new(&db).ok()?;
     let (_, rows) = query_rows(
         &conn,
-        "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key",
+        "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key, s.modules AS modules",
     )
     .ok()?;
     let row = rows.first()?;
@@ -306,6 +310,7 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
         sha,
         clean,
         content_key: (!key.is_empty()).then_some(key),
+        modules: cell(row, 3),
     })
 }
 
@@ -313,11 +318,12 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// session's routed read instead of opening a second handle on the
 /// session-owned DB. Parses the `apg query --json` rows and fails closed
 /// exactly like the direct read (an empty sha, a non-`true`/`false` clean, or
-/// an empty content key ⇒ `None`).
+/// an empty content key ⇒ `None`); the module selection is the routed
+/// `modules` field, so the two reads yield the same [`RecordedScan`].
 fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
     let out = crate::session::forward_query(
         apg_root,
-        "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key",
+        "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key, s.modules AS modules",
         true,
     )
     .ok()?;
@@ -343,6 +349,7 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
         sha,
         clean,
         content_key: (!key.is_empty()).then_some(key),
+        modules: field("modules"),
     })
 }
 
