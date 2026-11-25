@@ -402,4 +402,129 @@ mod e2e {
              file lands under two module identities"
         );
     }
+
+    /// A targeted rescan — the tree re-scanned incrementally after one file
+    /// changed — renders exactly the identities the first full scan rendered
+    /// for the unchanged code: the module FQN set and every
+    /// `Module`-`Contains`->`File` pair are unchanged, and every declaration FQN
+    /// persists unchanged. The edit's new declaration is the only addition,
+    /// nested under its own directory module, so the unchanged sibling
+    /// directories the rescan reuses from recorded facts cannot re-render
+    /// differently.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/cppfrontend/db.lbug/git); run via cargo test-e2e"]
+    fn targeted_rescan_renders_the_full_scan_identities() {
+        const MODULES: &str = "MATCH (n:Module) WHERE n.fqn STARTS WITH 'cpp.' \
+                               RETURN n.fqn ORDER BY n.fqn";
+        const MODULE_FILES: &str = "MATCH (m:Module)-[:Contains]->(f:File) \
+                                    WHERE m.fqn STARTS WITH 'cpp.' \
+                                    RETURN m.fqn, f.fqn ORDER BY f.fqn";
+        const FUNCTIONS: &str = "MATCH (n:Function) WHERE n.fqn STARTS WITH 'cpp.' \
+                                 RETURN n.fqn ORDER BY n.fqn";
+
+        let repo = cpp_repo(
+            "cpp-targeted-rescan",
+            &[
+                ("src/a/util/one.cpp", "int one() { return 1; }\n"),
+                ("src/b/util/two.cpp", "int two() { return 2; }\n"),
+                ("src/c/three.cpp", "int three() { return 3; }\n"),
+            ],
+        );
+        // Full scan: the recorded baseline the targeted rescan diffs against.
+        scan_cpp(&repo, &[]);
+
+        let full_modules = column(&query_rows(&repo, MODULES), "n.fqn");
+        let full_module_files = pairs(&query_rows(&repo, MODULE_FILES), "m.fqn", "f.fqn");
+        let full_functions = column(&query_rows(&repo, FUNCTIONS), "n.fqn");
+
+        assert_eq!(
+            full_modules,
+            vec![
+                "cpp.src/a/util".to_string(),
+                "cpp.src/b/util".to_string(),
+                "cpp.src/c".to_string(),
+            ],
+            "the full scan's module set"
+        );
+        assert_eq!(
+            full_module_files,
+            vec![
+                (
+                    "cpp.src/a/util".to_string(),
+                    "src/a/util/one.cpp".to_string()
+                ),
+                (
+                    "cpp.src/b/util".to_string(),
+                    "src/b/util/two.cpp".to_string()
+                ),
+                ("cpp.src/c".to_string(), "src/c/three.cpp".to_string()),
+            ],
+            "the full scan's Module-Contains->File pairs"
+        );
+        assert_eq!(
+            full_functions,
+            vec![
+                "cpp.src/a/util.one".to_string(),
+                "cpp.src/b/util.two".to_string(),
+                "cpp.src/c.three".to_string(),
+            ],
+            "the full scan's declaration FQNs"
+        );
+
+        // Change exactly one file and commit it, so the tree differs from the
+        // scan the full run recorded and the rescanned code is one file.
+        repo.write(
+            "src/c/three.cpp",
+            "int three() { return 3; }\n\nint three_extra() { return 4; }\n",
+        );
+        repo.commit_all("add three_extra");
+
+        // The second scan is the targeted (incremental) rescan: the pipeline
+        // names the incremental branch rather than skipping the change.
+        let log = scan_cpp(&repo, &[]);
+        assert!(
+            log.contains("[scan] incremental:"),
+            "the second scan must take the targeted/incremental path: {log}"
+        );
+
+        let modules = column(&query_rows(&repo, MODULES), "n.fqn");
+        let module_files = pairs(&query_rows(&repo, MODULE_FILES), "m.fqn", "f.fqn");
+        let functions = column(&query_rows(&repo, FUNCTIONS), "n.fqn");
+
+        assert_eq!(
+            modules, full_modules,
+            "the module FQN set is unchanged by a leaf edit"
+        );
+        assert_eq!(
+            module_files, full_module_files,
+            "every Module-Contains->File pair is unchanged by a leaf edit"
+        );
+
+        // Every declaration FQN from the full scan persists; the edit adds only
+        // its own new declaration, under the same directory module.
+        let mut expected = full_functions.clone();
+        expected.push("cpp.src/c.three_extra".to_string());
+        expected.sort();
+        assert_eq!(
+            functions, expected,
+            "the only declaration-set change is the edited file's new function"
+        );
+
+        let file_functions = pairs(
+            &query_rows(
+                &repo,
+                "MATCH (f:File)-[:Contains]->(fn:Function) WHERE fn.fqn STARTS WITH 'cpp.' \
+                 RETURN f.fqn, fn.fqn ORDER BY fn.fqn",
+            ),
+            "f.fqn",
+            "fn.fqn",
+        );
+        assert!(
+            file_functions.contains(&(
+                "src/c/three.cpp".to_string(),
+                "cpp.src/c.three_extra".to_string()
+            )),
+            "the new declaration nests under its own edited file's module: {file_functions:?}"
+        );
+    }
 }
