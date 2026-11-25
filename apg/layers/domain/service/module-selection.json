@@ -41,6 +41,11 @@
       "kind": "realises",
       "source": "solution.component.scan-driver",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-scanner-crate",
+      "properties": {}
     }
   ]
 }
