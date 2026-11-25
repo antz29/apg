@@ -32,22 +32,30 @@ static bool dir_has_sources(const fs::path &dir) {
 struct CppModule {
     std::string name;
     fs::path dir;
+    // The module identity: the directory's absolute path. Value-initialized
+    // when a `{name, dir}` aggregate omits it.
+    std::string identity{};
 };
 
-// Recursively finds the shallowest directories that directly contain C++
-// source files, skipping vendored/build noise dirs. Used as a fallback when the
-// top-level scan finds nothing, so a repo whose C++ code lives below the first
-// level (e.g. src/cpplib) still resolves a module (SPEC 0.9.1).
+// Recursively finds every directory that directly contains C++ source files,
+// skipping vendored/build noise dirs. A source-holding directory is pushed AND
+// its subdirectories are still walked, at every depth (the walk is unbounded),
+// so a nested directory that is its own module is not swallowed by an ancestor
+// (SPEC 0.9.1). `depth` is vestigial: it is retained so the existing call site
+// keeps compiling.
 static void find_modules_deep(const fs::path &dir, std::vector<CppModule> &modules,
     int depth) {
-    if (depth <= 0) return;
+    (void)depth;
     if (dir_has_sources(dir)) {
         std::string name = dir.filename().string();
         if (name.empty()) name = "root";
         modules.push_back({name, dir});
-        return;
     }
     for (const auto &entry : fs::directory_iterator(dir)) {
+        // Skip symlinked entries: the walk is unbounded, so a symlinked
+        // directory could form a cycle.
+        std::error_code ec;
+        if (fs::is_symlink(fs::symlink_status(entry.path(), ec))) continue;
         if (!entry.is_directory()) continue;
         std::string name = entry.path().filename().string();
         if (name[0] == '.') continue;
@@ -57,7 +65,7 @@ static void find_modules_deep(const fs::path &dir, std::vector<CppModule> &modul
             name == "cmake-build-release") {
             continue;
         }
-        find_modules_deep(entry.path(), modules, depth - 1);
+        find_modules_deep(entry.path(), modules, depth);
     }
 }
 
