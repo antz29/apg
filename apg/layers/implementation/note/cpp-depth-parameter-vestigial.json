@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cpp-depth-parameter-vestigial",
+  "body": "`find_modules_deep` keeps its `int depth` parameter only so `scan_root`'s existing call site compiles; the walk is unbounded and the parameter is ignored, so any value passed has no effect. Remove the parameter and the `/*depth=*/6` argument together when the call site may change in one commit.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "cpp.cpplib.find_modules_deep",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

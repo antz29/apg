@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cpp-module-name-field-unused",
+  "body": "`CppModule::name` is written but never read — the module identity is the directory path. Delete the field when the struct is free to change, rather than carrying a second, unused naming surface.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "cpp.cpplib.CppModule",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

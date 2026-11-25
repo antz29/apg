@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cpp-fused-strip-sibling-boundary",
+  "body": "The base-fused identity strip matches any absolute path directly beside the base whose name begins with `<base>.`, so a real sibling directory literally named `<base>.X` reached through `--module` would render `<lang>..X`. Upgrade when `--module` accepts a directory outside the scan root.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.identity.base_fused_tail",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
