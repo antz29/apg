@@ -490,6 +490,42 @@ mod unit {
         );
     }
 
+    /// cpp-module-identity phase-02 task-2: the C++ frontend fuses a
+    /// namespace chain onto its module directory's ABSOLUTE path, so the `.`
+    /// after the base is a NAME boundary, not a path component. Such a
+    /// base-fused parent strips to its bare tail — `/x/base.Ns.Sub` renders
+    /// `Ns.Sub`, `/x/base.Name` renders `Name` — never the `file_name(base)`
+    /// fallback (`base.Ns.Sub`). An under-base path keeps the ordinary
+    /// path-component strip, a path that merely shares a string prefix with no
+    /// `.` boundary (`/x/basement`) still falls back to its file name, and
+    /// rooting the same identities under `cpp` re-joins a fused tail with the
+    /// empty base module.
+    #[test]
+    fn cpp_declaration_parent_strips_at_a_name_boundary() {
+        let base = Path::new("/x/base");
+        // The base-fused namespace boundary strips to its bare tail.
+        assert_eq!(repo_relative_identity(base, "/x/base.Ns.Sub"), "Ns.Sub");
+        assert_eq!(repo_relative_identity(base, "/x/base.Name"), "Name");
+        // An under-base path keeps the path-component strip.
+        assert_eq!(
+            repo_relative_identity(base, "/x/base/src/cpplib.Ns.Name"),
+            "src/cpplib.Ns.Name"
+        );
+        // A shared string prefix with no `.` boundary is not a fused base:
+        // the outside-base file-name fallback is preserved.
+        assert_eq!(repo_relative_identity(base, "/x/basement"), "basement");
+        // Rooting re-joins a fused tail with the empty `cpp.` base module,
+        // while a nested-module identity keeps its path component.
+        assert_eq!(
+            root_module_fqn("cpp", "/x/base.Ns.Sub", base),
+            "cpp..Ns.Sub"
+        );
+        assert_eq!(
+            root_module_fqn("cpp", "/x/base/src/cpplib.Ns.Name", base),
+            "cpp.src/cpplib.Ns.Name"
+        );
+    }
+
     /// Phase-09 task-9 / task-40: a declaration whose parent is a module
     /// inherits the rooted module FQN through `parent.name` (the renderer
     /// only concatenates, so rooting the parent at record time roots the
