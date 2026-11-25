@@ -11,9 +11,9 @@ import java.util.regex.Pattern;
  * Gate tests for the phase-02 task-11 targeted (package-granularity) scan.
  *
  * The load-bearing invariant: a targeted scan's facts for the target packages
- * must equal what a full scan emits for them (the requirement
- * `requirements.requirement.exact-ongoing-equivalence` and
- * `global.constraint.frontend-full-context`). Plus: an all-targets request and
+ * must equal what a full scan emits for them — a targeted scan still walks the
+ * whole tree, so each target package is attributed in the full scan's context.
+ * Plus: an all-targets request and
  * an absent/empty target file are byte-identical to a full scan, and a warm
  * class-cache scan reuses unchanged packages instead of recompiling them. The
  * class cache lives at the keyless `<cache-dir>/java` layout and is reused only
@@ -50,6 +50,7 @@ public class CallGraphBuilderTest {
             testModuleDescriptorsDoNotDegradeAttribution(proj3, base);
             testDefaultPackageModuleIdentity(base);
             testDefaultPackageTargetedScaffolding(base);
+            testModuleFlagSubtreeSelection(base);
         } finally {
             deleteRec(base);
         }
@@ -799,6 +800,84 @@ public class CallGraphBuilderTest {
             "targeted output was:\n" + out);
     }
 
+    /**
+     * Phase-03 task-3: `--module` selects the walked subtree, resolved against
+     * the scan root — a relative value and its absolute equivalent admit the
+     * same `.java` files, never a sibling whose name merely shares a prefix,
+     * and a real `--exclude-path` value still drops its matching file. The
+     * flagless walk (empty roots) stays the whole tree.
+     */
+    static void testModuleFlagSubtreeSelection(Path base) throws Exception {
+        Path proj = base.resolve("proj-module-flag");
+        Files.createDirectories(proj.resolve("app"));
+        Files.createDirectories(proj.resolve("lib"));
+        Files.createDirectories(proj.resolve("appx"));
+        Files.writeString(proj.resolve("app/A.java"), """
+            package app;
+            public class A {
+                public int a() { return 1; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("app/B.java"), """
+            package app;
+            public class B {
+                public int b() { return 2; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("lib/L.java"), """
+            package lib;
+            public class L {
+                public int l() { return 3; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("appx/X.java"), """
+            package appx;
+            public class X {
+                public int x() { return 4; }
+            }
+            """, StandardCharsets.UTF_8);
+        Path appA = proj.resolve("app/A.java").toAbsolutePath().normalize();
+        Path appB = proj.resolve("app/B.java").toAbsolutePath().normalize();
+        Path libL = proj.resolve("lib/L.java").toAbsolutePath().normalize();
+        Path appxX = proj.resolve("appx/X.java").toAbsolutePath().normalize();
+
+        // A relative `--module` value resolves against the scan root (the first
+        // argv), so "app" selects `<proj>/app` and no sibling.
+        Set<String> relFiles = filePathsOf(normalize(run(proj, "--module", "app").out));
+        check("relative --module admits exactly the selected subtree's file records",
+            relFiles.equals(new TreeSet<>(Set.of(appA.toString(), appB.toString()))),
+            "selected files were: " + relFiles);
+        check("the requested subtree is present, never excluded",
+            relFiles.contains(appA.toString()) && relFiles.contains(appB.toString()),
+            "selected files were: " + relFiles);
+        check("--module app never admits a sibling that shares its prefix",
+            !relFiles.contains(appxX.toString()) && !relFiles.contains(libL.toString()),
+            "selected files were: " + relFiles);
+
+        // The absolute equivalent names the same subtree, so the file set is
+        // identical.
+        Set<String> absFiles = filePathsOf(
+            normalize(run(proj, "--module", proj.resolve("app").toString()).out));
+        check("absolute --module selects the identical file set",
+            absFiles.equals(relFiles),
+            "relative: " + relFiles + "\nabsolute: " + absFiles);
+
+        // A genuine `--exclude-path` value still drops its matching file inside
+        // the requested subtree, leaving the rest.
+        Set<String> excluded = filePathsOf(normalize(
+            run(proj, "--module", "app", "--exclude-path", appA.toString()).out));
+        check("a real --exclude-path value still drops its matching file",
+            excluded.equals(new TreeSet<>(Set.of(appB.toString()))),
+            "selected files were: " + excluded);
+
+        // Empty roots: no --module means the whole tree, every `.java` file.
+        Set<String> allFiles = filePathsOf(normalize(run(proj).out));
+        check("flagless scan still emits every .java file",
+            allFiles.equals(new TreeSet<>(Set.of(appA.toString(), appB.toString(),
+                libL.toString(), appxX.toString()))),
+            "emitted files were: " + allFiles);
+    }
+
     // ------------------------------------------------------------------
     // Scanner invocation
     // ------------------------------------------------------------------
@@ -1036,6 +1115,16 @@ public class CallGraphBuilderTest {
         for (String s : recs) {
             String[] p = s.split("\\|", -1);
             if (p[0].equals("module")) out.add(p[1]);
+        }
+        return out;
+    }
+
+    /** The absolute paths of the `file` records in a normalized record set. */
+    static Set<String> filePathsOf(Set<String> recs) {
+        Set<String> out = new TreeSet<>();
+        for (String s : recs) {
+            String[] p = s.split("\\|", -1);
+            if (p[0].equals("file")) out.add(p[1]);
         }
         return out;
     }
