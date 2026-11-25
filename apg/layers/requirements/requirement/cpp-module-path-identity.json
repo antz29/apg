@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cpp-module-path-identity",
+  "body": "C++ module identity is the module directory's path relative to the repository base, forward-slash separated, so distinct directories keep distinct identities and each symbol nests under its source directory.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.portable-graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
+    }
+  ]
+}

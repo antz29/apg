@@ -19,6 +19,16 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.cpp-module-path-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cpp-root-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.fast-project-start",
       "properties": {}
     },
@@ -54,11 +64,6 @@
     }
   ],
   "in": [
-    {
-      "kind": "requires",
-      "source": "requirements.stakeholder.multi-user-repo-team",
-      "properties": {}
-    },
     {
       "kind": "driven-by",
       "source": "domain.service.graph-identity",

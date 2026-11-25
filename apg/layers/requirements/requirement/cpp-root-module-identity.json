@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cpp-root-module-identity",
+  "body": "A C++ source directory that is the repository base is the C++ root module `cpp.`, so a C++ file at the repository root and every declaration in it are contained by `cpp.`.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.portable-graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.graph-identity",
+      "properties": {}
+    }
+  ]
+}

@@ -17,6 +17,16 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.cpp-module-path-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.cpp-root-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.csharp-global-namespace-root",
       "properties": {}
     },
@@ -52,6 +62,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-language-root",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.python-namespace-package-identity",
       "properties": {}
     },
@@ -79,17 +94,17 @@
       "kind": "driven-by",
       "target": "requirements.requirement.sql-language-root",
       "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.ps-language-root",
-      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "contains",
       "source": "domain.group.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cpp-module-identity",
       "properties": {}
     },
     {

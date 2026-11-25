@@ -45,6 +45,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.cpp-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.csharp-frontend-artifact",
       "properties": {}
     },

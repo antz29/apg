@@ -1,0 +1,41 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cpp-module-identity",
+  "body": "The C++ frontend's module-identity computation: each module identity is its directory's repo-relative path, shared by the module record, each file's parent and each declaration's scope prefix.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "src/cpplib/scan.h",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "src/cpplib/self_test.h",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "src/cpplib/source_discovery.h",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.graph-identity",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.cpp-frontend",
+      "properties": {}
+    }
+  ]
+}
