@@ -34,7 +34,7 @@
 //! directory and is never derived or touched here.
 
 use std::cell::{OnceCell, Ref, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -353,6 +353,19 @@ impl FactStore {
     /// joins the one held write transaction, committed by [`Self::save_index`].
     pub fn put_refs(&self, worktree: WorktreeId, entries: &BTreeMap<String, String>) -> Result<()> {
         self.write_txn()?.replace_refs(worktree, entries)
+    }
+
+    /// Applies only the changed refs rows for one worktree: upserts each
+    /// `path -> OID`, removes each vanished path, joining the one held write
+    /// transaction committed by [`Self::save_index`]. The open/contention
+    /// error surfaces like [`Self::put`].
+    pub fn apply_refs(
+        &self,
+        worktree: WorktreeId,
+        upserts: &BTreeMap<String, String>,
+        removals: &BTreeSet<String>,
+    ) -> Result<()> {
+        self.write_txn()?.apply_refs(worktree, upserts, removals)
     }
 
     /// One worktree's `path -> blob OID` manifest; empty when the store cannot
