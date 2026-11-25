@@ -1,6 +1,7 @@
 use super::*;
 use crate::classify::{ApgConfig, CodeTypeRule, StructuralScope};
 use crate::graph::Graph;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 fn located_node(kind: NodeKind, path: &str) -> Node {
@@ -41,6 +42,47 @@ fn structural_scope() -> StructuralScope {
         exclude: vec!["vendor/**".to_string()],
         code_type: Some("config".to_string()),
     }
+}
+
+/// A body id whose 32 bytes are all `byte` — one distinct id per byte value.
+fn body_id(byte: u8) -> BodyId {
+    [byte; 32]
+}
+
+/// One stored unit row plus its five-part key, with the format/config/lang
+/// parts fixed so the caller varies only the identity a manifest matches on.
+fn unit(rel: &str, oid: &str, body: u8, writer_root: &str) -> (UnitKey, UnitRow) {
+    (
+        UnitKey {
+            format: FACTS_FORMAT_VERSION,
+            config_digest: "cfg".into(),
+            lang: "go".into(),
+            rel: rel.into(),
+            oid: oid.into(),
+        },
+        UnitRow {
+            body: body_id(body),
+            inputs: String::new(),
+            writer_root: writer_root.into(),
+        },
+    )
+}
+
+/// One language's stored module-scaffolding row.
+fn scaffolding(lang: &str, body: u8) -> (ScaffoldingKey, BodyId) {
+    (
+        ScaffoldingKey {
+            format: FACTS_FORMAT_VERSION,
+            config_digest: "cfg".into(),
+            lang: lang.into(),
+        },
+        body_id(body),
+    )
+}
+
+/// A live worktree manifest with one `repo-relative path -> blob OID` entry.
+fn manifest(rel: &str, oid: &str) -> BTreeMap<String, String> {
+    [(rel.to_string(), oid.to_string())].into_iter().collect()
 }
 
 /// A pure in-memory fixture graph for the single-pass index property: one
@@ -822,5 +864,138 @@ mod unit {
             language_dir(&root, "ts").join("tsconfig.tsbuildinfo"),
             Path::new("/checkout/apg/.trans/cache/ts/tsconfig.tsbuildinfo")
         );
+    }
+
+    /// scan-cache-redb phase-05 task-3: the grace window is inclusive at its
+    /// boundary (`now - at == grace` is still live, one second more is not),
+    /// a brand-new intent is live, and an `at` later than the clock (worktree
+    /// clock skew) counts as unexpired rather than as an ancient intent.
+    #[test]
+    fn intent_grace_cutoff_is_inclusive_and_clock_skew_is_live() {
+        assert_eq!(INTENT_GRACE_SECS, 15 * 60);
+        let grace = INTENT_GRACE_SECS;
+        let at = 1_000_000;
+        // Zero elapsed age: a brand-new intent is live.
+        assert!(intent_live(at, at, grace));
+        // The boundary is included; one second past it expires.
+        assert!(intent_live(at, at + grace, grace));
+        assert!(!intent_live(at, at + grace + 1, grace));
+        // A timestamp ahead of the clock is skew, not age: saturating
+        // subtraction keeps it inside the window.
+        assert!(intent_live(at, at - 1, grace));
+        assert!(intent_live(u64::MAX, 0, grace));
+        // A zero window admits only the same instant (and the future).
+        assert!(intent_live(at, at, 0));
+        assert!(!intent_live(at, at + 1, 0));
+    }
+
+    /// scan-cache-redb phase-05 task-3: a live manifest reaches the unit whose
+    /// `(rel, oid)` it records, and that unit roots its body. Every other unit
+    /// is collected whatever its body does — a manifest entry for the same path
+    /// with a different OID reaches nothing.
+    #[test]
+    fn manifest_roots_its_unit_and_body_while_unreached_rows_are_collected() {
+        let (a_key, a_row) = unit("src/a.go", "oid-a", 1, "/wt");
+        let (b_key, b_row) = unit("src/b.go", "oid-b", 2, "/wt");
+        let view = View {
+            bodies: vec![body_id(1), body_id(2)],
+            units: vec![(a_key, a_row), (b_key.clone(), b_row)],
+            scaffolding: vec![],
+            manifests: vec![manifest("src/a.go", "oid-a"), manifest("src/b.go", "stale")],
+            intent_roots: BTreeSet::new(),
+        };
+        assert_eq!(
+            collectable(&view),
+            Collection {
+                bodies: vec![body_id(2)],
+                units: vec![b_key],
+                scaffolding: vec![],
+            }
+        );
+    }
+
+    /// scan-cache-redb phase-05 task-3: live module scaffolding is global, so
+    /// the body it references is a root with no manifest or intent at all — and
+    /// no scaffolding row is ever collected while it is stored.
+    #[test]
+    fn scaffolding_roots_its_body_and_no_scaffolding_row_is_collected() {
+        let view = View {
+            bodies: vec![body_id(1), body_id(2)],
+            units: vec![],
+            scaffolding: vec![scaffolding("go", 1)],
+            manifests: vec![],
+            intent_roots: BTreeSet::new(),
+        };
+        assert_eq!(
+            collectable(&view),
+            Collection {
+                bodies: vec![body_id(2)],
+                units: vec![],
+                scaffolding: vec![],
+            }
+        );
+    }
+
+    /// scan-cache-redb phase-05 task-3: a body shared on content can survive
+    /// under another root while the unit row that recorded it is collected —
+    /// that row still cannot be reused, so it is deleted with no dangling body.
+    #[test]
+    fn unreached_unit_is_collected_even_when_its_body_survives() {
+        let (key, row) = unit("src/a.go", "oid-a", 1, "/wt");
+        let view = View {
+            bodies: vec![body_id(1)],
+            units: vec![(key.clone(), row)],
+            scaffolding: vec![scaffolding("go", 1)],
+            manifests: vec![],
+            intent_roots: BTreeSet::new(),
+        };
+        let collection = collectable(&view);
+        assert!(collection.bodies.is_empty());
+        assert_eq!(collection.units, vec![key]);
+        assert!(collection.scaffolding.is_empty());
+    }
+
+    /// scan-cache-redb phase-05 task-3: an unexpired intent roots only the
+    /// units whose recorded `writer_root` is that worktree's checkout root —
+    /// the store knows the writing root per unit, never per body.
+    #[test]
+    fn unexpired_intent_roots_the_units_its_worktree_wrote() {
+        let (mine, mine_row) = unit("src/a.go", "oid-a", 1, "/wt-a");
+        let (theirs, theirs_row) = unit("src/b.go", "oid-b", 2, "/wt-b");
+        let view = View {
+            bodies: vec![body_id(1), body_id(2)],
+            units: vec![(mine, mine_row), (theirs.clone(), theirs_row)],
+            scaffolding: vec![],
+            manifests: vec![],
+            intent_roots: BTreeSet::from(["/wt-a".to_string()]),
+        };
+        assert_eq!(
+            collectable(&view),
+            Collection {
+                bodies: vec![body_id(2)],
+                units: vec![theirs],
+                scaffolding: vec![],
+            }
+        );
+    }
+
+    /// scan-cache-redb phase-05 task-3: the two degenerate views collect
+    /// nothing — an empty store, and one where every stored row is reached.
+    #[test]
+    fn empty_and_fully_reached_views_collect_nothing() {
+        let empty = collectable(&View::default());
+        assert!(empty.is_empty());
+        assert_eq!(empty, Collection::default());
+
+        let (key, row) = unit("src/a.go", "oid-a", 1, "/wt");
+        let all_reached = View {
+            bodies: vec![body_id(1)],
+            units: vec![(key, row)],
+            scaffolding: vec![scaffolding("go", 1)],
+            manifests: vec![manifest("src/a.go", "oid-a")],
+            intent_roots: BTreeSet::new(),
+        };
+        let collection = collectable(&all_reached);
+        assert!(collection.is_empty(), "{collection:?}");
     }
 }
