@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cpp-module-identity-atomicity",
-  "body": "A C++ module identity splits only at directory boundaries, so an embedded dot in a directory name yields no additional module and a namespace chain derives only strictly beyond the identity's full extent.",
+  "body": "A C++ module identity splits only at directory boundaries, so a dot inside a directory name belongs to that directory's identity and a namespace chain derives only strictly beyond the identity's full extent.",
   "properties": {
     "feature": "graph-identity"
   },
