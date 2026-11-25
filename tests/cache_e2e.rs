@@ -1175,7 +1175,10 @@ mod e2e {
     /// delta rows, and a unit is selected on its five-part `(format, config,
     /// language, repo-relative path, blob OID)` identity alone — the recorded
     /// `inputs` diagnostic never gates the OID-only `candidate`/`has_unit`
-    /// selection, while the inputs-gated `has`/`reuse` still does.
+    /// selection, while the inputs-gated `has`/`reuse` still does. phase-07
+    /// task-9: the scan row is manifest-free — it carries only its
+    /// `sha`/`cache_key`/`content_key`, and each worktree's tree is asserted
+    /// through its own refs rows.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktrees/redb store); run via cargo test-e2e"]
     fn each_worktree_keeps_its_rows_and_units_reuse_on_the_oid_alone() {
@@ -1241,19 +1244,38 @@ mod e2e {
         );
         assert_ne!(main_refs, wt_refs, "the two trees' refs differ");
 
-        // The scan rows: each worktree keeps its OWN row, recording its root.
+        // The scan rows: each worktree keeps its OWN row. The row is
+        // manifest-free — it carries only the commit it ran at, its cache key
+        // and its content-identity key — because a worktree's refs rows (above)
+        // ARE its manifest, so a decoded row's manifest is empty.
         let main_row = store.scan(main_id).expect("the main scan row");
         let wt_row = store.scan(wt_id).expect("the worktree scan row");
         assert_ne!(main_row, wt_row, "the two scan rows differ");
         let main_record: ScanRecord =
             postcard::from_bytes(&main_row).expect("the main scan row decodes");
         let wt_record: ScanRecord = postcard::from_bytes(&wt_row).expect("the wt scan row decodes");
-        let main_root = std::fs::canonicalize(&repo.root).unwrap();
-        let wt_root = std::fs::canonicalize(&wt).unwrap();
-        assert_eq!(main_record.manifest.root, main_root.to_string_lossy());
-        assert_eq!(wt_record.manifest.root, wt_root.to_string_lossy());
-        assert_eq!(main_record.manifest.entries, main_refs);
-        assert_eq!(wt_record.manifest.entries, wt_refs);
+        let head = repo.head_sha();
+        assert_eq!(main_record.sha, head, "the main row records its commit");
+        assert_eq!(wt_record.sha, head, "the wt row records the same commit");
+        assert_eq!(
+            main_record.cache_key, wt_record.cache_key,
+            "both scans ran under the same cache key"
+        );
+        assert!(
+            main_record.content_key.is_some() && wt_record.content_key.is_some(),
+            "each row records a content identity"
+        );
+        assert_ne!(
+            main_record.content_key, wt_record.content_key,
+            "each row records its OWN tree's content identity"
+        );
+        assert!(
+            main_record.manifest.entries.is_empty()
+                && main_record.manifest.root.is_empty()
+                && wt_record.manifest.entries.is_empty()
+                && wt_record.manifest.root.is_empty(),
+            "the row carries no per-file manifest: the refs rows are the manifest"
+        );
         let ids: std::collections::BTreeSet<Vec<u8>> = store
             .scans()
             .into_iter()
@@ -1368,6 +1390,84 @@ mod e2e {
 
         let _ = std::fs::remove_dir_all(&repo.root);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// phase-07 task-9: the delta refs relay writes only the changed rows — a
+    /// one-file delta upserts exactly that path's ref row and removes a vanished
+    /// path's row, leaving every other path's row and a sibling worktree's rows
+    /// untouched (no wholesale delete-plus-insert of the worktree's manifest).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/sibling checkout/redb store); run via cargo test-e2e"]
+    fn delta_refs_relay_touches_only_the_changed_rows() {
+        use apg::testutil::Repo;
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let repo = Repo::new("delta-refs-relay");
+        // A sibling checkout OUTSIDE the repo, so it resolves its own worktree
+        // id rather than the repo's canonical workdir.
+        let sibling = std::env::temp_dir().join(format!(
+            "apg-cache-sibling-{}-delta-refs-relay",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&sibling);
+        std::fs::create_dir_all(&sibling).unwrap();
+        let main_id = worktree_id(&repo.root);
+        let sibling_id = worktree_id(&sibling);
+        assert_ne!(main_id, sibling_id, "each checkout has its own worktree id");
+
+        let refs = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(path, oid)| (path.to_string(), oid.to_string()))
+                .collect()
+        };
+        let store = FactStore::at(repo.root.join(".git/apg"));
+        store
+            .put_refs(
+                main_id,
+                &refs(&[("a.go", "oid-a"), ("b.go", "oid-b"), ("c.go", "oid-c")]),
+            )
+            .unwrap();
+        store
+            .put_refs(sibling_id, &refs(&[("s.go", "oid-s")]))
+            .unwrap();
+        let sibling_scan = b"sibling scan row".to_vec();
+        store.put_scan(sibling_id, &sibling_scan).unwrap();
+        store.save_index().unwrap();
+        assert_eq!(
+            store.refs(main_id),
+            refs(&[("a.go", "oid-a"), ("b.go", "oid-b"), ("c.go", "oid-c")]),
+            "the baseline manifest rows"
+        );
+
+        // One file changed, one file added, one file vanished.
+        store
+            .apply_refs(
+                main_id,
+                &refs(&[("b.go", "oid-b2"), ("d.go", "oid-d")]),
+                &BTreeSet::from(["a.go".to_string()]),
+            )
+            .unwrap();
+        store.save_index().unwrap();
+
+        assert_eq!(
+            store.refs(main_id),
+            refs(&[("b.go", "oid-b2"), ("c.go", "oid-c"), ("d.go", "oid-d")]),
+            "only b.go is upserted (and d.go added), a.go removed, c.go untouched"
+        );
+        assert_eq!(
+            store.refs(sibling_id),
+            refs(&[("s.go", "oid-s")]),
+            "the sibling worktree's refs rows are untouched"
+        );
+        assert_eq!(
+            store.scan(sibling_id).as_deref(),
+            Some(sibling_scan.as_slice()),
+            "the sibling worktree's scan row is untouched"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&sibling);
     }
 
     /// phase-05 task-6: a body written one minute ago — inside the intent grace
