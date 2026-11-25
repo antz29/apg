@@ -112,6 +112,11 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.scan-hygiene",
       "properties": {}
     },

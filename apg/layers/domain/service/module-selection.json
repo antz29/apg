@@ -31,6 +31,11 @@
       "kind": "realises",
       "source": "solution.component.module-selection",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.scan-driver",
+      "properties": {}
     }
   ]
 }
