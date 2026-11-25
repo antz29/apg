@@ -577,6 +577,48 @@ mod unit {
         }
     }
 
+    /// cpp-module-identity phase-02 task-4: a `--targets` canonical edge
+    /// endpoint and the declaration parent render the SAME rooted C++ FQN at
+    /// both boundaries — a base-level endpoint (`/x/base.Name`,
+    /// `/x/base.Ns.Type`) roots through `root_edge_endpoint` to `cpp..Name` /
+    /// `cpp..Ns.Type`, agreeing with `rooted_scope` on the corresponding
+    /// parent, while a nested-module endpoint keeps the existing
+    /// path-component strip (`/x/base/src/cpplib.Ns.Name` →
+    /// `cpp.src/cpplib.Ns.Name`).
+    #[test]
+    fn cpp_targeted_endpoint_agrees_with_the_declaration_parent() {
+        let base = Path::new("/x/base");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "cpp".to_string(),
+            HashSet::from([
+                "/x/base".to_string(),
+                "/x/base.Ns".to_string(),
+                "/x/base/src/cpplib".to_string(),
+            ]),
+        )]);
+        // Base level: the endpoint composes the `cpp.` root module with the
+        // name, exactly as the `/x/base` declaration parent does.
+        let base_endpoint = root_edge_endpoint("cpp", "/x/base.Name", &ids, base);
+        assert_eq!(base_endpoint, "cpp..Name");
+        assert_eq!(
+            base_endpoint,
+            format!("{}.Name", rooted_scope("cpp", "/x/base", &ids, base))
+        );
+        // Base-fused namespace: the endpoint strips the fused base and roots
+        // the tail under the same empty root module as the parent.
+        let ns_endpoint = root_edge_endpoint("cpp", "/x/base.Ns.Type", &ids, base);
+        assert_eq!(ns_endpoint, "cpp..Ns.Type");
+        assert_eq!(
+            ns_endpoint,
+            format!("{}.Type", rooted_scope("cpp", "/x/base.Ns", &ids, base))
+        );
+        // A nested module keeps the ordinary path-component strip.
+        assert_eq!(
+            root_edge_endpoint("cpp", "/x/base/src/cpplib.Ns.Name", &ids, base),
+            "cpp.src/cpplib.Ns.Name"
+        );
+    }
+
     /// Phase-09 task-9 / task-40: a declaration whose parent is a module
     /// inherits the rooted module FQN through `parent.name` (the renderer
     /// only concatenates, so rooting the parent at record time roots the
