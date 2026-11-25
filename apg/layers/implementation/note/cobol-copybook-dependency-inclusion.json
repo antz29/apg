@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "cobol-copybook-dependency-inclusion",
+  "body": "The COBOL arm's `--module` restriction applies to the walk-admitted source set only: a copybook reached through a `COPY` dependency is found by the `Search` lookup over the including file's directory, the scan root, `copybooks/`, `copy/` and each `--copy-path`, and every copybook read is emitted as its own `File` node wherever it lies, so a copybook outside the selected subtree enters the graph as a dependency rather than an admitted source (by coordinator decision, conformant with `cobol-copybook-search` and `cobol-copybook-files`); upgrade if the module rule must ever confine dependency files instead of walk-admitted sources.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cobolfrontend.scan.run",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
