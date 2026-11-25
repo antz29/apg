@@ -17,8 +17,7 @@ namespace CsharpFrontend.Tests;
 /// emitted as the ingestor's canonical FQN, so the cached unit supplies the
 /// endpoint node and the cross-file `calls`/`uses` edge survives
 /// `apg::ingest::finalize_graph`'s dangling-edge pruning — i.e. the targeted
-/// graph equals a full scan (requirements.requirement.exact-ongoing-equivalence
-/// and requirements.requirement.full-context-targeted-emission).
+/// graph's edges equal a full scan's.
 ///
 /// Covered directly: Scanner.TryResolveEndpoint -> Scanner.CanonicalFqn ->
 /// Scanner.EmittedMethodName, and Scanner.RegisterUniverse's overload-group
@@ -38,7 +37,7 @@ public static class TestMain
 
     public static int Main()
     {
-        string baseDir = Path.Combine(Path.GetTempPath(), "apg-csharp-test-" + Guid.NewGuid().ToString("N"));
+        string baseDir = Physical(Path.Combine(Path.GetTempPath(), "apg-csharp-test-" + Guid.NewGuid().ToString("N")));
         try
         {
             // Harness-wide reference isolation: no test may read the developer's NuGet cache, dotnet or Reference Assemblies dirs.
@@ -81,6 +80,7 @@ public static class TestMain
             TestProjectWalkSkips(baseDir);
             TestSlnProjectScope(baseDir);
             TestProjectWalkModuleScope(baseDir);
+            TestSymlinkedRootModuleScope(baseDir);
             TestProjectLoadedOnce(baseDir);
             TestDiscoverFilesScope(baseDir);
             TestOverloadFailureKeepsBoundMethod(baseDir);
@@ -451,6 +451,37 @@ public static class TestMain
         var path = Path.GetFullPath(Path.Combine(dir, name));
         File.WriteAllText(path, text, new UTF8Encoding(false));
         return path;
+    }
+
+    // The harness's in-process roots are lexical `/var/...` spellings on macOS,
+    // while Program.Main resolves its scan root physically; expectations derived
+    // from baseDir must use the same resolution (mirrors Program's helper).
+    private static string Physical(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full);
+        if (string.IsNullOrEmpty(root)) return full;
+        var current = root!;
+        foreach (var part in full.Substring(root.Length)
+                     .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                            StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            try
+            {
+                var info = new DirectoryInfo(current);
+                if (info.LinkTarget != null)
+                {
+                    var target = info.ResolveLinkTarget(returnFinalTarget: true);
+                    if (target != null) current = Path.GetFullPath(target.FullName);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                // Unreadable/unresolvable component: keep the lexical spelling.
+            }
+        }
+        return current;
     }
 
     /// <summary>DiscoverFiles claims .cs/.csx/.cshtml/.razor case-insensitively and nothing else.</summary>
@@ -1779,6 +1810,49 @@ public static class TestMain
             !g.Funcs.Any(f => f.Name == "FromAB"), all);
         Check("--module src/A: src/AB and root sources are not scanned; Extra.cs is (projectless)",
             !g.Structs.Any(s => s.Name is "AB" or "Root") && g.Structs.Any(s => s.Parent == "Ma" && s.Name == "Extra"), all);
+    }
+
+    /// <summary>
+    /// A scan root spelled through a symlink selects the same subtree as its
+    /// physical spelling: only src/A is admitted, while the sibling src/AB and a
+    /// project outside the module stay gated.
+    /// </summary>
+    private static void TestSymlinkedRootModuleScope(string baseDir)
+    {
+        var real = Path.GetFullPath(Path.Combine(baseDir, "symlink-module", "real"));
+        var a = Path.Combine(real, "src", "A");
+        WriteSource(a, "A.csproj", ScopeProject("AMOD", "A.cs"));
+        WriteSource(a, "A.cs", "namespace Sm;\n\npublic class A\n{\n" + Gated("AMOD", "InA") + "}\n");
+        WriteSource(a, "Extra.cs", "namespace Sm;\n\npublic class Extra\n{\n" + Gated("ABMOD", "FromAB") + Gated("OUTSIDE", "FromOutside") + "}\n");
+        WriteSource(Path.Combine(real, "src", "AB"), "AB.csproj", ScopeProject("ABMOD", "../A/Extra.cs", "AB.cs"));
+        WriteSource(Path.Combine(real, "src", "AB"), "AB.cs", "namespace Smab;\n\npublic class AB { }\n");
+        WriteSource(Path.Combine(real, "outside"), "O.csproj", ScopeProject("OUTSIDE", "../src/A/Extra.cs"));
+
+        var link = Path.Combine(baseDir, "root-link");
+        try
+        {
+            Directory.CreateSymbolicLink(link, real);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Console.WriteLine($"SKIP: symlinked-root equivalence (symlink creation unsupported or denied: {ex.GetType().Name})");
+            return;
+        }
+
+        var physical = RunScanner(real, "--module", "src/A");
+        var symlinked = RunScanner(link, "--module", "src/A");
+        Check("symlinked-root --module scan exits 0", symlinked.Code == 0, "exit " + symlinked.Code + "\n" + symlinked.Err);
+        Check("a symlinked scan root admits exactly the physical root's symbols/files",
+            physical.Out == symlinked.Out, Diff(physical.Out, symlinked.Out) + "\nSTDERR:\n" + symlinked.Err);
+
+        var g = ParseGraph(symlinked.Out);
+        var all = Join(Canonicalize(g).Records) + "\nSTDERR:\n" + symlinked.Err;
+        Check("symlinked-root --module src/A selects the project in src/A (Sm.A.InA)",
+            g.Funcs.Any(f => f.Parent == "Sm.A" && f.Name == "InA"), all);
+        Check("symlinked-root --module src/A never admits the sibling src/AB (FromAB stays gated)",
+            !g.Funcs.Any(f => f.Name == "FromAB"), all);
+        Check("symlinked-root --module src/A never admits a project outside it (FromOutside stays gated)",
+            !g.Funcs.Any(f => f.Name == "FromOutside"), all);
     }
 
     /// <summary>A .csproj reached by the walk and through two .sln files is loaded exactly once.</summary>

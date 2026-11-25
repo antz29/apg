@@ -20,7 +20,7 @@ public static class Program
             return 1;
         }
 
-        string rootDir = Path.GetFullPath(args[0]);
+        string rootDir = PhysicalPath(args[0]);
         var moduleDirs = new List<string>();
         var excludePatterns = new List<string>();
         // `--id-prefix <p>` (default "n") keeps opaque ids unique across
@@ -42,7 +42,7 @@ public static class Program
                 i++;
                 if (i < args.Length)
                 {
-                    moduleDirs.Add(Path.GetFullPath(Path.Combine(rootDir, args[i])));
+                    moduleDirs.Add(PhysicalPath(Path.Combine(rootDir, args[i])));
                 }
             }
             else if (args[i] == "--id-prefix")
@@ -113,6 +113,40 @@ public static class Program
             Console.Error.WriteLine($"csharpfrontend error: {ex}");
             return 1;
         }
+    }
+
+    /// Resolves a path to its physical (symlink-free) form by resolving the link
+    /// chain of each existing component against its prefix — a final-component
+    /// `ResolveLinkTarget` alone would miss an ancestor link (macOS `/tmp` and
+    /// `/var` are themselves links). A component that cannot be read or resolved
+    /// keeps its lexical spelling, so a non-existent tail still yields a usable
+    /// path.
+    private static string PhysicalPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full);
+        if (string.IsNullOrEmpty(root)) return full;
+        var current = root!;
+        foreach (var part in full.Substring(root.Length)
+                     .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                            StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            try
+            {
+                var info = new DirectoryInfo(current);
+                if (info.LinkTarget != null)
+                {
+                    var target = info.ResolveLinkTarget(returnFinalTarget: true);
+                    if (target != null) current = Path.GetFullPath(target.FullName);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                // Unreadable/unresolvable component: keep the lexical spelling.
+            }
+        }
+        return current;
     }
 
     /// Creates the pinned per-language artifact directory
