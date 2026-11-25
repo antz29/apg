@@ -46,6 +46,11 @@
       "kind": "realises",
       "source": "solution.component.structural-scanner-crate",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.ts-package-rooting",
+      "properties": {}
     }
   ]
 }

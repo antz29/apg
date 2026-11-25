@@ -61,11 +61,6 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "src/tslib/scanner.ts",
-      "properties": {}
-    },
-    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}

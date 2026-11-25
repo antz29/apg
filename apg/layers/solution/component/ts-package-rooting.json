@@ -24,6 +24,11 @@
       "kind": "realises",
       "target": "domain.service.graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.module-selection",
+      "properties": {}
     }
   ],
   "in": [
