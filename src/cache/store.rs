@@ -25,7 +25,7 @@
 //! the body tables move raw encoded bytes addressed by [`BodyId`], leaving the
 //! body codec to [`crate::cache::body`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -530,6 +530,25 @@ impl WriteTxn {
             table.remove(key.as_slice())?;
         }
         for (rel, oid) in entries {
+            table.insert(ref_key(worktree, rel).as_slice(), oid.as_str())?;
+        }
+        Ok(())
+    }
+
+    /// Applies only the changed refs rows for one worktree: upserts each
+    /// `path -> OID` and removes each vanished path. The worktree's rows stay
+    /// contiguous; nothing else is touched.
+    pub fn apply_refs(
+        &self,
+        worktree: WorktreeId,
+        upserts: &BTreeMap<String, String>,
+        removals: &BTreeSet<String>,
+    ) -> Result<()> {
+        let mut table = self.txn.open_table(REFS)?;
+        for rel in removals {
+            table.remove(ref_key(worktree, rel).as_slice())?;
+        }
+        for (rel, oid) in upserts {
             table.insert(ref_key(worktree, rel).as_slice(), oid.as_str())?;
         }
         Ok(())
