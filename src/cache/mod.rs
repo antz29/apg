@@ -41,6 +41,13 @@
 //! the `meta` format row. There are no `manifest.json`, `scan.json` or
 //! `index/*.json` files beside `facts.db` — the store carries everything.
 //!
+//! A scan only ever writes; the store's one deleting pass is [`gc`]. It runs in
+//! a write transaction of its own after the record commit and collects every
+//! body no live worktree manifest, live scaffolding row or unexpired scan intent
+//! reaches — with the grace period resolved against the per-worktree intent rows,
+//! the store's only time input — deleting each collected body together with every
+//! unit row that would dangle from it.
+//!
 //! The global cache key ([`CacheKey`], `domain.value.cache-key`) is the
 //! version/format/config identity that invalidates the whole cache on drift:
 //! the explicit fact-store format version ([`FACTS_FORMAT_VERSION`]), scanner
@@ -59,14 +66,15 @@
 // ([`body`]), the manifest and global cache key ([`manifest`]), the per-file
 // fact units, single-pass index and module scaffolding ([`fragment`]), the
 // redb substrate and its `facts.lock` writer gate ([`store`]), the `FactStore`
-// facade over the redb store ([`factstore`]), and the checkout-local toolchain
-// cache layout ([`toolchain`]) — all re-exported here so `crate::cache::<name>`
-// keeps resolving.
+// facade over the redb store ([`factstore`]), the reachability collector
+// ([`gc`]), and the checkout-local toolchain cache layout ([`toolchain`]) — all
+// re-exported here so `crate::cache::<name>` keeps resolving.
 #![allow(dead_code)]
 
 pub mod body;
 pub mod factstore;
 pub mod fragment;
+pub mod gc;
 pub mod manifest;
 pub mod store;
 pub mod toolchain;
@@ -74,6 +82,7 @@ pub mod toolchain;
 pub use body::*;
 pub use factstore::*;
 pub use fragment::*;
+pub use gc::*;
 pub use manifest::*;
 pub use store::*;
 pub use toolchain::*;
