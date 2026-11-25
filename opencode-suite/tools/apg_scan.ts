@@ -63,7 +63,8 @@ export default Plugin.define({
             },
             modules: {
               type: "string",
-              description: "Comma-separated module dirs to scan (Go/C++). Restricts scanning to these modules; defaults to auto-discovery.",
+              description:
+                "Comma-separated `--module` dirs, each passed as its own `--module` flag and restricting the scan to that directory and its subtree. A relative value resolves against the scan root; an absolute value passes through unchanged. Honoured by every frontend apg ships — the code languages, the agent-definition frontend and every bundled structural stream — with one TypeScript granularity exception: its arm selects whole npm packages, so a value at or above a package root selects that package's subtree, while a value inside a package (e.g. packages/app/src) selects nothing. Defaults to auto-discovery of the whole tree.",
             },
             force: {
               type: "boolean",
