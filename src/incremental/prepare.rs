@@ -666,7 +666,10 @@ pub fn full_universe(prepared: &Prepared, emitted_fqns: &BTreeSet<String>) -> BT
 /// (both present and equal), and (c) every reused file with a recorded fact
 /// unit (`has_unit(lang, rel, oid)`) has its checkout-relative path — its File
 /// FQN — in `previous.scanned`. These are checked in that order, and the check
-/// stops at the first uncovered file. Otherwise it returns `true`.
+/// stops at the first uncovered file. Check (c) tests the in-memory
+/// `previous.scanned` seed first and only probes the store (`has_unit`) for a
+/// file the local seed does not hold, so a seed that already covers every
+/// reused file costs no store lookup. Otherwise it returns `true`.
 ///
 /// `false` means the local database holds the File of every reused file that
 /// has a recorded unit. Because it was built from the same tree content, it also
@@ -702,7 +705,7 @@ pub fn reuse_universe_needed(
     }
     reused_files
         .iter()
-        .any(|(rel, lang, oid)| has_unit(lang, rel, oid) && !previous.scanned.contains(rel))
+        .any(|(rel, lang, oid)| !previous.scanned.contains(rel) && has_unit(lang, rel, oid))
 }
 
 /// The absolute path of a checkout-relative path.
