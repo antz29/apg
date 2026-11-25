@@ -728,6 +728,49 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
     }
 }
 
+/// Whether `language`'s frontend applies `--module` as a subtree restriction.
+///
+/// Every frontend apg ships honours the flag — the code frontends (`go`,
+/// `java`, `cpp`, `rust`, `ts`/`js`, `csharp`, `py`, `cobol`, `sql`, `ps`), the
+/// agent-definition frontend, and the bundled structural scanner's every stream
+/// id (`md`, `sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`,
+/// `ini`, `sln`, `misc`) — and each restricts its scan to the named directory
+/// and its subtree. A language id the driver does not ship is refused: no
+/// frontend of its own can make the selection honest, so the scan fails loudly
+/// rather than spawning a frontend that would accept and ignore the flag, or
+/// fail on its own and leave a partial graph. The driver's set is static, so
+/// the predicate is pure — no I/O, no process spawn.
+pub fn honours_module_flag(language: &str) -> bool {
+    matches!(
+        language,
+        "go" | "java"
+            | "cpp"
+            | "rust"
+            | "ts"
+            | "js"
+            | "csharp"
+            | "py"
+            | "cobol"
+            | "sql"
+            | "ps"
+            | "agent"
+    ) || classify::is_structural_language(language)
+}
+
+/// The named, actionable error for a selected frontend that cannot honour
+/// `--module`: the language and every requested value, so the operator can
+/// correct the selection instead of receiving a partial graph. A pure
+/// builder — no I/O, no panic.
+pub fn module_flag_error(language: &str, module_dirs: &[String]) -> String {
+    let requested: Vec<String> = module_dirs.iter().map(|m| format!("`{m}`")).collect();
+    format!(
+        "the `{language}` frontend cannot honour `--module`: requested --module {} \
+         — remove `--module` or select a language whose frontend restricts its scan \
+         to the named subtree",
+        requested.join(", ")
+    )
+}
+
 /// The named, actionable error for a scan-time tool the selected language's
 /// frontend needs but `PATH` does not provide: the language, the missing tool,
 /// and how to install it. A pure builder — no panic, no I/O (SPEC:
@@ -767,9 +810,10 @@ pub fn scan_time_preflight(language: &str) -> anyhow::Result<()> {
 /// Spawns one language's frontend for a scan phase, draining stdout to a spool
 /// and stderr to a log spool. Returns `Ok(Some(spool))` on success and
 /// `Ok(None)` when the frontend process itself failed (reported + skipped,
-/// never fatal). An `Err` is reserved for a pre-spawn toolchain failure (a
-/// missing scan-time tool), which fails the whole scan with a named, actionable
-/// error rather than silently skipping the language and writing an empty graph.
+/// never fatal). An `Err` is reserved for a pre-spawn failure — a missing
+/// scan-time tool or a requested `--module` selection the language's frontend
+/// cannot honour — which fails the whole scan with a named, actionable error
+/// rather than silently skipping the language and writing an empty graph.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_frontend(
     lang: &str,
@@ -802,6 +846,11 @@ pub fn spawn_frontend(
 
 /// [`spawn_frontend`] plus `cobol_args` (the `-std=` and `--copy-path` argv
 /// fragment from `cobol::...`), appended only when `lang` is `cobol`.
+///
+/// A requested `--module` selection the language's frontend cannot honour
+/// fails here — before the argv is built and before any spawn — with the
+/// language and every requested value named ([`module_flag_error`]), so the
+/// scan never leaves a partial graph behind.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_frontend_args(
     lang: &str,
@@ -825,6 +874,16 @@ pub fn spawn_frontend_args(
     // (`cpp`, `csharp`, `py`, `agent`, `sql`, `ps`) and every structural stream id of the
     // bundled scanner (`md`, `sh`, …) probe nothing and are unaffected.
     scan_time_preflight(lang)?;
+    // `--module` honour check (SPEC:
+    // `requirements.requirement.module-flag-invalid-selection-fails-loudly`): a
+    // requested module selection on a frontend that cannot apply it fails the
+    // whole scan here, before the argv is built and before any spawn, naming
+    // the language and every requested value — never spawning a frontend that
+    // would accept and ignore the flag, fail on its own, or leave a partial
+    // graph behind.
+    if !module_dirs.is_empty() && !honours_module_flag(lang) {
+        anyhow::bail!("{}", module_flag_error(lang, module_dirs));
+    }
     let cmd = frontend_cmd(lang)
         .ok_or_else(|| anyhow::anyhow!("frontend for language '{lang}' is not installed"))?;
     let spool = tmp.join(format!("{lang}.p{phase}.jsonl"));
