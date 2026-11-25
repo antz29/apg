@@ -114,12 +114,12 @@ func discoverNestedModules(root string, moduleDirs []string) []moduleInfo {
 
 // absRestrict resolves --module dirs against the scan root: a relative dir
 // joins root (so the process working directory never decides), an absolute dir
-// passes through unchanged.
+// is cleaned so it prefix-matches the Clean-ed dirs dirAllowed compares against.
 func absRestrict(root string, moduleDirs []string) []string {
 	restrict := make([]string, 0, len(moduleDirs))
 	for _, d := range moduleDirs {
 		if filepath.IsAbs(d) {
-			restrict = append(restrict, d)
+			restrict = append(restrict, filepath.Clean(d))
 		} else {
 			restrict = append(restrict, filepath.Join(root, d))
 		}

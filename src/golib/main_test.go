@@ -461,6 +461,8 @@ func TestAbsRestrictResolvesAgainstScanRoot(t *testing.T) {
 		{"relative", []string{"alpha"}, []string{"/scan/root/alpha"}},
 		{"absolute", []string{"/scan/root/alpha"}, []string{"/scan/root/alpha"}},
 		{"absolute outside root", []string{"/elsewhere/beta"}, []string{"/elsewhere/beta"}},
+		{"absolute trailing separator cleaned", []string{"/scan/root/alpha/"}, []string{"/scan/root/alpha"}},
+		{"absolute dot-dot cleaned", []string{"/scan/root/alpha/../beta"}, []string{"/scan/root/beta"}},
 		{"dot-dot cleaned lexically", []string{"alpha/../beta"}, []string{"/scan/root/beta"}},
 		{"multiple values each resolved", []string{"alpha", "/elsewhere/beta"}, []string{"/scan/root/alpha", "/elsewhere/beta"}},
 		{"empty input", nil, nil},
@@ -477,5 +479,21 @@ func TestAbsRestrictResolvesAgainstScanRoot(t *testing.T) {
 	abs := absRestrict(root, []string{filepath.Join(root, "alpha")})
 	if !slices.Equal(rel, abs) {
 		t.Fatalf("relative and absolute forms differ: %v vs %v", rel, abs)
+	}
+
+	// feedback-19: an unclean absolute value is cleaned, so each selects the same
+	// subtree as its equivalent relative form (the process CWD never decides).
+	equivalences := []struct {
+		root, rel, abs, want string
+	}{
+		{"/scan/root/alpha", "../beta", "/scan/root/alpha/../beta", "/scan/root/beta"},
+		{"/scan/root", "alpha", "/scan/root/alpha/", "/scan/root/alpha"},
+	}
+	for _, e := range equivalences {
+		fromRel := absRestrict(e.root, []string{e.rel})
+		fromAbs := absRestrict(e.root, []string{e.abs})
+		if !slices.Equal(fromRel, fromAbs) || !slices.Equal(fromAbs, []string{e.want}) {
+			t.Fatalf("absRestrict(%q): relative %q = %v, absolute %q = %v, want both %v", e.root, e.rel, fromRel, e.abs, fromAbs, []string{e.want})
+		}
 	}
 }
