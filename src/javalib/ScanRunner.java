@@ -92,9 +92,11 @@ class ScanRunner {
      * Phase-04 task-17: persists the SAME class dir + declaration surface the
      * targeted path consumes (`compileAndCollect` + `saveSurface`), so the first
      * targeted scan after a cold full scan reuses it and reports zero
-     * `compiling N unchanged-package file(s)`. A full scan has every source, so
-     * it is authoritative (global.constraint.frontend-full-context); a partial
-     * surface is never persisted.
+     * `compiling N unchanged-package file(s)`. The walked set is exactly the
+     * scan's attribution context — every source when no `--module` root is
+     * given, the selected subtrees otherwise — so a surface covering every
+     * walked file is authoritative for that scan; a partial surface is never
+     * persisted.
      */
     static void seedClassCache(List<Path> allFiles, Path dir, String cacheDir) {
         Path javaRoot = persistentJavaRoot(cacheDir);
@@ -378,10 +380,11 @@ class ScanRunner {
             // module the descriptor does not read (java.desktop / java.sql /
             // java.xml / org.xml.sax / ...). Each such type then degrades to a
             // javac error symbol — the targeted scan would resolve against a
-            // REDUCED context, which global.constraint.frontend-full-context
-            // forbids and which the full scan (all files explicit, module
-            // descriptors excluded from the walk) does not suffer. A Maven
-            // source root always carries the descriptor, so substitute an
+            // context narrowed by NAMED-module attribution, which the full scan
+            // (all files explicit, module descriptors kept out of every javac
+            // task) does not suffer. A `--module` selection narrows the walked
+            // set deliberately; it must never narrow JDK visibility on top. A
+            // Maven source root always carries the descriptor, so substitute an
             // equivalent root that links every child EXCEPT `module-info.java`:
             // package lookup is unchanged, javac finds no descriptor and stays
             // in the unnamed module.

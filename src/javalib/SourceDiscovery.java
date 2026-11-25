@@ -41,11 +41,23 @@ class SourceDiscovery {
 
     /**
      * The discovery walk: every non-hidden-directory `.java` file under `dir`,
-     * minus the caller's `excludePaths` substrings. Emits the opening/closing
-     * progress lines and returns the walked set (module descriptors included;
-     * they are partitioned out of attribution downstream).
+     * minus the caller's `excludePaths` substrings and, when `moduleRoots` is
+     * non-empty, outside every one of those scan-root-resolved subtree roots.
+     * Subtree admission is path containment, never a substring match: `pkg`
+     * never admits `pkgx/`, and a selected root never admits a sibling.
+     *
+     * A selected walk IS javac's entire attribution context — `newTask` passes
+     * no `-sourcepath` and no `-classpath`, with `-implicit:none` always on —
+     * so a selected subtree's cross-subtree references degrade to unresolved
+     * targets and resolve only within the selected subtree, the same narrowing
+     * every other `--module`-honouring arm applies.
+     *
+     * Emits the opening/closing progress lines and returns the walked set
+     * (module descriptors included; they are partitioned out of attribution
+     * downstream).
      */
-    static List<Path> collect(Path dir, List<String> excludePaths) throws IOException {
+    static List<Path> collect(Path dir, List<String> excludePaths, List<Path> moduleRoots)
+            throws IOException {
         System.err.println("[" + Progress.elapsed() + "] collecting source files...");
         List<Path> files = new ArrayList<>();
         // Discovery walk. Prune hidden directories — any directory whose
@@ -84,15 +96,18 @@ class SourceDiscovery {
             // Maven multi-module tree carries one per module (jgrapht), so a
             // one-task full scan reported `too many module declarations found`
             // and lost JDK visibility wholesale. The scanner attributes an
-            // UNNAMED-module source tree (global.constraint.frontend-full-
-            // context: resolve against the FULL context), so descriptors are
-            // attributed nowhere on BOTH legs while remaining part of the
-            // scanned file set.
+            // UNNAMED-module source tree, so descriptors are attributed nowhere
+            // on BOTH legs while remaining part of the scanned file set.
             @Override
             public FileVisitResult visitFile(Path p, BasicFileAttributes attrs) {
                 if (!attrs.isRegularFile()) return FileVisitResult.CONTINUE;
                 if (!p.toString().endsWith(".java")) return FileVisitResult.CONTINUE;
                 if (excludePaths.stream().anyMatch(pat -> p.toString().contains(pat))) {
+                    return FileVisitResult.CONTINUE;
+                }
+                Path norm = p.toAbsolutePath().normalize();
+                if (!moduleRoots.isEmpty()
+                        && moduleRoots.stream().noneMatch(norm::startsWith)) {
                     return FileVisitResult.CONTINUE;
                 }
                 files.add(p);

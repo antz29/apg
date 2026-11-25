@@ -7,9 +7,12 @@ public class CallGraphBuilder {
         // frontends when a scan merges multiple languages. The phase-02
         // task-11 hand-off flags are appended beside it on the incremental
         // path (the pinned target-set interface), and `--cache-dir <dir>` is
-        // the per-worktree toolchain cache root.
+        // the per-worktree toolchain cache root. `--module <dir>` (repeatable)
+        // is a scan-root-resolved subtree root: it SELECTS the walk, so it
+        // never joins `excludePaths`.
         String idPrefix = "n";
         List<String> excludePaths = new ArrayList<>();
+        List<Path> moduleRoots = new ArrayList<>();
         String targetsPath = null;
         String cacheDir = null;
         for (int i = 1; i < args.length; i++) {
@@ -22,13 +25,19 @@ public class CallGraphBuilder {
             } else if (args[i].equals("--cache-dir") && i + 1 < args.length) {
                 cacheDir = args[i + 1];
                 i++;
+            } else if (args[i].equals("--module") && i + 1 < args.length) {
+                // An absolute value passes through unchanged; a relative value
+                // resolves against the scan root argument, never the process
+                // working directory.
+                moduleRoots.add(dir.resolve(args[i + 1]).toAbsolutePath().normalize());
+                i++;
             } else {
                 excludePaths.add(args[i]);
             }
         }
         String prefix = idPrefix;
 
-        List<Path> files = SourceDiscovery.collect(dir, excludePaths);
+        List<Path> files = SourceDiscovery.collect(dir, excludePaths, moduleRoots);
 
         // The target set is an EMISSION filter only (phase-02 task-11). An
         // absent flag or an empty file means NO filter — the byte-identical
