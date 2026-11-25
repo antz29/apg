@@ -29,6 +29,11 @@
     },
     {
       "kind": "realises",
+      "source": "solution.component.java-package-hierarchy",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.module-selection",
       "properties": {}
     },

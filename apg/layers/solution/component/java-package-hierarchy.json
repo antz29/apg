@@ -7,17 +7,17 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "java.(default)",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "java.CallGraphBuilder.main",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "java.Collector.emitPkgHierarchy",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "java.(default)",
       "properties": {}
     },
     {
@@ -28,6 +28,11 @@
     {
       "kind": "realises",
       "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.module-selection",
       "properties": {}
     }
   ],
