@@ -1,4 +1,5 @@
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -52,6 +53,7 @@ public class CallGraphBuilderTest {
             testDefaultPackageModuleIdentity(base);
             testDefaultPackageTargetedScaffolding(base);
             testModuleFlagSubtreeSelection(base);
+            testModuleFlagSymlinkSelection(base);
         } finally {
             deleteRec(base);
         }
@@ -877,6 +879,76 @@ public class CallGraphBuilderTest {
             allFiles.equals(new TreeSet<>(Set.of(appA.toString(), appB.toString(),
                 libL.toString(), appxX.toString()))),
             "emitted files were: " + allFiles);
+    }
+
+    /**
+     * Phase-04 task-13: the `--module` value is resolved to its REAL path, so
+     * a symlinked value selects the subtree the (non-following) walk emits and
+     * a `..` crossing a symlink resolves physically — not lexically. Skipped
+     * where the platform cannot create symbolic links.
+     */
+    static void testModuleFlagSymlinkSelection(Path base) throws Exception {
+        Path proj = base.resolve("proj-module-symlink");
+        Files.createDirectories(proj.resolve("app"));
+        Files.createDirectories(proj.resolve("inner"));
+        Files.createDirectories(proj.resolve("lib"));
+        Files.writeString(proj.resolve("app/A.java"), """
+            package app;
+            public class A {
+                public int a() { return 1; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("app/B.java"), """
+            package app;
+            public class B {
+                public int b() { return 2; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("lib/L.java"), """
+            package lib;
+            public class L {
+                public int l() { return 3; }
+            }
+            """, StandardCharsets.UTF_8);
+        Path appA = proj.resolve("app/A.java").toAbsolutePath().normalize();
+        Path appB = proj.resolve("app/B.java").toAbsolutePath().normalize();
+        Path libL = proj.resolve("lib/L.java").toAbsolutePath().normalize();
+
+        // link -> app: the symlinked value selects the link target's subtree,
+        // the identical set the real directory names.
+        try {
+            Files.createSymbolicLink(proj.resolve("link"), proj.resolve("app"));
+        } catch (UnsupportedOperationException | IOException e) {
+            System.out.println("SKIP: symbolic links unsupported on this platform — " + e);
+            return;
+        }
+        Set<String> viaReal = filePathsOf(normalize(run(proj, "--module", "app").out));
+        Set<String> viaLink = filePathsOf(normalize(run(proj, "--module", "link").out));
+        check("symlinked --module admits exactly the link target's subtree",
+            viaLink.equals(new TreeSet<>(Set.of(appA.toString(), appB.toString()))),
+            "selected files were: " + viaLink);
+        check("symlinked --module selects the identical set as the real directory",
+            viaLink.equals(viaReal),
+            "real: " + viaReal + "\nsymlink: " + viaLink);
+
+        // inner/link -> ../app, so `inner/link/..` resolves PHYSICALLY to the
+        // project root (every file) — never lexical `inner`, which holds no
+        // `.java` file and would select nothing.
+        try {
+            Files.createSymbolicLink(proj.resolve("inner/link"), Path.of("..", "app"));
+        } catch (UnsupportedOperationException | IOException e) {
+            System.out.println("SKIP: symbolic links unsupported on this platform — " + e);
+            return;
+        }
+        Set<String> crossing = filePathsOf(normalize(run(proj, "--module", "inner/link/..").out));
+        Set<String> flagless = filePathsOf(normalize(run(proj).out));
+        check("a `..` crossing a symlink resolves to the physical parent (the whole root)",
+            crossing.equals(flagless),
+            "crossing: " + crossing + "\nflagless: " + flagless);
+        check("that `..` is not read lexically as `inner` (which selects nothing)",
+            crossing.contains(appA.toString()) && crossing.contains(appB.toString())
+                && crossing.contains(libL.toString()),
+            "selected files were: " + crossing);
     }
 
     // ------------------------------------------------------------------

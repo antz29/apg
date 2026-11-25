@@ -1,3 +1,4 @@
+import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 public class CallGraphBuilder {
@@ -28,8 +29,31 @@ public class CallGraphBuilder {
             } else if (args[i].equals("--module") && i + 1 < args.length) {
                 // An absolute value passes through unchanged; a relative value
                 // resolves against the scan root argument, never the process
-                // working directory.
-                moduleRoots.add(dir.resolve(args[i + 1]).toAbsolutePath().normalize());
+                // working directory. Resolve the REAL path (before any lexical
+                // normalize) so a symlinked value — or a `..` that crosses a
+                // symlink — selects the subtree the non-following walk emits.
+                Path joined = dir.resolve(args[i + 1]);
+                Path physical;
+                try {
+                    physical = joined.toRealPath();
+                } catch (IOException e) {
+                    physical = joined.toAbsolutePath().normalize();
+                }
+                // The walk emits lexical paths, so re-express the physical
+                // module root in the scan root's lexical spelling. A root
+                // outside the scan root keeps its physical spelling: no walked
+                // path can lie under it either way.
+                Path moduleRoot = physical;
+                try {
+                    Path realDir = dir.toRealPath();
+                    if (physical.startsWith(realDir)) {
+                        moduleRoot = dir.toAbsolutePath().normalize()
+                                .resolve(realDir.relativize(physical));
+                    }
+                } catch (IOException e) {
+                    // Scan root unreadable: keep the physical spelling.
+                }
+                moduleRoots.add(moduleRoot);
                 i++;
             } else {
                 excludePaths.add(args[i]);
