@@ -100,6 +100,34 @@ fn stored_unit_keys(path: &Path) -> Vec<UnitKey> {
     keys
 }
 
+/// Every `(worktree id, recorded unix seconds)` row in the real `intents` table
+/// of a `facts.db` on disk — the table `cmd_scan` writes before its first reuse
+/// read and clears after the record commit, read straight from the redb file
+/// rather than through the `FactStore` facade. `None` while the store does not
+/// exist yet or redb's open is momentarily behind the writer, so a caller can
+/// poll.
+fn intent_rows(db_path: &Path) -> Option<Vec<(Vec<u8>, u64)>> {
+    if !db_path.exists() {
+        return None;
+    }
+    let db = redb::Database::builder()
+        .set_concurrency_mode(redb::ConcurrencyMode::MultiWriter)
+        .open(db_path)
+        .ok()?;
+    let txn = db.begin_read().ok()?;
+    let table = match txn.open_table(redb::TableDefinition::<&[u8], u64>::new("intents")) {
+        Ok(table) => table,
+        Err(redb::TableError::TableDoesNotExist(_)) => return Some(Vec::new()),
+        Err(_) => return None,
+    };
+    let mut rows = Vec::new();
+    for row in table.iter().ok()? {
+        let (key, at) = row.ok()?;
+        rows.push((key.value().to_vec(), at.value()));
+    }
+    Some(rows)
+}
+
 /// e2e tier -- real I/O: every test here writes files / the content-addressed
 /// store under the temp dir. Each is `#[ignore]`d, so a plain `cargo test`
 /// never runs one; the only entry point is the named guard `cargo test-e2e`
@@ -1600,5 +1628,95 @@ mod e2e {
         drop(store);
 
         let _ = std::fs::remove_dir_all(&repo.root);
+    }
+
+    /// phase-05 task-7 (feedback-25): the scan-side intent lifecycle. A real CLI
+    /// scan of a scratch `/tmp` repo commits its `intents` row before its first
+    /// reuse read and clears it after the record commit, so the redb `intents`
+    /// table is empty once the scan exits. The row is read from `facts.db`
+    /// while the child is still scanning — a missing `put_intent` never shows
+    /// it — and the post-exit read rejects a stale row — a missing
+    /// `remove_intent` leaves one.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/redb store/git); run via cargo test-e2e"]
+    fn scan_writes_its_intent_then_clears_it_after_the_record_commit() {
+        use apg::testutil::{ApgCommand, Repo};
+
+        let repo = Repo::new("scan-intent-lifecycle");
+        repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+        repo.write(
+            "a/a.go",
+            "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+        );
+        repo.commit_all("source");
+        let home = scratch_home("intent-lifecycle");
+        let home_s = home.to_string_lossy().into_owned();
+        let db_path = repo.root.join(".git/apg/facts.db");
+        let worktree = worktree_id(&repo.root);
+
+        // Spawn the real CLI and poll the store's own `intents` table until this
+        // worktree's row is committed. `cmd_scan` holds it from before its first
+        // reuse read until after `run_pipeline` returns, so it is visible while
+        // the child is still running.
+        let mut child = ApgCommand::new(&["scan", "."])
+            .cwd(&repo.root)
+            .env("HOME", &home_s)
+            .spawn();
+        let started = std::time::Instant::now();
+        let bound = std::time::Duration::from_secs(60);
+        let mut observed = None;
+        loop {
+            if let Some(rows) = intent_rows(&db_path)
+                && let Some((_, at)) = rows.iter().find(|(id, _)| id.as_slice() == &worktree[..])
+            {
+                observed = Some(*at);
+                break;
+            }
+            if started.elapsed() >= bound {
+                let _ = child.kill();
+                break;
+            }
+            if let Ok(Some(status)) = child.try_wait() {
+                panic!(
+                    "the scan exited ({status:?}) without its intent row ever being \
+                     observable in facts.db — `cmd_scan` never committed it"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let out = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            out.status.success(),
+            "the scan must succeed before its clearing is asserted: {stderr}"
+        );
+        let at = observed.unwrap_or_else(|| {
+            panic!(
+                "the scan's intent row was never observable in facts.db within \
+                 {bound:?} — `cmd_scan` did not write it before its reuse read"
+            )
+        });
+        // The observed row is a live intent: inside the grace the collector honours.
+        let now = unix_now();
+        assert!(
+            intent_live(at, now, INTENT_GRACE_SECS),
+            "the observed intent ({at}) is live as of {now} within the {INTENT_GRACE_SECS}s grace"
+        );
+
+        // After the record commit and its own clearing transaction the table is
+        // empty: no stale row survives a successful scan.
+        let rows = intent_rows(&db_path).expect("facts.db is readable after the scan");
+        assert!(
+            !rows.iter().any(|(id, _)| id.as_slice() == &worktree[..]),
+            "no stale intent row survives the scan: {rows:?}"
+        );
+        assert!(
+            rows.is_empty(),
+            "the intent table is empty after a successful scan: {rows:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
