@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "go-module-selection-is-module-granular",
+  "body": "The Go arm's `--module` selection is module-granular: `dirAllowed` compares each discovered module's own directory, so a value naming a package directory inside a module selects nothing, and a sibling-subtree fixture must give each selected subtree its own `go.mod`. Upgrade when the Go frontend gains package-subtree selection (then discovery and `dirAllowed` must admit package dirs, and the fixture can return to one root module).",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "go.apg/gofrontend.dirAllowed",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

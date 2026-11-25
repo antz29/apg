@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "module-flag-e2e-absolute-leg-fast-path",
+  "body": "The per-language absolute-form legs generally take the freshness fast path, because `cmd_scan` canonicalises both spellings to one recorded module selection, so the absolute scan reuses the relative scan's graph: the legs pin driver resolution plus admission equivalence, not a second cold frontend invocation. A code-language scan also runs the bundled structural streams, so the assertion scopes the File query by the language's source suffix rather than by path alone. Upgrade by adding `--force` to the absolute leg if a scenario must prove the absolute spelling reaches a cold frontend run, or by dropping the suffix scope if the structural streams stop co-running.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.module_flag_e2e.e2e.per_language_relative_and_absolute_admission",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

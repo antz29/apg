@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "help-text-contract-restated-across-surfaces",
+  "body": "The `--module` contract is restated by hand in four surfaces — the help text, README, AGENTS.md and the `apg_scan` tool description — and the help text additionally enumerates the structural stream ids literally, while the help unit test checks neither the enumeration against `classify::is_structural_language` nor the four restatements against each other. A new structural stream id or a contract change can therefore drift out of one surface silently. Upgrade to a single-sourced or drift-checked documentation surface the next time the contract or the stream set changes.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.help_text",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

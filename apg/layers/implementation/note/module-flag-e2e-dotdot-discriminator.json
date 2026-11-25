@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "module-flag-e2e-dotdot-discriminator",
-  "body": "The `..`-crossing-symlink CLI leg pins the CLI's canonicalisation through the recorded selection, not through admission: structfrontend's own `absolutize` already canonicalises module dirs, so `--module inner/link/../A` admitted `A`'s files before the fix too; pre-fix the two spellings recorded different selections (`→ STALE (differing: modules)`), post-fix both record one physical selection (`→ FRESH`). The lexically-normalising arms this fixes (TS/C#/SQL) are exercised only by e2e-full scenarios. Upgrade when a hermetic lexical-normalising arm exists (or structfrontend's absolutize fallback is removed), so the admission assertion alone discriminates.",
+  "body": "The `..`-crossing-symlink CLI leg pins the CLI's canonicalisation through the recorded selection, not through admission: structfrontend's own `absolutize` already canonicalises module dirs, so `--module inner/link/../A` admitted `A`'s files before the fix too; pre-fix the two spellings recorded different selections (`→ STALE (differing: modules)`), post-fix both record one physical selection (`→ FRESH`). The lexically-normalising arms this fixes are exercised elsewhere: TS's per-arm equivalence cases run in the default `node --test` tier (`src/tslib/scanner.test.ts`), C#/T-SQL's only through their per-crate `dotnet run` test projects, and these CLI-through legs only under the e2e-full selection. Upgrade when a hermetic lexical-normalising arm exists (or structfrontend's absolutize fallback is removed), so the admission assertion alone discriminates.",
   "properties": {},
   "out": [
     {
