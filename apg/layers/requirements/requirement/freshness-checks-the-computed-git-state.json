@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "freshness-checks-the-computed-git-state",
-  "body": "The freshness predicate evaluates the git state its caller has computed, so the recorded scan is compared against that state alone.",
+  "body": "The freshness predicate evaluates the git state its caller has computed, so the recorded scan is compared against that state and the caller's requested module selection, never against a re-read of the tree.",
   "properties": {
     "feature": "scan-change-identity"
   },

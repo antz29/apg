@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-honours-the-requested-module-selection",
+  "body": "The scan freshness fast path reuses the recorded database only when the recorded scan's module selection equals the requested one, so a scan of one subtree and a scan of the whole tree each rebuild against the other's recorded graph.",
+  "properties": {
+    "feature": "module-selection"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.scan-operator",
+      "properties": {}
+    }
+  ]
+}

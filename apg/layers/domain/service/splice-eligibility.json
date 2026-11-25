@@ -32,6 +32,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.freshness-honours-the-requested-module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.freshness-reads-content-only",
       "properties": {}
     },
