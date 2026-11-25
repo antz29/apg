@@ -76,24 +76,26 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
     let root_abs = root_abs
         .canonicalize()
         .unwrap_or_else(|_| root_abs.to_path_buf());
-    let module_dirs: Vec<String> = module_dirs
+    let module_dirs: Vec<std::path::PathBuf> = module_dirs
         .iter()
         .map(|d| {
             let p = std::path::Path::new(d);
-            let abs = if p.is_absolute() {
+            if p.is_absolute() {
                 p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
             } else {
                 root_abs
                     .join(p)
                     .canonicalize()
                     .unwrap_or_else(|_| root_abs.join(p))
-            };
-            abs.display().to_string()
+            }
         })
         .collect();
 
-    // The target set is an EMISSION filter only: every discovered project is
-    // still fully loaded and resolved (global.constraint.frontend-full-context).
+    // The target set narrows EMISSION, not loading: every project `load_cargo`
+    // successfully loads is fully loaded and resolved whatever the selection.
+    // The `--module` selection then narrows the emitted crate set
+    // (`within_module_limit`), the target set narrows it further at crate
+    // granularity (`crate_emit`), and per-file emission is derivative of both.
     let target_filter = read_target_set(targets_path.as_deref());
     ensure_artifact_dir(cache_dir.as_deref(), cache_key.as_deref());
 
@@ -178,7 +180,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
 pub(crate) fn scan(
     mut ctx: Ctx<'_>,
     root_abs: &std::path::Path,
-    module_dirs: Vec<String>,
+    module_dirs: Vec<std::path::PathBuf>,
     excludes: Vec<String>,
     id_prefix: &str,
     target_filter: Option<&HashSet<std::path::PathBuf>>,
@@ -189,7 +191,10 @@ pub(crate) fn scan(
     let mut crates: Vec<Crate> = Crate::all(ctx.db)
         .into_iter()
         .filter(|k| k.origin(ctx.db).is_local())
-        .filter(|k| within_module_limit(&ctx, *k, &module_dirs))
+        .filter(|k| {
+            let path = path_of(&ctx, k.root_file(ctx.db));
+            within_module_limit(std::path::Path::new(&path), &module_dirs)
+        })
         .collect();
     // Prefer the cargo PACKAGE name as each crate's module prefix (phase-05
     // task-10): `src/rustlib` declares `[package] name = "apg-rustfrontend"`
@@ -403,10 +408,17 @@ pub(crate) fn scan(
     files.sort_by_key(|f| path_of(&ctx, *f));
     // A file is emitted when its crate is targeted and its path is neither
     // user-excluded nor a generated/dependency tree (task-3 PART 2 / task-8).
+    // The module-containment test is defence in depth: the crate-level filter
+    // above already admits only selected crates, and every emitted file of an
+    // admitted crate lies under its root, so this can only withhold a file.
     let emitted_file = |fid: &FileId| -> bool {
-        file_emit.get(fid).copied().unwrap_or(false)
-            && !path_excluded(&path_of(&ctx, *fid), &excludes)
-            && !under_excluded_tree(&path_of(&ctx, *fid), root_abs)
+        if !file_emit.get(fid).copied().unwrap_or(false) {
+            return false;
+        }
+        let path = path_of(&ctx, *fid);
+        !path_excluded(&path, &excludes)
+            && !under_excluded_tree(&path, root_abs)
+            && within_module_limit(std::path::Path::new(&path), &module_dirs)
     };
     let total_files = files.iter().filter(|f| emitted_file(f)).count();
     let mut scanned = 0usize;

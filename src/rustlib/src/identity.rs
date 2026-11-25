@@ -184,10 +184,12 @@ pub(crate) fn module_fqn_with_prefix(ctx: &Ctx<'_>, m: Module, prefix: &str) -> 
     }
 }
 
-pub(crate) fn within_module_limit(ctx: &Ctx<'_>, krate: Crate, module_dirs: &[String]) -> bool {
-    if module_dirs.is_empty() {
-        return true;
-    }
-    let path = path_of(ctx, krate.root_file(ctx.db));
-    module_dirs.iter().any(|d| path.starts_with(d.as_str()))
+/// True when `path` is at or under any selected module dir. Comparison is
+/// component-wise (`Path::starts_with`), so `/ws/crates/a` never admits the
+/// `/ws/crates/ab` sibling; an empty set selects every path (flagless scan).
+pub(crate) fn within_module_limit(
+    path: &std::path::Path,
+    module_dirs: &[std::path::PathBuf],
+) -> bool {
+    module_dirs.is_empty() || module_dirs.iter().any(|d| path.starts_with(d))
 }

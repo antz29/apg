@@ -63,4 +63,32 @@ mod unit {
         // No ellipsis marker (U+2026).
         assert!(!identity.contains('…'));
     }
+
+    /// `within_module_limit` is a pure, component-wise containment test: an
+    /// exact dir admits its files, a nested file is admitted, the `a`/`ab`
+    /// sibling is rejected (the regression), a trailing separator selects the
+    /// same subtree, a file outside every dir is withheld, and an empty set
+    /// admits everything (flagless scan).
+    #[test]
+    fn within_module_limit_is_component_wise() {
+        use crate::identity::within_module_limit;
+        use std::path::{Path, PathBuf};
+
+        let cases: &[(&str, &[&str], bool)] = &[
+            ("/ws/crates/a/lib.rs", &["/ws/crates/a"], true),
+            ("/ws/crates/a/src/deep/mod.rs", &["/ws/crates/a"], true),
+            ("/ws/crates/ab/src/lib.rs", &["/ws/crates/a"], false),
+            ("/ws/crates/a/src/lib.rs", &["/ws/crates/a/"], true),
+            ("/ws/crates/b/src/lib.rs", &["/ws/crates/a"], false),
+            ("/anywhere/file.rs", &[], true),
+        ];
+        for (path, dirs, expected) in cases {
+            let module_dirs: Vec<PathBuf> = dirs.iter().map(|d| PathBuf::from(*d)).collect();
+            assert_eq!(
+                within_module_limit(Path::new(path), &module_dirs),
+                *expected,
+                "path {path} dirs {dirs:?}"
+            );
+        }
+    }
 }
