@@ -326,10 +326,32 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // before any frontend runs. The gate is released as soon as this probe's open
     // returns — it is never held across a frontend. A genuinely unavailable store
     // (not a git repository, unreadable) keeps the ordinary full-scan fallback.
-    match cache::FactStore::resolve(&apg_root) {
-        Ok(_) => {}
+    // The resolved store is kept: the scan's intent row (just below) and the
+    // post-record collector need it.
+    let store = match cache::FactStore::resolve(&apg_root) {
+        Ok(store) => Some(store),
         Err(err) if cache::store::is_contention(&err) => return Err(err),
-        Err(_) => {}
+        Err(_) => None,
+    };
+
+    // The scan's intent row, written and committed BEFORE the first store read
+    // that decides reuse: a concurrently running collector roots every unit this
+    // scan writes until the intent is cleared, so it can never reap the facts of
+    // a scan whose own manifest is not committed yet. It is keyed by the same
+    // checkout identity the scan's refs/scan rows use [`cache::worktree_id`]. A
+    // `--force` (or blacklisted) scan skips reuse but still records a cold
+    // baseline, so it takes the intent too. Its own transaction, committed at
+    // once; a non-git / unavailable store writes nothing.
+    let worktree = cache::worktree_id(&project_dir);
+    if let Some(store) = store.as_ref()
+        && let Err(err) = store
+            .put_intent(worktree, cache::gc::unix_now())
+            .and_then(|()| store.save_index())
+    {
+        if cache::store::is_contention(&err) {
+            return Err(err);
+        }
+        log.ln(&format!("[scan] scan intent unavailable: {err:#}"));
     }
 
     // Win-B incremental preparation (phase-02 task-8): the content manifest,
@@ -844,6 +866,27 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         &mut log,
         Some(&mut progress),
     )?;
+    // The record commit returned inside `run_pipeline`: clear the intent in its
+    // own transaction, then run the collector in the collector's own — never
+    // inside the record transaction. Both are best-effort cache hygiene: a
+    // failure leaves the intent to its grace period and never fails the scan.
+    // Clearing before the frontend-failure bail below is right because a partial
+    // graph is still recorded.
+    if let Some(store) = store.as_ref() {
+        if let Err(err) = store
+            .remove_intent(worktree)
+            .and_then(|()| store.save_index())
+        {
+            log.ln(&format!("[scan] scan intent clear skipped: {err:#}"));
+        }
+        if let Err(err) = cache::gc::collect(
+            &store.root,
+            cache::gc::unix_now(),
+            cache::gc::INTENT_GRACE_SECS,
+        ) {
+            log.ln(&format!("[scan] fact collection skipped: {err:#}"));
+        }
+    }
     progress.summary();
     timing.add(
         timing::Phase::IngestAssembly,
