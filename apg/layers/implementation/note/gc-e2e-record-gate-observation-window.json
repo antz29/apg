@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "gc-e2e-record-gate-observation-window",
+  "body": "Scenario 3's \"collector is waiting\" check is a 300 ms observation window rather than an explicit start barrier; it is safe because the record holds the external facts.lock until commit (with the redb writer as backstop), so collect cannot finish earlier. Upgrade to explicit start-barrier synchronisation only if the test ever flakes on a heavily loaded CI host.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cache_e2e.e2e.collection_waits_for_the_record_commit_without_blocking_it",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
