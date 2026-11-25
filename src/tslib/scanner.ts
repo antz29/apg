@@ -112,16 +112,32 @@ for (let i = 1; i < args.length; i++) {
     excludes.push(args[i]);
   }
 }
-const root = path.resolve(rootArg);
+// The scan root and every `--module` dir are compared against each other and
+// against the walk's package dirs, so all three are spelled physically: a
+// symlinked root or package dir then selects the same subtree as its real
+// path. `realpathSync` needs the path to exist; the lexical resolve is the
+// fallback (the driver already validates a `--module` dir exists).
+const physical = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+
+const root = physical(rootArg);
 config.root = root;
 config.idPrefix = idPrefix;
 config.excludes = excludes;
-config.moduleDirAbs = moduleDirs.map((d) => path.resolve(path.resolve(root, d === "." ? root : d)));
+config.moduleDirAbs = moduleDirs.map((d) => physical(d === "." ? root : path.resolve(root, d)));
 
-// The target set is an EMISSION filter only (global.constraint.frontend-full-
-// context). `null` means no filter is in force, so every declaration is
-// emitted — the byte-identical full-scan stream. A missing/unreadable file
-// degrades to no filter (with a warning), never to an empty scan.
+// The target set filters EMISSION of the surviving files' declarations and
+// file records. With `--module` the package walk is already narrowed to the
+// selected dirs and their subtrees (`src/tslib/discovery.mjs` `finish()`), and
+// an unselected scan walks every package. `null` means no filter is in force,
+// so every declaration is emitted — the byte-identical full-scan stream. A
+// missing/unreadable file degrades to no filter (with a warning), never to an
+// empty scan.
 config.targetFiles = null;
 if (targetsPath) {
   try {
