@@ -89,6 +89,50 @@ fn assert_declined(output: &Output) {
     );
 }
 
+/// Two `*.md` definitions plus a non-`*.md` direct child (the claim is
+/// location-based, not extension-based) in `.opencode/agents/`, with three
+/// non-definitions around them: a nested file, a non-`*.md` file outside the
+/// claimed directory and a `docs/` sibling subtree. `sub/` is a real directory
+/// so a `sub/..` module value can traverse back to the checkout root.
+fn module_fixture(tag: &str) -> Scratch {
+    let scratch = Scratch::new(tag);
+    scratch.write(".opencode/agents/first.md", "# first\n");
+    scratch.write(".opencode/agents/second.md", "# second\n# body\n");
+    scratch.write(".opencode/agents/notes.txt", "not markdown\n");
+    scratch.write(".opencode/agents/nested/deep.md", "# nested\n");
+    scratch.write(".opencode/README.txt", "not a definition\n");
+    scratch.write("docs/agent.md", "# elsewhere\n");
+    scratch.write("sub/records.txt", "real child\n");
+    scratch
+}
+
+/// The identity set of a record stream — `module` by FQN, located records by
+/// `path` (an `agent` by its stem too), sorted — so two runs selecting the same
+/// definitions compare equal whatever `--module` form selected them. The agent
+/// stream carries repo-relative paths only.
+fn identities(recs: &[Value]) -> Vec<String> {
+    let mut ids: Vec<String> = recs
+        .iter()
+        .map(|rec| {
+            let ty = rec["type"].as_str().expect("record type");
+            match ty {
+                "module" => format!("module:{}", rec["fqn"].as_str().expect("module fqn")),
+                "agent" => format!(
+                    "agent:{}:{}",
+                    rec["name"].as_str().expect("agent name"),
+                    rec["path"].as_str().expect("agent path")
+                ),
+                _ => format!(
+                    "{ty}:{}",
+                    rec["path"].as_str().expect("located record path")
+                ),
+            }
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
 mod e2e {
     use super::*;
 
@@ -289,5 +333,108 @@ mod e2e {
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["name"], "keep");
         assert_eq!(agents[0]["path"], ".opencode/agents/keep.md");
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem I/O; run via (cd src/agentlib && cargo test e2e:: -- --ignored --test-threads=4)"]
+    fn module_relative_and_absolute_forms_select_the_same_definitions() {
+        let scratch = module_fixture("module-forms");
+        let relative = records(&run(&scratch.root, &["--module", ".opencode/agents"]));
+        let absolute_path = scratch.path(".opencode/agents");
+        let absolute = records(&run(
+            &scratch.root,
+            &[
+                "--module",
+                absolute_path.to_str().expect("utf-8 module path"),
+            ],
+        ));
+
+        assert_eq!(
+            typed(&relative, "agent").len(),
+            3,
+            "the selection must admit every definition: {relative:?}"
+        );
+        assert_eq!(identities(&relative), identities(&absolute));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem I/O; run via (cd src/agentlib && cargo test e2e:: -- --ignored --test-threads=4)"]
+    fn module_dotdot_value_selects_the_same_subtree() {
+        let scratch = module_fixture("module-dotdot");
+        let plain = records(&run(&scratch.root, &["--module", "."]));
+        let dotdot = records(&run(&scratch.root, &["--module", "sub/.."]));
+
+        assert_eq!(
+            typed(&plain, "agent").len(),
+            3,
+            "the root selection must admit every definition: {plain:?}"
+        );
+        assert_eq!(identities(&plain), identities(&dotdot));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "e2e tier: real filesystem I/O; run via (cd src/agentlib && cargo test e2e:: -- --ignored --test-threads=4)"]
+    fn module_symlinked_value_selects_the_same_subtree() {
+        use std::os::unix::fs::symlink;
+
+        let scratch = module_fixture("module-symlink");
+        let target = scratch.path(".opencode/agents");
+        let link = scratch.path("linked-agents");
+        if symlink(&target, &link).is_err() {
+            // The platform denied symlink creation: nothing to compare.
+            return;
+        }
+
+        let plain = records(&run(&scratch.root, &["--module", ".opencode/agents"]));
+        let linked = records(&run(&scratch.root, &["--module", "linked-agents"]));
+
+        assert_eq!(
+            typed(&plain, "agent").len(),
+            3,
+            "the selection must admit every definition: {plain:?}"
+        );
+        assert_eq!(identities(&plain), identities(&linked));
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem I/O; run via (cd src/agentlib && cargo test e2e:: -- --ignored --test-threads=4)"]
+    fn module_outside_the_agents_subtree_emits_nothing() {
+        let scratch = module_fixture("module-outside");
+        let recs = records(&run(&scratch.root, &["--module", "docs"]));
+
+        assert!(
+            recs.is_empty(),
+            "a subtree outside .opencode/agents admitted records: {recs:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem I/O; run via (cd src/agentlib && cargo test e2e:: -- --ignored --test-threads=4)"]
+    fn flagless_run_emits_every_definition() {
+        let scratch = module_fixture("module-flagless");
+        let recs = records(&run(&scratch.root, &[]));
+
+        assert_eq!(typed(&recs, "module").len(), 1);
+        let mut files: Vec<&str> = typed(&recs, "file")
+            .iter()
+            .map(|r| r["path"].as_str().expect("file path"))
+            .collect();
+        files.sort();
+        assert_eq!(
+            files,
+            [
+                ".opencode/agents/first.md",
+                ".opencode/agents/notes.txt",
+                ".opencode/agents/second.md",
+            ],
+            "only the direct definition children are emitted"
+        );
+        let mut names: Vec<&str> = typed(&recs, "agent")
+            .iter()
+            .map(|r| r["name"].as_str().expect("agent name"))
+            .collect();
+        names.sort();
+        assert_eq!(names, ["first", "notes", "second"]);
     }
 }
