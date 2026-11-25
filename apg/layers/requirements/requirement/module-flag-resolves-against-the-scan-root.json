@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "module-flag-resolves-against-the-scan-root",
+  "body": "A relative --module <dir> resolves against the scan root and an absolute value passes through unchanged, so the same value selects the same subtree from any working directory.",
+  "properties": {
+    "feature": "module-selection"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.scan-operator",
+      "properties": {}
+    }
+  ]
+}

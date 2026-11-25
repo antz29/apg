@@ -1,0 +1,30 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "scan-operator",
+  "body": "A person or agent who runs apg scan over a repository and may restrict it to one module subtree, reading the resulting program graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.module-flag-documented-surface",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.module-flag-invalid-selection-fails-loudly",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.module-flag-resolves-against-the-scan-root",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.module-flag-restricts-the-scan-subtree",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

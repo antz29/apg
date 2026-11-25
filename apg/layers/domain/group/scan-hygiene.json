@@ -24,6 +24,11 @@
     },
     {
       "kind": "contains",
+      "target": "domain.service.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.service.scan-hygiene",
       "properties": {}
     },

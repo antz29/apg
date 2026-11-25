@@ -1,0 +1,76 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "module-selection",
+  "body": "The cross-frontend module-selection surface: it resolves each --module value against the scan root and restricts a frontend's scan to that subtree, failing loudly where the value names no directory.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "cpp.cpplib.scan_root",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.Program.Main",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.SqlFrontend.Program.Main",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "go.apg/gofrontend.absRestrict",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.SourceDiscovery.collect",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.agentfrontend.collect_definitions",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.agentfrontend.parse_args",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend.scanner.run",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.cobolfrontend.scan.run",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.psfrontend.scan.run",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.pyfrontend.run",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.module-selection",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

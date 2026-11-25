@@ -1,0 +1,41 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "module-selection",
+  "body": "The capability that selects the source subtree a scan admits: one resolution rule across frontends, subtree restriction, and a loud failure for an invalid selection.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.module-flag-documented-surface",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.module-flag-invalid-selection-fails-loudly",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.module-flag-resolves-against-the-scan-root",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.module-flag-restricts-the-scan-subtree",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-hygiene",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.module-selection",
+      "properties": {}
+    }
+  ]
+}

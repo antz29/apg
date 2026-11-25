@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "module-flag-restricts-the-scan-subtree",
+  "body": "Every frontend that honours --module restricts its scan to the named directory and its subtree and admits no source outside it.",
+  "properties": {
+    "feature": "module-selection"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.scan-operator",
+      "properties": {}
+    }
+  ]
+}

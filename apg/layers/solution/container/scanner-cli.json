@@ -114,6 +114,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.navigator-scan-permission-coherence-test",
       "properties": {}
     },
