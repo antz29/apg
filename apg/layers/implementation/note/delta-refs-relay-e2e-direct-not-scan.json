@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delta-refs-relay-e2e-direct-not-scan",
+  "body": "The delta refs scenario exercises FactStore::apply_refs directly with two hoisted worktree ids, not a full apg scan delta record or a real linked-worktree sibling (the sibling id comes from a temp dir outside the repo). Upgrade to an end-to-end one-file rescan on a real worktree if the record-to-relay wiring itself ever needs pinning.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.cache_e2e.e2e.delta_refs_relay_touches_only_the_changed_rows",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

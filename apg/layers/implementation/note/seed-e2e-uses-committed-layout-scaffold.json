@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "seed-e2e-uses-committed-layout-scaffold",
+  "body": "The seed e2e uses the existing warm_scratch committed layout scaffold (the same files apg init writes) instead of spawning apg init, keeping the test hermetic and frontend-only; upgrade to a real apg init subprocess only if the suite-install path itself needs e2e coverage.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.project_start_seeds_fact_rows_so_the_worktree_first_scan_is_incremental",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

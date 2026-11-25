@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "facts-format-bump-invalidates-unit-keys",
+  "body": "FACTS_FORMAT_VERSION also stamps UnitKey.format and ScaffoldingKey.format, so the format-2 bump discards every cached unit and scaffolding body for the repository, not just the refs/scan rows - the same sanctioned one-time full scan, but cross-version unit reuse is deliberately lost. Upgrade to a narrower per-table marker only if unit reuse must survive a refs/scan-row-only generation change.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/cache/store.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

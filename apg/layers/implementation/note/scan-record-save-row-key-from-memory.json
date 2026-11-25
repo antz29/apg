@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-record-save-row-key-from-memory",
+  "body": "ScanRecord::save derives its row key from the in-memory manifest, which a loaded record decodes empty because the field is serde-skipped, so saving a loaded record would key on the default manifest's root. Production recording passes the live manifest to put_scan, and every current save caller constructs a fresh record; upgrade when save takes an explicit worktree id or is retired.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.delta.ScanRecord.save",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
