@@ -1,0 +1,41 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "terraform-module-identity",
+  "body": "The capability that assigns each Terraform file to exactly one directory module, places test files with the module they test, and applies OpenTofu shadowing and override-file ordering.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-directory-module",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-override-files",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-test-file-module",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-tofu-shadowing",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

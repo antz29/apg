@@ -12,6 +12,16 @@
       "kind": "contains",
       "source": "requirements.requirement.bicep-scan-integration",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.bicep-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.frontend-dependencies",
+      "properties": {}
     }
   ]
 }

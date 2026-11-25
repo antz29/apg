@@ -1,0 +1,48 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "bicep-frontend",
+  "body": "The Azure Bicep source-scanning subdomain: template and parameter files as modules, their declarations, the symbol references and file dependencies between them, and the scan settings that admit them.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.bicep-conformance",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.bicep-declaration-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.bicep-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.bicep-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.bicep-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.bicep-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.iac",
+      "properties": {}
+    }
+  ]
+}

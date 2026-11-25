@@ -1,0 +1,53 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "terraform-frontend",
+  "body": "The Terraform and OpenTofu source-scanning subdomain: directory modules, their blocks, variable-definition, test and lock files, the references and module sources between them, and the scan settings that admit them.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-block-scanning",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-conformance",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-language-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-reference-resolution",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-source-classification",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.iac",
+      "properties": {}
+    }
+  ]
+}

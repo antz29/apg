@@ -40,6 +40,11 @@
   ],
   "in": [
     {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-block-scanning",
+      "properties": {}
+    },
+    {
       "kind": "requires",
       "source": "requirements.user.iac-codebase-owner",
       "properties": {}
