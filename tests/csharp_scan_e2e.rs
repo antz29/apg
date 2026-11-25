@@ -41,11 +41,13 @@ fn csharp_frontend_bin() -> PathBuf {
 }
 
 /// A fresh scratch directory under the system temp dir (never the apg repo).
+/// Returned canonicalised, because `csharpfrontend` resolves its scan root to
+/// the physical path and so emits `/private/var/...` for a `/var/...` temp dir.
 fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("apg-csharp-e2e-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
-    dir
+    dir.canonicalize().expect("canonicalise scratch dir")
 }
 
 /// Writes `text` at `dir/name` and returns its absolute path as a string.
