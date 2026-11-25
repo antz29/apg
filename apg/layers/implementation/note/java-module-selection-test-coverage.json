@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "java-module-selection-test-coverage",
+  "body": "The Java `--module` regression drives `CallGraphBuilder.main` in-process over a temp fixture, so it covers subtree admission, sibling-prefix containment and `--exclude-path` but no CLI spawn, exit status or freshness interaction; upgrade when the CLI-through honouring arms for Java are asserted by the phase-5 module-flag e2e.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "java.CallGraphBuilderTest.testModuleFlagSubtreeSelection",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

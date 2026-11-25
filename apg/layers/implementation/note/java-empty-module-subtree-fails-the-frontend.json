@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "java-empty-module-subtree-fails-the-frontend",
+  "body": "A `--module` root naming an existing directory that contains no `.java` file yields a zero-length walk, and the pre-existing full-scan path then fails the frontend with javac's `error: no source files` (the driver reports and skips the language) instead of emitting an empty stream; upgrade when a selected-but-empty subtree must emit an empty stream rather than fail the frontend process.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "java.CallGraphBuilder.main",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
