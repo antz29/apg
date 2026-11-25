@@ -62,6 +62,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.frontends.spawn_frontend_args",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.incremental.record.record",
       "properties": {}
     },
