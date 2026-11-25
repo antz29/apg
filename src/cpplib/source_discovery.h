@@ -49,7 +49,7 @@ static void find_modules_deep(const fs::path &dir, std::vector<CppModule> &modul
     if (dir_has_sources(dir)) {
         std::string name = dir.filename().string();
         if (name.empty()) name = "root";
-        modules.push_back({name, dir});
+        modules.push_back({name, dir, dir.string()});
     }
     for (const auto &entry : fs::directory_iterator(dir)) {
         // Skip symlinked entries: the walk is unbounded, so a symlinked
