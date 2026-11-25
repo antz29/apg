@@ -19,11 +19,13 @@ use super::prepare::State;
 /// stays complete and reusable. A target the assembled graph does not carry is
 /// skipped — a stale unit would be a correctness bug, not a saving.
 ///
-/// The one record commit ([`FactStore::save_index`]) is followed by the
-/// housekeeping hand-off, each step in a transaction of its own and never inside
-/// that commit: the scan's intent is cleared, then the reachability collector
-/// ([`crate::cache::gc::collect`]) runs. Both are best-effort — the scan is
-/// already durably recorded by then.
+/// This function's work ends at the one record commit
+/// ([`FactStore::save_index`]). The post-commit hand-off is the **scan driver's**
+/// (`cmd_scan`): after `run_pipeline` returns it clears this scan's intent —
+/// written before the reuse read — in its own transaction, then runs the
+/// reachability collector ([`crate::cache::gc::collect`]) in the collector's
+/// own, so the ingest-assembly window performs no whole-store collection. Both
+/// are best-effort — the scan is already durably recorded by then.
 pub fn record(
     store_root: &Path,
     cache_key: &CacheKey,
@@ -98,12 +100,13 @@ pub fn record(
         store.put_scaffolding_all(&scaffolding, cache_key)?;
     } else {
         for (lang, delta) in &scaffolding {
-            let merged = merge_scaffolding(
-                store.scaffolding(lang, cache_key).unwrap_or_default(),
-                delta,
-                targets_rel,
-            );
-            store.put_scaffolding(lang, &merged, cache_key)?;
+            let stored = store.scaffolding(lang, cache_key).unwrap_or_default();
+            let merged = merge_scaffolding(stored.clone(), delta, targets_rel);
+            // A one-file body edit merges to the stored record: writing it back
+            // would re-encode an O(files) body for a no-op, so skip it.
+            if merged != stored {
+                store.put_scaffolding(lang, &merged, cache_key)?;
+            }
         }
     }
     if full_scan {
@@ -156,28 +159,10 @@ pub fn record(
     store.put_overloads(id, &postcard::to_allocvec(&state.overloads)?)?;
 
     // ONE commit: the per-file units, scaffolding, refs/registry, the scan row
-    // and the delta rows land together.
+    // and the delta rows land together. The scan driver clears the intent and
+    // runs the collector after `run_pipeline` returns (the hand-off stays out of
+    // this commit and out of the measured ingest-assembly window).
     store.save_index()?;
-
-    // Only once that commit has returned: clear the scan intent in its own
-    // transaction (the held one was committed and taken, so this opens a new
-    // one), then let the collector run in the collector's own transaction —
-    // never inside the record transaction, and never on its error path. Both are
-    // best-effort: the scan is durably recorded by now, so a reclamation hiccup
-    // must not turn it into a failed scan. A missed clear is bounded by the
-    // intent grace period (and clearing an absent intent is a no-op, so the
-    // scan driver's own post-pipeline clear stays harmless); a missed collection
-    // is simply retried by the next scan.
-    if let Err(err) = store.remove_intent(id).and_then(|()| store.save_index()) {
-        eprintln!("[scan] scan intent clear skipped: {err:#}");
-    }
-    if let Err(err) = crate::cache::gc::collect(
-        store_root,
-        crate::cache::gc::unix_now(),
-        crate::cache::gc::INTENT_GRACE_SECS,
-    ) {
-        eprintln!("[scan] fact collection skipped: {err:#}");
-    }
     Ok(())
 }
 
