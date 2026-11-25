@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "module-selection",
-  "body": "The cross-frontend module-selection surface: it resolves each --module value against the scan root and restricts a frontend's scan to that subtree, failing loudly where the value names no directory.",
+  "body": "The cross-frontend module-selection surface: it resolves each --module value against the scan root and restricts a frontend's scan to that subtree, reporting a named error for a value that names a missing directory.",
   "properties": {},
   "out": [
     {
@@ -58,6 +58,11 @@
     {
       "kind": "implemented-by",
       "target": "rust.pyfrontend.run",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
       "properties": {}
     },
     {

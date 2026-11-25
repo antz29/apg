@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "module-flag-invalid-selection-fails-loudly",
-  "body": "A --module value that names no existing directory, and any frontend that cannot honour the flag, fails the scan with a named error instead of yielding an empty, partial, or wrongly-scanned graph.",
+  "body": "A --module value that names a missing directory fails the scan with a named error rather than an empty or partial graph, and a frontend that cannot honour the flag fails the same way.",
   "properties": {
     "feature": "module-selection"
   },

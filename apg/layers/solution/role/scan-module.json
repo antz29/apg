@@ -120,6 +120,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.navigator-scan-permission-coherence-test",
       "properties": {}
     },

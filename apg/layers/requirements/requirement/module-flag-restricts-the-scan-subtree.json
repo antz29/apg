@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "module-flag-restricts-the-scan-subtree",
-  "body": "Every frontend that honours --module restricts its scan to the named directory and its subtree and admits no source outside it.",
+  "body": "Every frontend that honours --module restricts its scan to the named directory and its subtree, so every admitted source file lies within that subtree.",
   "properties": {
     "feature": "module-selection"
   },
