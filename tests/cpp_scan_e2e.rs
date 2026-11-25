@@ -291,4 +291,115 @@ mod e2e {
             "the file contains its dotted-module-nested function"
         );
     }
+
+    /// A `.cpp` directly in the repository root roots at the `cpp.` base module
+    /// (the empty repo-relative path, rendered with its trailing dot) with its
+    /// declaration contained by it — `cpp..rooted` — while a source directory
+    /// nested below the root keeps its own module `cpp.nested/inner` owning its
+    /// own file and declaration. The base module claims only the root-level
+    /// file, so no source file lands under two module identities.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/cppfrontend/db.lbug/git); run via cargo test-e2e"]
+    fn base_level_source_roots_at_the_cpp_root_module() {
+        let repo = cpp_repo(
+            "cpp-base-root",
+            &[
+                ("rooted.cpp", "int rooted() { return 1; }\n"),
+                ("nested/inner/one.cpp", "int nested() { return 2; }\n"),
+            ],
+        );
+        scan_cpp(&repo, &[]);
+
+        let modules = column(
+            &query_rows(
+                &repo,
+                "MATCH (n:Module) WHERE n.fqn STARTS WITH 'cpp' RETURN n.fqn ORDER BY n.fqn",
+            ),
+            "n.fqn",
+        );
+        assert_eq!(
+            modules,
+            vec!["cpp.".to_string(), "cpp.nested/inner".to_string()],
+            "the C++ module set is exactly the base root module `cpp.` plus the \
+             nested directory's own module"
+        );
+
+        let module_files = pairs(
+            &query_rows(
+                &repo,
+                "MATCH (m:Module)-[:Contains]->(f:File) WHERE m.fqn STARTS WITH 'cpp.' \
+                 RETURN m.fqn, f.fqn ORDER BY f.fqn",
+            ),
+            "m.fqn",
+            "f.fqn",
+        );
+        assert_eq!(
+            module_files,
+            vec![
+                (
+                    "cpp.nested/inner".to_string(),
+                    "nested/inner/one.cpp".to_string()
+                ),
+                ("cpp.".to_string(), "rooted.cpp".to_string()),
+            ],
+            "the base module owns only the root-level file — it does not \
+             recursively claim nested/inner/one.cpp"
+        );
+
+        let functions = column(
+            &query_rows(
+                &repo,
+                "MATCH (n:Function) WHERE n.fqn STARTS WITH 'cpp.' RETURN n.fqn ORDER BY n.fqn",
+            ),
+            "n.fqn",
+        );
+        assert_eq!(
+            functions,
+            vec![
+                "cpp..rooted".to_string(),
+                "cpp.nested/inner.nested".to_string()
+            ],
+            "the root-level declaration's scope is the base root module"
+        );
+
+        let file_functions = pairs(
+            &query_rows(
+                &repo,
+                "MATCH (f:File)-[:Contains]->(fn:Function) WHERE fn.fqn STARTS WITH 'cpp.' \
+                 RETURN f.fqn, fn.fqn ORDER BY f.fqn",
+            ),
+            "f.fqn",
+            "fn.fqn",
+        );
+        assert_eq!(
+            file_functions,
+            vec![
+                (
+                    "nested/inner/one.cpp".to_string(),
+                    "cpp.nested/inner.nested".to_string()
+                ),
+                ("rooted.cpp".to_string(), "cpp..rooted".to_string()),
+            ],
+            "each file contains the declaration its own module roots"
+        );
+
+        let file_parent_counts = pairs(
+            &query_rows(
+                &repo,
+                "MATCH (m:Module)-[:Contains]->(f:File) WHERE m.fqn STARTS WITH 'cpp.' \
+                 RETURN f.fqn, count(*) AS n ORDER BY f.fqn",
+            ),
+            "f.fqn",
+            "n",
+        );
+        assert_eq!(
+            file_parent_counts,
+            vec![
+                ("nested/inner/one.cpp".to_string(), "1".to_string()),
+                ("rooted.cpp".to_string(), "1".to_string()),
+            ],
+            "every source file has exactly one cpp module parent — no source \
+             file lands under two module identities"
+        );
+    }
 }
