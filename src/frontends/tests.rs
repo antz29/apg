@@ -301,4 +301,35 @@ mod unit {
             "a tool-requiring language must still report its scan-time tool"
         );
     }
+
+    /// module-flag-resolution phase-01 task-18: `honours_module_flag` admits a
+    /// shipped code frontend, the agent frontend and a structural stream, and
+    /// refuses a language the driver ships no frontend for — so a `--module`
+    /// selection can never spawn a frontend that would accept and ignore the
+    /// flag. The pure `module_flag_error` builder names that language and every
+    /// requested value, so the operator can correct the selection.
+    #[test]
+    fn module_flag_honour_admits_shipped_and_refuses_unshipped() {
+        for shipped in ["go", "agent", "md"] {
+            assert!(
+                honours_module_flag(shipped),
+                "the shipped `{shipped}` frontend must honour --module"
+            );
+        }
+        // `ruby` has no frontend in the driver's registry and is not a
+        // structural stream id, so it is a genuinely unshipped refusal arm.
+        assert!(
+            !classify::is_structural_language("ruby"),
+            "the refusal arm must not be a structural stream id"
+        );
+        assert!(
+            !honours_module_flag("ruby"),
+            "a language with no shipped frontend must refuse --module"
+        );
+
+        let message = module_flag_error("ruby", &["pkg/one".to_string(), "pkg/two".to_string()]);
+        assert!(message.contains("`ruby`"), "{message}");
+        assert!(message.contains("`pkg/one`"), "{message}");
+        assert!(message.contains("`pkg/two`"), "{message}");
+    }
 }
