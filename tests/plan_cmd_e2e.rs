@@ -2067,6 +2067,11 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// The verb contract for the two existing-code verbs: both refuse an FQN
+    /// that does not resolve in the scanned graph; `modifies` accepts a still
+    /// planned FQN (licensed at verify by an earlier `creates`), `deletes`
+    /// refuses it (only real scanned code may be deleted), and both land on
+    /// real scanned code.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn task_verb_modifies_deletes_require_real_scanned_code() {
@@ -2091,7 +2096,7 @@ mod e2e {
             },
         ];
 
-        // modifies/deletes with an unresolvable FQN are refused.
+        // modifies/deletes with an unresolvable (drift) FQN are refused.
         for verb in ["modifies", "deletes"] {
             let err = plan_add_task_at(
                 &apg_root,
@@ -2111,8 +2116,9 @@ mod e2e {
                 "{verb}: {err}"
             );
         }
-        // modifies/deletes against a still-planned FQN are refused too — only
-        // a creates builds a planned node.
+        // A still-planned FQN: `modifies` is accepted — the planned node is
+        // licensed at verify by another task's earlier `creates` of the same
+        // FQN — while `deletes` targets real scanned code only and is refused.
         let mut with_planned = records.clone();
         with_planned.push(Record::PlannedNode {
             fqn: "github.com/x/y.Gateway".to_string(),
@@ -2120,7 +2126,7 @@ mod e2e {
             name: "Gateway".to_string(),
             parent: String::new(),
         });
-        let err = plan_add_task_at(
+        plan_add_task_at(
             &apg_root,
             "foo",
             &mut with_planned,
@@ -2130,6 +2136,24 @@ mod e2e {
             &assigned_agent(),
             None,
             &[task_op("struct", "modifies", "github.com/x/y.Gateway", "")],
+        )
+        .unwrap();
+        assert!(with_planned.iter().any(|r| matches!(
+            r,
+            Record::StructModify { from, to }
+                if from == "foo/plan.phase-01.task-1"
+                    && to == "github.com/x/y.Gateway"
+        )));
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut with_planned,
+            1,
+            2,
+            "T2",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "deletes", "github.com/x/y.Gateway", "")],
         )
         .unwrap_err();
         assert!(
