@@ -1043,10 +1043,12 @@ pub fn nf(
 
 /// [`task_recs`]'s single-task plan record plus the operation edge its verb
 /// names — `creates` → `<kind>_create` to the planned destination,
-/// `modifies`/`deletes` → `<kind>_{modify,delete}` to the live target,
-/// `renames`/`moves` → `<kind>_{rename,move}` to the live source plus a
-/// `target` edge to the planned destination — and no edge for a target-less
-/// task. Shared by the plan/edge tiers so fixtures are single-sourced.
+/// `modifies` → `<kind>_modify` to the live target or a planned node licensed
+/// at verify by an earlier `creates` of the same FQN, `deletes` →
+/// `<kind>_delete` to the live target only, `renames`/`moves` →
+/// `<kind>_{rename,move}` to the live source plus a `target` edge to the
+/// planned destination — and no edge for a target-less task. Shared by the
+/// plan/edge tiers so fixtures are single-sourced.
 pub fn task_recs(
     kind: &str,
     verb: &str,
