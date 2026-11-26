@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "terraform-json-nested-blocks-as-attributes",
+  "body": "In Terraform JSON syntax, an object nested inside a block body (lifecycle, provisioner, dynamic, a nested provider block, …) is mapped as an attribute, not a nested block, because the frontend carries no per-block-type schema; its ${…} strings still yield references. Native-syntax nested blocks are unaffected. Upgrade by passing a per-kind body schema to the JSON mapping when a nested JSON block must become a Struct or scope a dynamic-block iterator.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.terraformfrontend.parse.json_blocks",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
