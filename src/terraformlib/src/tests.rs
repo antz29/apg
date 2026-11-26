@@ -3,6 +3,10 @@
 //! shared fixtures and helpers at this root. e2e tests live outside this
 //! tree in `tests/terraformlib_e2e.rs`, under `mod e2e`.
 
+use crate::{module, parse, resolve, source, units};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
 mod unit {
     use crate::{diag, module, parse, source};
     use std::path::{Path, PathBuf};
@@ -323,5 +327,539 @@ mod unit {
         let refs = &body.blocks[0].body.attributes[0].refs;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].span.start, text.find("var.y").unwrap());
+    }
+}
+
+/// One wired run over in-memory `(repo-relative path, text)` files, with every
+/// module's facts keyed by qualified Struct name (`<dir>::<name>`, bare in the root).
+#[derive(Default)]
+struct Wired {
+    structs: Vec<String>,
+    uses: Vec<(String, String)>,
+    files: Vec<(String, String, &'static str)>,
+    unresolved: Vec<(String, String, &'static str)>,
+    diags: Vec<String>,
+}
+
+fn qual(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{dir}::{name}")
+    }
+}
+
+fn pair(a: &str, b: &str) -> (String, String) {
+    (a.to_string(), b.to_string())
+}
+
+fn tri(a: &str, b: &str, c: &'static str) -> (String, String, &'static str) {
+    (a.to_string(), b.to_string(), c)
+}
+
+/// Maps `files` to modules, parses them (shadowed files skipped), scans each module's
+/// blocks and resolves its references: pure in-memory, no disk access.
+fn wire(files: &[(&str, &str)]) -> Wired {
+    let root = Path::new("/r");
+    let paths: Vec<PathBuf> = files.iter().map(|&(p, _)| root.join(p)).collect();
+    let modules = module::modules(root, &paths);
+    let shadowed: HashSet<&str> = modules
+        .values()
+        .flat_map(|m| m.shadowed.iter().map(String::as_str))
+        .collect();
+    let parsed: Vec<units::Parsed> = files
+        .iter()
+        .filter(|&&(p, _)| !shadowed.contains(p))
+        .map(|&(p, text)| {
+            let text = source::decode_mapped(text.as_bytes());
+            let body = parse::parse(Path::new(p), &text.text)
+                .unwrap_or_else(|e| panic!("{p}: {}", e.message));
+            units::Parsed {
+                path: p.to_string(),
+                text,
+                body,
+            }
+        })
+        .collect();
+    let mut w = Wired::default();
+    for (dir, m) in &modules {
+        let found = units::module_units(dir, m, &parsed);
+        let names: Vec<String> = found.structs.iter().map(|u| qual(dir, &u.name)).collect();
+        w.diags.extend(
+            found
+                .diagnostics
+                .iter()
+                .map(|d| format!("{}:{}: {}", d.file, d.line, d.message)),
+        );
+        for fact in resolve::resolve(dir, &modules, &found, &parsed) {
+            match fact {
+                resolve::Fact::Uses { from, to } => {
+                    w.uses.push((names[from].clone(), names[to].clone()));
+                }
+                resolve::Fact::FileUses { from, path, kind } => {
+                    w.files.push((names[from].clone(), path, kind));
+                }
+                resolve::Fact::Unresolved {
+                    from,
+                    name,
+                    category,
+                } => w.unresolved.push((names[from].clone(), name, category)),
+            }
+        }
+        w.structs.extend(names);
+    }
+    w
+}
+
+mod int {
+    use super::*;
+
+    #[test]
+    fn block_facts_name_every_kind_of_block() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+resource "aws_vpc" "main" {}
+data "aws_ami" "ubuntu" {}
+variable "region" {}
+output "id" {}
+module "net" {
+  source = "hashicorp/vpc/aws"
+}
+provider "aws" {
+  region = "us-east-1"
+}
+provider "aws" {
+  alias = "west"
+}
+locals {
+  a = 1
+  b = 2
+}
+"#,
+        )]);
+        assert_eq!(
+            w.structs,
+            [
+                "aws_vpc.main",
+                "data.aws_ami.ubuntu",
+                "var.region",
+                "output.id",
+                "module.net",
+                "provider.aws",
+                "provider.aws.west",
+                "local.a",
+                "local.b",
+            ]
+        );
+        assert_eq!(
+            w.unresolved,
+            [tri("module.net", "hashicorp/vpc/aws", "external")]
+        );
+        assert!(w.uses.is_empty() && w.diags.is_empty());
+    }
+
+    #[test]
+    fn lock_and_test_files_yield_their_structs() {
+        let w = wire(&[
+            (
+                ".terraform.lock.hcl",
+                "provider \"registry.terraform.io/hashicorp/aws\" {\n  version = \"5.0.0\"\n}\n",
+            ),
+            ("tests/x.tftest.hcl", "run \"smoke\" {}\nrun \"plan\" {}\n"),
+        ]);
+        assert_eq!(
+            w.structs,
+            [
+                "test.tests/x.tftest.hcl",
+                "run.smoke",
+                "run.plan",
+                "lock.registry.terraform.io/hashicorp/aws",
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_base_declaration_keeps_the_first_and_reports_it() {
+        let w = wire(&[
+            ("a.tf", "variable \"x\" {}\n"),
+            ("b.tf", "variable \"x\" {}\n"),
+        ]);
+        assert_eq!(w.structs, ["var.x"]);
+        assert_eq!(
+            w.diags,
+            ["b.tf:1: duplicate declaration of `var.x`, first declared at a.tf:1"]
+        );
+    }
+
+    #[test]
+    fn override_block_without_a_base_match_is_dropped_and_reported() {
+        let w = wire(&[
+            ("main.tf", "resource \"a\" \"b\" {}\n"),
+            ("zz_override.tf", "resource \"a\" \"c\" {}\n"),
+        ]);
+        assert_eq!(w.structs, ["a.b"]);
+        assert_eq!(
+            w.diags,
+            ["zz_override.tf:1: override block `a.c` matches no base declaration"]
+        );
+    }
+
+    #[test]
+    fn same_module_references_resolve_and_context_values_draw_nothing() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+variable "region" {}
+resource "aws_vpc" "main" {
+  cidr = var.region
+  name = lower(var.region)
+  az   = count.index
+  id   = self.id
+  tf   = terraform.workspace
+  p    = path.module
+  e    = each.key
+  zone = aws_subnet.missing.id
+}
+resource "aws_subnet" "s" {
+  vpc = aws_vpc.main.id
+}
+"#,
+        )]);
+        assert_eq!(w.structs, ["var.region", "aws_vpc.main", "aws_subnet.s"]);
+        assert_eq!(
+            w.uses,
+            [
+                pair("aws_vpc.main", "var.region"),
+                pair("aws_subnet.s", "aws_vpc.main"),
+            ]
+        );
+        assert_eq!(
+            w.unresolved,
+            [tri("aws_vpc.main", "aws_subnet.missing", "unknown")]
+        );
+    }
+
+    #[test]
+    fn dynamic_iterators_by_label_and_by_attribute_draw_no_edges() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+variable "rules" {}
+resource "aws_security_group" "sg" {
+  dynamic "ingress" {
+    for_each = var.rules
+    content {
+      port = ingress.value
+    }
+  }
+  dynamic "egress" {
+    for_each = var.rules
+    iterator = it
+    content {
+      port = it.value
+    }
+  }
+}
+"#,
+        )]);
+        assert_eq!(w.structs, ["var.rules", "aws_security_group.sg"]);
+        assert_eq!(w.uses, [pair("aws_security_group.sg", "var.rules")]);
+        assert!(w.unresolved.is_empty());
+    }
+
+    #[test]
+    fn meta_argument_and_provider_references_resolve_to_their_structs() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+provider "aws" {
+  region = "us-east-1"
+}
+provider "aws" {
+  alias = "west"
+}
+resource "aws_vpc" "main" {
+  provider = aws
+}
+resource "aws_instance" "web" {
+  provider   = aws.west
+  depends_on = [aws_vpc.main]
+  lifecycle {
+    replace_triggered_by = [aws_vpc.main]
+  }
+}
+"#,
+        )]);
+        assert_eq!(
+            w.structs,
+            [
+                "provider.aws",
+                "provider.aws.west",
+                "aws_vpc.main",
+                "aws_instance.web",
+            ]
+        );
+        assert_eq!(
+            w.uses,
+            [
+                pair("aws_vpc.main", "provider.aws"),
+                pair("aws_instance.web", "provider.aws.west"),
+                pair("aws_instance.web", "aws_vpc.main"),
+            ]
+        );
+        assert!(w.unresolved.is_empty());
+    }
+
+    #[test]
+    fn undeclared_provider_is_an_unknown_unresolved_target() {
+        let w = wire(&[("main.tf", "resource \"x\" \"y\" {\n  provider = aws\n}\n")]);
+        assert_eq!(w.unresolved, [tri("x.y", "provider.aws", "unknown")]);
+    }
+
+    #[test]
+    fn module_providers_map_resolves_to_the_aliased_provider() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+provider "aws" {
+  alias = "west"
+}
+module "vpc" {
+  source    = "hashicorp/vpc/aws"
+  providers = { aws = aws.west }
+}
+"#,
+        )]);
+        assert_eq!(w.structs, ["provider.aws.west", "module.vpc"]);
+        assert_eq!(w.uses, [pair("module.vpc", "provider.aws.west")]);
+        assert_eq!(
+            w.unresolved,
+            [tri("module.vpc", "hashicorp/vpc/aws", "external")]
+        );
+    }
+
+    #[test]
+    fn override_references_leave_the_base_struct_with_one_override_file_edge() {
+        let w = wire(&[
+            (
+                "main.tf",
+                "variable \"size\" {}\nlocals {\n  base = 1\n}\nresource \"aws_instance\" \"web\" {\n  ami = \"ami-1\"\n}\n",
+            ),
+            (
+                "override.tf",
+                "resource \"aws_instance\" \"web\" {\n  instance_type = var.size\n  ami           = local.base\n}\n",
+            ),
+        ]);
+        assert_eq!(w.structs, ["var.size", "local.base", "aws_instance.web"]);
+        assert_eq!(
+            w.uses,
+            [
+                pair("aws_instance.web", "var.size"),
+                pair("aws_instance.web", "local.base"),
+            ]
+        );
+        assert_eq!(
+            w.files,
+            [(
+                "aws_instance.web".to_string(),
+                "override.tf".to_string(),
+                "override"
+            )]
+        );
+    }
+
+    #[test]
+    fn tfvars_keys_bind_to_variables_and_unknown_keys_are_unresolved() {
+        let w = wire(&[
+            ("main.tf", "variable \"region\" {}\n"),
+            ("prod.tfvars", "region = \"us-east-1\"\nbogus = 1\n"),
+        ]);
+        assert_eq!(w.structs, ["var.region", "tfvars.prod.tfvars"]);
+        assert_eq!(w.uses, [pair("tfvars.prod.tfvars", "var.region")]);
+        assert_eq!(
+            w.unresolved,
+            [tri("tfvars.prod.tfvars", "var.bogus", "unknown")]
+        );
+    }
+
+    #[test]
+    fn local_module_source_links_every_base_and_override_file_of_the_target() {
+        let w = wire(&[
+            ("main.tf", "module \"net\" {\n  source = \"./net\"\n}\n"),
+            ("net/main.tf", "variable \"cidr\" {}\n"),
+            (
+                "net/override.tf",
+                "variable \"cidr\" {\n  default = \"10\"\n}\n",
+            ),
+        ]);
+        let mut sources: Vec<_> = w
+            .files
+            .into_iter()
+            .filter(|f| f.2 == "module-source")
+            .collect();
+        sources.sort();
+        assert_eq!(
+            sources,
+            [
+                (
+                    "module.net".to_string(),
+                    "net/main.tf".to_string(),
+                    "module-source"
+                ),
+                (
+                    "module.net".to_string(),
+                    "net/override.tf".to_string(),
+                    "module-source"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parent_relative_module_source_normalises_across_directories() {
+        let w = wire(&[
+            ("a/main.tf", "module \"b\" {\n  source = \"../x\"\n}\n"),
+            ("x/main.tf", "variable \"v\" {}\n"),
+        ]);
+        assert_eq!(
+            w.files,
+            [(
+                "a::module.b".to_string(),
+                "x/main.tf".to_string(),
+                "module-source"
+            )]
+        );
+        assert!(w.unresolved.is_empty());
+    }
+
+    #[test]
+    fn missing_or_escaping_local_module_source_is_unknown_by_normalised_path() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+module "gone" {
+  source = "./missing"
+}
+module "up" {
+  source = "../../up"
+}
+"#,
+        )]);
+        assert_eq!(w.structs, ["module.gone", "module.up"]);
+        assert_eq!(
+            w.unresolved,
+            [
+                tri("module.gone", "missing", "unknown"),
+                tri("module.up", "../../up", "unknown"),
+            ]
+        );
+    }
+
+    #[test]
+    fn registry_git_and_absolute_module_sources_are_external() {
+        let w = wire(&[(
+            "main.tf",
+            r#"
+module "reg" {
+  source = "hashicorp/consul/aws"
+}
+module "git" {
+  source = "git::https://example.com/m.git"
+}
+module "abs" {
+  source = "/abs/x"
+}
+"#,
+        )]);
+        assert_eq!(
+            w.unresolved,
+            [
+                tri("module.reg", "hashicorp/consul/aws", "external"),
+                tri("module.git", "git::https://example.com/m.git", "external"),
+                tri("module.abs", "/abs/x", "external"),
+            ]
+        );
+    }
+
+    #[test]
+    fn computed_module_source_is_a_nameless_unknown_at_its_byte_offset() {
+        let text = "module \"m\" {\n  source = var.src\n}\n";
+        let w = wire(&[("main.tf", text)]);
+        let off = text.find("var.src").unwrap();
+        assert_eq!(
+            w.unresolved,
+            [tri(
+                "module.m",
+                &format!("<nameless@main.tf:{off}>"),
+                "unknown"
+            )]
+        );
+    }
+
+    #[test]
+    fn test_file_runs_resolve_against_their_module_and_carry_module_sources() {
+        let w = wire(&[
+            ("main.tf", "variable \"region\" {}\n"),
+            ("net/main.tf", "variable \"cidr\" {}\n"),
+            (
+                "tests/plan.tftest.hcl",
+                r#"
+run "plan" {
+  variables {
+    r = var.region
+  }
+}
+run "net" {
+  module {
+    source = "./net"
+  }
+}
+"#,
+            ),
+        ]);
+        assert_eq!(
+            w.structs,
+            [
+                "var.region",
+                "test.tests/plan.tftest.hcl",
+                "run.plan",
+                "run.net",
+                "net::var.cidr",
+            ]
+        );
+        assert_eq!(w.uses, [pair("run.plan", "var.region")]);
+        assert_eq!(
+            w.files,
+            [(
+                "run.net".to_string(),
+                "net/main.tf".to_string(),
+                "module-source"
+            )]
+        );
+    }
+
+    #[test]
+    fn shadowed_tf_contributes_no_structs_to_the_tofu_module() {
+        let w = wire(&[
+            ("main.tf", "variable \"x\" {}\n"),
+            ("main.tofu", "variable \"y\" {}\n"),
+        ]);
+        assert_eq!(w.structs, ["var.y"]);
+        assert!(w.diags.is_empty());
+    }
+
+    #[test]
+    fn a_reference_does_not_reach_another_modules_declarations() {
+        let w = wire(&[
+            ("main.tf", "variable \"region\" {}\n"),
+            (
+                "net/main.tf",
+                "resource \"a\" \"b\" {\n  x = var.region\n}\n",
+            ),
+        ]);
+        assert_eq!(w.structs, ["var.region", "net::a.b"]);
+        assert!(w.uses.is_empty());
+        assert_eq!(w.unresolved, [tri("net::a.b", "var.region", "unknown")]);
     }
 }
