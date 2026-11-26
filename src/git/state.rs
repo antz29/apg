@@ -503,21 +503,35 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
     db_recorded_scan_result(apg_root).ok().flatten()
 }
 
-/// The same `Scan` row [`db_recorded_scan`] reads, taken through the live
-/// session's routed read instead of opening a second handle on the
-/// session-owned DB. Parses the `apg query --json` rows and fails closed
-/// exactly like the direct read (an empty sha, a non-`true`/`false` clean, or
-/// an empty content key ⇒ `None`); the module selection is the routed
-/// `modules` field, so the two reads yield the same [`RecordedScan`].
-fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
+/// The same `Scan` row [`db_recorded_scan_result`] reads, taken through the
+/// live session's routed read instead of opening a second handle on the
+/// session-owned DB, with the same three outcomes:
+///
+/// - `Err` — the routed read failed or its protocol response is malformed (a
+///   forward failure, a JSON parse failure, a non-array value or a non-object
+///   first row): the recorded state is "unreadable now", never an absent row;
+/// - `Ok(None)` — a readable, well-formed response carrying no usable recorded
+///   scan: an empty row list, an empty `git_sha`, or a `git_clean` that is
+///   neither `"true"` nor `"false"` (an empty `content_key` parses to
+///   `content_key: None`);
+/// - `Ok(Some(_))` — one usable row, the module selection being the routed
+///   `modules` field.
+fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedScan>> {
     let out = crate::session::forward_query(
         apg_root,
         "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key, s.modules AS modules",
         true,
-    )
-    .ok()?;
-    let rows: serde_json::Value = serde_json::from_str(&out).ok()?;
-    let row = rows.as_array()?.first()?.as_object()?;
+    )?;
+    let rows: serde_json::Value = serde_json::from_str(&out)?;
+    let rows = rows
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("routed scan read returned a non-array response"))?;
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
+    let row = row
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("routed scan read returned a non-object row"))?;
     let field = |name: &str| {
         row.get(name)
             .and_then(serde_json::Value::as_str)
@@ -526,20 +540,20 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
     };
     let sha = field("git_sha");
     if sha.is_empty() {
-        return None;
+        return Ok(None);
     }
     let clean = match field("git_clean").as_str() {
         "true" => true,
         "false" => false,
-        _ => return None,
+        _ => return Ok(None),
     };
     let key = field("content_key");
-    Some(RecordedScan {
+    Ok(Some(RecordedScan {
         sha,
         clean,
         content_key: (!key.is_empty()).then_some(key),
         modules: field("modules"),
-    })
+    }))
 }
 
 /// Collects the freshness facts from **one** capture of the database and the
@@ -570,7 +584,7 @@ fn freshness_facts(
         return (true, None, vec!["git sha"]);
     };
     let Some(rec) = (if live_session {
-        db_recorded_scan_routed(apg_root)
+        db_recorded_scan_routed(apg_root).ok().flatten()
     } else {
         db_recorded_scan(apg_root)
     }) else {
