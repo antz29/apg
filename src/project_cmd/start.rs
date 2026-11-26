@@ -37,9 +37,10 @@ pub(crate) type ScanFn = dyn Fn(&Path) -> anyhow::Result<()>;
 
 /// Core of `project start` (split from the CLI wrapper so tests drive it
 /// against a fixture root). Refuses when the main checkout's scan is stale or
-/// missing, else creates the branch + worktree and copies main's `apg/.trans`
-/// into the branch — no frontend scan. The toolchain cache is materialised
-/// separately, by [`project_start_at_with`] under its resolved policy.
+/// missing (or its database is contended), else creates the branch + worktree
+/// and copies main's `apg/.trans` into the branch — no frontend scan. The
+/// toolchain cache is materialised separately, by [`project_start_at_with`]
+/// under its resolved policy.
 pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> {
     project_start_at_with(apg_root, name, None)
 }
@@ -48,6 +49,16 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
 /// cache-copy policy source). Takes the spec lock before the freshness gate and
 /// holds it through the `.trans` seed copy and the cache materialisation, so a
 /// running scan is waited out rather than mis-read as stale.
+///
+/// The freshness gate has three outcomes, from **one** snapshot: `Fresh`
+/// proceeds; `Contended` (the main database stayed unreadable through the
+/// bounded retry) is refused as named contention — the scan is not stale or
+/// missing and a stale-graph `apg scan` is not the fix; `Stale` and
+/// `NotApplicable` (a differing input, or no database/HEAD at all) keep the
+/// stale-or-missing refusal asking for `apg scan` in the main checkout. The
+/// refusals and the version gate run first, then the spec lock, then this
+/// gate, then the gitignore self-heal — so a refusal creates no branch/worktree
+/// and never mutates main.
 pub fn project_start_at_with(
     apg_root: &Path,
     name: &str,
@@ -103,15 +114,33 @@ pub fn project_start_at_with(
     let _lock = crate::artifacts::acquire_spec_lock(apg_root)?;
 
     // Freshness gate: start seeds the branch DB by copying main's scan, so
-    // main must have a CURRENT scan for main's HEAD. `!git::is_fresh` (never
-    // `is_stale`) — a missing `db.lbug` is "not fresh" too, which
-    // `is_stale` alone cannot see. This sits AFTER `refuse_start` (dirty/
-    // collision/in-worktree refusals keep precedence) and BEFORE the gitignore
-    // self-heal, so a refusal never mutates the main checkout.
-    if !git::is_fresh(apg_root) {
-        anyhow::bail!(
-            "refused: the main checkout's scan is stale or missing — `apg project start` copies main's scan into the branch, so main must have a current scan. Fix: run `apg scan` in the main checkout, then re-run `apg project start {name}`."
-        );
+    // main must have a CURRENT scan for main's HEAD. One snapshot decides the
+    // three outcomes. `Fresh` proceeds. `Contended` — the main database stayed
+    // unreadable (locked/busy) through the freshness read's bounded retry — is
+    // refused as named contention: the scan is NOT stale or missing, and
+    // re-scanning is not the fix for another process holding the database.
+    // `Stale` and `NotApplicable` (a differing input, or no `db.lbug`/HEAD at
+    // all — `!is_fresh` was true for both) keep the stale-or-missing refusal
+    // asking for `apg scan` in main. This sits AFTER `refuse_start` (dirty/
+    // collision/in-worktree refusals keep precedence) and the version gate,
+    // and BEFORE the gitignore self-heal, so a refusal never mutates the main
+    // checkout and never creates a branch/worktree.
+    match git::freshness_snapshot(apg_root) {
+        git::FreshnessSnapshot::Fresh { .. } => {}
+        git::FreshnessSnapshot::Contended {
+            database,
+            waited,
+            budget,
+            ..
+        } => anyhow::bail!(
+            "refused: the main checkout's scan is not stale or missing — its database at `{}` is unreadable because another process holds it (waited {waited:?} of a {budget:?} budget for the contention to clear). Fix: retry `apg project start {name}` once that process finishes; a stale-graph `apg scan` is not the fix.",
+            database.display()
+        ),
+        git::FreshnessSnapshot::Stale { .. } | git::FreshnessSnapshot::NotApplicable { .. } => {
+            anyhow::bail!(
+                "refused: the main checkout's scan is stale or missing — `apg project start` copies main's scan into the branch, so main must have a current scan. Fix: run `apg scan` in the main checkout, then re-run `apg project start {name}`."
+            );
+        }
     }
 
     // Self-heal (R9): when either apg layout location — the worktree dir or
