@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "freshness-read-projection-helper",
+  "body": "`freshness_read` is a private projection helper in `src/git/state.rs` (typed downcast to `FreshnessReadFailure` plus a panic-free fallback) because `freshness_read_retry` returns `anyhow::Result`, a signature the existing unit tests pin; collapse the helper into its callers if the retry ever returns the typed failure directly.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.freshness_read",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
