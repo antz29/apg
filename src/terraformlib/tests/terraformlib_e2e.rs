@@ -421,6 +421,55 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: real filesystem and process; run via cargo test-e2e"]
+    fn tofu_json_shadows_tf_and_tfvars_json_binds_to_its_variable() {
+        let dir = Scratch::new("tofu-json");
+        let main = "resource \"azurerm_resource_group\" \"main\" {\n  location = var.location\n}\n";
+        dir.write("main.tf", main);
+        dir.write(
+            "main.tofu.json",
+            "{\"resource\":{\"azurerm_resource_group\":{\"main\":{\"location\":\"westeurope\"}}}}\n",
+        );
+        dir.write("vars.tfvars.json", "{\"location\": \"westeurope\"}\n");
+        dir.write("variables.tf", "variable \"location\" {}\n");
+        let root = dir.root();
+        let run = tf(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let recs = records(&run.stdout);
+        assert_eq!(
+            files(&recs),
+            [
+                (
+                    format!("{root}/main.tf"),
+                    String::new(),
+                    1,
+                    main.lines().count() as u64
+                ),
+                (format!("{root}/main.tofu.json"), String::new(), 1, 1),
+                (format!("{root}/variables.tf"), String::new(), 1, 1),
+                (format!("{root}/vars.tfvars.json"), String::new(), 1, 1),
+            ]
+        );
+        assert!(of(&recs, "struct")
+            .iter()
+            .all(|r| text(r, "path") != format!("{root}/main.tf")));
+        let rg = named(&recs, "struct", "azurerm_resource_group.main");
+        assert_eq!(text(rg, "path"), format!("{root}/main.tofu.json"));
+        assert_eq!(
+            structs(&recs),
+            [
+                pair("azurerm_resource_group.main", ""),
+                pair("tfvars.vars.tfvars.json", ""),
+                pair("var.location", ""),
+            ]
+        );
+        assert_eq!(
+            uses(&recs),
+            [pair("tfvars.vars.tfvars.json", "var.location")]
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test-e2e"]
     fn targets_of_every_file_equal_the_full_scan() {
         let dir = Scratch::new("targets-all");
         split_tree(&dir);

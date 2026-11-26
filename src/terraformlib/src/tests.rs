@@ -850,6 +850,63 @@ run "net" {
     }
 
     #[test]
+    fn tofu_json_shadows_same_base_tf_and_tf_json() {
+        let w = wire(&[
+            ("main.tf", "variable \"x\" {}\n"),
+            ("main.tf.json", r#"{"variable":{"z":{}}}"#),
+            ("main.tofu.json", r#"{"variable":{"y":{}}}"#),
+        ]);
+        assert_eq!(w.structs, ["var.y"]);
+        assert!(w.diags.is_empty());
+    }
+
+    #[test]
+    fn tofu_shadows_same_base_tf_json() {
+        let w = wire(&[
+            ("main.tf.json", r#"{"variable":{"x":{}}}"#),
+            ("main.tofu", "variable \"y\" {}\n"),
+        ]);
+        assert_eq!(w.structs, ["var.y"]);
+        assert!(w.diags.is_empty());
+    }
+
+    #[test]
+    fn tofutest_shadows_tftest_contributing_no_test_or_run_structs() {
+        let w = wire(&[
+            ("tests/x.tftest.hcl", "run \"a\" {}\n"),
+            ("tests/x.tofutest.hcl", "run \"b\" {}\n"),
+        ]);
+        assert_eq!(w.structs, ["test.tests/x.tofutest.hcl", "run.b"]);
+    }
+
+    #[test]
+    fn tfvars_json_binds_keys_to_variables_and_unknown_keys_are_unresolved() {
+        let w = wire(&[
+            ("main.tf", "variable \"location\" {}\n"),
+            (
+                "prod.tfvars.json",
+                r#"{"location":"westeurope","bogus":"x"}"#,
+            ),
+        ]);
+        assert_eq!(w.structs, ["var.location", "tfvars.prod.tfvars.json"]);
+        assert_eq!(w.uses, [pair("tfvars.prod.tfvars.json", "var.location")]);
+        assert_eq!(
+            w.unresolved,
+            [tri("tfvars.prod.tfvars.json", "var.bogus", "unknown")]
+        );
+    }
+
+    #[test]
+    fn scanned_tofu_json_yields_its_structs() {
+        let w = wire(&[(
+            "main.tofu.json",
+            r#"{"resource":{"azurerm_resource_group":{"main":{"location":"westeurope"}}}}"#,
+        )]);
+        assert_eq!(w.structs, ["azurerm_resource_group.main"]);
+        assert!(w.uses.is_empty() && w.unresolved.is_empty() && w.diags.is_empty());
+    }
+
+    #[test]
     fn a_reference_does_not_reach_another_modules_declarations() {
         let w = wire(&[
             ("main.tf", "variable \"region\" {}\n"),
