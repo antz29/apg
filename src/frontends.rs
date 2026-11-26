@@ -399,6 +399,22 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             true,
         ),
+        // Bicep claims `.bicep` and `.bicepparam` sources.
+        (
+            "bicep",
+            &[".bicep", ".bicepparam"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+            false,
+        ),
+        // Terraform claims `.tf`, `.tf.json`, `.tofu`, `.hcl` and `.tfvars` sources.
+        (
+            "terraform",
+            &[".tf", ".tf.json", ".tofu", ".hcl", ".tfvars"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+            false,
+        ),
     ];
     let mut out = Vec::new();
     for (lang, exts, depth, skip, ci) in &candidates {
