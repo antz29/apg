@@ -275,6 +275,41 @@ pub struct RecordedScan {
     pub modules: String,
 }
 
+/// The outcome of **one** freshness evaluation: the verdict plus the captured
+/// checkout state and recorded scan it was derived from, so every
+/// refuse-on-stale site renders its reasons from this one capture instead of
+/// re-reading git or the database.
+///
+/// The arm *is* the verdict — [`NotApplicable`](Self::NotApplicable) when there
+/// is nothing to compare, [`Fresh`](Self::Fresh) when every input matches, and
+/// [`Stale`](Self::Stale) when at least one input differs. The variant set is
+/// open by design: a later transient-unreadable-database outcome takes a
+/// further arm rather than a closed shape, so a non-stale read failure never
+/// has to masquerade as a stale verdict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FreshnessSnapshot {
+    /// Nothing to compare: no `db.lbug`, or no git repo / unborn HEAD.
+    /// `differing` names the precondition that made it N/A (`"database"` or
+    /// `"git sha"`) so the collect-all callers can still report it.
+    NotApplicable {
+        current: GitState,
+        recorded: Option<RecordedScan>,
+        differing: Vec<&'static str>,
+    },
+    /// Every freshness input matches the recorded scan.
+    Fresh {
+        current: GitState,
+        recorded: Option<RecordedScan>,
+    },
+    /// At least one input differs, each named in `differing` — never empty, so
+    /// a stale verdict always names at least one differing input.
+    Stale {
+        current: GitState,
+        recorded: Option<RecordedScan>,
+        differing: Vec<&'static str>,
+    },
+}
+
 /// The recorded state of the scan that built the live DB, read from the DB's
 /// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
 /// DB's account of itself. This row is the ONE recorded-state source of the
@@ -352,6 +387,130 @@ fn db_recorded_scan_routed(apg_root: &Path) -> Option<RecordedScan> {
         content_key: (!key.is_empty()).then_some(key),
         modules: field("modules"),
     })
+}
+
+/// Collects the freshness facts from **one** capture of the database and the
+/// caller's already-captured [`GitState`]: whether `db.lbug` exists, its own
+/// [`RecordedScan`] row (when readable) and the other DB facts (pending state,
+/// schema, authored digest, session socket), folded into the list of inputs
+/// that differ (empty = fresh).
+///
+/// The precondition failures short-circuit exactly as the collect-all form
+/// always has — `"database"`, `"socket"`, `"git sha"` and `"recorded scan"`
+/// each reported alone — so [`freshness_differences_with`]'s `Ok`/`Err` is
+/// unchanged. [`freshness_snapshot`] shares this gather, so the labels and the
+/// verdict come from one evaluation and cannot drift.
+fn freshness_facts(
+    apg_root: &Path,
+    state: &GitState,
+    requested: Option<&[String]>,
+) -> (bool, Option<RecordedScan>, Vec<&'static str>) {
+    if !db_path(apg_root).exists() {
+        return (false, None, vec!["database"]);
+    }
+    let socket = crate::session::socket_path(apg_root);
+    let live_session = socket.exists() && crate::session::live_session_at(&socket);
+    if socket.exists() && !live_session {
+        return (true, None, vec!["socket"]);
+    }
+    let Some(cur_sha) = state.sha.as_deref() else {
+        return (true, None, vec!["git sha"]);
+    };
+    let Some(rec) = (if live_session {
+        db_recorded_scan_routed(apg_root)
+    } else {
+        db_recorded_scan(apg_root)
+    }) else {
+        return (true, None, vec!["recorded scan"]);
+    };
+    let mut differing: Vec<&'static str> = Vec::new();
+    if !live_session {
+        if crate::artifacts::db::db_has_pending_state(apg_root) {
+            differing.push("pending state");
+        }
+        if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
+            differing.push("schema");
+        }
+        let authored_ok = match crate::splice::seed::seed_authored_identity(&db_path(apg_root)) {
+            Ok(db) => {
+                crate::splice::seed::tree_authored_identity(apg_root).is_ok_and(|tree| tree == db)
+            }
+            Err(_) => false,
+        };
+        if !authored_ok {
+            differing.push("authored digest");
+        }
+    }
+    match rec.content_key.as_deref() {
+        // Pre-hardening: freshness cannot be verified.
+        None => differing.push("content key"),
+        Some(rec_key) => {
+            if state.content_key.as_deref() != Some(rec_key) {
+                differing.push("content key");
+            }
+        }
+    }
+    if rec.sha != cur_sha {
+        differing.push("sha");
+    }
+    if rec.clean != state.clean {
+        differing.push("cleanliness");
+    }
+    if let Some(requested) = requested
+        && modules_differ(&rec.modules, requested)
+    {
+        differing.push("modules");
+    }
+    (true, Some(rec), differing)
+}
+
+/// Maps already-captured freshness facts to the [`FreshnessSnapshot`] verdict.
+///
+/// **PURE**: no git, filesystem, database or process access — the caller
+/// ([`freshness_snapshot`]) does the one capture and this only folds it, so the
+/// unit tier can test the verdict in memory. `NotApplicable` when there is no
+/// database or no HEAD sha (not a repo / unborn HEAD); `Fresh` when the
+/// differing-label set is empty; `Stale` carrying the non-empty label set
+/// otherwise — so a stale verdict can never render an empty `differing` list.
+pub fn classify_freshness(
+    current: GitState,
+    recorded: Option<RecordedScan>,
+    database_present: bool,
+    differing: Vec<&'static str>,
+) -> FreshnessSnapshot {
+    if !database_present || current.sha.is_none() {
+        return FreshnessSnapshot::NotApplicable {
+            current,
+            recorded,
+            differing,
+        };
+    }
+    if differing.is_empty() {
+        FreshnessSnapshot::Fresh { current, recorded }
+    } else {
+        FreshnessSnapshot::Stale {
+            current,
+            recorded,
+            differing,
+        }
+    }
+}
+
+/// The single freshness evaluation the refuse-on-stale sites share: **one**
+/// [`git_state`] read plus **one** pass over the database's own facts
+/// ([`freshness_facts`]), folded by the pure [`classify_freshness`] into a
+/// [`FreshnessSnapshot`] carrying the verdict, the captured current
+/// [`GitState`] and the recorded [`RecordedScan`]. Nothing in the path
+/// re-reads, so a later projection derives its refusal message from this one
+/// capture rather than re-evaluating freshness.
+///
+/// The module-selection comparison is not applied (`requested` is `None`):
+/// this is the gate-shaped evaluation, whose callers carry no `--module`
+/// selection.
+pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
+    let current = git_state(apg_root);
+    let (database_present, recorded, differing) = freshness_facts(apg_root, &current, None);
+    classify_freshness(current, recorded, database_present, differing)
 }
 
 /// The content-identity freshness predicate (win A): the live DB is reusable
@@ -485,67 +644,16 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
 /// `requested` `None` skips the module comparison (the gates that carry no
 /// selection); `Some(set)` additionally reports `"modules"` when the requested
 /// resolved set differs from the recorded module selection.
+///
+/// The label collection is [`freshness_facts`], shared with
+/// [`freshness_snapshot`], so this collect-all form and the snapshot verdict
+/// derive from one evaluation and cannot drift.
 pub fn freshness_differences_with(
     apg_root: &Path,
     state: &GitState,
     requested: Option<&[String]>,
 ) -> Result<(), Vec<&'static str>> {
-    if !db_path(apg_root).exists() {
-        return Err(vec!["database"]);
-    }
-    let socket = crate::session::socket_path(apg_root);
-    let live_session = socket.exists() && crate::session::live_session_at(&socket);
-    if socket.exists() && !live_session {
-        return Err(vec!["socket"]);
-    }
-    let Some(cur_sha) = state.sha.as_deref() else {
-        return Err(vec!["git sha"]);
-    };
-    let Some(rec) = (if live_session {
-        db_recorded_scan_routed(apg_root)
-    } else {
-        db_recorded_scan(apg_root)
-    }) else {
-        return Err(vec!["recorded scan"]);
-    };
-    let mut differing: Vec<&'static str> = Vec::new();
-    if !live_session {
-        if crate::artifacts::db::db_has_pending_state(apg_root) {
-            differing.push("pending state");
-        }
-        if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
-            differing.push("schema");
-        }
-        let authored_ok = match crate::splice::seed::seed_authored_identity(&db_path(apg_root)) {
-            Ok(db) => {
-                crate::splice::seed::tree_authored_identity(apg_root).is_ok_and(|tree| tree == db)
-            }
-            Err(_) => false,
-        };
-        if !authored_ok {
-            differing.push("authored digest");
-        }
-    }
-    match rec.content_key.as_deref() {
-        // Pre-hardening: freshness cannot be verified.
-        None => differing.push("content key"),
-        Some(rec_key) => {
-            if state.content_key.as_deref() != Some(rec_key) {
-                differing.push("content key");
-            }
-        }
-    }
-    if rec.sha != cur_sha {
-        differing.push("sha");
-    }
-    if rec.clean != state.clean {
-        differing.push("cleanliness");
-    }
-    if let Some(requested) = requested
-        && modules_differ(&rec.modules, requested)
-    {
-        differing.push("modules");
-    }
+    let (_, _, differing) = freshness_facts(apg_root, state, requested);
     if differing.is_empty() {
         Ok(())
     } else {
