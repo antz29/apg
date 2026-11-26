@@ -603,9 +603,8 @@ fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedSca
 ///
 /// The precondition failures short-circuit exactly as the collect-all form
 /// always has — `"database"`, `"socket"`, `"git sha"` and `"recorded scan"`
-/// each reported alone — so [`freshness_differences_with`]'s `Ok`/`Err` is
-/// unchanged. [`freshness_snapshot`] shares this gather, so the labels and the
-/// verdict come from one evaluation and cannot drift.
+/// each reported alone. [`freshness_snapshot`] shares this gather, so the labels
+/// and the verdict come from one evaluation and cannot drift.
 ///
 /// The two **opening data reads** — the recorded `Scan` row and the
 /// pending-state probe — run through the bounded retry ([`freshness_read`] over
@@ -766,11 +765,12 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
 /// stale.
 ///
 /// The verdict is exactly [`freshness_differences_with`]'s — the body is
-/// `freshness_differences_with(apg_root, state, requested).is_ok()` — so the
-/// predicate and the collect-all form can never disagree. `requested` is the
-/// caller's resolved `--module` selection: `None` skips the module comparison
-/// (the gates that carry no selection), `Some(set)` compares it to the recorded
-/// one.
+/// `matches!(freshness_differences_with(apg_root, state, requested),
+/// FreshnessSnapshot::Fresh { .. })` — so the predicate and the collect-all
+/// form can never disagree. A contended (unreadable) database is **not** fresh:
+/// only the `Fresh` arm reuses the DB. `requested` is the caller's resolved
+/// `--module` selection: `None` skips the module comparison (the gates that
+/// carry no selection), `Some(set)` compares it to the recorded one.
 ///
 /// The DB-existence precondition comes FIRST. The fast-path's action is "reuse
 /// the existing DB", so with no `db.lbug` at all there is nothing to reuse →
@@ -824,16 +824,19 @@ pub fn is_fresh_with_state(
     state: &GitState,
     requested: Option<&[String]>,
 ) -> bool {
-    freshness_differences_with(apg_root, state, requested).is_ok()
+    matches!(
+        freshness_differences_with(apg_root, state, requested),
+        FreshnessSnapshot::Fresh { .. }
+    )
 }
 
 /// The collect-all form of [`is_fresh_with_state`]: `Ok(())` when the DB is
 /// reusable as-is, otherwise `Err` naming EVERY freshness input that differs
 /// between the scan recorded in the DB's own `Scan` row and the current
 /// checkout — one entry per differing input, never short-circuited. The verdict
-/// is exactly [`is_fresh_with_state`]'s (`Err` ⇔ not fresh), so that predicate
-/// can be `freshness_differences(apg_root, state).is_ok()`, and the STALE
-/// refusal / scan preamble can name every reported input.
+/// derives from the same [`freshness_differences_with`] snapshot as
+/// [`is_fresh_with_state`], so the predicate and this form can never disagree;
+/// the STALE refusal / scan preamble can name every reported input.
 ///
 /// The label strings (stable — pinned by tests):
 ///
@@ -864,7 +867,15 @@ pub fn is_fresh_with_state(
 /// schema and authored digest are evaluated only when no live session owns
 /// `db.lbug`; the recorded/git content comparison runs either way.
 pub fn freshness_differences(apg_root: &Path, state: &GitState) -> Result<(), Vec<&'static str>> {
-    freshness_differences_with(apg_root, state, None)
+    // TRANSITIONAL (superseded by task 11's contention-aware propagation):
+    // keeps the pre-change `Ok`/`Err` shape and the fail-closed
+    // `"recorded scan"` label for the contention arm.
+    match freshness_differences_with(apg_root, state, None) {
+        FreshnessSnapshot::Fresh { .. } => Ok(()),
+        FreshnessSnapshot::NotApplicable { differing, .. }
+        | FreshnessSnapshot::Stale { differing, .. } => Err(differing),
+        FreshnessSnapshot::Contended { .. } => Err(vec!["recorded scan"]),
+    }
 }
 
 /// Whether the requested resolved module set differs from the recorded
@@ -885,49 +896,40 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
     recorded != requested
 }
 
-/// [`freshness_differences`] with the caller's resolved `--module` selection.
-/// `requested` `None` skips the module comparison (the gates that carry no
-/// selection); `Some(set)` additionally reports `"modules"` when the requested
-/// resolved set differs from the recorded module selection.
+/// [`freshness_differences`] with the caller's resolved `--module` selection,
+/// returning the shared [`FreshnessSnapshot`] verdict. `requested` `None` skips
+/// the module comparison (the gates that carry no selection); `Some(set)`
+/// additionally reports `"modules"` when the requested resolved set differs
+/// from the recorded module selection.
 ///
 /// This is the collect-all projection of the one shared freshness evaluation:
 /// the snapshot is built from the shared gather ([`freshness_facts`], also used
 /// by [`freshness_snapshot`]) folded by the pure [`classify_freshness`] with the
-/// caller's already-captured `state` and `requested` selection, and the verdict
-/// is projected from that snapshot — `Ok(())` ⇔
-/// [`Fresh`](FreshnessSnapshot::Fresh), `Err(differing)` otherwise.
+/// caller's already-captured `state` and `requested` selection.
 /// [`NotApplicable`](FreshnessSnapshot::NotApplicable) is NOT short-circuited:
-/// it reports its precondition label (`"database"`, `"socket"` or `"git sha"`)
-/// exactly as the collect-all form always has, so the label set and the
-/// `Ok`/`Err` partition match the shared snapshot.
+/// it carries its precondition label (`"database"`, `"socket"` or `"git sha"`)
+/// exactly as the collect-all form always has, so the label set and the `Fresh`
+/// partition match the shared snapshot.
 ///
-/// A gather `Err` (a database unreadable through the bounded retry) reports the
-/// pre-change fail-closed `"recorded scan"` label until task 10 maps it to the
-/// contention arm — marked TRANSITIONAL below.
+/// A gather `Err` (a database unreadable through the bounded retry) is the
+/// [`Contended`](FreshnessSnapshot::Contended) arm — never a differing-input
+/// label — carrying the captured [`GitState`], the path the read targeted and
+/// the waited/budget pair.
 pub fn freshness_differences_with(
     apg_root: &Path,
     state: &GitState,
     requested: Option<&[String]>,
-) -> Result<(), Vec<&'static str>> {
-    let (database_present, recorded, differing) = match freshness_facts(apg_root, state, requested)
-    {
-        Ok(facts) => facts,
-        // TRANSITIONAL (superseded by task 10's contention-aware mapping):
-        // preserves the pre-change fail-closed outcome — an unreadable scan
-        // row used to report the `"recorded scan"` precondition label —
-        // rather than fabricating an empty `differing` list.
-        Err(_) => return Err(vec!["recorded scan"]),
-    };
-    match classify_freshness(state.clone(), recorded, database_present, differing) {
-        FreshnessSnapshot::Fresh { .. } => Ok(()),
-        FreshnessSnapshot::NotApplicable { differing, .. }
-        | FreshnessSnapshot::Stale { differing, .. } => Err(differing),
-        // TRANSITIONAL (superseded by task 10's contention-aware mapping):
-        // `classify_freshness` has no contention arm, so this arm cannot be
-        // reached from the facts above; it preserves the pre-change fail-closed
-        // outcome rather than panicking on a legitimate value or fabricating an
-        // empty `differing` list.
-        FreshnessSnapshot::Contended { .. } => Err(vec!["recorded scan"]),
+) -> FreshnessSnapshot {
+    match freshness_facts(apg_root, state, requested) {
+        Ok((database_present, recorded, differing)) => {
+            classify_freshness(state.clone(), recorded, database_present, differing)
+        }
+        Err(failure) => FreshnessSnapshot::Contended {
+            current: state.clone(),
+            database: failure.database,
+            waited: failure.waited,
+            budget: failure.budget,
+        },
     }
 }
 
@@ -1026,11 +1028,11 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 /// - `Git state: recorded <rec> vs current <cur> → FRESH` — byte-identical to
 ///   the pre-collect-all line, with no parenthetical;
 /// - `Git state: recorded <rec> vs current <cur> → STALE (differing: <labels>)`
-///   — `<labels>` is [`freshness_differences_with`]' list joined by `, `, so
-///   every differing freshness input is named, the `modules` selection included
-///   when `requested` is `Some` and differs from the recorded one. A DB with no
-///   readable `Scan` row reports the single `recorded scan` label with recorded
-///   `-@-`.
+///   — `<labels>` is [`freshness_differences_with`]'s differing list joined by
+///   `, `, so every differing freshness input is named, the `modules` selection
+///   included when `requested` is `Some` and differs from the recorded one. A DB
+///   with no readable `Scan` row reports the single `recorded scan` label with
+///   recorded `-@-`.
 ///
 /// The verdict is the SAME content-identity rule [`is_fresh_with_state`] uses —
 /// it is [`freshness_differences_with`] with the same `requested` selection — so
@@ -1057,10 +1059,19 @@ pub fn staleness_line(apg_root: &Path, current: &GitState, requested: Option<&[S
         None => state_str(None, false),
     };
     match freshness_differences_with(apg_root, current, requested) {
-        Ok(()) => format!("Git state: recorded {rec} vs current {cur} → FRESH"),
-        Err(differing) => format!(
+        FreshnessSnapshot::Fresh { .. } => {
+            format!("Git state: recorded {rec} vs current {cur} → FRESH")
+        }
+        FreshnessSnapshot::NotApplicable { differing, .. }
+        | FreshnessSnapshot::Stale { differing, .. } => format!(
             "Git state: recorded {rec} vs current {cur} → STALE (differing: {})",
             differing.join(", ")
         ),
+        // TRANSITIONAL (superseded by task 12's contention render): the
+        // pre-change fail-closed shape for a database that stayed unreadable
+        // through the bounded retry.
+        FreshnessSnapshot::Contended { .. } => {
+            format!("Git state: recorded {rec} vs current {cur} → STALE (differing: recorded scan)")
+        }
     }
 }

@@ -918,9 +918,18 @@ mod e2e {
         let assert_line_names_with =
             |apg: &Path, labels: &[&'static str], requested: Option<&[String]>| {
                 let state = git_state(apg);
+                let differing = match freshness_differences_with(apg, &state, requested) {
+                    FreshnessSnapshot::NotApplicable { differing, .. }
+                    | FreshnessSnapshot::Stale { differing, .. } => differing,
+                    FreshnessSnapshot::Fresh { .. } => {
+                        panic!("a differing input must never read fresh")
+                    }
+                    FreshnessSnapshot::Contended { .. } => {
+                        panic!("a differing input must never read contended")
+                    }
+                };
                 assert_eq!(
-                    freshness_differences_with(apg, &state, requested)
-                        .expect_err("a differing input must never read fresh"),
+                    differing,
                     labels.to_vec(),
                     "the predicate must report exactly the flipped inputs"
                 );
