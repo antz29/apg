@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "acceptance-overlap-proves-one-intersection-not-a-reader-floor",
+  "body": "The phase-03 acceptance `plan_verify_passes_beside_a_concurrent_read_only_reader` proves at least one observed reader/verify interval intersection per round from a continuously looped reader, not a minimum reader-invocation count per round, and it manufactures overlap by the pre-verify rendezvous (one completed reader invocation) plus the loop rather than by sleeping; a pathological scheduler that fitted an entire verify into the microsecond gap between two reader invocations would fail the overlap assertion rather than false-pass, so the acceptance is conservative. Upgrade to a per-round minimum-invocation assertion if CI ever needs a stronger concurrency floor.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.plan_verify_passes_beside_a_concurrent_read_only_reader",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
