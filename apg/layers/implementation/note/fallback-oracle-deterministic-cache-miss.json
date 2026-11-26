@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "fallback-oracle-deterministic-cache-miss",
+  "body": "The full-load-fallback oracle models the fact-store cache miss deterministically through the parked-worktree-root plus cache::gc::collect path, not a naturally occurring contention or GC window; upgrade when a hermetic fixture for a natural miss exists. It asserts the freshness verdict (the refusal message) on the fallback database before any mutation, because an admitted mutation re-projects the database and would mask the divergence.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.splice_e2e.e2e.full_load_fallback_publishes_the_tree_authored_digest",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
