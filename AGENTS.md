@@ -1192,9 +1192,11 @@ asserted by the binary.
   `implements` Component, and its per-kind operation edges —
   `creates`/`modifies`/`deletes`/`renames`/`moves`, each rendered
   `module_`/`file_`/`struct_`/`function_`-prefixed (`module_create`, …).
-  `creates` targets a planned node; `modifies`/`deletes` target existing code;
-  `renames`/`moves` carry the live source plus a `target` edge to the planned
-  destination; a target-less activity carries an empty edge set. Every task is
+  `creates` targets a planned node; `modifies` targets existing code, or a
+  planned node licensed at verify by a `creates` of the same FQN in an earlier
+  plan phase; `deletes` targets existing code only; `renames`/`moves` carry the
+  live source plus a `target` edge to the planned destination; a target-less
+  activity carries an empty edge set. Every task is
   implementer-workable — the human's decision point is plan end: the verify
   gate + merge act are the single delivery moment.
 - `Feedback {fqn, body, status, disposition}` is a review item;
