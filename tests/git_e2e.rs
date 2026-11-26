@@ -2196,4 +2196,124 @@ mod e2e {
         assert!(!is_stale(&apg));
         testutil::remove(&repo);
     }
+
+    /// A database made unreadable is **named contention** — the database path
+    /// and the waited/budget pair — never a stale verdict naming a differing
+    /// input, while a genuine difference in a separate fixture still reads
+    /// `Stale` and names its labels. The two fixtures keep the contention split
+    /// from swallowing the genuine-difference arm.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug); run via cargo test-e2e"]
+    fn contended_database_is_named_contention_never_stale() {
+        // ---- Contended arm: db.lbug is present but unreadable -------------
+        let repo = fixture_repo("freshness-contended");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        // Keep the file in place (its absence is the `"database"` N/A arm) and
+        // overwrite it with bytes no engine can parse: the read-only
+        // `Database::new` returns a terminal `Err`, so this is contention, never
+        // a missing DB. Any WAL/shm sidecar the fixture's last write left is
+        // dropped so the corrupt main file is all the open can see.
+        let db_path = apg.join(specs::TRANS).join("db.lbug");
+        std::fs::write(&db_path, b"not a database").unwrap();
+        for suffix in ["wal", "shm"] {
+            let _ = std::fs::remove_file(format!("{}.{suffix}", db_path.display()));
+        }
+
+        match freshness_snapshot(&apg) {
+            FreshnessSnapshot::Contended { database, .. } => assert_eq!(
+                &database, &db_path,
+                "the contention snapshot must name the database it could not read"
+            ),
+            other => panic!("an unreadable database must read Contended, got {other:?}"),
+        }
+        assert!(
+            !is_stale(&apg),
+            "contention is never stale — an unreadable database names no differing input"
+        );
+
+        let db_display = db_path.display().to_string();
+        let msg = refusal_message(&apg).expect("contended must refuse, not pass as fresh");
+        assert!(
+            msg.contains(&db_display),
+            "the contention refusal must name the database path: {msg}"
+        );
+        assert!(
+            msg.contains("unreadable"),
+            "the contention refusal must say unreadable: {msg}"
+        );
+        assert!(
+            !msg.contains("graph is stale"),
+            "contention must never read as a stale verdict: {msg}"
+        );
+        assert!(
+            !msg.contains("run `apg scan` before mutating"),
+            "a scan is not the contention fix: {msg}"
+        );
+
+        let line = staleness_line(&apg, &git_state(&apg), None);
+        assert!(
+            line.contains("CONTENDED"),
+            "the staleness line must name contention: {line}"
+        );
+        assert!(
+            line.contains(&db_display),
+            "the contention line must name the database path: {line}"
+        );
+        assert!(
+            !line.contains("STALE"),
+            "the contention line must never print STALE: {line}"
+        );
+        testutil::remove(&repo);
+
+        // ---- Genuine-difference arm: a new commit after the scan row -------
+        let repo = fixture_repo("freshness-contended-diff");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        repo.commit_all("second");
+
+        let differing = match freshness_snapshot(&apg) {
+            FreshnessSnapshot::Stale { differing, .. } => differing,
+            other => {
+                panic!("a readable database with a differing input must read Stale, got {other:?}")
+            }
+        };
+        assert!(
+            !differing.is_empty(),
+            "a stale verdict always names at least one differing input"
+        );
+
+        let msg = refusal_message(&apg).expect("a stale verdict must refuse");
+        assert!(
+            msg.contains("graph is stale"),
+            "a genuine difference must read stale: {msg}"
+        );
+        for label in &differing {
+            assert!(
+                msg.contains(*label),
+                "the refusal message must name `{label}`: {msg}"
+            );
+        }
+        let line = staleness_line(&apg, &git_state(&apg), None);
+        assert!(
+            line.contains("→ STALE (differing: "),
+            "a genuine difference must print the stale line: {line}"
+        );
+        assert!(
+            !line.contains("CONTENDED"),
+            "a genuine difference is never contention: {line}"
+        );
+        for label in &differing {
+            assert!(
+                line.contains(*label),
+                "the staleness line must name `{label}`: {line}"
+            );
+        }
+        testutil::remove(&repo);
+    }
 }
