@@ -46,6 +46,27 @@ pub(crate) use identity::root_edge_endpoint;
 pub(crate) use identity::{root_module_endpoint, root_stream_edge_endpoint, rooted_scope};
 pub(crate) use render::{FuncDecl, render_function_fqns};
 
+/// File extensions reserved for the Terraform and Bicep frontends (Phases 2/3).
+/// When a structural stream (e.g. `misc`) emits a record for one of these files
+/// before the dedicated frontend is installed, the ingest module skips it so the
+/// file is never claimed by the structural scanner. The structfrontend's own
+/// discovery walk (`stream_for_path`) applies the same skip; this is the
+/// ingest-side backstop.
+const IAC_RESERVED_EXTS: &[&str] = &[
+    "tf", "tf.json", "tofu", "hcl", "tfvars", "bicep", "bicepparam",
+];
+
+/// True when `path` has an extension reserved for the Terraform or Bicep
+/// frontends. The check matches exactly the whole dotted extension suffix (so
+/// `x.tf.json` matches while `x.json` does not) and is case-insensitive
+/// (`.TF`, `.BICEP`).
+fn is_iac_reserved_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    IAC_RESERVED_EXTS
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")))
+}
+
 pub struct IngestOptions<'a> {
     pub blacklist: &'a [String],
     pub language: &'a str,
@@ -822,6 +843,11 @@ fn ingest_records(
                         rooted_scope(&lang, &parent, &module_identities, base)
                     );
                     let identity = repo_relative_identity(base, &path);
+                    if is_iac_reserved_path(&path) && !matches!(lang.as_str(), "terraform" | "bicep")
+                    {
+                        skipped += 1;
+                        continue;
+                    }
                     claim(&mut seen, &identity, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     if is_blacklisted(&fqn, Some(&identity), &lang, opts) {
@@ -905,6 +931,17 @@ fn ingest_records(
                             rooted_scope(&lang, &parent, &module_identities, base)
                         };
                     let identity = repo_relative_identity(base, &path);
+                    // A file whose extension is reserved for the Terraform or
+                    // Bicep frontend must not be claimed by any other stream
+                    // (the structural scanner's `misc` included). The dedicated
+                    // frontend (Phases 2/3) will emit it under its own id; until
+                    // then this ingest-side backstop keeps the file out of the
+                    // structural graph so it is never double-claimed.
+                    if is_iac_reserved_path(&path) && !matches!(lang.as_str(), "terraform" | "bicep")
+                    {
+                        skipped += 1;
+                        continue;
+                    }
                     if is_blacklisted(&parent, Some(&identity), &lang, opts) {
                         skipped += 1;
                         continue;
@@ -1485,6 +1522,12 @@ fn ingest_records(
         let Some(fqn) = id_to_fqn.get(&f.id).cloned() else {
             continue;
         };
+        if is_iac_reserved_path(&f.path)
+            && !matches!(f.language.as_str(), "terraform" | "bicep")
+        {
+            skipped += 1;
+            continue;
+        }
         if is_blacklisted(&fqn, Some(&f.path), &f.language, opts) {
             skipped += 1;
             continue;
