@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "read-only-test-holds-the-read-write-class",
+  "body": "The concurrency test holds the read-write class in-process, not only a read-only handle, because lbug read-only opens take no lock: only a held writer discriminates the read-only class (the test fails deterministically if `review_list` opens read-write); revisit if lbug ever gives read-only opens a shared lock.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.review_cmd_e2e.e2e.review_list_runs_beside_a_held_read_only_database",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
