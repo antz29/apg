@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use lbug::{Connection, Database};
 
@@ -347,6 +348,93 @@ pub fn is_transient_read_error(err: &anyhow::Error) -> bool {
     message
         .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
         .any(|word| matches!(word, "lock" | "locked" | "busy"))
+}
+
+/// How long a freshness read keeps retrying a transient lock/busy failure
+/// before refusing as named contention ([`FreshnessReadFailure`]).
+pub const FRESHNESS_READ_BUDGET: Duration = Duration::from_millis(500);
+
+/// One retry step: the caller's injected sleeper is asked to wait this long
+/// between attempts. `FRESHNESS_READ_BUDGET / FRESHNESS_READ_STEP` bounds the
+/// loop at 20 retries.
+pub const FRESHNESS_READ_STEP: Duration = Duration::from_millis(25);
+
+/// The contention value a freshness read yields when it stops retrying: the
+/// database it read, how long the caller's sleeper was asked to wait, the
+/// budget that bounded the wait, and the last underlying read error.
+///
+/// Every failure is wrapped — a terminal one on the first read
+/// ([`is_transient_read_error`] false) carries `waited == Duration::ZERO` — so
+/// downstream contention rendering reads one uniform value instead of
+/// re-deriving the wait. `waited` is the sum of the injected sleeps, never a
+/// clock reading.
+#[derive(Debug)]
+pub struct FreshnessReadFailure {
+    /// The database the read targeted (e.g. `<apg_root>/.trans/db.lbug`).
+    pub database: PathBuf,
+    /// The total the injected sleeper was asked to wait before giving up.
+    pub waited: Duration,
+    /// The retry budget that bounded `waited` ([`FRESHNESS_READ_BUDGET`]).
+    pub budget: Duration,
+    /// The last read error (transient on exhaustion, terminal otherwise).
+    pub source: anyhow::Error,
+}
+
+impl std::fmt::Display for FreshnessReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "database `{}` is unreadable — waited {:?} of a {:?} budget for the contention to clear: {:#}",
+            self.database.display(),
+            self.waited,
+            self.budget,
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for FreshnessReadFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+/// Run one freshness read, retrying a transient lock/busy failure
+/// ([`is_transient_read_error`]) until [`FRESHNESS_READ_BUDGET`] is spent.
+///
+/// The function never sleeps itself: `sleep` is the caller's injected sleeper,
+/// asked to wait [`FRESHNESS_READ_STEP`] between attempts, so the unit tier
+/// drives it with no I/O and no clock. The loop is bounded by the accumulated
+/// injected wait (at most `FRESHNESS_READ_BUDGET / FRESHNESS_READ_STEP`
+/// retries), never by wall time and never unbounded.
+///
+/// A terminal failure returns at once, no retry. Every failure — terminal or
+/// exhausted — is wrapped in [`FreshnessReadFailure`] carrying the database,
+/// the waited total (zero for a terminal first read) and the last underlying
+/// error, so downstream rendering has one uniform contention value.
+pub fn freshness_read_retry<T>(
+    database: &Path,
+    mut read: impl FnMut() -> anyhow::Result<T>,
+    mut sleep: impl FnMut(Duration),
+) -> anyhow::Result<T> {
+    let mut waited = Duration::ZERO;
+    loop {
+        match read() {
+            Ok(value) => return Ok(value),
+            Err(source) => {
+                if !is_transient_read_error(&source) || waited >= FRESHNESS_READ_BUDGET {
+                    return Err(anyhow::Error::new(FreshnessReadFailure {
+                        database: database.to_path_buf(),
+                        waited,
+                        budget: FRESHNESS_READ_BUDGET,
+                        source,
+                    }));
+                }
+                sleep(FRESHNESS_READ_STEP);
+                waited += FRESHNESS_READ_STEP;
+            }
+        }
+    }
 }
 
 /// The recorded state of the scan that built the live DB, read from the DB's
