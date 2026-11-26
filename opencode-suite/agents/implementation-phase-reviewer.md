@@ -267,9 +267,10 @@ durable targets need `--project <p>`, routing into the branch's transient mirror
   no node, and is the acceptance criteria you check.
 - **Task assignment and operations**: each task assigns exactly one `assigned-to` Agent and may
   name the Component it `implements`; the code it touches is a per-kind operation edge —
-  `creates` (the *planned* destination only), `modifies`/`deletes` (code that must already
-  resolve in the scanned graph), `renames`/`moves` (the live source plus the `target`
-  destination) — and an empty edge set is a target-less activity.
+  `creates` (the *planned* destination only); `modifies` (existing scanned code, or a planned
+  node licensed by a `creates` of the same FQN in an earlier plan phase); `deletes` (code that
+  must already resolve in the scanned graph); `renames`/`moves` (the live source plus the
+  `target` destination) — and an empty edge set is a target-less activity.
 - **Gate ownership**: the repo gate belongs to the **gate-owning Agent**; a gate task is done
   only on that Agent's observed green run, never asserted from a retired gate kind.
 - **Planned nodes** live at their real code FQN with `status: planned`; a **branch scan**
