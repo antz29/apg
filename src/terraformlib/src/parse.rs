@@ -7,7 +7,7 @@
 use std::ops::Range;
 use std::path::Path;
 
-use hcl_edit::expr::{Expression, FuncCall, Traversal};
+use hcl_edit::expr::{Expression, ForExpr, FuncCall, Traversal};
 use hcl_edit::structure::{Body as HclBody, Structure};
 use hcl_edit::template::ForTemplateExpr;
 use hcl_edit::visit::{self, Visit};
@@ -33,9 +33,13 @@ pub struct Attribute {
     pub name: String,
     /// The value when it is a plain string with no template interpolation.
     pub literal: Option<String>,
+    /// The bare identifier when the value is one (`provider = aws`), native syntax only.
+    pub variable: Option<String>,
     /// Traversal and function-call references, including those in `${…}`.
     pub refs: Vec<Reference>,
     pub span: Range<usize>,
+    /// The value expression's span (its start locates a non-literal source).
+    pub value: Range<usize>,
 }
 
 #[derive(Debug)]
@@ -100,8 +104,10 @@ fn native_body(body: &HclBody) -> Body {
             Structure::Attribute(a) => out.attributes.push(Attribute {
                 name: a.key.as_str().to_string(),
                 literal: a.value.as_str().map(str::to_string),
+                variable: a.value.as_variable().map(|v| v.as_str().to_string()),
                 refs: refs_of(&a.value),
                 span: a.span().unwrap_or(0..0),
+                value: a.value.span().unwrap_or(0..0),
             }),
         }
     }
@@ -111,16 +117,28 @@ fn native_body(body: &HclBody) -> Body {
 fn refs_of(expr: &Expression) -> Vec<Reference> {
     let mut c = Collect::default();
     c.visit_expr(expr);
-    c.0
+    c.refs
 }
 
-/// Collects every traversal and function call, in source order per visit.
+/// Collects every traversal and function call, in source order per visit. A
+/// traversal rooted at a `for` iterator in scope is not a reference.
 #[derive(Default)]
-struct Collect(Vec<Reference>);
+struct Collect {
+    refs: Vec<Reference>,
+    bound: Vec<String>,
+}
 
 impl Visit for Collect {
     fn visit_traversal(&mut self, node: &Traversal) {
-        self.0.push(Reference {
+        if let Expression::Variable(root) = &node.expr {
+            if self.bound.iter().any(|b| b == root.as_str()) {
+                for op in &node.operators {
+                    self.visit_traversal_operator(op);
+                }
+                return;
+            }
+        }
+        self.refs.push(Reference {
             span: node.span().unwrap_or(0..0),
             target: Target::Traversal(node.clone()),
         });
@@ -128,17 +146,47 @@ impl Visit for Collect {
     }
 
     fn visit_func_call(&mut self, node: &FuncCall) {
-        self.0.push(Reference {
+        self.refs.push(Reference {
             span: node.span().unwrap_or(0..0),
             target: Target::Call(node.clone()),
         });
         visit::visit_func_call(self, node);
     }
 
+    // hcl-edit 0.10.0's default skips the `for` expression's collection expression
+    // and binds nothing; both are walked here with the iterators in scope.
+    fn visit_for_expr(&mut self, node: &ForExpr) {
+        self.visit_expr(&node.intro.collection_expr);
+        let depth = self.bound.len();
+        self.bound.extend(
+            node.intro
+                .key_var
+                .iter()
+                .chain([&node.intro.value_var])
+                .map(|v| v.as_str().to_string()),
+        );
+        if let Some(k) = &node.key_expr {
+            self.visit_expr(k);
+        }
+        self.visit_expr(&node.value_expr);
+        if let Some(c) = &node.cond {
+            self.visit_expr(&c.expr);
+        }
+        self.bound.truncate(depth);
+    }
+
     // hcl-edit 0.10.0's default skips the `for` directive's collection expression.
     fn visit_for_template_expr(&mut self, node: &ForTemplateExpr) {
         self.visit_expr(&node.collection_expr);
-        visit::visit_for_template_expr(self, node);
+        let depth = self.bound.len();
+        self.bound.extend(
+            node.key_var
+                .iter()
+                .chain([&node.value_var])
+                .map(|v| v.as_str().to_string()),
+        );
+        self.visit_template(&node.template);
+        self.bound.truncate(depth);
     }
 }
 
@@ -295,8 +343,10 @@ fn json_attribute(src: &str, p: &Prop) -> Result<Attribute, ParseError> {
             }
             _ => None,
         },
+        variable: None,
         refs,
         span: p.span.clone(),
+        value: p.value.span.clone(),
     })
 }
 
@@ -314,7 +364,7 @@ fn json_refs(src: &str, node: &Node, out: &mut Vec<Reference>) -> Result<(), Par
             })?;
             let mut c = Collect::default();
             c.visit_template(&template);
-            out.extend(c.0.into_iter().map(|r| Reference {
+            out.extend(c.refs.into_iter().map(|r| Reference {
                 span: raw_span(&s.map, &node.span, r.span),
                 target: r.target,
             }));
