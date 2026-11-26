@@ -454,6 +454,28 @@ pub fn freshness_read_retry<T>(
     }
 }
 
+/// One production freshness read through the bounded retry
+/// ([`freshness_read_retry`]) with `std::thread::sleep` as the sleeper, yielding
+/// the typed [`FreshnessReadFailure`] the freshness facts carry.
+///
+/// [`freshness_read_retry`] wraps every failure — terminal or exhausted — in
+/// that one error type, so the downcast recovers it unchanged; the fallback
+/// keeps the projection total and panic-free for any other error.
+fn freshness_read<T>(
+    database: &Path,
+    read: impl FnMut() -> anyhow::Result<T>,
+) -> Result<T, FreshnessReadFailure> {
+    freshness_read_retry(database, read, std::thread::sleep).map_err(|err| {
+        err.downcast::<FreshnessReadFailure>()
+            .unwrap_or_else(|source| FreshnessReadFailure {
+                database: database.to_path_buf(),
+                waited: Duration::ZERO,
+                budget: FRESHNESS_READ_BUDGET,
+                source,
+            })
+    })
+}
+
 /// The recorded state of the scan that built the live DB, read from the DB's
 /// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
 /// DB's account of itself, with an unreadable database reported as a read
@@ -584,32 +606,56 @@ fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedSca
 /// each reported alone — so [`freshness_differences_with`]'s `Ok`/`Err` is
 /// unchanged. [`freshness_snapshot`] shares this gather, so the labels and the
 /// verdict come from one evaluation and cannot drift.
+///
+/// The two **opening data reads** — the recorded `Scan` row and the
+/// pending-state probe — run through the bounded retry ([`freshness_read`] over
+/// [`freshness_read_retry`], with `std::thread::sleep` as the production
+/// sleeper), each against the same `db.lbug` path. A terminal or
+/// budget-exhausted read failure is the facts' `Err`, which
+/// [`freshness_snapshot`] renders as
+/// [`Contended`](FreshnessSnapshot::Contended): a persistently unreadable
+/// database is contention, never a differing-input label.
+///
+/// The schema-shape ([`crate::splice::seed::validate_compatible`]) and authored
+/// digest ([`crate::splice::seed::seed_authored_identity`] against
+/// [`crate::splice::seed::tree_authored_identity`]) checks stay **verdicts**
+/// (`"schema"`, `"authored digest"`): each conflates a mismatch on a *readable*
+/// database — a genuine difference — with a read failure, and an unreadable
+/// database has already failed the opening reads above as contention, so
+/// turning either verdict into contention would drop a genuinely differing
+/// input's label.
 fn freshness_facts(
     apg_root: &Path,
     state: &GitState,
     requested: Option<&[String]>,
-) -> (bool, Option<RecordedScan>, Vec<&'static str>) {
+) -> Result<(bool, Option<RecordedScan>, Vec<&'static str>), FreshnessReadFailure> {
     if !db_path(apg_root).exists() {
-        return (false, None, vec!["database"]);
+        return Ok((false, None, vec!["database"]));
     }
     let socket = crate::session::socket_path(apg_root);
     let live_session = socket.exists() && crate::session::live_session_at(&socket);
     if socket.exists() && !live_session {
-        return (true, None, vec!["socket"]);
+        return Ok((true, None, vec!["socket"]));
     }
     let Some(cur_sha) = state.sha.as_deref() else {
-        return (true, None, vec!["git sha"]);
+        return Ok((true, None, vec!["git sha"]));
     };
-    let Some(rec) = (if live_session {
-        db_recorded_scan_routed(apg_root).ok().flatten()
-    } else {
-        db_recorded_scan(apg_root)
-    }) else {
-        return (true, None, vec!["recorded scan"]);
+    let database = db_path(apg_root);
+    let Some(rec) = freshness_read(&database, || {
+        if live_session {
+            db_recorded_scan_routed(apg_root)
+        } else {
+            db_recorded_scan_result(apg_root)
+        }
+    })?
+    else {
+        return Ok((true, None, vec!["recorded scan"]));
     };
     let mut differing: Vec<&'static str> = Vec::new();
     if !live_session {
-        if crate::artifacts::db::db_has_pending_state(apg_root) {
+        if freshness_read(&database, || {
+            crate::artifacts::db::db_has_pending_state_result(apg_root)
+        })? {
             differing.push("pending state");
         }
         if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
@@ -645,7 +691,7 @@ fn freshness_facts(
     {
         differing.push("modules");
     }
-    (true, Some(rec), differing)
+    Ok((true, Some(rec), differing))
 }
 
 /// Maps already-captured freshness facts to the [`FreshnessSnapshot`] verdict.
@@ -691,10 +737,25 @@ pub fn classify_freshness(
 /// The module-selection comparison is not applied (`requested` is `None`):
 /// this is the gate-shaped evaluation, whose callers carry no `--module`
 /// selection.
+///
+/// A facts read failure ([`FreshnessReadFailure`]) — a database that stayed
+/// unreadable through the bounded retry — is
+/// [`Contended`](FreshnessSnapshot::Contended), carrying the captured
+/// [`GitState`], the path the read targeted and the waited/budget pair; every
+/// readable database folds through [`classify_freshness`] exactly as before.
 pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
     let current = git_state(apg_root);
-    let (database_present, recorded, differing) = freshness_facts(apg_root, &current, None);
-    classify_freshness(current, recorded, database_present, differing)
+    match freshness_facts(apg_root, &current, None) {
+        Ok((database_present, recorded, differing)) => {
+            classify_freshness(current, recorded, database_present, differing)
+        }
+        Err(failure) => FreshnessSnapshot::Contended {
+            current,
+            database: failure.database,
+            waited: failure.waited,
+            budget: failure.budget,
+        },
+    }
 }
 
 /// The content-identity freshness predicate (win A): the live DB is reusable
@@ -839,21 +900,32 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
 /// it reports its precondition label (`"database"`, `"socket"` or `"git sha"`)
 /// exactly as the collect-all form always has, so the label set and the
 /// `Ok`/`Err` partition match the shared snapshot.
+///
+/// A gather `Err` (a database unreadable through the bounded retry) reports the
+/// pre-change fail-closed `"recorded scan"` label until task 10 maps it to the
+/// contention arm — marked TRANSITIONAL below.
 pub fn freshness_differences_with(
     apg_root: &Path,
     state: &GitState,
     requested: Option<&[String]>,
 ) -> Result<(), Vec<&'static str>> {
-    let (database_present, recorded, differing) = freshness_facts(apg_root, state, requested);
+    let (database_present, recorded, differing) = match freshness_facts(apg_root, state, requested)
+    {
+        Ok(facts) => facts,
+        // TRANSITIONAL (superseded by task 10's contention-aware mapping):
+        // preserves the pre-change fail-closed outcome — an unreadable scan
+        // row used to report the `"recorded scan"` precondition label —
+        // rather than fabricating an empty `differing` list.
+        Err(_) => return Err(vec!["recorded scan"]),
+    };
     match classify_freshness(state.clone(), recorded, database_present, differing) {
         FreshnessSnapshot::Fresh { .. } => Ok(()),
         FreshnessSnapshot::NotApplicable { differing, .. }
         | FreshnessSnapshot::Stale { differing, .. } => Err(differing),
         // TRANSITIONAL (superseded by task 10's contention-aware mapping):
-        // nothing constructs `Contended` yet, so this arm is unreachable in this
-        // commit. It preserves the pre-change fail-closed outcome — an
-        // unreadable scan row used to report the `"recorded scan"` precondition
-        // label — rather than panicking on a legitimate value or fabricating an
+        // `classify_freshness` has no contention arm, so this arm cannot be
+        // reached from the facts above; it preserves the pre-change fail-closed
+        // outcome rather than panicking on a legitimate value or fabricating an
         // empty `differing` list.
         FreshnessSnapshot::Contended { .. } => Err(vec!["recorded scan"]),
     }
