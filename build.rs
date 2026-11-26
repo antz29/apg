@@ -3,7 +3,9 @@ use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
-/// `struct`, `py`, `agent`, `cobol`, `sql`, `ps`); `0`/`none`/empty skips all.
+/// `struct`, `py`, `agent`, `cobol`, `sql`, `ps`, `terraform`, `bicep`); `0`/`none`/empty skips all.
+/// `terraform`/`bicep` are reserved ids: no stage arm exists until their
+/// crates land, so naming them stages nothing.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
@@ -72,6 +74,8 @@ fn watch_frontend_sources() {
         "src/cobollib",
         "src/sqllib",
         "src/pslib",
+        "src/terraformlib",
+        "src/biceplib",
     ];
     let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     while let Some(dir) = stack.pop() {
