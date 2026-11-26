@@ -27,6 +27,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.splice_e2e.e2e.authored_digest_fallback_and_splice_paths_match_a_force_rebuild",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.splice_e2e.e2e.deleted_agent_definition_rescan_matches_a_full_rebuild",
       "properties": {}
     },
@@ -53,6 +58,11 @@
     {
       "kind": "implemented-by",
       "target": "rust.splice_e2e.e2e.diverged_authored_rows_are_not_fast_pathed",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.splice_e2e.e2e.full_load_fallback_publishes_the_tree_authored_digest",
       "properties": {}
     },
     {
