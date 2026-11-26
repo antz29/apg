@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib,agentlib,cobollib,sqllib,pslib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Works under the Ponytail discipline (fixed level ultra). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites, and the suite-local `opencode-suite/node_modules/.bin/tsc` type check); removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
+description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib,agentlib,cobollib,sqllib,pslib,terraformlib,biceplib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Works under the Ponytail discipline (fixed level ultra). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites, and the suite-local `opencode-suite/node_modules/.bin/tsc` type check); removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp (per-tool rules + edit-scope assert over the same paths), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback), and commits once per task (git add/commit only; push and tag are human-approved acts and are NOT granted to it) and returns without marking done — it runs apg_plan_done only when the navigator resumes it after its rescan. Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
 mode: subagent
 hidden: true
 permissions:
@@ -63,6 +63,8 @@ permissions:
   - { action: edit, resource: "src/cobollib/**", effect: deny }
   - { action: edit, resource: "src/sqllib/**", effect: deny }
   - { action: edit, resource: "src/pslib/**", effect: deny }
+  - { action: edit, resource: "src/terraformlib/**", effect: deny }
+  - { action: edit, resource: "src/biceplib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/golib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/javalib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/cpplib/**", effect: deny }
@@ -75,6 +77,8 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/src/cobollib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/sqllib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/pslib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/terraformlib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/biceplib/**", effect: deny }
   - { action: edit, resource: "src/*/target/**", effect: deny }
   - { action: edit, resource: "src/tslib/node_modules/**", effect: deny }
   - { action: edit, resource: "src/cpplib/vendor/**", effect: deny }
@@ -458,8 +462,9 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **The language frontends are NOT yours.** `src/golib/**`, `src/javalib/**`,
   `src/cpplib/**`, `src/rustlib/**`, `src/tslib/**`, `src/csharplib/**`,
   `src/pylib/**`, `src/structlib/**`, `src/agentlib/**`, `src/cobollib/**`,
-  `src/sqllib/**`, and `src/pslib/**` are owned by their
-  **dedicated frontend agents**; your edit grant explicitly denies every one.
+  `src/sqllib/**`, `src/pslib/**`, `src/terraformlib/**`
+  (`terraformlib-implementer`), and `src/biceplib/**` (`biceplib-implementer`)
+  are owned by their **dedicated frontend agents**; your edit grant explicitly denies every one.
 - **Your shared seams are the ones only you touch**: `src/frontends.rs`,
   `src/classify.rs`/`src/classify/**`, `src/cleanup.rs`, `src/ingest/**`, and
   `src/load/**`. When a frontend agent needs one of these changed, that is your

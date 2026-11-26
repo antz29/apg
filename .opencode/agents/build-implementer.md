@@ -296,8 +296,9 @@ the read-only `apg_review`, make the fix or propose a wont-fix, and return an
 - **Standalone cargo crates you gate**: `src/rustlib`, `src/pylib`,
   `src/structlib`, `src/agentlib` via `cargo <cmd> --manifest-path
   src/<crate>/Cargo.toml`. You exercise their tests; you do not edit their
-  source. `src/cobollib` and `src/pslib` (also pinned by the root
-  `rust-toolchain.toml`) and the .NET `src/sqllib` are gated by their own
+  source. `src/cobollib`, `src/pslib`, `src/terraformlib` and `src/biceplib`
+  (also pinned by the root `rust-toolchain.toml`) and the .NET `src/sqllib`
+  are gated by their own
   agents and you hold no grant for them — when a change on your surface
   (toolchain pin, `build.rs`, a formula) reaches them, say so in your report
   so the coordinator dispatches their agent to run their tests.

@@ -45,6 +45,8 @@ permissions:
   - { action: edit, resource: "src/agentlib/**", effect: deny }
   - { action: edit, resource: "src/cobollib/**", effect: deny }
   - { action: edit, resource: "src/pslib/**", effect: deny }
+  - { action: edit, resource: "src/terraformlib/**", effect: deny }
+  - { action: edit, resource: "src/biceplib/**", effect: deny }
   - { action: edit, resource: "src/*/target/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/build.rs", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/Cargo.toml", effect: deny }
@@ -65,6 +67,8 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/src/agentlib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/cobollib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/pslib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/terraformlib/**", effect: deny }
+  - { action: edit, resource: "apg/.worktrees/*/src/biceplib/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/src/*/target/**", effect: deny }
   - { action: edit, resource: ".opencode/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/.opencode/**", effect: deny }
