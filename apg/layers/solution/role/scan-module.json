@@ -270,6 +270,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.staleness-verdict",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.test-layout",
       "properties": {}
     },
