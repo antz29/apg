@@ -310,6 +310,45 @@ pub enum FreshnessSnapshot {
     },
 }
 
+/// True when a freshness read failed on the engine's **transient lock/busy
+/// family** — the database is held open by another process (lock) or is being
+/// mutated (busy) — rather than being absent, corrupt or permanently
+/// unreadable. Pure: it scans only the error's whole message chain (`{err:#}`),
+/// so no I/O, clock or global state, and a lock failure wrapped with context
+/// still classifies.
+///
+/// The freshness read's retry arm consumes this to retry a bounded number of
+/// times and then refuse as named contention
+/// ([`crate::cache::store::Contention`]); a terminal error is never retried.
+/// The marker list is deliberately conservative: a missed transient ends as a
+/// contention refusal (safe), and a false transient costs only a bounded retry
+/// that ends in the same terminal failure.
+///
+/// The engine's wording is `Could not set lock on file …`; the other markers
+/// cover the OS `EWOULDBLOCK`/`EBUSY` wording a wrapped lock failure can carry.
+/// Single-word markers match whole words only, so `clock` never classifies.
+pub fn is_transient_read_error(err: &anyhow::Error) -> bool {
+    let message = format!("{err:#}").to_lowercase();
+    const PHRASES: [&str; 8] = [
+        "could not set lock",
+        "would block",
+        // Covers `Resource temporarily unavailable` (EAGAIN/EWOULDBLOCK).
+        "temporarily unavailable",
+        // Covers `already in use`.
+        "in use",
+        "database is locked",
+        "file is locked",
+        "lock conflict",
+        "lock timeout",
+    ];
+    if PHRASES.iter().any(|phrase| message.contains(*phrase)) {
+        return true;
+    }
+    message
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|word| matches!(word, "lock" | "locked" | "busy"))
+}
+
 /// The recorded state of the scan that built the live DB, read from the DB's
 /// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
 /// DB's account of itself. This row is the ONE recorded-state source of the
