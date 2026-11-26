@@ -571,6 +571,12 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         };
     }
 
+    // The widening above only EXTENDS `targets_rel`, so a widened sql/ps file
+    // that the store reports complete would stay a reuse candidate as well as a
+    // target. Restore the invariant the driver relies on: a target is re-emitted,
+    // never spliced.
+    reuse_candidates.retain(|f| !targets_rel.contains(&f.rel));
+
     // Removed FQNs: every FQN the recorded signature map attributes to a
     // removed/renamed-away file (the full-universe subtraction half).
     let mut removed_fqns: BTreeSet<String> = BTreeSet::new();
