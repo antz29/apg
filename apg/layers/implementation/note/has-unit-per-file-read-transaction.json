@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "has-unit-per-file-read-transaction",
+  "body": "The full-load fallback's reuse-candidate admission probes FactStore::has_unit once per unchanged file, opening one read transaction per file on every incremental scan. The per-file probe is correct but linear in read-transaction overhead; if a large-tree rescan's time budget regresses, add a single-read-transaction batched probe to cache::FactStore and use it here.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.incremental.prepare.prepare",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
