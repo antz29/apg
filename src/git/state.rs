@@ -712,34 +712,41 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
     }
 }
 
-/// The refusal message for a stale DB, or `None` when the DB is fresh (or N/A).
-/// Only ever called by the mutation gate once `is_stale` is true.
+/// The refusal message for a stale DB, or `None` when the snapshot's verdict is
+/// fresh (or N/A).
+///
+/// **One** [`freshness_snapshot`] call supplies everything the message renders —
+/// the verdict, the captured current [`GitState`], the recorded
+/// [`RecordedScan`] and the differing-label list — so the message can never
+/// disagree with the verdict it accompanies. A
+/// [`Stale`](FreshnessSnapshot::Stale) verdict always carries a non-empty
+/// `differing`, so the message always names at least one differing input.
 ///
 /// The exact shape (stable — pinned by tests):
 ///
 /// `graph is stale (recorded <rec>, current <cur>; differing: <labels>) — run `apg scan` before mutating`
 ///
 /// `<rec>`/`<cur>` are [`state_str`] (`<sha>@<clean>`, or `-@-` when there is
-/// no sha to display) and `<labels>` is [`freshness_differences`]' reason list
-/// joined by `, `, so every differing freshness input is named: `database`,
-/// `socket`, `git sha`, `recorded scan`, `pending state`, `schema`,
-/// `authored digest`, `content key`, `sha`, `cleanliness`.
+/// no sha to display) and `<labels>` is the snapshot's differing labels joined
+/// by `, `: `database`, `socket`, `git sha`, `recorded scan`, `pending state`,
+/// `schema`, `authored digest`, `content key`, `sha`, `cleanliness`. A snapshot
+/// with no recorded row (the `socket`/`recorded scan` stales) records `-@-`.
 pub fn refusal_message(apg_root: &Path) -> Option<String> {
-    if !is_stale(apg_root) {
-        return None;
-    }
-    let current = git_state(apg_root);
-    let Err(differing) = freshness_differences(apg_root, &current) else {
-        // A tree that moved between the `is_stale` gate and the read above.
+    let FreshnessSnapshot::Stale {
+        current,
+        recorded,
+        differing,
+    } = freshness_snapshot(apg_root)
+    else {
         return None;
     };
-    let recorded = match db_recorded_scan(apg_root) {
+    let rec = match recorded {
         Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
     };
     let cur = state_str(current.sha.as_deref(), current.clean);
     Some(format!(
-        "graph is stale (recorded {recorded}, current {cur}; differing: {}) — run `apg scan` before mutating",
+        "graph is stale (recorded {rec}, current {cur}; differing: {}) — run `apg scan` before mutating",
         differing.join(", ")
     ))
 }
