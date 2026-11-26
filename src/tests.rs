@@ -498,6 +498,29 @@ mod unit {
             );
         }
     }
+
+    /// terraform file-edge kinds: exactly `module-source` / `override`,
+    /// case- and whitespace-exact; the ps `dot-source` is not one of them.
+    #[test]
+    fn terraform_file_edge_kinds_are_module_source_and_override() {
+        assert!(terraform::is_file_edge_kind("module-source"));
+        assert!(terraform::is_file_edge_kind("override"));
+        for kind in [
+            "copy",
+            "dot-source",
+            "import-module",
+            "",
+            "Override",
+            "MODULE-SOURCE",
+            "override ",
+            "module_source",
+        ] {
+            assert!(
+                !terraform::is_file_edge_kind(kind),
+                "{kind:?} is not a file-edge kind"
+            );
+        }
+    }
 }
 
 /// An in-memory manifest holding `paths` (OIDs irrelevant to widening).
@@ -525,6 +548,20 @@ const PS_MANIFEST: &[&str] = &[
     "a.go",
     "README.md",
     "x.ps1xml",
+];
+
+/// The manifest the `terraform::widen_targets` int tests share.
+const TF_MANIFEST: &[&str] = &[
+    "main.tf",
+    "net/main.tf",
+    "net/vars.tf.json",
+    "prod.tfvars",
+    "tests/x.tftest.hcl",
+    "main.tofu",
+    "net/x.hcl",
+    "build.ps1",
+    "a.go",
+    "README.md",
 ];
 
 /// int tier -- two or more units wired together, still pure in-memory.
@@ -566,6 +603,85 @@ mod int {
         ps::widen_targets(&mut targets, &manifest);
         let mut want = set_of(&ps_files);
         want.insert("gone.ps1".to_string());
+        assert_eq!(targets, want);
+    }
+
+    /// `terraform::widen_targets` leaves a set holding no terraform file
+    /// exactly as given, the empty set included.
+    #[test]
+    fn terraform_widen_targets_leaves_a_tf_free_set_unchanged() {
+        let manifest = ps_manifest(TF_MANIFEST);
+        for given in [set_of(&["a.go", "README.md", "build.ps1"]), set_of(&[])] {
+            let mut targets = given.clone();
+            terraform::widen_targets(&mut targets, &manifest);
+            assert_eq!(targets, given);
+        }
+    }
+
+    /// One terraform target widens to every manifest terraform file (the
+    /// `.tf`, `.tf.json`, `.tfvars`, `.tofu` and `.tftest.hcl` claims); non-tf
+    /// targets and a deleted tf path absent from the manifest are kept, and
+    /// no non-tf manifest file (nor the plain `.hcl`) is added.
+    #[test]
+    fn terraform_widen_targets_widens_one_tf_file_to_every_manifest_tf_file() {
+        let manifest = ps_manifest(TF_MANIFEST);
+        let tf_files = [
+            "main.tf",
+            "net/main.tf",
+            "net/vars.tf.json",
+            "prod.tfvars",
+            "tests/x.tftest.hcl",
+            "main.tofu",
+        ];
+
+        let mut targets = set_of(&["a.go", "net/vars.tf.json"]);
+        terraform::widen_targets(&mut targets, &manifest);
+        let mut want = set_of(&tf_files);
+        want.insert("a.go".to_string());
+        assert_eq!(targets, want);
+
+        let mut targets = set_of(&["gone.tf"]);
+        terraform::widen_targets(&mut targets, &manifest);
+        let mut want = set_of(&tf_files);
+        want.insert("gone.tf".to_string());
+        assert_eq!(targets, want);
+    }
+
+    /// Widening does not cross languages: a ps-only target leaves a
+    /// terraform-free set alone, and a terraform-only target does not widen
+    /// the ps stream.
+    #[test]
+    fn terraform_and_ps_widening_do_not_cross_languages() {
+        let manifest = ps_manifest(TF_MANIFEST);
+        let mut targets = set_of(&["build.ps1"]);
+        terraform::widen_targets(&mut targets, &manifest);
+        assert_eq!(targets, set_of(&["build.ps1"]));
+
+        let mut targets = set_of(&["main.tf"]);
+        ps::widen_targets(&mut targets, &manifest);
+        assert_eq!(targets, set_of(&["main.tf"]));
+    }
+
+    /// A mixed set holding a ps and a terraform target widens for both
+    /// streams when passed through both widenings in turn.
+    #[test]
+    fn mixed_ps_and_terraform_targets_widen_for_both() {
+        let manifest = ps_manifest(&[PS_MANIFEST, TF_MANIFEST].concat());
+        let mut targets = set_of(&["main.tf", "sub/Util.Psm1"]);
+        ps::widen_targets(&mut targets, &manifest);
+        terraform::widen_targets(&mut targets, &manifest);
+        let want = set_of(&[
+            "build.ps1",
+            "LEGACY.PS1",
+            "sub/Util.Psm1",
+            "data/Settings.psd1",
+            "main.tf",
+            "net/main.tf",
+            "net/vars.tf.json",
+            "prod.tfvars",
+            "tests/x.tftest.hcl",
+            "main.tofu",
+        ]);
         assert_eq!(targets, want);
     }
 }
