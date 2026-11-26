@@ -9,3 +9,6 @@ pub mod resolve;
 pub mod scan;
 pub mod source;
 pub mod units;
+
+#[cfg(test)]
+mod tests;
