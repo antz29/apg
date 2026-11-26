@@ -801,6 +801,105 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// `freshness_snapshot`, `is_stale` and `refusal_message` are one
+    /// evaluation on real fixtures: `is_stale` is exactly the snapshot's
+    /// `Stale` arm, a refusal is issued exactly when the verdict is stale, a
+    /// stale verdict always names at least one differing input (and the
+    /// message's list is exactly the snapshot's), and the N/A cases are never
+    /// stale.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug); run via cargo test-e2e"]
+    fn stale_verdict_and_refusal_agree_on_one_snapshot() {
+        // The agreement every arm pins: `is_stale` is exactly the snapshot's
+        // `Stale` arm, and a refusal is issued exactly when it is stale.
+        let assert_agrees = |apg: &Path, want_stale: bool| {
+            assert_eq!(
+                is_stale(apg),
+                matches!(freshness_snapshot(apg), FreshnessSnapshot::Stale { .. }),
+                "is_stale must be exactly the snapshot's Stale verdict"
+            );
+            assert_eq!(
+                refusal_message(apg).is_some(),
+                is_stale(apg),
+                "a refusal is issued exactly when the verdict is stale"
+            );
+            assert_eq!(is_stale(apg), want_stale, "unexpected verdict");
+        };
+        // The `differing: <labels>)` text of a refusal — the labels the one
+        // evaluation named.
+        fn differing_text(msg: &str) -> &str {
+            msg.split_once("differing: ")
+                .expect("a refusal names its differing inputs")
+                .1
+                .split_once(") — run `apg scan` before mutating")
+                .expect("the differing list precedes the guidance")
+                .0
+        }
+
+        // FRESH: a DB whose scan row matches the clean HEAD.
+        let repo = fixture_repo("snapshot-agree");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(matches!(
+            freshness_snapshot(&apg),
+            FreshnessSnapshot::Fresh { .. }
+        ));
+        assert!(refusal_message(&apg).is_none());
+        assert_agrees(&apg, false);
+
+        // STALE: a new commit flips the recorded HEAD sha. The stale verdict
+        // must name at least the `sha` input, and the refusal renders exactly
+        // that same list — the verdict and the reasons are one evaluation's.
+        let sha1 = repo.commit_all("second");
+        assert_ne!(sha, sha1);
+        let FreshnessSnapshot::Stale { differing, .. } = freshness_snapshot(&apg) else {
+            panic!("a new commit must make the snapshot stale");
+        };
+        assert!(
+            !differing.is_empty(),
+            "a stale verdict always names at least one differing input"
+        );
+        assert!(
+            differing.contains(&"sha"),
+            "the new commit must be named as a differing `sha`: {differing:?}"
+        );
+        assert_agrees(&apg, true);
+        let msg = refusal_message(&apg).expect("a stale verdict must refuse");
+        assert_eq!(
+            differing_text(&msg),
+            differing.join(", "),
+            "the refusal must name exactly the snapshot's differing inputs: {msg}"
+        );
+        testutil::remove(&repo);
+
+        // N/A (no DB): nothing can be stale without a recorded scan.
+        let repo = fixture_repo("snapshot-agree-nodb");
+        let apg = repo.apg_root();
+        assert!(matches!(
+            freshness_snapshot(&apg),
+            FreshnessSnapshot::NotApplicable { .. }
+        ));
+        assert!(refusal_message(&apg).is_none());
+        assert_agrees(&apg, false);
+        testutil::remove(&repo);
+
+        // N/A (not a git repo): a real schema DB recording a non-git scan.
+        let dir = std::env::temp_dir().join(format!("apg-snapshot-nongit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let apg = dir.join("apg");
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, None, false, "2026-09-07T00:00:00Z");
+        assert!(matches!(
+            freshness_snapshot(&apg),
+            FreshnessSnapshot::NotApplicable { .. }
+        ));
+        assert!(refusal_message(&apg).is_none());
+        assert_agrees(&apg, false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// `staleness_line` names every differing freshness input the predicate
     /// reports, and its FRESH line stays bare. Each arm starts from an
     /// otherwise-fresh fixture DB, flips exactly ONE input, and asserts the
