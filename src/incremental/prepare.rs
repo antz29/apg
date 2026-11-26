@@ -499,6 +499,41 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     for f in &changed_rel {
         targets_rel.extend(state.overloads.peer_files(f));
     }
+
+    // Reuse candidates: files present in the CURRENT manifest that are byte-
+    // identical to the recorded OID and outside the target set. A candidate the
+    // store holds no fact unit for cannot be spliced (an unchanged file's unit
+    // may be reclaimed by the store's cache-miss path), so it is promoted into
+    // the target set and its frontend re-emits it — the per-file completeness
+    // `warm::warm_prepared` enforces. The promotion lands BEFORE the whole-
+    // language widening and the full-scan decision so both see it.
+    let mut reuse_candidates = Vec::new();
+    if let Some(recorded) = &recorded {
+        let store = FactStore::at(store_root.clone()).load();
+        for (rel, oid) in &manifest.entries {
+            if targets_rel.contains(rel) || deleted.contains(rel) {
+                continue;
+            }
+            let Some(prev_oid) = recorded.oid(rel) else {
+                continue; // new-but-not-changed cannot happen; be conservative
+            };
+            if prev_oid != oid {
+                continue;
+            }
+            let lang = language_of(rel);
+            if !store.has_unit(lang, rel, oid, &cache_key) {
+                targets_rel.insert(rel.clone());
+                continue;
+            }
+            reuse_candidates.push(ReuseFile {
+                abs: absolute(scan_root, rel),
+                rel: rel.clone(),
+                oid: oid.clone(),
+                lang: lang.to_string(),
+            });
+        }
+    }
+
     // The sql stream is whole-project: any .sql/.sqlproj change re-targets
     // every tracked .sql file (a removed one stays here as delete scope).
     let sql_targets =
@@ -551,30 +586,6 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
             for s in sigs {
                 removed_fqns.insert(s.fqn.clone());
             }
-        }
-    }
-
-    // Reuse candidates: files present in the CURRENT manifest that are byte-
-    // identical to the recorded OID and outside the target set.
-    let mut reuse_candidates = Vec::new();
-    if let Some(recorded) = &recorded {
-        for (rel, oid) in &manifest.entries {
-            if targets_rel.contains(rel) || deleted.contains(rel) {
-                continue;
-            }
-            let Some(prev_oid) = recorded.oid(rel) else {
-                continue; // new-but-not-changed cannot happen; be conservative
-            };
-            if prev_oid != oid {
-                continue;
-            }
-            let abs = absolute(scan_root, rel);
-            reuse_candidates.push(ReuseFile {
-                abs,
-                rel: rel.clone(),
-                oid: oid.clone(),
-                lang: language_of(rel).to_string(),
-            });
         }
     }
 
