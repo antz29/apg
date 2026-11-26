@@ -670,14 +670,15 @@ operation edge.
 - `apg plan verify <project>` runs the **pre-merge coherence gate** (every
   planned node **realized** — a branch scan found real code at its FQN; all
   feedback resolved; every `implemented-by` claim and added/changed requirement
-  in the change-set delta is covered by a task or phase) and prints the merge
-  handoff. `apg project merge <name>` (from the main checkout) then runs
-  verify → merge → unguarded main rebuild. A post-merge rebuild that fails — a
-  returned error or a panic — unlands the merge instead of leaving a stale main
-  graph: the default branch is hard-reset to the pre-merge commit, the stale
-  main derived index (`apg/.trans/db.lbug`) is discarded, and the project
-  branch and worktree stay so re-running `apg project merge <name>` retries
-  with no manual main scan. Push/tag remain human-approved acts.
+  in the change-set delta is covered by a task or phase; every `modifies` of a
+  planned node licensed by a `creates` of the same FQN in an earlier phase) and
+  prints the merge handoff. `apg project merge <name>` (from the main checkout)
+  then runs verify → merge → unguarded main rebuild. A post-merge rebuild that
+  fails — a returned error or a panic — unlands the merge instead of leaving a
+  stale main graph: the default branch is hard-reset to the pre-merge commit,
+  the stale main derived index (`apg/.trans/db.lbug`) is discarded, and the
+  project branch and worktree stay so re-running `apg project merge <name>`
+  retries with no manual main scan. Push/tag remain human-approved acts.
 
 ## Configuration
 
