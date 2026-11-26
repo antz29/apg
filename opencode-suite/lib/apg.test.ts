@@ -958,3 +958,10 @@ test("apg_scan lists ps as a language", async () => {
   const tool = await registeredTool(apgScan)
   expect(tool.input?.properties?.language?.description ?? "").toContain("ps,")
 })
+
+// terraform-frontend P2 task-24: the `apg_scan` language list names `terraform` as a
+// comma-delimited id, anchored on both sides so a longer word cannot satisfy it.
+test("apg_scan lists terraform as a language", async () => {
+  const tool = await registeredTool(apgScan)
+  expect(tool.input?.properties?.language?.description ?? "").toMatch(/[:,]\s*terraform\s*,/)
+})
