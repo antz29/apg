@@ -8904,6 +8904,10 @@ mod e2e {
             }
         };
         assert!(
+            !differing.is_empty(),
+            "a stale verdict always names at least one differing input"
+        );
+        assert!(
             differing.contains(&"authored digest"),
             "a diverged DB must still be declared stale by the authored digest: {differing:?}"
         );
