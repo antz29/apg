@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "retry-exhaustion-test-pins-loop-boundary-counts",
+  "body": "The exhaustion count assertion encodes the retry loop's read/sleep shape (reads = budget/step + 1, sleeps = budget/step); if `freshness_read_retry` ever changes how it lands exactly at the budget boundary, revisit `freshness_read_retry_exhausts_at_the_budget` (src/git/tests.rs:469) — upgrade when that loop's boundary semantics change.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.tests.unit.freshness_read_retry_exhausts_at_the_budget",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
