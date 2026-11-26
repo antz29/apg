@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "read-only-proof-lacks-a-negative-control",
+  "body": "The read-only coexistence assertion pins that verify succeeds while another read-only handle is held, but it does not independently demonstrate that a read-write open would fail (lbug's handle classes may not conflict on this fixture), so the exclusive-class claim rests on the production code using `open_read_only`; add a negative control if a read-write conflict becomes observable.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.plan_cmd_e2e.e2e.plan_verify_opens_read_only_and_refuses_a_contended_database",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
