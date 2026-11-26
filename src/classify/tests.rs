@@ -137,20 +137,26 @@ mod unit {
         }
     }
 
-    /// iac-frontends phase-01 task-2: a Terraform file's code type follows
-    /// path segments only — test/tests → `test`, gen/generated → `generated`,
-    /// vendor/third_party/thirdparty → `external` — with no filename marker.
+    /// iac-frontends phase-01 task-2: a Terraform file is test under a
+    /// test/tests segment or a `.tftest.hcl`/`.tofutest.hcl` filename,
+    /// generated under gen/generated, external under vendor/.terraform, and
+    /// `src` otherwise — matched case-insensitively.
     #[test]
-    fn terraform_code_type_follows_path_segments() {
+    fn terraform_code_type_follows_spec() {
         for (p, want) in [
             ("test/main.tf", "test"),
-            ("tests/vars.tfvars", "test"),
+            ("Tests/x.tf", "test"),
             ("tf/test/main.tofu", "test"),
+            ("main.tftest.hcl", "test"),
+            ("X.TOFUTEST.HCL", "test"),
+            ("tests/vars.tfvars", "test"),
             ("gen/outputs.tf", "generated"),
-            ("generated/providers.hcl", "generated"),
+            ("GENERATED/providers.hcl", "generated"),
             ("vendor/modules/main.tf.json", "external"),
-            ("third_party/stack.tf", "external"),
-            ("thirdparty/import.tf", "external"),
+            ("VENDOR/main.tf", "external"),
+            (".terraform/modules/x/main.tf", "external"),
+            ("third_party/stack.tf", "src"),
+            ("thirdparty/import.tf", "src"),
             ("main.tf", "src"),
             ("src/variables.tf", "src"),
             ("env/main.tf.json", "src"),
@@ -170,22 +176,26 @@ mod unit {
         }
     }
 
-    /// iac-frontends phase-01 task-2: a Bicep file's code type follows path
-    /// segments only — test/tests → `test`, gen/generated → `generated`,
-    /// vendor/third_party/thirdparty → `external` — with no filename marker.
+    /// iac-frontends phase-01 task-14: a Bicep file is test under a test/tests
+    /// segment, generated under gen/generated, external under vendor/.terraform,
+    /// and `src` otherwise — matched case-insensitively, no filename marker.
     #[test]
-    fn bicep_code_type_follows_path_segments() {
+    fn bicep_code_type_follows_spec() {
         for (p, want) in [
             ("test/main.bicep", "test"),
-            ("tests/params.bicepparam", "test"),
+            ("Tests/params.bicepparam", "test"),
             ("gen/module.bicep", "generated"),
+            ("GEN/x.bicep", "generated"),
             ("generated/resources.bicepparam", "generated"),
             ("vendor/modules/network.bicep", "external"),
-            ("third_party/storage.bicep", "external"),
-            ("thirdparty/aks.bicep", "external"),
+            (".terraform/storage.bicep", "external"),
+            ("VENDOR/aks.bicep", "external"),
+            ("third_party/storage.bicep", "src"),
+            ("thirdparty/aks.bicep", "src"),
             ("main.bicep", "src"),
             ("src/variables.bicepparam", "src"),
             ("test_main.bicep", "src"),
+            ("main.tftest.hcl", "src"),
         ] {
             assert_eq!(builtin_code_type(p, "bicep"), want, "{p} must be {want}");
             assert_eq!(
