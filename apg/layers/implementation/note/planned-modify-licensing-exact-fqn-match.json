@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "planned-modify-licensing-exact-fqn-match",
+  "body": "Planned-node modifies licensing compares the operation target to the declared planned-node FQNs by exact string equality, not the language-root-tolerant identity used by the coverage check; a plan that declares a planned node bare while a task modifies the rooted FQN (or the reverse) escapes the licensing refusal. Upgrade to a code_identity comparison when plans begin mixing bare and rooted planned-node FQNs.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.verify.planned_modify_licensing_gaps",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
