@@ -282,11 +282,13 @@ pub struct RecordedScan {
 /// re-reading git or the database.
 ///
 /// The arm *is* the verdict — [`NotApplicable`](Self::NotApplicable) when there
-/// is nothing to compare, [`Fresh`](Self::Fresh) when every input matches, and
-/// [`Stale`](Self::Stale) when at least one input differs. The variant set is
-/// open by design: a later transient-unreadable-database outcome takes a
-/// further arm rather than a closed shape, so a non-stale read failure never
-/// has to masquerade as a stale verdict.
+/// is nothing to compare, [`Fresh`](Self::Fresh) when every input matches,
+/// [`Stale`](Self::Stale) when at least one input differs, and
+/// [`Contended`](Self::Contended) when the database could not be read at all.
+/// The stale/contention split is the load-bearing one: a `Stale` verdict always
+/// carries a **non-empty** `differing` list, while contention is **never** stale
+/// and names no differing input — a persistently unreadable or locked database
+/// is a named contention, never a stale verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FreshnessSnapshot {
     /// Nothing to compare: no `db.lbug`, or no git repo / unborn HEAD.
@@ -308,6 +310,21 @@ pub enum FreshnessSnapshot {
         current: GitState,
         recorded: Option<RecordedScan>,
         differing: Vec<&'static str>,
+    },
+    /// The database could not be read within the bounded retry budget: a
+    /// persistently locked or otherwise unreadable database is named
+    /// contention, never [`Stale`](Self::Stale) and never a differing-input
+    /// label.
+    ///
+    /// `database` is the path the read targeted, `waited` the total the retry
+    /// sleeper was asked to wait and `budget` the configured bound it exhausted
+    /// ([`FRESHNESS_READ_BUDGET`]); `current` is the captured checkout state so
+    /// a render can still name it.
+    Contended {
+        current: GitState,
+        database: PathBuf,
+        waited: Duration,
+        budget: Duration,
     },
 }
 
@@ -832,6 +849,13 @@ pub fn freshness_differences_with(
         FreshnessSnapshot::Fresh { .. } => Ok(()),
         FreshnessSnapshot::NotApplicable { differing, .. }
         | FreshnessSnapshot::Stale { differing, .. } => Err(differing),
+        // TRANSITIONAL (superseded by task 10's contention-aware mapping):
+        // nothing constructs `Contended` yet, so this arm is unreachable in this
+        // commit. It preserves the pre-change fail-closed outcome — an
+        // unreadable scan row used to report the `"recorded scan"` precondition
+        // label — rather than panicking on a legitimate value or fabricating an
+        // empty `differing` list.
+        FreshnessSnapshot::Contended { .. } => Err(vec!["recorded scan"]),
     }
 }
 
