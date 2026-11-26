@@ -959,15 +959,23 @@ pub fn is_fresh(apg_root: &Path) -> bool {
 ///   differs, always named in the snapshot's non-empty `differing` list. A
 ///   missing/pre-hardening recorded key counts here (freshness cannot be
 ///   verified).
+/// - [`Contended`](FreshnessSnapshot::Contended) → **false**: contention is
+///   **never** stale. A persistently unreadable database is reported by
+///   [`refusal_message`]/[`staleness_line`] as named contention (the database
+///   path and waited budget), not by a stale verdict.
 ///
 /// The verdict comes from the single snapshot capture — one git read plus one
 /// pass over the database's own facts — never a second freshness pass, so the
 /// refusal gate and the sites rendering the reasons derive from one evaluation.
+/// This is the public refuse-on-stale predicate; its former in-tree callers now
+/// take the snapshot directly.
 pub fn is_stale(apg_root: &Path) -> bool {
-    matches!(
-        freshness_snapshot(apg_root),
-        FreshnessSnapshot::Stale { .. }
-    )
+    match freshness_snapshot(apg_root) {
+        FreshnessSnapshot::Stale { .. } => true,
+        FreshnessSnapshot::NotApplicable { .. }
+        | FreshnessSnapshot::Fresh { .. }
+        | FreshnessSnapshot::Contended { .. } => false,
+    }
 }
 
 /// `<sha>@<clean>` for a git state, or `-@-` when there is no sha to display.
