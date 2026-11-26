@@ -555,8 +555,10 @@ mod e2e {
         testutil::write_scan_meta(&apg, Some(&other_sha), false, "2026-09-07T00:00:00Z");
         let state = git_state(&apg);
         let differing = match freshness_differences(&apg, &state) {
-            FreshnessSnapshot::NotApplicable { differing, .. }
-            | FreshnessSnapshot::Stale { differing, .. } => differing,
+            FreshnessSnapshot::Stale { differing, .. } => differing,
+            FreshnessSnapshot::NotApplicable { .. } => {
+                panic!("a fixture with a database and a HEAD sha is never not-applicable")
+            }
             FreshnessSnapshot::Fresh { .. } => {
                 panic!("two differing inputs must never read fresh")
             }
@@ -564,6 +566,10 @@ mod e2e {
                 panic!("a readable fixture must never read contended")
             }
         };
+        assert!(
+            !differing.is_empty(),
+            "a stale verdict always names at least one differing input"
+        );
         assert_eq!(
             differing,
             vec!["sha", "cleanliness"],
@@ -648,8 +654,10 @@ mod e2e {
         let assert_names = |apg: &Path, label: &str| {
             let state = git_state(apg);
             let differing = match freshness_differences(apg, &state) {
-                FreshnessSnapshot::NotApplicable { differing, .. }
-                | FreshnessSnapshot::Stale { differing, .. } => differing,
+                FreshnessSnapshot::Stale { differing, .. } => differing,
+                FreshnessSnapshot::NotApplicable { .. } => {
+                    panic!("a flipped input must never be not-applicable")
+                }
                 FreshnessSnapshot::Fresh { .. } => {
                     panic!("a differing input must never read fresh")
                 }
@@ -657,6 +665,10 @@ mod e2e {
                     panic!("a readable fixture must never read contended")
                 }
             };
+            assert!(
+                !differing.is_empty(),
+                "a stale verdict always names at least one differing input"
+            );
             assert_eq!(
                 differing,
                 vec![label],
@@ -803,8 +815,10 @@ mod e2e {
         drop(db);
         let state = git_state(&apg);
         let differing = match freshness_differences(&apg, &state) {
-            FreshnessSnapshot::NotApplicable { differing, .. }
-            | FreshnessSnapshot::Stale { differing, .. } => differing,
+            FreshnessSnapshot::Stale { differing, .. } => differing,
+            FreshnessSnapshot::NotApplicable { .. } => {
+                panic!("a fixture with a database and a HEAD sha is never not-applicable")
+            }
             FreshnessSnapshot::Fresh { .. } => {
                 panic!("two differing inputs must never read fresh")
             }
@@ -812,6 +826,10 @@ mod e2e {
                 panic!("a readable fixture must never read contended")
             }
         };
+        assert!(
+            !differing.is_empty(),
+            "a stale verdict always names at least one differing input"
+        );
         assert_eq!(
             differing,
             vec!["content key", "sha"],
@@ -945,8 +963,10 @@ mod e2e {
             |apg: &Path, labels: &[&'static str], requested: Option<&[String]>| {
                 let state = git_state(apg);
                 let differing = match freshness_differences_with(apg, &state, requested) {
-                    FreshnessSnapshot::NotApplicable { differing, .. }
-                    | FreshnessSnapshot::Stale { differing, .. } => differing,
+                    FreshnessSnapshot::Stale { differing, .. } => differing,
+                    FreshnessSnapshot::NotApplicable { .. } => {
+                        panic!("a flipped input must never be not-applicable")
+                    }
                     FreshnessSnapshot::Fresh { .. } => {
                         panic!("a differing input must never read fresh")
                     }
@@ -954,6 +974,10 @@ mod e2e {
                         panic!("a differing input must never read contended")
                     }
                 };
+                assert!(
+                    !differing.is_empty(),
+                    "a stale verdict always names at least one differing input"
+                );
                 assert_eq!(
                     differing,
                     labels.to_vec(),
