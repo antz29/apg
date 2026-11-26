@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "terraform-unresolved-first-category",
+  "body": "Each unresolved record is emitted once per scan carrying the first category any site assigns to its name, whereas the PowerShell frontend keeps a fixed category precedence; the Terraform resolver's naming keeps external (a source string) and unknown (var.x, aws_vpc.main, a normalised path, a nameless key) names disjoint, so no name currently receives two categories. Upgrade to a fixed precedence if a later rule can give one name two categories or a targeted rescan shows a category differing from the full scan.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.terraformfrontend.scan.facts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
