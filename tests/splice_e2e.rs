@@ -1313,6 +1313,135 @@ fn ps_label_change_splices_like_force(
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// The authored/transient rows of a DB file in the row identity the authored
+/// digest folds: one `N:<table>:<cells>` line per non-code node row (its
+/// `properties`/`updated` columns excluded — exactly the columns
+/// `seed_authored_identity` projects) and one `E:<table>:<from>-><to>` line per
+/// rel row whose SOURCE FQN is an authored node. The digest functions yield only
+/// the folded value, so this recovers the individual rows the fallback oracle
+/// prints when a published DB diverges from a `--force` rebuild.
+fn authored_snapshot(path: &Path) -> BTreeSet<String> {
+    /// The code / engine-bookkeeping node labels — never authored rows.
+    const CODE_LABELS: &[&str] = &[
+        "Module",
+        "File",
+        "Struct",
+        "Function",
+        "UnresolvedTarget",
+        "Language",
+        "Agent",
+        "Scan",
+        "PendingRemoval",
+    ];
+    /// The code-only rel tables: no authored source can appear in them.
+    const CODE_RELS: &[&str] = &["UnresolvedCall", "UnresolvedUse"];
+
+    let db = Database::new(path, fixture_db_config().read_only(true)).unwrap();
+    let conn = Connection::new(&db).unwrap();
+    let (names, tables) = query_rows(&conn, "CALL show_tables() RETURN name, type").unwrap();
+    let name_i = column_index(&names, "name").unwrap();
+    let type_i = column_index(&names, "type").unwrap();
+    let mut authored: BTreeSet<String> = BTreeSet::new();
+    let mut rows: BTreeSet<String> = BTreeSet::new();
+    let mut rels: Vec<String> = Vec::new();
+    for table_row in &tables {
+        let table = cell(table_row, name_i);
+        if cell(table_row, type_i) == "REL" {
+            if !CODE_RELS.contains(&table.as_str()) {
+                rels.push(table);
+            }
+            continue;
+        }
+        if CODE_LABELS.contains(&table.as_str()) {
+            continue;
+        }
+        let (col_names, col_rows) =
+            query_rows(&conn, &format!("CALL table_info('{table}') RETURN *")).unwrap();
+        let col_i = column_index(&col_names, "name").unwrap();
+        let projected: Vec<String> = col_rows
+            .iter()
+            .map(|r| cell(r, col_i))
+            .filter(|c| c != "properties" && c != "updated")
+            .collect();
+        let fqn_i = projected
+            .iter()
+            .position(|c| c == "fqn")
+            .expect("an authored node table is keyed on fqn");
+        let selection = projected
+            .iter()
+            .map(|c| format!("n.`{c}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let (_, node_rows) =
+            query_rows(&conn, &format!("MATCH (n:{table}) RETURN {selection}")).unwrap();
+        for node in node_rows {
+            authored.insert(cell(&node, fqn_i));
+            let cells: Vec<String> = (0..projected.len()).map(|i| cell(&node, i)).collect();
+            rows.insert(format!("N:{table}:{}", cells.join("|")));
+        }
+    }
+    for table in rels {
+        let (_, edge_rows) = query_rows(
+            &conn,
+            &format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"),
+        )
+        .unwrap();
+        for edge in edge_rows {
+            let from = cell(&edge, 0);
+            if authored.contains(&from) {
+                rows.insert(format!("E:{table}:{from}->{}", cell(&edge, 1)));
+            }
+        }
+    }
+    drop(conn);
+    drop(db);
+    rows
+}
+
+/// The symmetric difference of two row snapshots as bounded `only in …` lines
+/// (multiplicity-insensitive is enough for the oracle: a changed value shows up
+/// once per side).
+fn row_diff(
+    left: &BTreeSet<String>,
+    right: &BTreeSet<String>,
+    left_name: &str,
+    right_name: &str,
+) -> Vec<String> {
+    let mut out: Vec<String> = left
+        .symmetric_difference(right)
+        .map(|row| {
+            if left.contains(row) {
+                format!("only {left_name}: {row}")
+            } else {
+                format!("only {right_name}: {row}")
+            }
+        })
+        .collect();
+    out.sort();
+    out.truncate(40);
+    out
+}
+
+/// Reclaims the shared fact store's per-file units for the worktree at `wt`
+/// while leaving the store's per-worktree manifest and scan rows intact — the
+/// store's own **documented cache-miss path**: a registered root that is no
+/// longer a live checkout makes every unit unreachable to the collector, and
+/// the next scan re-derives them. An UNCHANGED file is not a re-emission
+/// target, though, so a scan that falls back to a full re-assembly has no facts
+/// to splice for it. Returns the number of units reclaimed.
+fn reclaim_cached_units(apg_root: &Path, wt: &Path) -> usize {
+    let store = apg::cache::FactStore::resolve(apg_root).expect("resolve the shared fact store");
+    let id = apg::cache::worktree_id(wt);
+    store
+        .register_worktree(id, "/nonexistent/apg-fact-cache-miss")
+        .expect("park the worktree root so its units are collectable");
+    store.save_index().expect("commit the parked root");
+    apg::cache::gc::collect(&store.root, apg::cache::gc::unix_now(), 0)
+        .expect("collect the unreachable units")
+        .units
+        .len()
+}
+
 /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files
 /// and writes node files under the temp dir. Each is
 /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -8015,5 +8144,416 @@ mod e2e {
         drop(seeded);
         std::fs::remove_file(&temp).ok();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase-01 task-1 (e2e oracle): the `SeedFallback::UnrepresentedAuthored`
+    /// full-load fallback must publish the TREE's authored/transient rows —
+    /// `seed_authored_identity(db) == tree_authored_identity(apg_root)` — and
+    /// leave the worktree mutable.
+    ///
+    /// The bug this pins: after a source commit and a plain `apg scan` that
+    /// lands on the full-load fallback, the NEXT bookkeeping mutation refused
+    /// with `differing: authored digest` at a matching HEAD, while a
+    /// `--force` rebuild cleared it. The fixture reproduces the bug's observed
+    /// order: a plan mutation plus a durable authored row the last scan never
+    /// saw, then a source commit, then a plain `apg scan`. The scratch `/tmp`
+    /// project worktree carries real Go code, one `.opencode/agents/`
+    /// definition, durable Components whose `implemented-by` and a Note's
+    /// `details` name a real Function, and a branch-local plan with two
+    /// assigned tasks, a real-code `function modify`, and a planned `function
+    /// create`.
+    ///
+    /// The mechanism the fallback fails on is an ASSEMBLY GAP: the full-load
+    /// fallback rebuilds the database from the target spool plus the shared
+    /// fact store's cached facts, and the store's documented cache-miss path
+    /// (its units reclaimed for a worktree whose registered root is no longer a
+    /// live checkout — the H3 shared-store class) leaves an UNCHANGED file with
+    /// no cached facts. Its code nodes and the authored→code edges naming them
+    /// then vanish from the published DB, so `tree_authored_identity` cannot
+    /// reconcile the orphaned `implemented-by` (spec drift) and the freshness
+    /// check reports `authored digest`; `--force` re-runs every frontend and
+    /// recovers. The splice path keeps the seed's code, which is why the bug
+    /// tracked the fallback.
+    ///
+    /// Mechanism-agnostic in its verdict — the oracle captures the fallback DB's
+    /// digest, the TREE digest (an `Err` names the lost code ref), the
+    /// freshness verdict, then a `--force` rebuild's digest and ROW SET, and
+    /// prints the diverging authored/transient rows (the digest functions fold
+    /// only a value) plus the fallback DB's plan rows against the plan JSONL.
+    /// On the unfixed tree this is RED by design; phase 2 fixes the assembly and
+    /// phase 3 adds the refusal-preserving verification.
+    ///
+    /// Scratch `/tmp` repo + candidate binary only
+    /// (`global.constraint.no-real-project-test`); a real Go frontend scan, real
+    /// `db.lbug` files and a real git checkout are real I/O, so this is
+    /// `#[ignore]`d e2e (`global.constraint.test-tier-boundaries`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/go frontend/db.lbug/git); run via cargo test-e2e"]
+    fn full_load_fallback_publishes_the_tree_authored_digest() {
+        use apg::schema::Record;
+        use apg::testutil::{ApgCommand, Repo, wt_commit_paths};
+
+        const PROJECT: &str = "adf";
+        /// The real Function the authored edges and the task's `modify` name
+        /// (`go.mod` module `scratch`, package `b`).
+        const TARGET: &str = "go.scratch/b.Foo";
+        /// The plan's planned `creates` target.
+        const PLANNED: &str = "go.scratch/a.New";
+        const COMPONENT: &str = "solution.component.foo-cmp";
+        const AGENT: &str = "agent.implementer";
+        const TASK1: &str = "adf/plan.phase-01.task-1";
+        const TASK2: &str = "adf/plan.phase-01.task-2";
+
+        /// One `apg` invocation in `dir` with an isolated `HOME`; fails loudly on
+        /// a non-zero exit.
+        fn apg_cli(dir: &Path, home: &str, args: &[&str]) -> std::process::Output {
+            let out = ApgCommand::new(args).cwd(dir).env("HOME", home).output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        /// `apg scan .` (plus `extra`) in `dir`; returns its stderr log (the
+        /// `[scan]`/`[load]` decision lines).
+        fn scan_log(dir: &Path, home: &str, extra: &[&str]) -> String {
+            let mut args = vec!["scan", "."];
+            args.extend_from_slice(extra);
+            String::from_utf8_lossy(&apg_cli(dir, home, &args).stderr).into_owned()
+        }
+
+        /// The JSON rows of one `apg query`.
+        fn query_json(dir: &Path, home: &str, cypher: &str) -> Vec<serde_json::Value> {
+            let out = apg_cli(dir, home, &["query", "--json", cypher]);
+            serde_json::from_slice(&out.stdout).expect("json rows")
+        }
+
+        let repo = Repo::new("authored-digest-fallback");
+        // The project worktree (`apg/.worktrees/<project>` on branch `<project>`)
+        // is what gives `apg plan done` its membership context.
+        let wt = repo.start_project(PROJECT);
+        let apg_root = repo.project_apg_root(PROJECT);
+        let home = sibling_home(&repo, "authored-digest-fallback");
+        let home_s = home.to_str().unwrap().to_string();
+
+        let write = |rel: &str, content: &str| {
+            let path = wt.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, content).unwrap();
+        };
+        write("go.mod", "module scratch\n\ngo 1.21\n");
+        write(
+            "a/a.go",
+            "package a\n\n// Leaf is the edited leaf.\nfunc Leaf() int { return 1 }\n",
+        );
+        write(
+            "b/b.go",
+            "package b\n\n// Foo is the untouched seed-only target.\nfunc Foo() int { return 2 }\n",
+        );
+        write(
+            ".opencode/agents/implementer.md",
+            "# Implementer\n\nCore implementation.\n",
+        );
+
+        // The unchanged durable spec: an implementation-layer Note `details`
+        // and a solution Component `implemented-by`, both onto the real
+        // `b.Foo`. Code endpoints have no node file, so each edge carries only
+        // its spec-side half.
+        let mut note = apg::testutil::node("implementation", "note", "foo-note");
+        note.body = "the note that details the seed-only target".to_string();
+        note.out = vec![apg::testutil::out_edge("details", TARGET)];
+        apg::layers::write_node(&apg_root, &note).unwrap();
+        let mut component = apg::testutil::node("solution", "component", "foo-cmp");
+        component.body = "the component that implements the seed-only target".to_string();
+        component.out = vec![apg::testutil::out_edge("implemented-by", TARGET)];
+        apg::layers::write_node(&apg_root, &component).unwrap();
+
+        // The branch-local plan store (gitignored, so not part of the git delta
+        // between the scans): two Agent-assigned tasks, a real-code `modify`, a
+        // planned `create`, and one `implements` onto the Component.
+        let plan_records = [
+            Record::Plan {
+                fqn: "adf/plan".into(),
+                title: "Authored-digest fallback".into(),
+                strategy: "s".into(),
+            },
+            Record::PlanPhase {
+                fqn: "adf/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "d".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "adf/plan".into(),
+                to: "adf/plan.phase-01".into(),
+                properties: NodeProperties::default(),
+            },
+            Record::Task {
+                fqn: TASK1.into(),
+                title: "Reproduce".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "adf/plan.phase-01".into(),
+                to: TASK1.into(),
+                properties: NodeProperties::default(),
+            },
+            Record::Task {
+                fqn: TASK2.into(),
+                title: "Verify".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "adf/plan.phase-01".into(),
+                to: TASK2.into(),
+                properties: NodeProperties::default(),
+            },
+            Record::AssignedTo {
+                from: TASK1.into(),
+                to: AGENT.into(),
+            },
+            Record::AssignedTo {
+                from: TASK2.into(),
+                to: AGENT.into(),
+            },
+            Record::Implements {
+                from: TASK1.into(),
+                to: COMPONENT.into(),
+            },
+            Record::FunctionModify {
+                from: TASK1.into(),
+                to: TARGET.into(),
+            },
+            Record::PlannedNode {
+                fqn: PLANNED.into(),
+                kind: "function".into(),
+                name: "New".into(),
+                parent: "go.scratch/a".into(),
+            },
+            Record::FunctionCreate {
+                from: TASK2.into(),
+                to: PLANNED.into(),
+            },
+        ];
+        let plan_path = apg_root
+            .join(".trans")
+            .join("plans")
+            .join(format!("{PROJECT}.jsonl"));
+        std::fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &plan_path,
+            plan_records
+                .iter()
+                .map(|r| serde_json::to_string(r).unwrap() + "\n")
+                .collect::<String>(),
+        )
+        .unwrap();
+
+        wt_commit_paths(&wt, &["."], "fixture: source, spec and the branch plan");
+
+        // (1) Cold full scan: the seed DB carries every authored row and its
+        // real-code edges.
+        let cold_log = scan_log(&wt, &home_s, &[]);
+        assert!(
+            cold_log.contains("[load] writing parquet load files"),
+            "the cold scan must full-load: {cold_log}"
+        );
+        assert!(
+            !cold_log.contains("full load skipped"),
+            "the cold scan has no seed to splice: {cold_log}"
+        );
+
+        // (2) The plan mutation the last scan never saw (the bug's step 1).
+        let _ = apg_cli(&wt, &home_s, &["plan", "done", PROJECT, TASK1]);
+        let done_status: Vec<serde_json::Value> = query_json(
+            &wt,
+            &home_s,
+            &format!("MATCH (t:Task {{fqn: '{TASK1}'}}) RETURN t.status AS status"),
+        );
+        assert_eq!(
+            done_status.first().and_then(|r| r["status"].as_str()),
+            Some("done"),
+            "the plan mutation must project its task status into the live DB"
+        );
+
+        // (3) The spec-writer cadence — a durable authored row the last scan
+        // never saw (the seal that makes the seed unrepresentable) — then a
+        // source commit (the bug's step 2).
+        let mut late = apg::testutil::node("solution", "component", "late-cmp");
+        late.body = "the component the last scan never saw".to_string();
+        late.out = vec![apg::testutil::out_edge("implemented-by", TARGET)];
+        apg::layers::write_node(&apg_root, &late).unwrap();
+        write(
+            "a/a.go",
+            "package a\n\n// Leaf is the edited leaf.\nfunc Leaf() int { return 42 }\n",
+        );
+        wt_commit_paths(&wt, &["."], "spec row, source edit");
+
+        // The assembly gap: the shared fact store reclaims this worktree's
+        // per-file units (its documented cache-miss path — a registered root
+        // that is no longer a live checkout makes every unit unreachable to the
+        // collector) while its manifest/scan rows survive, so the next scan
+        // still takes the delta dispatch but has no cached facts to splice for
+        // the UNCHANGED files. A cache miss is supposed to be harmless; here it
+        // silently drops the unchanged code from the fallback's re-assembly.
+        let reclaimed = reclaim_cached_units(&apg_root, &wt);
+        assert!(
+            reclaimed > 0,
+            "the fixture must reclaim the cached units for the unchanged files"
+        );
+
+        // (4) The plain scan (the bug's step 3): the new spec row refuses the
+        // seed, the full-load fallback re-assembles from the target spool +
+        // the (now empty) cached facts.
+        let fallback_log = scan_log(&wt, &home_s, &[]);
+
+        // Diagnostics first (no panic): the fallback DB's digest + rows, the
+        // tree's digest (an `Err` here is itself the defect — the tree assembly
+        // cannot reconcile a code ref the published DB lost), the freshness
+        // verdict, then the `--force` reference.
+        let db_path = apg_root.join(".trans").join("db.lbug");
+        let fallback_digest = seed_authored_identity(&db_path).expect("fallback db digest");
+        let fallback_tree = tree_authored_identity(&apg_root);
+        let fallback_rows = authored_snapshot(&db_path);
+        let refusal = apg::git::refusal_message(&apg_root);
+        let force_log = scan_log(&wt, &home_s, &["--force"]);
+        let force_digest = seed_authored_identity(&db_path).expect("--force db digest");
+        let force_tree = tree_authored_identity(&apg_root);
+        let force_rows = authored_snapshot(&db_path);
+
+        let diverging = row_diff(&fallback_rows, &force_rows, "fallback", "--force");
+        // H1/H2 falsifier: the plan rows the fallback PUBLISHED vs the rows the
+        // plan JSONL (the tree) carries.
+        let mut tree_plan_rows: BTreeSet<String> = BTreeSet::new();
+        for record in apg::specs::read_jsonl(&plan_path).expect("plan jsonl") {
+            match record {
+                Record::Plan {
+                    fqn,
+                    title,
+                    strategy,
+                } => {
+                    tree_plan_rows.insert(format!("N:Plan:{fqn}|{title}|{strategy}"));
+                }
+                Record::PlanPhase {
+                    fqn,
+                    number,
+                    title,
+                    deliverable,
+                    status,
+                } => {
+                    tree_plan_rows.insert(format!(
+                        "N:PlanPhase:{fqn}|{number}|{title}|{deliverable}|{status}"
+                    ));
+                }
+                Record::Task { fqn, title, status } => {
+                    tree_plan_rows.insert(format!("N:Task:{fqn}|{title}|{status}"));
+                }
+                _ => {}
+            }
+        }
+        let published_plan_rows: BTreeSet<String> = fallback_rows
+            .iter()
+            .filter(|row| {
+                row.starts_with("N:Plan:")
+                    || row.starts_with("N:PlanPhase:")
+                    || row.starts_with("N:Task:")
+            })
+            .cloned()
+            .collect();
+        let transient_diverging = row_diff(
+            &published_plan_rows,
+            &tree_plan_rows,
+            "published fallback DB",
+            "plan JSONL (tree)",
+        );
+
+        let diff_report = format!(
+            "fallback db digest {fallback_digest}, tree digest {fallback_tree:?}, \
+             --force db digest {force_digest}, --force tree digest {force_tree:?}\n\
+             refusal: {refusal:?}\n\
+             diverging authored/transient rows (fallback vs --force):\n{}\n\
+             plan rows (published fallback DB vs plan JSONL):\n{}",
+            if diverging.is_empty() {
+                "(none)".to_string()
+            } else {
+                diverging.join("\n")
+            },
+            if transient_diverging.is_empty() {
+                "(none)".to_string()
+            } else {
+                transient_diverging.join("\n")
+            }
+        );
+
+        // The state under test: the plain scan took the UnrepresentedAuthored
+        // full-load fallback.
+        assert!(
+            fallback_log.contains("[scan] incremental:"),
+            "the commit + edit must take the delta dispatch: {fallback_log}"
+        );
+        assert!(
+            fallback_log
+                .contains("does not represent the assembled graph's authored/transient rows"),
+            "the seed must be refused as UnrepresentedAuthored: {fallback_log}"
+        );
+        assert!(
+            fallback_log.contains("[load] full-load fallback: re-assembling the full graph"),
+            "the refusal must re-assemble the full graph: {fallback_log}"
+        );
+        assert!(
+            !fallback_log.contains("full load skipped"),
+            "the delta graph must never be published: {fallback_log}"
+        );
+        assert!(
+            force_log.contains("[load] writing parquet load files")
+                && !force_log.contains("full load skipped"),
+            "the reference must be a from-scratch full rebuild: {force_log}"
+        );
+
+        // The oracle: the fallback's published rows are the tree's. The tree
+        // digest must be COMPUTABLE first — `tree_authored_identity` validates
+        // every `implemented-by` against the published DB's code universe, so an
+        // Err names exactly the code ref the fallback dropped.
+        let fallback_tree_digest = match &fallback_tree {
+            Ok(digest) => digest.clone(),
+            Err(err) => panic!(
+                "the full-load fallback must publish a DB the tree's authored digest can be \
+                 computed against: {err:#}\n{diff_report}"
+            ),
+        };
+        assert_eq!(
+            fallback_digest, fallback_tree_digest,
+            "the full-load fallback must publish the tree's authored digest\n{diff_report}"
+        );
+        assert_eq!(
+            fallback_digest, force_digest,
+            "the full-load fallback's authored digest must equal a --force rebuild's\n{diff_report}"
+        );
+        assert!(
+            fallback_rows == force_rows,
+            "the full-load fallback's authored/transient rows must equal a --force rebuild's\n{diff_report}"
+        );
+        // The `--force` rebuild is the correctness reference: it re-runs every
+        // frontend, so its published DB and the tree agree again.
+        assert_eq!(
+            force_tree.as_deref().ok(),
+            Some(force_digest.as_str()),
+            "the --force reference must recover a consistent authored digest\n{diff_report}"
+        );
+        assert!(
+            refusal.is_none(),
+            "the next bookkeeping mutation must be admitted, not refused: {refusal:?}\n{diff_report}"
+        );
+
+        // End-to-end: the worktree stays mutable — a real plan mutation lands.
+        let _ = apg_cli(&wt, &home_s, &["plan", "done", PROJECT, TASK2]);
+
+        let _ = std::fs::remove_dir_all(&repo.root);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
