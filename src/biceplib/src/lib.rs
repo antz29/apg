@@ -4,5 +4,6 @@
 
 pub mod diag;
 pub mod parse;
+pub mod resolve;
 pub mod source;
 pub mod units;
