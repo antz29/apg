@@ -190,11 +190,12 @@ mod unit {
 
     /// A task's operation contract (SPEC §5): an empty edge set is a valid
     /// target-less activity; `creates` accepts a planned or still-absent target
-    /// but refuses real scanned code; `modifies`/`deletes` require real scanned
-    /// code (a planned or absent FQN is refused); `renames`/`moves` validate
-    /// BOTH FQNs — a live source and a destination that collides with no
-    /// existing code. Pure in-memory: the caller supplies the two code
-    /// universes as `BTreeSet`s.
+    /// but refuses real scanned code; `modifies` accepts real scanned code and a
+    /// planned node (a planned target is licensed at verify by an earlier
+    /// `creates`), while `deletes` requires real scanned code (a planned or
+    /// absent FQN is refused); `renames`/`moves` validate BOTH FQNs — a live
+    /// source and a destination that collides with no existing code. Pure
+    /// in-memory: the caller supplies the two code universes as `BTreeSet`s.
     #[test]
     fn task_operations_validation() {
         use crate::plan_cmd::authoring::{TaskOperation, validate_task_operations};
@@ -241,18 +242,32 @@ mod unit {
             .to_string();
         assert!(err.contains("already resolves to scanned code"), "{err}");
 
-        // modifies/deletes require real scanned code.
+        // modifies accepts real scanned code and a planned node; deletes
+        // requires real scanned code.
         for verb in ["modifies", "deletes"] {
             assert!(check(&[op("function", verb, "rust.apg.cmd_scan", "")]).is_ok());
-            let err = check(&[op(
+        }
+        assert!(
+            check(&[op(
                 "function",
-                verb,
+                "modifies",
                 "rust.apg.plan_cmd.authoring.validate_task_operations",
                 "",
             )])
-            .unwrap_err()
-            .to_string();
-            assert!(err.contains("planned node"), "{verb}: {err}");
+            .is_ok()
+        );
+        let err = check(&[op(
+            "function",
+            "deletes",
+            "rust.apg.plan_cmd.authoring.validate_task_operations",
+            "",
+        )])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("planned node"), "{err}");
+
+        // Both verbs refuse a target absent from the scanned graph.
+        for verb in ["modifies", "deletes"] {
             let err = check(&[op(
                 "function",
                 verb,

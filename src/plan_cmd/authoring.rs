@@ -1191,8 +1191,11 @@ const TASK_VERBS: [&str; 5] = ["creates", "modifies", "deletes", "renames", "mov
 ///
 /// - `creates` — the target must NOT resolve in the scanned graph (it may be a
 ///   planned node or still absent); creating over existing real code is refused.
-/// - `modifies` / `deletes` — the target must resolve in the scanned graph; an
-///   unresolvable (or still-planned) FQN is refused.
+/// - `modifies` — the target must resolve in the scanned graph, or be a planned
+///   node (a planned-target `modifies` is licensed at verify by an earlier
+///   `creates`); an absent FQN is refused.
+/// - `deletes` — the target must resolve in the scanned graph as real code; an
+///   absent or still-planned FQN is refused.
 /// - `renames` / `moves` — the source must resolve in the scanned graph and the
 ///   destination FQN must not collide with existing real code.
 ///
@@ -1247,7 +1250,16 @@ pub(crate) fn validate_task_operations(
                     );
                 }
             }
-            "modifies" | "deletes" => match status {
+            "modifies" => match status {
+                crate::layers::CodeRefStatus::Real | crate::layers::CodeRefStatus::Pending => {}
+                crate::layers::CodeRefStatus::Drift => anyhow::bail!(
+                    "{} target `{}` does not resolve in the scanned graph — {} changes existing code (a creates would plan it)",
+                    op.verb,
+                    op.target,
+                    op.verb
+                ),
+            },
+            "deletes" => match status {
                 crate::layers::CodeRefStatus::Real => {}
                 crate::layers::CodeRefStatus::Pending => anyhow::bail!(
                     "{} target `{}` is a planned node, not scanned code — only a creates builds a planned node",
