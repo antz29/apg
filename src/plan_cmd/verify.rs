@@ -68,13 +68,102 @@ pub(crate) fn realization_candidates(fqn: &str) -> Vec<String> {
     out
 }
 
+/// Licensing gaps for a `modifies` of a planned Implementation node. Pure — no
+/// I/O: the caller supplies the transient plan records (requirement
+/// `planned-node-modifies-is-licensed-by-an-earlier-creates`).
+///
+/// A `modifies` may name a still-planned node only when another task `creates`
+/// the same FQN in a strictly earlier plan phase: the modifying task builds on
+/// code an earlier phase already introduces. A `modifies` whose target is not a
+/// declared planned node is left to the ordinary operation gates and ignored
+/// here. Each gap names the planned target and both phases; the output is
+/// sorted and deduplicated so the verdict is stable.
+pub(crate) fn planned_modify_licensing_gaps(records: &[Record]) -> Vec<String> {
+    // The plan's own numbering: phase FQN → phase number.
+    let phase_numbers: BTreeMap<&str, u32> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::PlanPhase { fqn, number, .. } => Some((fqn.as_str(), *number)),
+            _ => None,
+        })
+        .collect();
+    // Each declared task's phase, from its `<project>/plan.phase-<n>.task-<k>`
+    // FQN: the phase FQN is the prefix before `.task-`, numbered above.
+    let task_phase: BTreeMap<&str, u32> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Task { fqn, .. } => fqn
+                .rsplit_once(".task-")
+                .and_then(|(phase_fqn, _)| phase_numbers.get(phase_fqn).copied())
+                .map(|n| (fqn.as_str(), n)),
+            _ => None,
+        })
+        .collect();
+
+    // The earliest phase creating each target FQN.
+    let mut creates: BTreeMap<&str, u32> = BTreeMap::new();
+    for r in records {
+        let (from, to) = match r {
+            Record::ModuleCreate { from, to }
+            | Record::FileCreate { from, to }
+            | Record::StructCreate { from, to }
+            | Record::FunctionCreate { from, to } => (from, to),
+            _ => continue,
+        };
+        let Some(&phase) = task_phase.get(from.as_str()) else {
+            continue;
+        };
+        creates
+            .entry(to.as_str())
+            .and_modify(|earliest| *earliest = (*earliest).min(phase))
+            .or_insert(phase);
+    }
+
+    let planned: BTreeSet<&str> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::PlannedNode { fqn, .. } => Some(fqn.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    let mut gaps: Vec<String> = Vec::new();
+    for r in records {
+        let (from, to) = match r {
+            Record::ModuleModify { from, to }
+            | Record::FileModify { from, to }
+            | Record::StructModify { from, to }
+            | Record::FunctionModify { from, to } => (from, to),
+            _ => continue,
+        };
+        if !planned.contains(to.as_str()) {
+            continue;
+        }
+        let Some(&modify_phase) = task_phase.get(from.as_str()) else {
+            continue;
+        };
+        match creates.get(to.as_str()) {
+            None => gaps.push(format!(
+                "planned node `{to}` is `modifies`d by `{from}` (phase {modify_phase}) but no plan task `creates` it"
+            )),
+            Some(&create_phase) if create_phase >= modify_phase => gaps.push(format!(
+                "planned node `{to}` is `modifies`d by `{from}` (phase {modify_phase}) but its earliest `creates` is in phase {create_phase} — the creator must be in a strictly earlier phase"
+            )),
+            Some(_) => {}
+        }
+    }
+    gaps.sort();
+    gaps.dedup();
+    gaps
+}
+
 /// Core of `plan verify` — the coherence gate. Returns the merge handoff
 /// message on green, or errors listing every blocker (unrealized planned
-/// nodes, unresolved feedback, and the change-set delta's coverage gaps —
-/// uncovered `implemented-by` claims and `Satisfies`-less added-or-changed
-/// requirements). Guarded: refuses outside the project context and against a
-/// stale branch DB (a verdict is only meaningful against the branch's graph —
-/// R5).
+/// nodes, unresolved feedback, unlicensed planned-node modifies, and the
+/// change-set delta's coverage gaps — uncovered `implemented-by` claims and
+/// `Satisfies`-less added-or-changed requirements). Guarded: refuses outside
+/// the project context and against a stale branch DB (a verdict is only
+/// meaningful against the branch's graph — R5).
 pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     // Take the extended lock BEFORE judging staleness: `apg scan` holds the same
@@ -157,6 +246,18 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
         problems.push(format!(
             "unresolved review feedback: {} — resolve every `Feedback` before verify",
             unresolved.join(", ")
+        ));
+    }
+
+    // 2b. A `modifies` of a still-planned Implementation node is licensed only
+    // by another task's `creates` of the same FQN in a strictly earlier phase
+    // (requirement `planned-node-modifies-is-licensed-by-an-earlier-creates`):
+    // name every unlicensed planned-node modify.
+    let licensing = planned_modify_licensing_gaps(&records);
+    if !licensing.is_empty() {
+        problems.push(format!(
+            "unlicensed planned-node modifies: {} — a `modifies` of a planned FQN requires another task's `creates` of the same FQN in an earlier phase",
+            licensing.join("; ")
         ));
     }
 
