@@ -1454,52 +1454,42 @@ where
 
 /// Answer whether the database under an `apg/` layout root carries **pending
 /// state** — the same question [`ArtifactDb::has_pending_state`] answers from a
-/// held handle — for every reader that holds none: `is_fresh`, the scan,
-/// `session start` and `apg query`.
+/// held handle — with an **unreadable database reported as a read failure**
+/// rather than as pending state. Three outcomes:
 ///
-/// An **absent** `db.lbug` is **not** pending: there is nothing to discard, so
-/// the answer is `false` — not an error, and not a reason to refuse a scan or a
-/// session start. Otherwise the database is opened **exactly once**, **read-only**
-/// ([`system_config(true)`]), one connection is taken
-/// from it, the pending-removal ledger is read once
-/// (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`), and the per-table
-/// row answers fold through the shared pure rule [`pending_state_present`] — the
-/// same roster walk that rule drives for the handle-backed sibling, never a
-/// second independent probe.
+/// - `Ok(false)` — an **absent** `db.lbug`: there is nothing to discard, so
+///   this is not an error and not a reason to refuse a scan or a session start;
+/// - `Err` — the database cannot be read at all: a refused
+///   [`system_config(true)`], a failed open, a refused connection, or a refused
+///   pending-removal ledger read;
+/// - `Ok(decision)` — the database is readable, and the ledger plus the
+///   per-table row answers fold through the shared pure rule
+///   [`pending_state_present`] — the same roster walk that rule drives for the
+///   handle-backed sibling, never a second independent probe.
 ///
-/// **Fails closed.** An unopenable or unreadable database is `true`, as is a
-/// refused connection, a refused ledger read, and every per-table probe error
-/// (including a table whose `updated` column is absent): an unreadable database
-/// is never reported clean. Dirty means exactly `updated = 1`; a row whose
+/// A **per-table probe error stays pending** (the `unwrap_or(true)` below): a
+/// probe that errors means that table's *shape* differs (e.g. no `updated`
+/// column), which the separate `validate_compatible` check labels. It does not
+/// mean the database is unreadable, so only the open/connect/ledger failures
+/// above are read failures. Dirty means exactly `updated = 1`; a row whose
 /// `updated` is NULL is not pending. Opens no write handle and touches no
 /// `apg/layers/**` file.
-pub fn db_has_pending_state(apg_root: &Path) -> bool {
+pub fn db_has_pending_state_result(apg_root: &Path) -> anyhow::Result<bool> {
     let db_path = apg_root.join(specs::TRANS).join("db.lbug");
     if !db_path.exists() {
-        return false;
+        return Ok(false);
     }
-    let Ok(config) = system_config(true) else {
-        return true;
-    };
-    let db = match Database::new(&db_path, config) {
-        Ok(db) => db,
-        Err(_) => return true,
-    };
-    let conn = match Connection::new(&db) {
-        Ok(conn) => conn,
-        Err(_) => return true,
-    };
-    let ledger: Vec<PendingRemoval> = match query_rows(
+    let db = Database::new(&db_path, system_config(true)?)?;
+    let conn = Connection::new(&db)?;
+    let (_, rows) = query_rows(
         &conn,
         "MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn",
-    ) {
-        Ok((_, rows)) => rows
-            .into_iter()
-            .map(|row| PendingRemoval { fqn: cell(&row, 0) })
-            .collect(),
-        Err(_) => return true,
-    };
-    pending_state_present(
+    )?;
+    let ledger: Vec<PendingRemoval> = rows
+        .into_iter()
+        .map(|row| PendingRemoval { fqn: cell(&row, 0) })
+        .collect();
+    Ok(pending_state_present(
         |table| {
             query_rows(
                 &conn,
@@ -1509,7 +1499,18 @@ pub fn db_has_pending_state(apg_root: &Path) -> bool {
             .unwrap_or(true)
         },
         &ledger,
-    )
+    ))
+}
+
+/// The fail-closed legacy projection of [`db_has_pending_state_result`]:
+/// `true` for a pending database **and** for an unreadable one (`Err`), `false`
+/// only for an absent one. Every reader that must never treat an unreadable
+/// database as clean — `is_fresh`'s freshness evaluation, the scan, the
+/// pipeline and `session start` — keeps this answer; a caller that must
+/// distinguish "unreadable now" from "pending" uses
+/// [`db_has_pending_state_result`].
+pub fn db_has_pending_state(apg_root: &Path) -> bool {
+    db_has_pending_state_result(apg_root).unwrap_or(true)
 }
 
 /// Read one durable node table into `nodes`, keyed by its FQN: identity from
