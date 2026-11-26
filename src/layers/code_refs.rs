@@ -30,7 +30,7 @@ pub enum CodeRefStatus {
 /// every id `available_languages`/`id_prefix_for` recognise: the code frontend
 /// ids (`ts` and `js` are the unified JS/TS frontend's two ids; a JS-only repo
 /// scans under `js`; `sql` is the SQL frontend's id; `ps` is the PowerShell
-/// frontend's id), `agent` (the
+/// frontend's id; `terraform` and `bicep` are the IaC frontends' ids), `agent` (the
 /// agent-definition frontend's id, whose code
 /// FQNs are `agent.<file-stem>`), and the bundled structural scanner's stream
 /// ids (`md` plus the per-format structural streams — `sln` among them, the
@@ -42,7 +42,7 @@ pub enum CodeRefStatus {
 /// This literal mirrors [`crate::frontends::STRUCTURAL_LANGUAGES`] plus the
 /// code/agent ids; a `const` array cannot concatenate that slice, so the ids
 /// are repeated here and the two lists must move together.
-pub const LANGUAGE_ROOTS: [&str; 23] = [
+pub const LANGUAGE_ROOTS: [&str; 25] = [
     "rust",
     "java",
     "go",
@@ -54,6 +54,8 @@ pub const LANGUAGE_ROOTS: [&str; 23] = [
     "cobol",
     "sql",
     "ps",
+    "terraform",
+    "bicep",
     "md",
     "agent",
     "sh",
