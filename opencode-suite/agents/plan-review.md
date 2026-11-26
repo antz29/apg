@@ -236,9 +236,10 @@ pair is structural — the linter reports it, the write refuses
   deliverable, or one-task-per-file busywork) — attach to the phase and name the split, never a
   count-only finding.
 - **Operation edges** — checked against the task's title: `creates` names a **declared planned
-  node** (never auto-created); `modifies`/`deletes` name existing branch-graph code;
-  `renames`/`moves` carry the live source plus the `target` destination; an empty set is a
-  target-less activity.
+  node** (never auto-created); `modifies` names existing branch-graph code, or a planned node
+  licensed by a `creates` of the same FQN in an earlier plan phase; `deletes` names existing
+  branch-graph code only; `renames`/`moves` carry the live source plus the `target` destination;
+  an empty set is a target-less activity.
 - **Gate ownership** — the repo gate belongs to the **gate-owning Agent**: a gate task is done
   only on that Agent's observed green run, and a red or unasserted gate is blocking.
 - **Satisfies** — every requirement Satisfied by **exactly one** phase, and the deliverable
