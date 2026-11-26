@@ -15,6 +15,9 @@ use apg::testutil::{self, Repo, av, nf, task_recs, with_cwd, wt_commit_paths};
 use lbug::Connection;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// A temp repo with a real project context for `foo` (R4 — non-git
 /// fixtures are gone): the worktree on branch `foo` carries a real DB
@@ -6479,6 +6482,140 @@ mod e2e {
             !msg.contains("run `apg scan` inside the project worktree first"),
             "a stale-graph scan is not the contention fix: {msg}"
         );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-1 (acceptance): on one scratch `/tmp` branch checkout, soak
+    /// `apg plan verify` for 20 rounds beside a **looped**, read-only `apg query`
+    /// reader — never a one-shot. The reader starts before verify, is joined
+    /// only after verify returns, and every round must show an observed overlap
+    /// (a completed reader invocation whose wall-clock interval intersects
+    /// verify's). Each round asserts verify exits 0 carrying the success line
+    /// and the `Merge:` handoff, its stderr carries neither the stale verdict
+    /// nor `differing:`, and every reader invocation exits 0 with the CSV
+    /// header. This guards the failure mode where a concurrent read-only apg
+    /// process makes verify's freshness verdict misread as a stale branch graph.
+    ///
+    /// Overlap is produced, not slept for: the reader loops `testutil::spawn_apg`
+    /// invocations and the test waits until one has fully completed before
+    /// starting verify, so a further invocation is in flight when verify runs.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg readers+verify/db.lbug/plan store); run via cargo test-e2e"]
+    fn plan_verify_passes_beside_a_concurrent_read_only_reader() {
+        const ROUNDS: usize = 20;
+        const READER_QUERY: &str = "MATCH (s:Scan) RETURN s.git_sha";
+
+        let (apg_root, repo, wt) = fixture("verify-concurrent-reader");
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &bare_plan(),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                apg::git::freshness_snapshot(&apg_root),
+                apg::git::FreshnessSnapshot::Fresh { .. }
+            ),
+            "the fixture must record a fresh scan (precondition)"
+        );
+
+        let t0 = Instant::now();
+        for round in 0..ROUNDS {
+            let stop = Arc::new(AtomicBool::new(false));
+            let runs: Arc<Mutex<Vec<(Instant, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
+            let reader_failures: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+            let reader = {
+                let stop = Arc::clone(&stop);
+                let runs = Arc::clone(&runs);
+                let reader_failures = Arc::clone(&reader_failures);
+                let wt = wt.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::SeqCst) {
+                        let start = Instant::now();
+                        let out = testutil::spawn_apg(&["query", READER_QUERY], &wt);
+                        let end = Instant::now();
+                        runs.lock().unwrap().push((start, end));
+                        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+                        if !out.status.success() {
+                            reader_failures.lock().unwrap().push(format!(
+                                "apg query exited {:?}: {}",
+                                out.status.code(),
+                                String::from_utf8_lossy(&out.stderr)
+                            ));
+                        } else if !stdout.contains("s.git_sha") {
+                            reader_failures.lock().unwrap().push(format!(
+                                "apg query stdout lacked the s.git_sha header: {stdout:?}"
+                            ));
+                        }
+                    }
+                })
+            };
+
+            // Rendezvous: the reader has completed a full invocation, so it is
+            // demonstrably in flight before verify starts.
+            let deadline = Instant::now() + Duration::from_secs(120);
+            while runs.lock().unwrap().is_empty() {
+                assert!(
+                    Instant::now() < deadline,
+                    "round {round}: the read-only reader never completed a query"
+                );
+                std::thread::yield_now();
+            }
+
+            let v_start = Instant::now();
+            let verify = testutil::spawn_apg(&["plan", "verify", "foo"], &wt);
+            let v_end = Instant::now();
+
+            // Join only after verify returns.
+            stop.store(true, Ordering::SeqCst);
+            reader.join().expect("the reader thread panicked");
+
+            let stdout = String::from_utf8_lossy(&verify.stdout);
+            let stderr = String::from_utf8_lossy(&verify.stderr);
+            assert!(
+                verify.status.success(),
+                "round {round}: plan verify exited {:?}\nstdout: {stdout}\nstderr: {stderr}",
+                verify.status.code()
+            );
+            assert!(
+                stdout.contains("Verify gate passed for foo"),
+                "round {round}: verify stdout lacks the success line: {stdout}"
+            );
+            assert!(
+                stdout.contains("Merge:"),
+                "round {round}: verify stdout lacks the Merge: handoff: {stdout}"
+            );
+            assert!(
+                !stderr.contains("branch graph is stale"),
+                "round {round}: a concurrent reader must not make verify report a stale branch graph: {stderr}"
+            );
+            assert!(
+                !stderr.contains("differing:"),
+                "round {round}: verify named a differing freshness input beside a reader: {stderr}"
+            );
+
+            let reader_failures = reader_failures.lock().unwrap();
+            assert!(
+                reader_failures.is_empty(),
+                "round {round}: every reader invocation must exit 0 with the CSV header: {reader_failures:?}"
+            );
+
+            let runs = runs.lock().unwrap();
+            assert!(
+                runs.iter()
+                    .any(|(r_start, r_end)| *r_start <= v_end && v_start <= *r_end),
+                "round {round}: no observed reader/verify overlap — verify {:?}..{:?}, reader intervals {:?}",
+                v_start.duration_since(t0),
+                v_end.duration_since(t0),
+                runs.iter()
+                    .map(|(s, e)| (s.duration_since(t0), e.duration_since(t0)))
+                    .collect::<Vec<_>>()
+            );
+        }
 
         testutil::remove(&repo);
     }
