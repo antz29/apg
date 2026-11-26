@@ -672,26 +672,29 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     is_fresh_with_state(apg_root, &git_state(apg_root), None)
 }
 
-/// The refuse-on-stale predicate:
+/// The refuse-on-stale predicate, projected from the one shared freshness
+/// evaluation ([`freshness_snapshot`]): **true iff** that snapshot is
+/// [`FreshnessSnapshot::Stale`].
 ///
-/// - No DB (no `apg/.trans/db.lbug`) → **false** (N/A — nothing to be stale).
-/// - Not a git repo (or an unborn HEAD) → **false** (N/A — no recorded state
-///   to compare). These two N/A short-circuits are why this is not simply
-///   `!is_fresh`.
-/// - DB exists in a git repo → **stale iff** `!is_fresh` — one shared
-///   content-identity rule with the scan fast-path. A missing/pre-hardening
-///   recorded key is stale (freshness cannot be verified).
+/// - [`NotApplicable`](FreshnessSnapshot::NotApplicable) → **false**: no
+///   `db.lbug` (nothing to be stale), or no git repo / unborn HEAD (no
+///   recorded state to compare). These N/A short-circuits are why this is not
+///   simply `!is_fresh`.
+/// - [`Fresh`](FreshnessSnapshot::Fresh) → **false**: every freshness input
+///   matches the recorded scan.
+/// - [`Stale`](FreshnessSnapshot::Stale) → **true**: at least one input
+///   differs, always named in the snapshot's non-empty `differing` list. A
+///   missing/pre-hardening recorded key counts here (freshness cannot be
+///   verified).
+///
+/// The verdict comes from the single snapshot capture — one git read plus one
+/// pass over the database's own facts — never a second freshness pass, so the
+/// refusal gate and the sites rendering the reasons derive from one evaluation.
 pub fn is_stale(apg_root: &Path) -> bool {
-    if !db_path(apg_root).exists() {
-        return false;
-    }
-    let Ok(repo) = git2::Repository::discover(apg_root) else {
-        return false;
-    };
-    if head_sha(&repo).is_none() {
-        return false;
-    }
-    !is_fresh(apg_root)
+    matches!(
+        freshness_snapshot(apg_root),
+        FreshnessSnapshot::Stale { .. }
+    )
 }
 
 /// `<sha>@<clean>` for a git state, or `-@-` when there is no sha to display.
