@@ -163,26 +163,45 @@ pub(crate) fn planned_modify_licensing_gaps(records: &[Record]) -> Vec<String> {
 /// change-set delta's coverage gaps — uncovered `implemented-by` claims and
 /// `Satisfies`-less added-or-changed requirements). Guarded: refuses outside
 /// the project context and, from one freshness snapshot, against a stale branch
-/// DB (a verdict is only meaningful against the branch's graph — R5).
+/// DB (a verdict is only meaningful against the branch's graph — R5) or a
+/// persistently contended freshness read (named as contention, never staleness).
+/// The coherence handle is opened in the read-only class — a verdict never takes
+/// the exclusive read-write class a concurrent reader or writer needs.
 pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     // Take the extended lock BEFORE judging staleness: `apg scan` holds the same
     // blocking flock for its whole rebuild, so a verify overlapping a scan waits
     // for it and judges the finished branch database instead of a transient one.
+    // Readers never take this flock.
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
     // One snapshot decides the gate and names every differing input: a `Stale`
-    // verdict always carries a non-empty `differing`, while `Fresh` and
-    // `NotApplicable` (no DB or no git repo) proceed as before.
-    if let crate::git::FreshnessSnapshot::Stale { differing, .. } =
-        crate::git::freshness_snapshot(apg_root)
-    {
-        anyhow::bail!(
-            "cannot verify `{project}`: the branch graph is stale (differing: {}) — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)",
-            differing.join(", ")
-        );
+    // verdict always carries a non-empty `differing`, a persistently unreadable
+    // database is named contention (never staleness, and a stale-graph `apg
+    // scan` is not the fix), while `Fresh` and `NotApplicable` (no DB or no git
+    // repo) proceed as before.
+    match crate::git::freshness_snapshot(apg_root) {
+        crate::git::FreshnessSnapshot::Stale { differing, .. } => {
+            anyhow::bail!(
+                "cannot verify `{project}`: the branch graph is stale (differing: {}) — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)",
+                differing.join(", ")
+            );
+        }
+        crate::git::FreshnessSnapshot::Contended {
+            database,
+            waited,
+            budget,
+            ..
+        } => {
+            anyhow::bail!(
+                "cannot verify `{project}`: the branch database at `{}` is unreadable — waited {waited:?} of a {budget:?} budget for the contention to clear; retry once the other process finishes (a stale-graph `apg scan` is not the fix)",
+                database.display()
+            );
+        }
+        crate::git::FreshnessSnapshot::Fresh { .. }
+        | crate::git::FreshnessSnapshot::NotApplicable { .. } => {}
     }
     let records = load_plan(apg_root, project)?;
-    let db = artifacts::ArtifactDb::open(apg_root)?;
+    let db = artifacts::ArtifactDb::open_read_only(apg_root)?;
 
     // 1. Every planned Implementation node in the branch is realized: a scan
     // found real (present) code at its FQN and replaced the placeholder. A
