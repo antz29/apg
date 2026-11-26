@@ -68,7 +68,7 @@ pub struct Span {
     pub end_line: usize,
 }
 
-/// The span of decoded bytes `start_byte..end_byte` (tree-sitter offsets).
+/// The span of decoded byte offsets `start_byte..end_byte` into `Decoded.text`.
 pub fn span(src: &Decoded, start_byte: usize, end_byte: usize) -> Span {
     // An end just past a line break stays on the preceding line.
     let last = if end_byte > start_byte {
