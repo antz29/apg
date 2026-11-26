@@ -6035,24 +6035,23 @@ mod e2e {
     /// earlier phase, and the licensed plan passes only once the node is
     /// realized in the branch graph.
     ///
-    /// One scratch `/tmp` repo carries a real Rust crate `app` (no `helper`
-    /// yet) plus one `.opencode/agents/implementer.md` definition, so its
-    /// branch scan carries both the code graph and the Agent roster a task
-    /// assignment resolves against. The planned function is authored at its
-    /// language-agnostic identity (`app.helper`) BEFORE the code exists (a plan
-    /// never plans real code); landing `helper` in `src/main.rs` and re-scanning
-    /// realizes it at the rooted identity `rust.app.helper` through the verify
-    /// gate's `<root>.<identity>` tolerance.
+    /// One scratch `/tmp` repo carries NO language source (only the `.md`
+    /// fixture written at realization time) plus one
+    /// `.opencode/agents/implementer.md` definition, so its branch scan runs
+    /// only the bundled structural (`md`) and agent frontends — the scenario is
+    /// hermetic (no per-language frontend spawn). The planned File is authored
+    /// at its repo-relative path (`docs/helper.md`) BEFORE the code exists (a
+    /// plan never plans real code); writing that markdown file and re-scanning
+    /// realizes the File node at the same identity.
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg/rust frontend/db.lbug/plan store); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg/struct+agent frontends/db.lbug/plan store); run via cargo test-e2e"]
     fn task_modifies_of_planned_node_requires_an_earlier_create() {
-        const PLANNED: &str = "app.helper";
-        const REALIZED: &str = "rust.app.helper";
+        const PLANNED: &str = "docs/helper.md";
         const PHASE1_TASK: &str = "demo/plan.phase-01.task-1";
         const PHASE2_TASK: &str = "demo/plan.phase-02.task-1";
 
         /// The record set the licensing legs rebuild from: two phases, the
-        /// parentless planned function (as the apply-gate fixtures declare it),
+        /// parentless planned File (as the apply-gate fixtures declare it),
         /// and the plan/phase Contains edges.
         fn base_plan() -> Vec<Record> {
             vec![
@@ -6087,28 +6086,19 @@ mod e2e {
                 },
                 Record::PlannedNode {
                     fqn: PLANNED.to_string(),
-                    kind: "function".to_string(),
-                    name: "helper".to_string(),
+                    kind: "file".to_string(),
+                    name: "helper.md".to_string(),
                     parent: String::new(),
                 },
             ]
         }
 
         let repo = Repo::new("plan-modifies-licensing");
-        // `cargo metadata` writes a lockfile and may build into `target/`; both
-        // stay out of git so the checkout remains clean for the freshness gate.
-        repo.write(
-            ".gitignore",
-            "apg/.trans/\napg/.worktrees/\napg/.scratch/\nCargo.lock\n/target\n**/target\n",
-        );
-        repo.write(
-            "Cargo.toml",
-            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        );
-        repo.write("src/main.rs", "fn main() {}\n");
         // The branch graph's Agent roster supplies the task's `assigned-to`.
+        // No language source exists, so the scan spawns only the bundled
+        // structural + agent frontends.
         repo.write(".opencode/agents/implementer.md", "# implementer\n");
-        repo.commit_all("rust crate + agent roster");
+        repo.commit_all("agent roster");
 
         let wt = repo.start_project("demo");
         let apg_root = wt.join(specs::LAYOUT);
@@ -6124,7 +6114,7 @@ mod e2e {
             out
         };
 
-        // Author the plan and the planned function BEFORE any code exists.
+        // Author the plan and the planned File BEFORE any code exists.
         run(
             &wt,
             &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
@@ -6157,16 +6147,35 @@ mod e2e {
                 "D",
             ],
         );
-        run(
-            &wt,
-            &[
-                "plan", "add", "demo", "planned", "function", PLANNED, "--name", "helper",
-            ],
-        );
+        run(&wt, &["plan", "add", "demo", "planned", "file", PLANNED]);
 
-        // The branch scan: the code graph (no `helper` yet) plus the Agent
-        // roster the task assignment resolves against.
-        run(&wt, &["scan", "."]);
+        // The branch scan: the structural code graph (no `docs/helper.md` yet)
+        // plus the Agent roster the task assignment resolves against. Pin the
+        // language set to the two bundled frontends so no per-language binary
+        // is ever selected (auto-detect would fall back to every installed
+        // frontend on this source-less tree).
+        let first_scan = run(&wt, &["scan", ".", "--language", "md,agent"]);
+        let first_log = format!(
+            "{}{}",
+            String::from_utf8_lossy(&first_scan.stdout),
+            String::from_utf8_lossy(&first_scan.stderr)
+        );
+        let languages = first_log
+            .lines()
+            .find_map(|l| l.strip_prefix("Languages: "))
+            .unwrap_or_else(|| panic!("the scan log must name its Languages: {first_log}"));
+        for code in [
+            "java", "go", "cpp", "rust", "ts", "js", "csharp", "py", "cobol", "sql", "ps",
+        ] {
+            assert!(
+                !languages.split(", ").any(|l| l == code),
+                "the scan must spawn no per-language frontend, got `{languages}`"
+            );
+        }
+        assert!(
+            languages.split(", ").any(|l| l == "md") && languages.split(", ").any(|l| l == "agent"),
+            "the scan must run the bundled structural and agent frontends: {languages}"
+        );
 
         // LEG 1 — authoring accepts BOTH a phase-1 `creates` of the planned FQN
         // and a phase-2 `modifies` of it.
@@ -6177,10 +6186,10 @@ mod e2e {
             &mut licensed,
             1,
             1,
-            "create helper",
+            "create helper.md",
             &assigned_agent(),
             None,
-            &[task_op("function", "creates", PLANNED, "")],
+            &[task_op("file", "creates", PLANNED, "")],
         )
         .unwrap();
         plan_add_task_at(
@@ -6189,23 +6198,23 @@ mod e2e {
             &mut licensed,
             2,
             1,
-            "modify helper",
+            "modify helper.md",
             &assigned_agent(),
             None,
-            &[task_op("function", "modifies", PLANNED, "")],
+            &[task_op("file", "modifies", PLANNED, "")],
         )
         .unwrap();
         assert!(
             licensed.iter().any(|r| matches!(
                 r,
-                Record::FunctionCreate { from, to } if from == PHASE1_TASK && to == PLANNED
+                Record::FileCreate { from, to } if from == PHASE1_TASK && to == PLANNED
             )),
             "the phase-1 task creates the planned FQN"
         );
         assert!(
             licensed.iter().any(|r| matches!(
                 r,
-                Record::FunctionModify { from, to } if from == PHASE2_TASK && to == PLANNED
+                Record::FileModify { from, to } if from == PHASE2_TASK && to == PLANNED
             )),
             "the planned-node modifies is authored"
         );
@@ -6218,9 +6227,7 @@ mod e2e {
         let msg = format!("{err:#}");
         assert!(msg.contains("coherence gate blocked"), "{msg}");
         assert!(
-            msg.contains(&format!(
-                "planned function node `{PLANNED}` is not realized"
-            )),
+            msg.contains(&format!("planned file node `{PLANNED}` is not realized")),
             "{msg}"
         );
         assert!(
@@ -6237,10 +6244,10 @@ mod e2e {
             &mut unlicensed,
             1,
             1,
-            "modify helper",
+            "modify helper.md",
             &assigned_agent(),
             None,
-            &[task_op("function", "modifies", PLANNED, "")],
+            &[task_op("file", "modifies", PLANNED, "")],
         )
         .unwrap();
         write_through(&apg_root, "demo", &unlicensed).unwrap();
@@ -6265,10 +6272,10 @@ mod e2e {
             &mut misordered,
             1,
             1,
-            "modify helper",
+            "modify helper.md",
             &assigned_agent(),
             None,
-            &[task_op("function", "modifies", PLANNED, "")],
+            &[task_op("file", "modifies", PLANNED, "")],
         )
         .unwrap();
         plan_add_task_at(
@@ -6277,10 +6284,10 @@ mod e2e {
             &mut misordered,
             2,
             1,
-            "create helper",
+            "create helper.md",
             &assigned_agent(),
             None,
-            &[task_op("function", "creates", PLANNED, "")],
+            &[task_op("file", "creates", PLANNED, "")],
         )
         .unwrap();
         write_through(&apg_root, "demo", &misordered).unwrap();
@@ -6296,22 +6303,19 @@ mod e2e {
         );
 
         // LEG 4 — realization: restore the licensed plan, land the planned
-        // function's real source, commit, and re-scan. The gate then passes.
+        // File's real source, commit, and re-scan. The gate then passes.
         write_through(&apg_root, "demo", &licensed).unwrap();
-        std::fs::write(
-            wt.join("src/main.rs"),
-            "fn main() {}\n\npub fn helper() -> u32 {\n    0\n}\n",
-        )
-        .unwrap();
-        wt_commit_paths(&wt, &["src/main.rs"], "implement helper");
-        run(&wt, &["scan", "."]);
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        std::fs::write(wt.join("docs/helper.md"), "# helper\n\nPlanned helper.\n").unwrap();
+        wt_commit_paths(&wt, &["docs/helper.md"], "implement helper");
+        run(&wt, &["scan", ".", "--language", "md,agent"]);
 
-        // The scanned helper is real code at its rooted identity.
+        // The scanned markdown file is real code at its repo-relative identity.
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
         assert_eq!(
-            db.code_label(REALIZED),
-            Some("Function"),
-            "the landed helper must be scanned at `{REALIZED}`"
+            db.code_label(PLANNED),
+            Some("File"),
+            "the landed helper must be scanned as a File at `{PLANNED}`"
         );
         drop(db);
 
