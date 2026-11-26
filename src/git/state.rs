@@ -439,42 +439,68 @@ pub fn freshness_read_retry<T>(
 
 /// The recorded state of the scan that built the live DB, read from the DB's
 /// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
-/// DB's account of itself. This row is the ONE recorded-state source of the
-/// freshness check ([`is_fresh`]).
+/// DB's account of itself, with an unreadable database reported as a read
+/// failure rather than as an absent row.
 ///
-/// The DB is opened **read-only** and never modified. Every failure **fails
-/// closed** and never panics: a missing, unopenable or locked DB; a DB with no
-/// `Scan` row; an empty `git_sha` (a non-git scan); a `git_clean` that is
-/// neither `"true"` nor `"false"`; or an empty `content_key` (a pre-hardening
-/// DB). Every field is parsed from the row itself: an empty `git_sha` means
+/// The DB is opened **read-only** and never modified. Three outcomes:
+///
+/// - `Err` — the database itself could not be read: a missing, unopenable or
+///   locked DB, or a failing query;
+/// - `Ok(None)` — the database is readable but carries no usable recorded
+///   scan: no `Scan` row, an empty `git_sha` (a non-git scan), a `git_clean`
+///   that is neither `"true"` nor `"false"`, or an empty `content_key` (a
+///   pre-hardening DB, parsed to `content_key: None`);
+/// - `Ok(Some(_))` — one usable row.
+///
+/// Every field is parsed from the row itself: an empty `git_sha` means
 /// non-git, `git_clean` is `"true"`/`"false"`, an empty `content_key` is
 /// `None`, and the module selection is the `modules` column verbatim (empty for
 /// a whole-tree scan).
-pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
-    let db = Database::new(db_path(apg_root), system_config(true).ok()?).ok()?;
-    let conn = Connection::new(&db).ok()?;
+///
+/// This is the freshness-scoped read: the retry/contention arm distinguishes
+/// "unreadable now" from "nothing recorded" instead of collapsing both into an
+/// absent row. [`db_recorded_scan`] is its fail-closed legacy projection.
+pub fn db_recorded_scan_result(apg_root: &Path) -> anyhow::Result<Option<RecordedScan>> {
+    let db = Database::new(db_path(apg_root), system_config(true)?)?;
+    let conn = Connection::new(&db)?;
     let (_, rows) = query_rows(
         &conn,
         "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key, s.modules AS modules",
-    )
-    .ok()?;
-    let row = rows.first()?;
+    )?;
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
     let sha = cell(row, 0);
     if sha.is_empty() {
-        return None;
+        return Ok(None);
     }
     let clean = match cell(row, 1).as_str() {
         "true" => true,
         "false" => false,
-        _ => return None,
+        _ => return Ok(None),
     };
     let key = cell(row, 2);
-    Some(RecordedScan {
+    Ok(Some(RecordedScan {
         sha,
         clean,
         content_key: (!key.is_empty()).then_some(key),
         modules: cell(row, 3),
-    })
+    }))
+}
+
+/// The recorded state of the scan that built the live DB, read from the DB's
+/// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
+/// DB's account of itself. This row is the ONE recorded-state source of the
+/// freshness check ([`is_fresh`]).
+///
+/// The fail-closed legacy projection of [`db_recorded_scan_result`]: every
+/// failure — a missing, unopenable or locked DB, or a readable DB with no
+/// usable row (no `Scan` row; an empty `git_sha`; a `git_clean` other than
+/// `"true"`/`"false"`; an empty `content_key`) — is `None`, and it never
+/// panics. A caller that must distinguish "unreadable now" from "nothing
+/// recorded" uses [`db_recorded_scan_result`].
+pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
+    db_recorded_scan_result(apg_root).ok().flatten()
 }
 
 /// The same `Scan` row [`db_recorded_scan`] reads, taken through the live
