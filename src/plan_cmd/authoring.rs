@@ -1002,10 +1002,11 @@ pub fn plan_add_phase_at(
 /// operation ride beside it as the SCHEMA.md task edges: exactly one
 /// `assigned-to` Agent, at most one `implements` Component, and one per-kind
 /// operation edge per operation — `creates` → `{kind}_create` to the planned
-/// destination, `modifies`/`deletes` → `{kind}_{modify,delete}` to the live
-/// target, `renames`/`moves` → `{kind}_{rename,move}` to the live source plus
-/// a `target` edge to the planned destination. An empty operation set is a
-/// target-less activity.
+/// destination, `modifies` → `{kind}_modify` to the target, which may be a
+/// planned node licensed at verify by an earlier `creates` of the same FQN,
+/// `deletes` → `{kind}_delete` to the live target only, `renames`/`moves` →
+/// `{kind}_{rename,move}` to the live source plus a `target` edge to the
+/// planned destination. An empty operation set is a target-less activity.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_add_task_at(
     apg_root: &Path,
@@ -1133,10 +1134,11 @@ pub fn plan_add_planned_at(
 }
 
 /// One per-kind operation edge a task carries: `<kind>_<verb>` from the task to
-/// `target` — the planned destination of a `creates`, the live target of a
-/// `modifies`/`deletes`, the live source of a `renames`/`moves` — plus the
-/// renames/moves `target` edge destination in `new_fqn`. An empty operation set
-/// is a target-less activity.
+/// `target` — the planned destination of a `creates`, the live-or-planned target
+/// of a `modifies` (a planned target requires an earlier `creates` of the same
+/// FQN, licensed at verify), the live target of a `deletes`, the live source of
+/// a `renames`/`moves` — plus the renames/moves `target` edge destination in
+/// `new_fqn`. An empty operation set is a target-less activity.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TaskOperation {
     pub kind: String,
