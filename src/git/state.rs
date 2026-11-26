@@ -1018,9 +1018,10 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 }
 
 /// The one-line staleness summary `apg scan` prints (requirement 5): recorded
-/// `<sha>@<clean>` vs current `<sha>@<clean>` → `STALE`/`FRESH`, evaluated
-/// against the *pre-scan* DB before the new scan overwrites it. N/A when the
-/// scan is not in a git repo, or when there is no prior scan to be stale.
+/// `<sha>@<clean>` vs current `<sha>@<clean>` → `STALE`/`FRESH`/`CONTENDED`,
+/// evaluated against the *pre-scan* DB before the new scan overwrites it. N/A
+/// when the scan is not in a git repo, or when there is no prior scan to be
+/// stale.
 ///
 /// The exact line shapes:
 ///
@@ -1034,6 +1035,11 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 ///   included when `requested` is `Some` and differs from the recorded one. A DB
 ///   with no readable `Scan` row reports the single `recorded scan` label with
 ///   recorded `-@-`.
+/// - `Git state: recorded -@- vs current <cur> → CONTENDED (database `<path>`
+///   unreadable; waited <waited> of a <budget> budget)` — the database stayed
+///   unreadable (locked or busy) through the bounded retry. A contended read
+///   never prints `STALE` and never prints an empty or misleading differing
+///   list; the recorded state is `-@-` because nothing about the DB is known.
 ///
 /// The verdict is the SAME content-identity rule [`is_fresh_with_state`] uses —
 /// it is [`freshness_differences_with`] with the same `requested` selection — so
@@ -1055,24 +1061,40 @@ pub fn staleness_line(apg_root: &Path, current: &GitState, requested: Option<&[S
         );
     }
     let cur = state_str(Some(cur_sha), current.clean);
-    let rec = match db_recorded_scan(apg_root) {
+    let rec = |recorded: Option<&RecordedScan>| match recorded {
         Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
     };
     match freshness_differences_with(apg_root, current, requested) {
-        FreshnessSnapshot::Fresh { .. } => {
-            format!("Git state: recorded {rec} vs current {cur} → FRESH")
+        FreshnessSnapshot::Fresh { recorded, .. } => {
+            format!(
+                "Git state: recorded {} vs current {cur} → FRESH",
+                rec(recorded.as_ref())
+            )
         }
-        FreshnessSnapshot::NotApplicable { differing, .. }
-        | FreshnessSnapshot::Stale { differing, .. } => format!(
-            "Git state: recorded {rec} vs current {cur} → STALE (differing: {})",
+        FreshnessSnapshot::NotApplicable {
+            recorded,
+            differing,
+            ..
+        }
+        | FreshnessSnapshot::Stale {
+            recorded,
+            differing,
+            ..
+        } => format!(
+            "Git state: recorded {} vs current {cur} → STALE (differing: {})",
+            rec(recorded.as_ref()),
             differing.join(", ")
         ),
-        // TRANSITIONAL (superseded by task 12's contention render): the
-        // pre-change fail-closed shape for a database that stayed unreadable
-        // through the bounded retry.
-        FreshnessSnapshot::Contended { .. } => {
-            format!("Git state: recorded {rec} vs current {cur} → STALE (differing: recorded scan)")
-        }
+        FreshnessSnapshot::Contended {
+            database,
+            waited,
+            budget,
+            ..
+        } => format!(
+            "Git state: recorded {} vs current {cur} → CONTENDED (database `{}` unreadable; waited {waited:?} of a {budget:?} budget)",
+            rec(None),
+            database.display()
+        ),
     }
 }
