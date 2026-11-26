@@ -34,8 +34,14 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// .ps1/.psm1/.psd1 files are claimed by the ps stream rather than the
 /// structural misc stream, so a `4` projection lacks the ps file edges and
 /// holds misc units for PowerShell files (the cache-key token changes, older
-/// units miss and one correctness full scan re-records them).
-pub const PROJECTION_RULES_VERSION: &str = "5";
+/// units miss and one correctness full scan re-records them). v6: .tf and
+/// .bicep source files leave the structural `misc` claim (the structural scanner
+/// skips them; the terraform/bicep frontends own them), and the Struct→File
+/// `uses` edges of kind module-source/override (terraform) and
+/// module/using/extends/import (bicep) are admitted, so a `5` projection lacks
+/// those file edges and holds misc units for IaC files (the cache-key token
+/// changes, older units miss and one correctness full scan re-records them).
+pub const PROJECTION_RULES_VERSION: &str = "6";
 
 /// The scan config identity folded into the global cache key: the exact set of
 /// languages, path excludes, and module restrictions a scan ran with, plus the
