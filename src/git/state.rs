@@ -767,8 +767,12 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
 /// The verdict is exactly [`freshness_differences_with`]'s — the body is
 /// `matches!(freshness_differences_with(apg_root, state, requested),
 /// FreshnessSnapshot::Fresh { .. })` — so the predicate and the collect-all
-/// form can never disagree. A contended (unreadable) database is **not** fresh:
-/// only the `Fresh` arm reuses the DB. `requested` is the caller's resolved
+/// form can never disagree. It is the **`Fresh`-only** predicate and fails
+/// closed: [`NotApplicable`](FreshnessSnapshot::NotApplicable),
+/// [`Stale`](FreshnessSnapshot::Stale) and
+/// [`Contended`](FreshnessSnapshot::Contended) are all NOT fresh, so only the
+/// `Fresh` arm reuses the DB and a contended (unreadable) database is never
+/// fresh. `requested` is the caller's resolved
 /// `--module` selection: `None` skips the module comparison (the gates that
 /// carry no selection), `Some(set)` compares it to the recorded one.
 ///
@@ -830,13 +834,18 @@ pub fn is_fresh_with_state(
     )
 }
 
-/// The collect-all form of [`is_fresh_with_state`]: `Ok(())` when the DB is
-/// reusable as-is, otherwise `Err` naming EVERY freshness input that differs
-/// between the scan recorded in the DB's own `Scan` row and the current
-/// checkout — one entry per differing input, never short-circuited. The verdict
-/// derives from the same [`freshness_differences_with`] snapshot as
-/// [`is_fresh_with_state`], so the predicate and this form can never disagree;
-/// the STALE refusal / scan preamble can name every reported input.
+/// The no-selection freshness evaluation: the direct delegation
+/// `freshness_differences_with(apg_root, state, None)`, so this entry point and
+/// the selection-aware one return the **same** [`FreshnessSnapshot`] verdict and
+/// the contention arm propagates unchanged. It is the collect-all form of
+/// [`is_fresh_with_state`] — that predicate and this form can never disagree,
+/// because both consume the one [`freshness_differences_with`] evaluation; the
+/// STALE refusal / scan preamble can name every reported input.
+///
+/// A [`Contended`](FreshnessSnapshot::Contended) database is contention, never a
+/// differing-input label and never stale: the arm carries the captured checkout
+/// state, the path the read targeted and the waited/budget pair, and only the
+/// [`Fresh`](FreshnessSnapshot::Fresh) arm means the DB is reusable as-is.
 ///
 /// The label strings (stable — pinned by tests):
 ///
@@ -866,16 +875,8 @@ pub fn is_fresh_with_state(
 /// together. The live-session read skip is preserved exactly: pending state,
 /// schema and authored digest are evaluated only when no live session owns
 /// `db.lbug`; the recorded/git content comparison runs either way.
-pub fn freshness_differences(apg_root: &Path, state: &GitState) -> Result<(), Vec<&'static str>> {
-    // TRANSITIONAL (superseded by task 11's contention-aware propagation):
-    // keeps the pre-change `Ok`/`Err` shape and the fail-closed
-    // `"recorded scan"` label for the contention arm.
-    match freshness_differences_with(apg_root, state, None) {
-        FreshnessSnapshot::Fresh { .. } => Ok(()),
-        FreshnessSnapshot::NotApplicable { differing, .. }
-        | FreshnessSnapshot::Stale { differing, .. } => Err(differing),
-        FreshnessSnapshot::Contended { .. } => Err(vec!["recorded scan"]),
-    }
+pub fn freshness_differences(apg_root: &Path, state: &GitState) -> FreshnessSnapshot {
+    freshness_differences_with(apg_root, state, None)
 }
 
 /// Whether the requested resolved module set differs from the recorded

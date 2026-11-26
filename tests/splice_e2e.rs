@@ -8889,11 +8889,22 @@ mod e2e {
         let deleted = apg::testutil::detach_node(&apg_root, "solution.component.late-cmp");
         assert_eq!(deleted, 1, "exactly one authored row must be dropped");
         let state = apg::git::git_state(&apg_root);
-        let differing = apg::git::freshness_differences(&apg_root, &state);
+        let differing = match apg::git::freshness_differences(&apg_root, &state) {
+            apg::git::FreshnessSnapshot::Stale { differing, .. } => differing,
+            apg::git::FreshnessSnapshot::Fresh { .. } => {
+                panic!("a diverged DB must never read fresh")
+            }
+            apg::git::FreshnessSnapshot::NotApplicable { differing, .. } => {
+                panic!(
+                    "a diverged DB in an existing repo must not be not-applicable: {differing:?}"
+                )
+            }
+            apg::git::FreshnessSnapshot::Contended { .. } => {
+                panic!("a readable fixture must never read contended")
+            }
+        };
         assert!(
-            differing
-                .as_ref()
-                .is_err_and(|labels| labels.contains(&"authored digest")),
+            differing.contains(&"authored digest"),
             "a diverged DB must still be declared stale by the authored digest: {differing:?}"
         );
         assert!(

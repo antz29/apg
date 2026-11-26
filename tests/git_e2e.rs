@@ -554,8 +554,16 @@ mod e2e {
         let other_sha = format!("{sha}0");
         testutil::write_scan_meta(&apg, Some(&other_sha), false, "2026-09-07T00:00:00Z");
         let state = git_state(&apg);
-        let differing = freshness_differences(&apg, &state)
-            .expect_err("two differing inputs must never read fresh");
+        let differing = match freshness_differences(&apg, &state) {
+            FreshnessSnapshot::NotApplicable { differing, .. }
+            | FreshnessSnapshot::Stale { differing, .. } => differing,
+            FreshnessSnapshot::Fresh { .. } => {
+                panic!("two differing inputs must never read fresh")
+            }
+            FreshnessSnapshot::Contended { .. } => {
+                panic!("a readable fixture must never read contended")
+            }
+        };
         assert_eq!(
             differing,
             vec!["sha", "cleanliness"],
@@ -639,9 +647,18 @@ mod e2e {
         // list, and the verdict never reads fresh.
         let assert_names = |apg: &Path, label: &str| {
             let state = git_state(apg);
+            let differing = match freshness_differences(apg, &state) {
+                FreshnessSnapshot::NotApplicable { differing, .. }
+                | FreshnessSnapshot::Stale { differing, .. } => differing,
+                FreshnessSnapshot::Fresh { .. } => {
+                    panic!("a differing input must never read fresh")
+                }
+                FreshnessSnapshot::Contended { .. } => {
+                    panic!("a readable fixture must never read contended")
+                }
+            };
             assert_eq!(
-                freshness_differences(apg, &state)
-                    .expect_err("a differing input must never read fresh"),
+                differing,
                 vec![label],
                 "one flipped input must be the only difference"
             );
@@ -785,9 +802,18 @@ mod e2e {
         .unwrap();
         drop(db);
         let state = git_state(&apg);
+        let differing = match freshness_differences(&apg, &state) {
+            FreshnessSnapshot::NotApplicable { differing, .. }
+            | FreshnessSnapshot::Stale { differing, .. } => differing,
+            FreshnessSnapshot::Fresh { .. } => {
+                panic!("two differing inputs must never read fresh")
+            }
+            FreshnessSnapshot::Contended { .. } => {
+                panic!("a readable fixture must never read contended")
+            }
+        };
         assert_eq!(
-            freshness_differences(&apg, &state)
-                .expect_err("two differing inputs must never read fresh"),
+            differing,
             vec!["content key", "sha"],
             "collect-all must report BOTH differing inputs in its single result"
         );
