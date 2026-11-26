@@ -114,9 +114,11 @@ pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
 /// one indented sub-line per edge, `<kind> <operation> `<target>`` — `<kind>`
 /// is `module`/`file`/`struct`/`function`, `<operation>` is
 /// `create`/`modify`/`delete`/`rename`/`move`, and `<target>` is the edge's
-/// `to` (the planned destination of a create, the live target otherwise). A
-/// renames/moves line folds in the task's `target` edge destination as
-/// `-> `<destination>``:
+/// `to` — the planned destination of a `creates`, the target of a `modifies`
+/// (a live FQN, or a planned node licensed by an earlier `creates` of the same
+/// FQN), the live target of a `deletes`, or the live source of a
+/// `renames`/`moves`. A renames/moves line folds in the task's `target` edge
+/// destination as `-> `<destination>``:
 ///
 /// ```text
 /// **agent.implementer**
