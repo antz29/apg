@@ -414,6 +414,23 @@ impl ArtifactDb {
         Ok(ArtifactDb { db })
     }
 
+    /// Opens the branch database in the **read-only** class — the constructor
+    /// verdict paths use so a read takes no exclusive read-write class a
+    /// concurrent reader or writer needs. The exclusive read-write class is
+    /// reserved for writers; otherwise identical to [`open`](Self::open),
+    /// including the missing-database refusal.
+    pub fn open_read_only(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
+        let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+        if !db_path.exists() {
+            anyhow::bail!(
+                "{} does not exist — run `apg scan` first",
+                db_path.display()
+            );
+        }
+        let db = Database::new(&db_path, system_config(true)?)?;
+        Ok(ArtifactDb { db })
+    }
+
     /// A fresh connection to the owned database (borrows `self`, so any
     /// returned rows must be consumed before the next call).
     pub fn conn(&self) -> anyhow::Result<Connection<'_>> {
