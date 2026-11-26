@@ -6051,6 +6051,75 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// `plan verify` decides staleness from **one** freshness snapshot: a fresh
+    /// branch graph is never refused, and a stale one is refused with exactly
+    /// that snapshot's `differing` list (never a hard-coded subset), so the
+    /// verdict and the inputs it names are one evaluation's.
+    #[test]
+    #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn plan_verify_refuses_a_stale_graph_naming_one_snapshot_differences() {
+        let (apg_root, repo, wt) = fixture("verify-stale-snapshot");
+
+        // FRESH ARM: the fixture's recorded scan row matches the clean worktree
+        // HEAD, so a green plan verifies instead of being refused.
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &bare_plan(),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                apg::git::freshness_snapshot(&apg_root),
+                apg::git::FreshnessSnapshot::Fresh { .. }
+            ),
+            "the fixture records a fresh scan"
+        );
+        assert!(
+            plan_verify_at(&apg_root, "foo").is_ok(),
+            "a fresh branch graph is not refused"
+        );
+
+        // STALE ARM: commit a new worktree file and leave the recorded scan row
+        // lagging the tree, so at least one freshness input differs.
+        std::fs::create_dir_all(wt.join("src")).unwrap();
+        std::fs::write(wt.join("src/stale-probe.txt"), "probe\n").unwrap();
+        wt_commit_paths(&wt, &["src/stale-probe.txt"], "stale probe");
+
+        let apg::git::FreshnessSnapshot::Stale { differing, .. } =
+            apg::git::freshness_snapshot(&apg_root)
+        else {
+            panic!("a commit the recorded scan row lags must make the snapshot stale");
+        };
+        assert!(
+            !differing.is_empty(),
+            "a stale verdict always names at least one differing input"
+        );
+
+        let err = plan_verify_at(&apg_root, "foo").expect_err("a stale branch graph is refused");
+        let msg = format!("{err:#}");
+        // The freshness refusal — not a coherence blocker — naming exactly the
+        // one snapshot's inputs, plus the scan guidance.
+        assert!(
+            msg.contains("the branch graph is stale"),
+            "expected the freshness refusal, got: {msg}"
+        );
+        assert!(
+            msg.contains(&format!(
+                "the branch graph is stale (differing: {})",
+                differing.join(", ")
+            )),
+            "the refusal must name exactly the snapshot's differing inputs: {msg}"
+        );
+        assert!(
+            msg.contains("run `apg scan` inside the project worktree first"),
+            "the refusal must carry the scan guidance: {msg}"
+        );
+
+        testutil::remove(&repo);
+    }
+
     /// Phase-03 task-2 (e2e): a `modifies` of a planned Implementation node is
     /// licensed only by another task's `creates` of the same FQN in a STRICTLY
     /// earlier phase, and the licensed plan passes only once the node is
