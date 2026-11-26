@@ -432,8 +432,9 @@ add`/`remove`. **Push/tag are human-approved acts**: the code-writer agents neve
 only the per-repo `release-agent` holds them, and only with explicit consent. The **plan** and
 all **feedback** are **transient** — branch-local, never committed; reach them through the
 `apg_plan*` / `apg_review*` tools. **`apg plan verify <project>`** is the pre-merge coherence
-gate (planned nodes realized, feedback resolved, coverage holds) — read-only; it prints the
-merge handoff.
+gate (planned nodes realized, feedback resolved, coverage holds, and a `modifies` of a planned
+node needs an earlier-phase `creates` of the same FQN) — read-only; it prints the merge
+handoff.
 ### Caller-owned sessions (a durable mutation needs a live session)
 A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is **admitted only
 through a live session**: it applies to the worktree `db.lbug` at admission (projected so routed
