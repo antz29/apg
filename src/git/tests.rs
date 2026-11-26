@@ -3,6 +3,8 @@ use super::*;
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
+    use std::path::Path;
+    use std::time::Duration;
 
     #[test]
     fn iso8601_formats_known_epochs() {
@@ -376,5 +378,160 @@ mod unit {
                 other => panic!("expected Stale for {labels:?}, got {other:?}"),
             }
         }
+    }
+
+    /// A transient lock/busy failure is classified retryable; a terminal one is
+    /// not. Both directions are asserted explicitly, and the wrapped case
+    /// confirms the whole `{err:#}` chain is scanned.
+    #[test]
+    fn is_transient_read_error_classifies_lock_busy_and_terminal() {
+        let transient = [
+            anyhow::Error::msg("Could not set lock on file /repo/apg/.trans/db.lbug"),
+            anyhow::Error::msg("resource temporarily unavailable"),
+            anyhow::Error::msg("could not set lock on file db.lbug")
+                .context("opening the database"),
+        ];
+        for err in transient {
+            assert!(
+                is_transient_read_error(&err),
+                "expected transient for `{err:#}`"
+            );
+        }
+
+        let terminal = [
+            anyhow::Error::msg("no such table: Foo"),
+            anyhow::Error::msg("clock skew detected"),
+            anyhow::Error::msg("blocked by policy"),
+            anyhow::Error::msg("some unrelated read error"),
+        ];
+        for err in terminal {
+            assert!(
+                !is_transient_read_error(&err),
+                "expected terminal for `{err:#}`"
+            );
+        }
+    }
+
+    /// A reader failing transiently N times (well under the bound) then
+    /// returning `Ok` retries exactly N times and succeeds; every injected
+    /// sleep is one `FRESHNESS_READ_STEP`.
+    #[test]
+    fn freshness_read_retry_retries_transient_until_success() {
+        let database = Path::new("/repo/apg/.trans/db.lbug");
+        let mut reads = 0;
+        let mut sleeps: Vec<Duration> = Vec::new();
+        let result = freshness_read_retry(
+            database,
+            || {
+                reads += 1;
+                if reads <= 3 {
+                    Err(anyhow::Error::msg("Could not set lock on file db.lbug"))
+                } else {
+                    Ok("row")
+                }
+            },
+            |d| sleeps.push(d),
+        );
+        assert_eq!(result.unwrap(), "row");
+        assert_eq!(reads, 4, "three transient failures then one success");
+        assert_eq!(sleeps, vec![FRESHNESS_READ_STEP; 3], "one step per retry");
+    }
+
+    /// A terminal failure returns at once: no sleep, one read, and a
+    /// `FreshnessReadFailure` whose `waited` is zero.
+    #[test]
+    fn freshness_read_retry_does_not_retry_a_terminal_error() {
+        let database = Path::new("/repo/apg/.trans/db.lbug");
+        let mut reads = 0;
+        let mut slept = false;
+        let err = freshness_read_retry::<()>(
+            database,
+            || {
+                reads += 1;
+                Err(anyhow::Error::msg("no such table: Foo"))
+            },
+            |_| slept = true,
+        )
+        .unwrap_err();
+        assert_eq!(reads, 1, "a terminal error is read once");
+        assert!(!slept, "a terminal error never sleeps");
+        let failure = err
+            .downcast::<FreshnessReadFailure>()
+            .expect("the error is a FreshnessReadFailure");
+        assert_eq!(failure.waited, Duration::ZERO);
+        assert_eq!(failure.budget, FRESHNESS_READ_BUDGET);
+    }
+
+    /// An always-transient reader stops at the budget with `waited == budget`,
+    /// the path it was given, the last read error, and the exact read/sleep
+    /// counts the constants imply; `Display` names the path and the budget.
+    #[test]
+    fn freshness_read_retry_exhausts_at_the_budget() {
+        let database = Path::new("/repo/apg/.trans/db.lbug");
+        let steps = (FRESHNESS_READ_BUDGET.as_millis() / FRESHNESS_READ_STEP.as_millis()) as usize;
+        let mut reads = 0;
+        let mut sleeps = 0usize;
+        let err = freshness_read_retry::<()>(
+            database,
+            || {
+                reads += 1;
+                Err(anyhow::Error::msg("database is locked"))
+            },
+            |_| sleeps += 1,
+        )
+        .unwrap_err();
+        let failure = err
+            .downcast::<FreshnessReadFailure>()
+            .expect("the error is a FreshnessReadFailure");
+        assert_eq!(failure.budget, FRESHNESS_READ_BUDGET);
+        assert_eq!(failure.waited, FRESHNESS_READ_BUDGET);
+        assert_eq!(failure.database, database.to_path_buf());
+        assert!(
+            format!("{:#}", failure.source).contains("database is locked"),
+            "the source carries the last read error"
+        );
+        assert_eq!(
+            reads,
+            steps + 1,
+            "one final read discovers the exhausted budget"
+        );
+        assert_eq!(sleeps, steps, "one sleep per retry step the budget allows");
+        let rendered = failure.to_string();
+        assert!(
+            rendered.contains("/repo/apg/.trans/db.lbug"),
+            "Display names the database path: {rendered}"
+        );
+        assert!(
+            rendered.contains("500ms"),
+            "Display names the waited budget: {rendered}"
+        );
+    }
+
+    /// A transient failure followed by a terminal one stops on the terminal
+    /// after exactly one step of wait.
+    #[test]
+    fn freshness_read_retry_stops_on_terminal_after_transient() {
+        let database = Path::new("/repo/apg/.trans/db.lbug");
+        let mut reads = 0;
+        let mut sleeps: Vec<Duration> = Vec::new();
+        let err = freshness_read_retry::<()>(
+            database,
+            || {
+                reads += 1;
+                if reads == 1 {
+                    Err(anyhow::Error::msg("Could not set lock on file db.lbug"))
+                } else {
+                    Err(anyhow::Error::msg("no such table: Foo"))
+                }
+            },
+            |d| sleeps.push(d),
+        )
+        .unwrap_err();
+        assert_eq!(reads, 2);
+        assert_eq!(sleeps, vec![FRESHNESS_READ_STEP]);
+        let failure = err
+            .downcast::<FreshnessReadFailure>()
+            .expect("the error is a FreshnessReadFailure");
+        assert_eq!(failure.waited, FRESHNESS_READ_STEP);
     }
 }
