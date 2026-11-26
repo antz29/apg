@@ -1306,9 +1306,10 @@ mod e2e {
 
     /// fast-project-start task-6 (e2e): `apg project start` refuses when
     /// the main checkout has no scan OR a stale one, naming `apg scan` in
-    /// the main checkout. The refusal sits before the gitignore self-heal,
-    /// so it leaves main (and its `.gitignore`) untouched and creates no
-    /// branch/worktree.
+    /// the main checkout — or, when its database is present but unreadable,
+    /// names the contention and asks for a retry instead. Every refusal sits
+    /// before the gitignore self-heal, so it leaves main (and its
+    /// `.gitignore`) untouched and creates no branch/worktree.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn start_refuses_when_main_scan_is_stale_or_missing() {
@@ -1377,6 +1378,64 @@ mod e2e {
         let msg = format!("{err:#}");
         assert!(msg.contains("stale or missing"), "{msg}");
         assert!(msg.contains("apg scan"), "{msg}");
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_err(),
+            "no project branch may be created"
+        );
+        assert!(
+            main_repo.find_worktree("foo").is_err(),
+            "no project worktree may be created"
+        );
+        assert!(!repo.project_worktree_dir("foo").exists());
+        testutil::remove(&repo);
+
+        // (c) A present-but-unreadable scan: main's `db.lbug` exists (so this
+        // is neither "missing" — (a)'s NotApplicable path — nor "stale"), but
+        // its bytes no engine parses. That is named contention: start names
+        // the database and asks to retry once the holder finishes, NOT a
+        // stale-graph `apg scan`. The worktrees ignore entry is dropped, as in
+        // (a), so a refusal that reached the self-heal would visibly mutate
+        // `.gitignore`.
+        let repo = Repo::new("start-scan-contended");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.write(".gitignore", "apg/.trans/\n");
+        repo.commit_all("seed code, drop worktrees ignore");
+        start_scan(&repo.root).unwrap();
+        assert!(
+            git::is_fresh(&repo.apg_root()),
+            "the fixture scan must be fresh"
+        );
+        // Present but unreadable: overwrite the database with bytes no engine
+        // parses and drop any sidecars — never remove it (absence is (a)).
+        let db_path = repo.apg_root().join(specs::TRANS).join("db.lbug");
+        std::fs::write(&db_path, b"not a database").unwrap();
+        for sidecar in ["db.lbug.wal", "db.lbug.shm"] {
+            let _ = std::fs::remove_file(repo.apg_root().join(specs::TRANS).join(sidecar));
+        }
+
+        let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("unreadable"), "{msg}");
+        assert!(msg.contains(&db_path.display().to_string()), "{msg}");
+        assert!(msg.contains("retry"), "{msg}");
+        // The contention message says "is not stale or missing", so only the
+        // stale guidance itself is absent — not the bare phrase.
+        assert!(
+            !msg.contains("Fix: run `apg scan` in the main checkout"),
+            "a contended database must not ask for a stale-graph rescan: {msg}"
+        );
+        let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+        assert!(
+            !ignore.contains("apg/.worktrees/"),
+            "a contention refusal must not run the gitignore self-heal: {ignore}"
+        );
+        assert!(repo.is_clean(), "the refusal must leave main untouched");
         let main_repo = git2::Repository::open(&repo.root).unwrap();
         assert!(
             main_repo
