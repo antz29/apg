@@ -3,5 +3,6 @@
 //! facts on stdout. It is self-contained and spawns no child processes.
 
 pub mod diag;
+pub mod module;
 pub mod parse;
 pub mod source;
