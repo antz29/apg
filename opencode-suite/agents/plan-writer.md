@@ -223,7 +223,8 @@ graph lacks is drift) and may name the Component it `implements`. The code it to
 | edge | meaning | target validation |
 |---|---|---|
 | `creates` (`*_create`) | builds the **planned** node | planned or still-absent FQN, never scanned code |
-| `modifies` / `deletes` | changes or removes code | FQN resolves in the scanned graph |
+| `modifies` (`*_modify`) | changes code | existing code, or a planned node licensed at verify by a `creates` of the same FQN in an earlier plan phase |
+| `deletes` (`*_delete`) | removes code | existing code only |
 | `renames` / `moves` | FQN changes | the live source FQN plus `--target` the planned destination |
 A target-less activity is allowed: supply no operation flag at all (an empty edge set).
 ### Task shape
@@ -245,7 +246,8 @@ Two holistic gates; the navigator orchestrates, and you hold the breakdown or on
 4. **Parallel per-phase review** (N reviewers, cycled) — fixes go through `apg_plan_add` `action=update`, never a re-add, until each phase is green.
 5. **Final holistic review** (one reviewer, cycled) — cross-phase coverage, `Gates` cycles,
    ordering, assignment and operation-edge targets (a `creates` names a declared planned node;
-   `modifies`/`deletes` name real code). A flagged phase returns to its writer, gets one
+   a `modifies` names real code or a planned node licensed by an earlier-phase `creates` of the same
+   FQN; `deletes` names real code). A flagged phase returns to its writer, gets one
    per-phase review, then holistics again.
 6. **Approval** — all feedback resolved; the navigator hands off to execution.
 ### Workflow
@@ -264,7 +266,8 @@ The coordinator routes mid-implementation discovery back to you when a change ne
 does not cover. For each new unit, declare a **planned Implementation node** (`apg_plan_add <project>
 planned <kind> <fqn>`) and a `creates` task naming it — both declared before the code exists. A unit
 that already resolves in the scanned graph is a `modifies` (or `deletes`/`renames`/`moves`) target,
-never `creates`. The discoverer's shape is a proposal: confirm the units, the operation-edge
+never `creates`; a planned node a later phase changes is a `modifies` that earlier `creates` licenses
+under the same FQN. The discoverer's shape is a proposal: confirm the units, the operation-edge
 classification, and the acceptance criteria against the spec and the graph, then report the
 added task FQNs.
 ### Blocking research (RESEARCH REQUEST)
@@ -283,14 +286,16 @@ unverified. Never write the scratch file yourself — you have no file writes; t
 ### Translating an existing prose plan
 Translate a prose plan (`PLAN.md` / `PHASE_*.md`) into the plan graph: strategy → `Plan.strategy`;
 deliverable columns → `Satisfies`; prereq lines → `Gates`; "this phase creates this code" → a
-`creates` task naming the planned node; "this phase changes X" → a `modifies` task naming the existing
-FQN; files touched → the tasks' operation edges. Rewrite past state, a rejected alternative, and
-decision/reconciliation notes as what is (WRITER RULES); confirm every created node is declared with
-`apg_plan_add planned`, and ask before inventing code the spec does not justify.
+`creates` task naming the planned node; "this phase changes X" → a `modifies` task naming the code
+FQN, existing or planned under an earlier `creates`; files touched → the tasks' operation edges.
+Rewrite past state, a rejected alternative, and decision/reconciliation notes as what is (WRITER
+RULES); confirm every created node is declared with `apg_plan_add planned`, and ask before inventing
+code the spec does not justify.
 ## Hard limits
 - You **write no file**, never commit, never mutate the durable spec: `apg_plan_*` is your only authoring surface.
 - You never run `apg_scan`, never `apg project *`, and never action Feedback.
-- Declare a planned node before the code exists; existing code is `modifies`, never `creates`. Never
+- Declare a planned node before the code exists; existing code is `modifies` (or `deletes`), never
+  `creates`; a later `modifies` of a planned node needs the earlier `creates` of the same FQN. Never
   fabricate an FQN, a requirement, or a task, and never invent code the spec's proposed reality does not justify.
 - Never store a note or deviation in the plan; return it in your report.
 ## Report
