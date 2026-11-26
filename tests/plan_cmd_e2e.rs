@@ -6416,4 +6416,70 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-21 (e2e): `plan verify` opens the branch database in the
+    /// **read-only** class — it coexists with a read-only handle already held in
+    /// this process (a read-write open would fail or conflict) — and against a
+    /// present-but-unreadable branch database it refuses naming the contention,
+    /// never the stale-branch-graph refusal (whose `apg scan` is not the fix).
+    #[test]
+    #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn plan_verify_opens_read_only_and_refuses_a_contended_database() {
+        let (apg_root, repo, _wt) = fixture("verify-readonly-contended");
+
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &bare_plan(),
+        )
+        .unwrap();
+
+        // READ-ONLY PROOF: hold a read-only handle in this process, then verify.
+        // Verify's own branch handle must be the read-only class and coexist
+        // with the held reader; an exclusive read-write open would fail or
+        // conflict with it.
+        let reader = artifacts::ArtifactDb::open_read_only(&apg_root).unwrap();
+        assert!(
+            plan_verify_at(&apg_root, "foo").is_ok(),
+            "verify's read-only branch handle must coexist with a held reader"
+        );
+        drop(reader);
+
+        // CONTENDED ARM: keep db.lbug present (its absence is the
+        // `NotApplicable` path) but overwrite it with bytes no engine parses,
+        // dropping any WAL/shm sidecar so the corrupt main file is all the open
+        // can see.
+        let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+        std::fs::write(&db_path, b"not a database").unwrap();
+        for suffix in ["wal", "shm"] {
+            let _ = std::fs::remove_file(format!("{}.{suffix}", db_path.display()));
+        }
+
+        let err =
+            plan_verify_at(&apg_root, "foo").expect_err("a contended branch database must refuse");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("unreadable"),
+            "the refusal must name the contention: {msg}"
+        );
+        assert!(
+            msg.contains(&db_path.display().to_string()),
+            "the refusal must name the database path: {msg}"
+        );
+        assert!(
+            msg.contains("budget"),
+            "the refusal must name the contention budget: {msg}"
+        );
+        assert!(
+            !msg.contains("branch graph is stale"),
+            "contention must never read as a stale verdict: {msg}"
+        );
+        assert!(
+            !msg.contains("run `apg scan` inside the project worktree first"),
+            "a stale-graph scan is not the contention fix: {msg}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
