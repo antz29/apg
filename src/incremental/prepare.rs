@@ -511,6 +511,13 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     if let Some(recorded) = &recorded {
         let store = FactStore::at(store_root.clone()).load();
         for (rel, oid) in &manifest.entries {
+            // The tool-owned top-level `apg/` layout mirrors
+            // `warm::tool_owned_layout` (private): the structural scanner prunes
+            // it and the ingestor blacklists it, so it never carries a fact unit
+            // and must enter neither set.
+            if rel == "apg" || rel.starts_with("apg/") {
+                continue;
+            }
             if targets_rel.contains(rel) || deleted.contains(rel) {
                 continue;
             }
@@ -522,6 +529,13 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
             }
             let lang = language_of(rel);
             if !store.has_unit(lang, rel, oid, &cache_key) {
+                // A unit-less file is only re-emittable by a frontend this scan
+                // runs (`config.languages`): when its language has no running
+                // frontend it is a permanent phantom target exactly like the
+                // tool-owned layout, so leave it in neither set.
+                if !config.languages.iter().any(|l| l == lang) {
+                    continue;
+                }
                 targets_rel.insert(rel.clone());
                 continue;
             }
