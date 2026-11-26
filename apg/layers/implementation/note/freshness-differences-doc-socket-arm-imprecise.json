@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "freshness-differences-doc-socket-arm-imprecise",
+  "body": "`freshness_differences_with`'s doc lists `\"socket\"` among the `NotApplicable` precondition labels, but by construction a lone `\"socket\"` label reaches `Stale` — the database and HEAD sha are both present — and only a combined no-HEAD case could fold a socket failure into `NotApplicable`; correct that doc line when the phase is reviewed.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.freshness_differences_with",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
