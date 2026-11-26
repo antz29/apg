@@ -645,19 +645,26 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
 /// selection); `Some(set)` additionally reports `"modules"` when the requested
 /// resolved set differs from the recorded module selection.
 ///
-/// The label collection is [`freshness_facts`], shared with
-/// [`freshness_snapshot`], so this collect-all form and the snapshot verdict
-/// derive from one evaluation and cannot drift.
+/// This is the collect-all projection of the one shared freshness evaluation:
+/// the snapshot is built from the shared gather ([`freshness_facts`], also used
+/// by [`freshness_snapshot`]) folded by the pure [`classify_freshness`] with the
+/// caller's already-captured `state` and `requested` selection, and the verdict
+/// is projected from that snapshot — `Ok(())` ⇔
+/// [`Fresh`](FreshnessSnapshot::Fresh), `Err(differing)` otherwise.
+/// [`NotApplicable`](FreshnessSnapshot::NotApplicable) is NOT short-circuited:
+/// it reports its precondition label (`"database"`, `"socket"` or `"git sha"`)
+/// exactly as the collect-all form always has, so the label set and the
+/// `Ok`/`Err` partition match the shared snapshot.
 pub fn freshness_differences_with(
     apg_root: &Path,
     state: &GitState,
     requested: Option<&[String]>,
 ) -> Result<(), Vec<&'static str>> {
-    let (_, _, differing) = freshness_facts(apg_root, state, requested);
-    if differing.is_empty() {
-        Ok(())
-    } else {
-        Err(differing)
+    let (database_present, recorded, differing) = freshness_facts(apg_root, state, requested);
+    match classify_freshness(state.clone(), recorded, database_present, differing) {
+        FreshnessSnapshot::Fresh { .. } => Ok(()),
+        FreshnessSnapshot::NotApplicable { differing, .. }
+        | FreshnessSnapshot::Stale { differing, .. } => Err(differing),
     }
 }
 
