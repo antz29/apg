@@ -659,9 +659,11 @@ mirrors (in the tier dir of the attached node). Both die with the branch —
 nothing is committed. A task's own properties are **title** and **status**;
 everything else about it is edges: exactly one **assigned-to** Agent, an
 optional **implements** Component, and its per-kind operation edges —
-`creates` (a planned node), `modifies`/`deletes` (existing code),
-`renames`/`moves` (the live source, plus a `target` edge to the planned
-destination). A target-less activity carries no operation edge.
+`creates` (a planned node), `modifies` (existing code, or a planned node
+licensed at verify by a `creates` of the same FQN in an earlier plan phase),
+`deletes` (existing code only), `renames`/`moves` (the live source, plus a
+`target` edge to the planned destination). A target-less activity carries no
+operation edge.
 
 - `apg plan done` is an **implementer assertion** — no graph verification.
 - `apg plan complete` is a **milestone only** — the plan survives until verify.
