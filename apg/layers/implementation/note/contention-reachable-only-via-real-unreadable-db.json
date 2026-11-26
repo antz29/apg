@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "contention-reachable-only-via-real-unreadable-db",
+  "body": "The freshness contention arm is reachable only through a genuinely locked or unreadable `db.lbug`, and the retry budget is the fixed `FRESHNESS_READ_BUDGET` constant — the sleeper is injected but the budget is not; upgrade by making the budget an injectable parameter if a test ever needs to drive exhaustion deterministically.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.freshness_read_retry",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
