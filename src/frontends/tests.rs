@@ -205,6 +205,31 @@ mod unit {
         assert!(!ext_matches("a.ps1xml", &ps, true));
     }
 
+    /// iac-frontends phase-01 task-6: `terraform` (`tf`) and `bicep` (`bp`)
+    /// prefixes collide with no language root's, each other's nor the `x`
+    /// fallback; both are tool-less and use the default `--targets` hand-off.
+    #[test]
+    fn terraform_and_bicep_registration_is_distinct_and_tool_less() {
+        for (lang, want) in [("terraform", "tf"), ("bicep", "bp")] {
+            let prefix = id_prefix_for(lang);
+            assert_eq!(prefix, want);
+            assert_ne!(
+                prefix,
+                id_prefix_for("not-a-language"),
+                "{lang} vs fallback"
+            );
+            let others = crate::layers::LANGUAGE_ROOTS
+                .iter()
+                .chain(&["terraform", "bicep"])
+                .filter(|l| **l != lang);
+            for language in others {
+                assert_ne!(prefix, id_prefix_for(language), "{lang} vs {language}");
+            }
+            assert!(scan_time_tools(lang).is_empty());
+            assert!(!passes_targets_flag(lang, false));
+        }
+    }
+
     /// sql-frontend phase-06 task-30: `sql` always carries `--targets` (its
     /// list is its emission universe); every other language only when enabled.
     #[test]

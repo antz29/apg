@@ -494,6 +494,8 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "cobol" => "cb",
         "sql" => "sq",
         "ps" => "ps",
+        "terraform" => "tf",
+        "bicep" => "bp",
         // The agent-definition frontend's stream keeps its own prefix, distinct
         // from `x` (the unknown-id fallback) so a merged agent stream cannot
         // collide opaque ids.
@@ -733,7 +735,7 @@ pub fn should_spawn_language(
 /// The scan-time tools a selected language's frontend requires on `PATH` when
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
 /// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`,
-/// `agent`, `sql`, `ps`) and the bundled structural scanner's every stream id (`md`, `sh`,
+/// `agent`, `sql`, `ps`, `terraform`, `bicep`) and the bundled structural scanner's every stream id (`md`, `sh`,
 /// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `sln`, `misc`)
 /// require nothing — the structural, agent, sql and ps arms are explicit so the
 /// exemption is intentional, not the unknown-id catch-all — and neither does an
@@ -757,6 +759,8 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
         "sql" => &[],
         // The self-contained psfrontend needs no tool on `PATH` either.
         "ps" => &[],
+        // The self-contained terraformfrontend and bicepfrontend spawn nothing.
+        "terraform" | "bicep" => &[],
         _ => &[],
     }
 }
