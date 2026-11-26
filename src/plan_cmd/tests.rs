@@ -924,6 +924,111 @@ mod unit {
         assert!(bare.contains(&"go.apg.cache".to_string()));
     }
 
+    /// Pure licensing semantics for a `modifies` of a still-planned node
+    /// (requirement `planned-node-modifies-is-licensed-by-an-earlier-creates`):
+    /// the modify is legal only when another task `creates` the same FQN in a
+    /// strictly earlier phase. A missing creator and a same- or later-phase
+    /// creator are each a gap naming the target and both phases; an
+    /// earlier-phase creator licenses it; and a `modifies` of real
+    /// (non-declared) code is outside this gate entirely.
+    #[test]
+    fn planned_modify_licensing() {
+        const TARGET: &str = "rust.apg.cache";
+        let phase = |number: u32| Record::PlanPhase {
+            fqn: format!("foo/plan.phase-{number:02}"),
+            number,
+            title: format!("P{number}"),
+            deliverable: String::new(),
+            status: "pending".into(),
+        };
+        let task_fqn = |phase: u32, k: u32| format!("foo/plan.phase-{phase:02}.task-{k}");
+        let task = |phase: u32, k: u32| Record::Task {
+            fqn: task_fqn(phase, k),
+            title: "T".into(),
+            status: "pending".into(),
+        };
+        let creates = |phase: u32, k: u32| Record::FunctionCreate {
+            from: task_fqn(phase, k),
+            to: TARGET.into(),
+        };
+        let modifies = |phase: u32, k: u32| Record::FunctionModify {
+            from: task_fqn(phase, k),
+            to: TARGET.into(),
+        };
+        let planned = || Record::PlannedNode {
+            fqn: TARGET.into(),
+            kind: "function".into(),
+            name: "cache".into(),
+            parent: "rust.apg".into(),
+        };
+
+        // 1. No `creates` anywhere: one gap naming the planned target.
+        let gaps = planned_modify_licensing_gaps(&[
+            phase(1),
+            phase(2),
+            task(1, 1),
+            modifies(1, 1),
+            planned(),
+        ]);
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+        assert!(gaps[0].contains(TARGET), "{gaps:?}");
+        assert!(gaps[0].contains("no plan task `creates` it"), "{gaps:?}");
+
+        // 2. A `creates` in the SAME phase is not strictly earlier -> a gap.
+        let gaps = planned_modify_licensing_gaps(&[
+            phase(1),
+            task(1, 1),
+            modifies(1, 1),
+            task(1, 2),
+            creates(1, 2),
+            planned(),
+        ]);
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+        assert!(gaps[0].contains("strictly earlier"), "{gaps:?}");
+        assert!(gaps[0].contains("is in phase 1"), "{gaps:?}");
+
+        // 3. A `creates` in a LATER phase -> a gap naming both phases.
+        let gaps = planned_modify_licensing_gaps(&[
+            phase(1),
+            phase(2),
+            task(1, 1),
+            modifies(1, 1),
+            task(2, 1),
+            creates(2, 1),
+            planned(),
+        ]);
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+        assert!(gaps[0].contains("phase 1)"), "{gaps:?}");
+        assert!(gaps[0].contains("is in phase 2"), "{gaps:?}");
+
+        // 4. A `creates` in an EARLIER phase licenses the modify.
+        let gaps = planned_modify_licensing_gaps(&[
+            phase(1),
+            phase(2),
+            task(1, 1),
+            creates(1, 1),
+            task(2, 1),
+            modifies(2, 1),
+            planned(),
+        ]);
+        assert!(gaps.is_empty(), "{gaps:?}");
+
+        // 5. A `modifies` whose target is not a declared planned node is real
+        // code — outside this gate, untouched.
+        let gaps = planned_modify_licensing_gaps(&[phase(1), task(1, 1), modifies(1, 1)]);
+        assert!(gaps.is_empty(), "{gaps:?}");
+
+        // Repeated identical edges collapse to one gap (sorted, deduplicated).
+        let gaps = planned_modify_licensing_gaps(&[
+            phase(1),
+            task(1, 1),
+            modifies(1, 1),
+            modifies(1, 1),
+            planned(),
+        ]);
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+    }
+
     /// A removed target's Feedback record and its `Reviews` reference survive
     /// the cascade (a review item is closed by a reviewer, never dropped by the
     /// removal of the node it reviews), while a Note whose only `Details`
