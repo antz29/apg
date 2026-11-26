@@ -1768,28 +1768,49 @@ mod e2e {
         );
         assert_eq!(records.len(), before, "a refused creates leaves no record");
 
-        // A modifies/deletes edge against the planned FQN is refused too — only
-        // a creates builds a planned node, so neither may change it.
-        for verb in ["modifies", "deletes"] {
-            let err = plan_add_task_at(
-                &apg_root,
-                "foo",
-                &mut records,
-                1,
-                3,
-                "T3",
-                &assigned_agent(),
-                None,
-                &[task_op("struct", verb, "github.com/x/y.Gateway", "")],
-            )
-            .unwrap_err();
-            let msg = err.to_string();
-            assert!(
-                msg.contains("is a planned node, not scanned code"),
-                "{verb}: {msg}"
-            );
-            assert_eq!(records.len(), before, "a refused {verb} leaves no record");
-        }
+        // A `modifies` of the still-planned FQN is accepted: the planned node is
+        // licensed at verify by another task's earlier `creates` of the same
+        // FQN (the creates above), so the operation edge lands on the task.
+        let mut modified = records.clone();
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut modified,
+            1,
+            4,
+            "T4",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "modifies", "github.com/x/y.Gateway", "")],
+        )
+        .unwrap();
+        assert!(
+            modified.iter().any(|r| matches!(
+                r,
+                Record::StructModify { from, to }
+                    if from == "foo/plan.phase-01.task-4"
+                        && to == "github.com/x/y.Gateway"
+            )),
+            "the modifies edge lands on the planned destination"
+        );
+
+        // A `deletes` of the planned FQN is still refused — only a creates
+        // builds a planned node, and deletes targets existing scanned code only.
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            3,
+            "T3",
+            &assigned_agent(),
+            None,
+            &[task_op("struct", "deletes", "github.com/x/y.Gateway", "")],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("is a planned node, not scanned code"), "{msg}");
+        assert_eq!(records.len(), before, "a refused deletes leaves no record");
 
         // A task with an empty operation edge set is a valid target-less
         // activity in the scratch project worktree: only its Task, assigned-to
