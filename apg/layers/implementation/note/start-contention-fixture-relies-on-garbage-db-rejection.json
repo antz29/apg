@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "start-contention-fixture-relies-on-garbage-db-rejection",
+  "body": "The contended-start e2e arm triggers contention by overwriting `db.lbug` with 14 bytes of garbage and relies on the pinned engine rejecting a non-empty invalid file at open; if a future engine ever initialised an invalid file instead, that arm needs a different unreadable-database construction.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.start_refuses_when_main_scan_is_stale_or_missing",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
