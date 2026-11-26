@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "terraform-walk-skips-symlinks",
+  "body": "The Terraform claimed-file walk uses each entry's own file type, so a symlinked directory is not descended and a symlinked Terraform file is not claimed (the same behaviour as the PowerShell frontend's walk). Upgrade to following symlinks, with cycle protection, if a supported layout relies on symlinked Terraform modules or sources.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.terraformfrontend.source.walk",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
