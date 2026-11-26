@@ -508,9 +508,6 @@ mod unit {
             "Tf",
             "tofu",
             "Tofu",
-            "hcl",
-            "HCL",
-            "Hcl",
             "tfvars",
             "TFVARS",
             "bicep",
@@ -518,14 +515,29 @@ mod unit {
             "bicepparam",
             "BICEPPARAM",
         ];
-        // `.tf.json` is a filename suffix, not an extension.
-        for tfjson in ["tf.json", "TF.JSON", "Tf.Json"] {
+        // Terraform's compound suffixes are filename suffixes, skipped in any case.
+        for suffix in [
+            "tf.json",
+            "TF.JSON",
+            "Tf.Json",
+            "tfvars.json",
+            "TFVARS.JSON",
+            "tofu.json",
+            "Tofu.Json",
+            "tftest.hcl",
+            "TFTEST.HCL",
+            "tofutest.hcl",
+            "TofuTest.Hcl",
+            "terraform.lock.hcl",
+            "TERRAFORM.LOCK.HCL",
+        ] {
             assert_eq!(
-                stream_for_path(Path::new(&format!("src/main.{tfjson}"))),
+                stream_for_path(Path::new(&format!("src/main.{suffix}"))),
                 None,
-                ".{tfjson} must be skipped"
+                ".{suffix} must be skipped"
             );
         }
+        assert_eq!(stream_for_path(Path::new(".terraform.lock.hcl")), None);
 
         for ext in code {
             assert_eq!(
@@ -574,6 +586,10 @@ mod unit {
             ("a.c", Some("misc")),
             ("a.ps", Some("misc")),
             ("a.ps1xml", Some("misc")),
+            // Outside the Terraform claim: `.hcl` is residual, `.json` is json.
+            ("packer.hcl", Some("misc")),
+            ("X.HCL", Some("misc")),
+            ("x.json", Some("json")),
         ];
         for (path, want) in routed {
             assert_eq!(stream_for_path(Path::new(path)), want, "routing for {path}");
@@ -584,11 +600,16 @@ mod unit {
         assert!(is_pruned_dir("node_modules"));
         assert!(is_pruned_dir(".git"));
         assert!(is_pruned_dir(".worktrees"));
+        assert!(is_pruned_dir(".terraform"));
         assert!(!is_pruned_dir("src"));
         let root = Path::new("/repo");
         assert!(under_excluded_tree(Path::new("/repo/target/a.sh"), root));
         assert!(under_excluded_tree(
             Path::new("/repo/node_modules/x/a.sh"),
+            root
+        ));
+        assert!(under_excluded_tree(
+            Path::new("/repo/infra/.terraform/modules/x/README.md"),
             root
         ));
         assert!(!under_excluded_tree(Path::new("/repo/src/a.sh"), root));
