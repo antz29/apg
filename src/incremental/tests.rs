@@ -125,6 +125,18 @@ mod unit {
         assert_eq!(language_of(".gitconfig"), "ini");
         assert_eq!(language_of(".env"), "ini");
         assert_eq!(language_of(".env.local"), "ini");
+        // Terraform extensions map to the `terraform` language id; the
+        // `.tf.json` double extension is caught ahead of the `.json` arm so
+        // the JSON serialisation format is claimed by the Terraform frontend,
+        // not the structural `json` stream.
+        assert_eq!(language_of("main.tf"), "terraform");
+        assert_eq!(language_of("main.tf.json"), "terraform");
+        assert_eq!(language_of("main.tofu"), "terraform");
+        assert_eq!(language_of("config.hcl"), "terraform");
+        assert_eq!(language_of("prod.tfvars"), "terraform");
+        // Bicep extensions map to the `bicep` language id.
+        assert_eq!(language_of("main.bicep"), "bicep");
+        assert_eq!(language_of("main.bicepparam"), "bicep");
         // The residual — unknown extension, extension-less, dotfile, fixture
         // or binary — is the `misc` stream, matching the scanner's residual.
         assert_eq!(language_of("x.unknown"), "misc");

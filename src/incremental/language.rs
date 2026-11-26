@@ -16,9 +16,9 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 /// granularity key for the fact store.
 ///
 /// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
-/// `csharp`, `py`, `cpp`, `sql`, `ps`, `agent`, `md`, and the bundled structural scanner's
-/// `sh`, `yaml`, `json`, `toml`, `xml`, `sln`, `dockerfile`, `makefile`, `ini`,
-/// `misc`) so it can be compared directly against the scan's detected/requested
+/// `csharp`, `py`, `cpp`, `sql`, `ps`, `terraform`, `bicep`, `agent`, `md`, and the
+/// bundled structural scanner's `sh`, `yaml`, `json`, `toml`, `xml`, `sln`,
+/// `dockerfile`, `makefile`, `ini`, `misc`) so it can be compared directly against the scan's detected/requested
 /// language ids — `apg.targets_for_language` filters the win-B target set with
 /// exactly this comparison. `.py`/`.pyi` therefore return `"py"`, NOT
 /// `"python"` (the scan-side vocabulary is `py`: the detector candidate,
@@ -77,6 +77,12 @@ pub fn language_of(rel: &str) -> &'static str {
     {
         return "ini";
     }
+    // Terraform's JSON serialisation format — the `.json` extension would
+    // otherwise route to the structural `json` stream ahead of the Terraform
+    // frontend.
+    if name.ends_with(".tf.json") {
+        return "terraform";
+    }
     match ext {
         "go" => "go",
         "java" => "java",
@@ -129,6 +135,8 @@ pub fn language_of(rel: &str) -> &'static str {
         // Any letter case (`Legacy.SLN`), like `stream_for_path`'s lowercasing.
         _ if ext.eq_ignore_ascii_case("sln") => "sln",
         "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
+        "tf" | "tofu" | "hcl" | "tfvars" => "terraform",
+        "bicep" | "bicepparam" => "bicep",
         _ => "misc",
     }
 }
