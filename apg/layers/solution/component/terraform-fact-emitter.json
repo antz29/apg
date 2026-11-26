@@ -6,6 +6,21 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.diag",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.scan",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

@@ -6,6 +6,21 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.tests.int",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.tests.unit",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformlib_e2e",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

@@ -6,6 +6,16 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.apg.bicep",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.bicep_scan_e2e",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.scan-module",
       "properties": {}

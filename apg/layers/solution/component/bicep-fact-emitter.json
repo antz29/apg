@@ -6,6 +6,21 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.bicepfrontend",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.bicepfrontend.diag",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.bicepfrontend.scan",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}

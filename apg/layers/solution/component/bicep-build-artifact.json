@@ -6,6 +6,11 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.build_script_build.stage_bicep",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.pipeline-module",
       "properties": {}

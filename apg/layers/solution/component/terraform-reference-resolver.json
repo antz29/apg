@@ -6,6 +6,11 @@
   "properties": {},
   "out": [
     {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.resolve",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.frontend-module",
       "properties": {}
