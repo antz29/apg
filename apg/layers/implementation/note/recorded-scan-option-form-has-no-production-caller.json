@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "recorded-scan-option-form-has-no-production-caller",
+  "body": "`db_recorded_scan` has no production caller inside `src` now that `freshness_facts` uses `db_recorded_scan_result` and `staleness_line` takes the recorded row from the verdict; it survives only as the public `apg::git` fail-closed API used by the e2e crates and named in docs, so remove it when the public surface no longer needs the `Option` projection.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.db_recorded_scan",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
