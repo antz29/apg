@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "transient-classifier-is-message-based",
+  "body": "The transient freshness-read classifier is message-based because the freshness reads carry untyped `lbug`/anyhow errors; if the engine later exposes a typed lock/busy error, or changes the `Could not set lock on file` wording, switch to that downcast or extend the marker list.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.is_transient_read_error",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
