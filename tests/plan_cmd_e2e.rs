@@ -6029,4 +6029,297 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-03 task-2 (e2e): a `modifies` of a planned Implementation node is
+    /// licensed only by another task's `creates` of the same FQN in a STRICTLY
+    /// earlier phase, and the licensed plan passes only once the node is
+    /// realized in the branch graph.
+    ///
+    /// One scratch `/tmp` repo carries a real Rust crate `app` (no `helper`
+    /// yet) plus one `.opencode/agents/implementer.md` definition, so its
+    /// branch scan carries both the code graph and the Agent roster a task
+    /// assignment resolves against. The planned function is authored at its
+    /// language-agnostic identity (`app.helper`) BEFORE the code exists (a plan
+    /// never plans real code); landing `helper` in `src/main.rs` and re-scanning
+    /// realizes it at the rooted identity `rust.app.helper` through the verify
+    /// gate's `<root>.<identity>` tolerance.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg/rust frontend/db.lbug/plan store); run via cargo test-e2e"]
+    fn task_modifies_of_planned_node_requires_an_earlier_create() {
+        const PLANNED: &str = "app.helper";
+        const REALIZED: &str = "rust.app.helper";
+        const PHASE1_TASK: &str = "demo/plan.phase-01.task-1";
+        const PHASE2_TASK: &str = "demo/plan.phase-02.task-1";
+
+        /// The record set the licensing legs rebuild from: two phases, the
+        /// parentless planned function (as the apply-gate fixtures declare it),
+        /// and the plan/phase Contains edges.
+        fn base_plan() -> Vec<Record> {
+            vec![
+                Record::Plan {
+                    fqn: "demo/plan".to_string(),
+                    title: "Demo".to_string(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "demo/plan.phase-01".to_string(),
+                    number: 1,
+                    title: "P1".to_string(),
+                    deliverable: "D".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::PlanPhase {
+                    fqn: "demo/plan.phase-02".to_string(),
+                    number: 2,
+                    title: "P2".to_string(),
+                    deliverable: "D".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::Contains {
+                    from: "demo/plan".to_string(),
+                    to: "demo/plan.phase-01".to_string(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::Contains {
+                    from: "demo/plan".to_string(),
+                    to: "demo/plan.phase-02".to_string(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::PlannedNode {
+                    fqn: PLANNED.to_string(),
+                    kind: "function".to_string(),
+                    name: "helper".to_string(),
+                    parent: String::new(),
+                },
+            ]
+        }
+
+        let repo = Repo::new("plan-modifies-licensing");
+        // `cargo metadata` writes a lockfile and may build into `target/`; both
+        // stay out of git so the checkout remains clean for the freshness gate.
+        repo.write(
+            ".gitignore",
+            "apg/.trans/\napg/.worktrees/\napg/.scratch/\nCargo.lock\n/target\n**/target\n",
+        );
+        repo.write(
+            "Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        repo.write("src/main.rs", "fn main() {}\n");
+        // The branch graph's Agent roster supplies the task's `assigned-to`.
+        repo.write(".opencode/agents/implementer.md", "# implementer\n");
+        repo.commit_all("rust crate + agent roster");
+
+        let wt = repo.start_project("demo");
+        let apg_root = wt.join(specs::LAYOUT);
+        let run = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::spawn_apg(args, dir);
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        // Author the plan and the planned function BEFORE any code exists.
+        run(
+            &wt,
+            &["plan", "add", "demo", "--title", "Demo", "--strategy", "s"],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan",
+                "add",
+                "demo",
+                "phase",
+                "2",
+                "--title",
+                "P2",
+                "--deliverable",
+                "D",
+            ],
+        );
+        run(
+            &wt,
+            &[
+                "plan", "add", "demo", "planned", "function", PLANNED, "--name", "helper",
+            ],
+        );
+
+        // The branch scan: the code graph (no `helper` yet) plus the Agent
+        // roster the task assignment resolves against.
+        run(&wt, &["scan", "."]);
+
+        // LEG 1 — authoring accepts BOTH a phase-1 `creates` of the planned FQN
+        // and a phase-2 `modifies` of it.
+        let mut licensed = base_plan();
+        plan_add_task_at(
+            &apg_root,
+            "demo",
+            &mut licensed,
+            1,
+            1,
+            "create helper",
+            &assigned_agent(),
+            None,
+            &[task_op("function", "creates", PLANNED, "")],
+        )
+        .unwrap();
+        plan_add_task_at(
+            &apg_root,
+            "demo",
+            &mut licensed,
+            2,
+            1,
+            "modify helper",
+            &assigned_agent(),
+            None,
+            &[task_op("function", "modifies", PLANNED, "")],
+        )
+        .unwrap();
+        assert!(
+            licensed.iter().any(|r| matches!(
+                r,
+                Record::FunctionCreate { from, to } if from == PHASE1_TASK && to == PLANNED
+            )),
+            "the phase-1 task creates the planned FQN"
+        );
+        assert!(
+            licensed.iter().any(|r| matches!(
+                r,
+                Record::FunctionModify { from, to } if from == PHASE2_TASK && to == PLANNED
+            )),
+            "the planned-node modifies is authored"
+        );
+        write_through(&apg_root, "demo", &licensed).unwrap();
+
+        // Before realization the licensed plan blocks ONLY on the planned-node
+        // realization gate — the earlier `creates` licenses the `modifies`.
+        let err = plan_verify_at(&apg_root, "demo")
+            .expect_err("an unrealized planned node must block verify");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coherence gate blocked"), "{msg}");
+        assert!(
+            msg.contains(&format!(
+                "planned function node `{PLANNED}` is not realized"
+            )),
+            "{msg}"
+        );
+        assert!(
+            !msg.contains("unlicensed planned-node modifies"),
+            "a phase-1 creates licenses the phase-2 modify: {msg}"
+        );
+
+        // LEG 2 — unlicensed: the only task modifies the planned FQN and no
+        // task creates it.
+        let mut unlicensed = base_plan();
+        plan_add_task_at(
+            &apg_root,
+            "demo",
+            &mut unlicensed,
+            1,
+            1,
+            "modify helper",
+            &assigned_agent(),
+            None,
+            &[task_op("function", "modifies", PLANNED, "")],
+        )
+        .unwrap();
+        write_through(&apg_root, "demo", &unlicensed).unwrap();
+        let err = plan_verify_at(&apg_root, "demo")
+            .expect_err("a planned-node modify with no creator must block verify");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("unlicensed planned-node modifies"), "{msg}");
+        assert!(
+            msg.contains(&format!(
+                "planned node `{PLANNED}` is `modifies`d by `{PHASE1_TASK}` (phase 1) but no plan task `creates` it"
+            )),
+            "{msg}"
+        );
+
+        // LEG 3 — mis-ordered: the `creates` sits in a LATER phase than the
+        // `modifies`; both author (authoring carries no phase ordering) and the
+        // gate names both phases.
+        let mut misordered = base_plan();
+        plan_add_task_at(
+            &apg_root,
+            "demo",
+            &mut misordered,
+            1,
+            1,
+            "modify helper",
+            &assigned_agent(),
+            None,
+            &[task_op("function", "modifies", PLANNED, "")],
+        )
+        .unwrap();
+        plan_add_task_at(
+            &apg_root,
+            "demo",
+            &mut misordered,
+            2,
+            1,
+            "create helper",
+            &assigned_agent(),
+            None,
+            &[task_op("function", "creates", PLANNED, "")],
+        )
+        .unwrap();
+        write_through(&apg_root, "demo", &misordered).unwrap();
+        let err =
+            plan_verify_at(&apg_root, "demo").expect_err("a later-phase creator must block verify");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("unlicensed planned-node modifies"), "{msg}");
+        assert!(
+            msg.contains(&format!(
+                "planned node `{PLANNED}` is `modifies`d by `{PHASE1_TASK}` (phase 1) but its earliest `creates` is in phase 2 — the creator must be in a strictly earlier phase"
+            )),
+            "{msg}"
+        );
+
+        // LEG 4 — realization: restore the licensed plan, land the planned
+        // function's real source, commit, and re-scan. The gate then passes.
+        write_through(&apg_root, "demo", &licensed).unwrap();
+        std::fs::write(
+            wt.join("src/main.rs"),
+            "fn main() {}\n\npub fn helper() -> u32 {\n    0\n}\n",
+        )
+        .unwrap();
+        wt_commit_paths(&wt, &["src/main.rs"], "implement helper");
+        run(&wt, &["scan", "."]);
+
+        // The scanned helper is real code at its rooted identity.
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        assert_eq!(
+            db.code_label(REALIZED),
+            Some("Function"),
+            "the landed helper must be scanned at `{REALIZED}`"
+        );
+        drop(db);
+
+        assert!(
+            plan_verify_at(&apg_root, "demo").is_ok(),
+            "a licensed planned-node modify passes once the planned node is realized"
+        );
+
+        testutil::remove(&repo);
+    }
 }
