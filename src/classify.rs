@@ -221,6 +221,36 @@ fn ps_code_type(path: &str) -> &'static str {
     "src"
 }
 
+/// Terraform: path segments only (no filename marker); the `.tf`, `.tf.json`,
+/// `.tofu`, `.hcl` and `.tfvars` extensions are claimed by the structural scanner.
+fn terraform_code_type(has_seg: impl Fn(&[&str]) -> bool) -> &'static str {
+    if has_seg(&["test", "tests"]) {
+        return "test";
+    }
+    if has_seg(&["gen", "generated"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", "third_party", "thirdparty"]) {
+        return "external";
+    }
+    "src"
+}
+
+/// Bicep: path segments only (no filename marker); the `.bicep` and
+/// `.bicepparam` extensions are claimed by the structural scanner.
+fn bicep_code_type(has_seg: impl Fn(&[&str]) -> bool) -> &'static str {
+    if has_seg(&["test", "tests"]) {
+        return "test";
+    }
+    if has_seg(&["gen", "generated"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", "third_party", "thirdparty"]) {
+        return "external";
+    }
+    "src"
+}
+
 fn builtin_code_type(path: &str, language: &str) -> &'static str {
     let segments: Vec<&str> = path.split('/').collect();
     let has_seg = |names: &[&str]| segments.iter().any(|s| names.contains(s));
@@ -394,6 +424,11 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "docs"
         }
+        // Terraform and Bicep: infrastructure-as-code formats streamed by the
+        // structural scanner. They classify as code (`src` by default) rather
+        // than `config` — the same path-segment rules as SQL.
+        "terraform" => terraform_code_type(has_seg),
+        "bicep" => bicep_code_type(has_seg),
         // The bundled structural scanner's non-Markdown streams: the structural
         // formats are configuration/data, so with no config they classify
         // `config` — never the code default `src`. Markdown keeps its own `md`

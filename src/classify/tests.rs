@@ -137,6 +137,65 @@ mod unit {
         }
     }
 
+    /// iac-frontends phase-01 task-2: a Terraform file's code type follows
+    /// path segments only — test/tests → `test`, gen/generated → `generated`,
+    /// vendor/third_party/thirdparty → `external` — with no filename marker.
+    #[test]
+    fn terraform_code_type_follows_path_segments() {
+        for (p, want) in [
+            ("test/main.tf", "test"),
+            ("tests/vars.tfvars", "test"),
+            ("tf/test/main.tofu", "test"),
+            ("gen/outputs.tf", "generated"),
+            ("generated/providers.hcl", "generated"),
+            ("vendor/modules/main.tf.json", "external"),
+            ("third_party/stack.tf", "external"),
+            ("thirdparty/import.tf", "external"),
+            ("main.tf", "src"),
+            ("src/variables.tf", "src"),
+            ("env/main.tf.json", "src"),
+            ("test_main.tf", "src"),
+            ("testing/main.tf", "src"),
+        ] {
+            assert_eq!(
+                builtin_code_type(p, "terraform"),
+                want,
+                "{p} must be {want}"
+            );
+            assert_eq!(
+                classify_code_type(p, &format!("terraform.{p}"), "terraform", None),
+                want,
+                "{p} must classify as {want}"
+            );
+        }
+    }
+
+    /// iac-frontends phase-01 task-2: a Bicep file's code type follows path
+    /// segments only — test/tests → `test`, gen/generated → `generated`,
+    /// vendor/third_party/thirdparty → `external` — with no filename marker.
+    #[test]
+    fn bicep_code_type_follows_path_segments() {
+        for (p, want) in [
+            ("test/main.bicep", "test"),
+            ("tests/params.bicepparam", "test"),
+            ("gen/module.bicep", "generated"),
+            ("generated/resources.bicepparam", "generated"),
+            ("vendor/modules/network.bicep", "external"),
+            ("third_party/storage.bicep", "external"),
+            ("thirdparty/aks.bicep", "external"),
+            ("main.bicep", "src"),
+            ("src/variables.bicepparam", "src"),
+            ("test_main.bicep", "src"),
+        ] {
+            assert_eq!(builtin_code_type(p, "bicep"), want, "{p} must be {want}");
+            assert_eq!(
+                classify_code_type(p, &format!("bicep.{p}"), "bicep", None),
+                want,
+                "{p} must classify as {want}"
+            );
+        }
+    }
+
     /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in
