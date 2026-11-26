@@ -27,7 +27,17 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.read-only-verdicts-open-the-database-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.review-missing-target-names-searched-context",
       "properties": {}
     },
     {
@@ -48,11 +58,6 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.unresolved-feedback-blocks-verify",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.review-missing-target-names-searched-context",
       "properties": {}
     }
   ],

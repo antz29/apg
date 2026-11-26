@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "concurrent-reader-verify-acceptance",
+  "body": "A concurrency acceptance test on a scratch repository runs `apg plan verify` while a read-only apg process is in flight, and the gate passes green.",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

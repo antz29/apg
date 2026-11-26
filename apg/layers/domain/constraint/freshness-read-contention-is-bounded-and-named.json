@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "freshness-read-contention-is-bounded-and-named",
+  "body": "A freshness evaluation retries a transiently unreadable or locked database a bounded number of times, and a failure that persists refuses as named contention rather than as a freshness input.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

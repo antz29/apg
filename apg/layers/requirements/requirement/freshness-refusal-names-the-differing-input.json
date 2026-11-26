@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "freshness-refusal-names-the-differing-input",
-  "body": "The staleness refusal and the scan preamble name every freshness input that differs between the recorded scan and the current checkout, so an operator learns which input to refresh.",
+  "body": "The staleness refusal and the scan preamble name every freshness input that differs between the recorded scan and the current checkout, and one freshness evaluation yields both the stale verdict and the inputs it names.",
   "properties": {
     "feature": "scan-change-identity"
   },

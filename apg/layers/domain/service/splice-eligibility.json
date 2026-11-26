@@ -22,6 +22,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.fresh-graph-never-refused-under-concurrency",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.freshness-checks-the-computed-git-state",
       "properties": {}
     },
@@ -43,6 +48,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.freshness-refusal-names-the-differing-input",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.freshness-verdict-and-reasons-are-one-snapshot",
       "properties": {}
     },
     {
@@ -84,6 +94,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.transient-database-unreadability-is-retried-then-named-contention",
+      "properties": {}
     }
   ],
   "in": [
@@ -115,6 +130,11 @@
     {
       "kind": "realises",
       "source": "solution.component.splice-equivalence-tests",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.staleness-verdict",
       "properties": {}
     }
   ]

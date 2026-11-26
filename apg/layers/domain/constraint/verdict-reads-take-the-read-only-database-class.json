@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "verdict-reads-take-the-read-only-database-class",
+  "body": "A verdict that only reads the branch database opens it in the read-only class, so a read-only verdict occupies no exclusive class a concurrent reader or writer holds.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

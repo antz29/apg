@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "staleness-verdict",
+  "body": "The refuse-on-stale verdict surface: one captured git state and one freshness evaluation yield each gate's verdict and its named differing inputs, with a bounded retry of an unreadable database and a refusal named as contention.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.state.freshness_differences_with",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.state.is_stale",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.state.refusal_message",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.splice-eligibility",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

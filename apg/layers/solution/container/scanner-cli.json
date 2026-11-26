@@ -259,6 +259,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.staleness-verdict",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.test-layout",
       "properties": {}
     },

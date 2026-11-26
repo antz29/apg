@@ -47,6 +47,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.concurrent-reader-verify-acceptance",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.dirty-checkout-refusal-keeps-its-verdict",
       "properties": {}
     },
@@ -67,6 +72,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.fresh-graph-never-refused-under-concurrency",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.freshness-checks-the-computed-git-state",
       "properties": {}
     },
@@ -78,6 +88,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.freshness-refusal-names-the-differing-input",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.freshness-verdict-and-reasons-are-one-snapshot",
       "properties": {}
     },
     {
@@ -217,6 +232,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.read-only-verdicts-open-the-database-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.research-escalation-fresh-redispatch",
       "properties": {}
     },
@@ -283,6 +303,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.task-record-field-set",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.transient-database-unreadability-is-retried-then-named-contention",
       "properties": {}
     },
     {

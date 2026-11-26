@@ -7,6 +7,21 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.concurrent-reader-verify-acceptance",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.fresh-graph-never-refused-under-concurrency",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.freshness-verdict-and-reasons-are-one-snapshot",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.gate-rule-keys-on-the-gate-implementer",
       "properties": {}
     },
@@ -33,6 +48,16 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.planned-node-modifies-is-licensed-by-an-earlier-creates",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.read-only-verdicts-open-the-database-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.transient-database-unreadability-is-retried-then-named-contention",
       "properties": {}
     },
     {

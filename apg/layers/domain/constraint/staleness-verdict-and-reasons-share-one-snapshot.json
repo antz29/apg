@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "staleness-verdict-and-reasons-share-one-snapshot",
+  "body": "A staleness verdict and the differing inputs it names come from one captured git state and one freshness evaluation, so no refuse-on-stale site re-evaluates freshness to build its reason list.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
