@@ -67,6 +67,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.incremental.prepare.prepare",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.incremental.record.record",
       "properties": {}
     },
