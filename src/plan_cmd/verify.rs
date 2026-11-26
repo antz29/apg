@@ -162,28 +162,23 @@ pub(crate) fn planned_modify_licensing_gaps(records: &[Record]) -> Vec<String> {
 /// nodes, unresolved feedback, unlicensed planned-node modifies, and the
 /// change-set delta's coverage gaps — uncovered `implemented-by` claims and
 /// `Satisfies`-less added-or-changed requirements). Guarded: refuses outside
-/// the project context and against a stale branch DB (a verdict is only
-/// meaningful against the branch's graph — R5).
+/// the project context and, from one freshness snapshot, against a stale branch
+/// DB (a verdict is only meaningful against the branch's graph — R5).
 pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     // Take the extended lock BEFORE judging staleness: `apg scan` holds the same
     // blocking flock for its whole rebuild, so a verify overlapping a scan waits
     // for it and judges the finished branch database instead of a transient one.
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
-    if crate::git::is_stale(apg_root) {
-        // Name every input `freshness_differences` reports (the same list
-        // `refusal_message` and `staleness_line` render), so the operator
-        // learns which one to refresh. `is_stale` stays the refuse gate — it
-        // is N/A (false) for a missing DB or repo, so verify keeps refusing
-        // exactly when the branch graph is not fresh.
-        let differing =
-            match crate::git::freshness_differences(apg_root, &crate::git::git_state(apg_root)) {
-                // A tree that moved between the gate and the read above.
-                Ok(()) => String::new(),
-                Err(differing) => format!(" (differing: {})", differing.join(", ")),
-            };
+    // One snapshot decides the gate and names every differing input: a `Stale`
+    // verdict always carries a non-empty `differing`, while `Fresh` and
+    // `NotApplicable` (no DB or no git repo) proceed as before.
+    if let crate::git::FreshnessSnapshot::Stale { differing, .. } =
+        crate::git::freshness_snapshot(apg_root)
+    {
         anyhow::bail!(
-            "cannot verify `{project}`: the branch graph is stale{differing} — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)"
+            "cannot verify `{project}`: the branch graph is stale (differing: {}) — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)",
+            differing.join(", ")
         );
     }
     let records = load_plan(apg_root, project)?;
