@@ -242,26 +242,28 @@ const PY_DETECTOR_SKIP: &[&str] = &[
     "*.egg-info",
 ];
 
-/// True when extension `ext` (no leading dot) is one of `exts` (each with its
-/// leading dot). `case_insensitive` ignores letter case; otherwise it is exact.
-/// Only the C#, COBOL, SQL and PowerShell candidates pass
-/// `case_insensitive = true` (SQL: `.sql` in any letter case, like
-/// sqlfrontend's own discovery and `language_of`; PowerShell:
-/// `.ps1`/`.psm1`/`.psd1` in any letter case); every other language matches
-/// exact-case.
-fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
-    let dotted = format!(".{ext}");
+/// True when file name `name` ends with one of `exts` (each a dotted suffix,
+/// possibly compound like `.tf.json`). `case_insensitive` ignores ASCII letter
+/// case; otherwise it is exact. Only the C#, COBOL, SQL, PowerShell, Bicep and
+/// Terraform candidates pass `case_insensitive = true`; every other language
+/// matches exact-case.
+fn ext_matches(name: &str, exts: &[&str], case_insensitive: bool) -> bool {
+    let name = name.as_bytes();
     exts.iter().any(|x| {
-        if case_insensitive {
-            x.eq_ignore_ascii_case(&dotted)
-        } else {
-            *x == dotted
+        let x = x.as_bytes();
+        name.len() >= x.len() && {
+            let tail = &name[name.len() - x.len()..];
+            if case_insensitive {
+                tail.eq_ignore_ascii_case(x)
+            } else {
+                tail == x
+            }
         }
     })
 }
 
-/// True when `dir` holds, within `depth` directory levels, a file whose
-/// extension is one of `exts` (each with its leading dot), compared with
+/// True when `dir` holds, within `depth` directory levels, a file whose name
+/// ends with one of `exts` (each with its leading dot), compared with
 /// `ext_matches`' `case_insensitive` rule.
 ///
 /// `skip_set` names directories never descended into. Each entry is matched
@@ -306,10 +308,7 @@ pub fn has_extension(
             if has_extension(&p, exts, depth - 1, skip_set, case_insensitive) {
                 return true;
             }
-        } else if p
-            .extension()
-            .is_some_and(|e| ext_matches(e.to_str().unwrap_or(""), exts, case_insensitive))
-        {
+        } else if ext_matches(name, exts, case_insensitive) {
             return true;
         }
     }
@@ -332,8 +331,8 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
     // Every candidate shares the ONE generalised `has_extension` walker; each
     // names only the non-hidden directories it must not descend into
     // (`skip_set`), and the depth bound is explicit per candidate rather than a
-    // shared magic literal. Matching is exact-case except C#, COBOL, SQL and
-    // PowerShell.
+    // shared magic literal. Matching is a file-name suffix test, exact-case
+    // except C#, COBOL, SQL, PowerShell, Bicep and Terraform.
     let candidates = vec![
         (
             "java",
@@ -399,21 +398,33 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             true,
         ),
-        // Bicep claims `.bicep` and `.bicepparam` sources.
+        // Bicep claims `.bicep` and `.bicepparam` in any letter case.
         (
             "bicep",
             &[".bicep", ".bicepparam"],
             5,
             DEFAULT_DETECTOR_SKIP,
-            false,
+            true,
         ),
-        // Terraform claims `.tf`, `.tf.json`, `.tofu`, `.hcl` and `.tfvars` sources.
+        // Terraform claims exactly these suffixes in any letter case (a plain
+        // `.hcl`/`.json` stays structural); the hidden `.terraform` cache dir
+        // is pruned by the walker's dot-name rule.
         (
             "terraform",
-            &[".tf", ".tf.json", ".tofu", ".hcl", ".tfvars"],
+            &[
+                ".tf",
+                ".tf.json",
+                ".tfvars",
+                ".tfvars.json",
+                ".tofu",
+                ".tofu.json",
+                ".tftest.hcl",
+                ".tofutest.hcl",
+                ".terraform.lock.hcl",
+            ],
             5,
             DEFAULT_DETECTOR_SKIP,
-            false,
+            true,
         ),
     ];
     let mut out = Vec::new();
