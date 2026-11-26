@@ -1448,6 +1448,41 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-22 (e2e): `apg review list` opens the branch database in
+    /// the **read-only** class rather than taking the exclusive read-write class
+    /// a concurrent verdict/writer occupies. The test process holds both classes
+    /// for the whole child run — a read-only reader, and a read-write handle
+    /// that owns `db.lbug`'s exclusive lock (lbug refuses a second read-write
+    /// open with `Could not set lock … Lock is held by PID …`) — and the child
+    /// must still complete: its exit 0 plus the CSV header (printed only after
+    /// its own database open succeeds) is the proof.
+    #[test]
+    #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git/process); run via cargo test-e2e"]
+    fn review_list_runs_beside_a_held_read_only_database() {
+        let (apg_root, repo, wt) = fixture("readonly-concurrent");
+
+        // A read-only reader and the exclusive read-write class, both held in
+        // this process for the whole child run. A `review list` that took the
+        // read-write class itself would fail against the held writer's lock.
+        let reader = artifacts::ArtifactDb::open_read_only(&apg_root).unwrap();
+        let writer = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let listed = spawn_apg(&["review", "list"], &wt);
+        assert!(
+            listed.status.success(),
+            "review list must complete beside a held read-only database: {}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.starts_with("f.fqn,f.status,f.disposition,n.fqn"),
+            "the header is printed only after the concurrent reader's open: {out}"
+        );
+        drop(writer);
+        drop(reader);
+
+        testutil::remove(&repo);
+    }
 }
 
 /// The worktree branch's HEAD sha — the branch an auto-commit would land
