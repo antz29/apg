@@ -33,9 +33,47 @@ const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"]
 /// the C++ frontend does not claim it, so a tracked `.c` file falls to the
 /// residual `misc` stream.
 const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp", "ts",
-    "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor", "py", "pyi",
-    "cob", "cbl", "cobol", "cpy", "sql", "ps1", "psm1", "psd1",
+    "rs",
+    "go",
+    "java",
+    "cpp",
+    "cc",
+    "cxx",
+    "c++",
+    "h",
+    "hpp",
+    "hh",
+    "hxx",
+    "tpp",
+    "ipp",
+    "ts",
+    "tsx",
+    "mts",
+    "cts",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "cs",
+    "csx",
+    "cshtml",
+    "razor",
+    "py",
+    "pyi",
+    "cob",
+    "cbl",
+    "cobol",
+    "cpy",
+    "sql",
+    "ps1",
+    "psm1",
+    "psd1",
+    "tf",
+    "tofu",
+    "hcl",
+    "tfvars",
+    "bicep",
+    "bicepparam",
 ];
 
 /// Reads the pinned `--targets` list: absolute source paths, one per line,
@@ -76,6 +114,12 @@ pub(crate) fn stream_for_path(path: &Path) -> Option<&'static str> {
         if CODE_EXTENSIONS.contains(&e) {
             return None;
         }
+    }
+
+    // Terraform JSON files (`.tf.json`) are code-frontend territory;
+    // their extension is `.json` so they need a filename check.
+    if lower.ends_with(".tf.json") {
+        return None;
     }
 
     // Filename-keyed formats first: Dockerfile/Makefile and the extension-less
