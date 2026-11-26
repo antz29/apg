@@ -2,7 +2,7 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, COBOL, T-SQL, PowerShell), builds
+`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, COBOL, T-SQL, PowerShell, Terraform), builds
 a program graph of its types, functions, and call/use relationships, and
 stores it in a LadybugDB graph database that you can query with Cypher from
 inside opencode. The bundled structural scanner also graphs the tracked
@@ -19,10 +19,13 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
 
 - **Per-language scanner frontends** installed separately via brew — install
   only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python,
-  COBOL, T-SQL, PowerShell; the C# frontend is project-aware and Razor-compiling,
+  COBOL, T-SQL, PowerShell, Terraform; the C# frontend is project-aware and Razor-compiling,
   claiming `.cs`/`.csx`/`.cshtml`/`.razor`; the T-SQL frontend claims `.sql` in
   any letter case and reads `.sqlproj` membership statically; the PowerShell
-  frontend claims `.ps1`/`.psm1`/`.psd1` in any letter case),
+  frontend claims `.ps1`/`.psm1`/`.psd1` in any letter case; the Terraform
+  frontend claims `.tf`, `.tf.json`, `.tfvars`, `.tfvars.json`, `.tofu`, `.tofu.json`,
+  `.tftest.hcl`, `.tofutest.hcl` and `.terraform.lock.hcl` in any letter case, so
+  Terraform and OpenTofu are both covered),
   plus a **bundled structural scanner** in the base package that graphs the
   tracked text/config/packaging files the code frontends don't claim (Markdown,
   shell, YAML, JSON, TOML, XML — MSBuild `.csproj`/`.vbproj`/`.vcxproj`/
@@ -35,6 +38,13 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug
   TypeScript compiler, or Roslyn); C++ is heuristic (tree-sitter), and
   unresolvable refs become
   `UnresolvedTarget` nodes rather than guessed FQNs.
+- **Terraform and OpenTofu configurations** — each directory is one module.
+  Resource, data, variable, output, locals, module and provider blocks, tfvars,
+  test files and lock-file providers are graph units, and references become
+  edges: an `azurerm_virtual_network` whose `resource_group_name` reads
+  `azurerm_resource_group.main.name` and whose `location` reads `var.location`
+  draws `uses` edges to those Structs of its module. Unresolved references become
+  categorised unresolved targets, and `.terraform` directories are pruned.
 - **Multi-language codebases in one graph** — `apg scan` auto-detects every
   language present and merges their graphs into a single `apg/.trans/db.lbug` (a Go
   backend + TS frontend repo is one database, not two).
@@ -59,7 +69,7 @@ The `scanner` formula builds the `apg` binary and ships the bundled
 **structural scanner** (`structfrontend`) and the bundled **agent-definition
 frontend** (`agentfrontend`); the per-language frontends are separate formulae
 (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`,
-`apg-py`, `apg-cobol`, `apg-sql`, `apg-ps`). Install the base plus the frontends for the
+`apg-py`, `apg-cobol`, `apg-sql`, `apg-ps`, `apg-terraform`). Install the base plus the frontends for the
 languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
@@ -98,7 +108,9 @@ the COBOL frontend (`apg-cobol`) is a self-contained binary that never shells
 out, the T-SQL frontend (`apg-sql`) is a self-contained single-file publish
 (its .NET SDK is build-time only) that never runs MSBuild, `dotnet`, a database
 or the network, and the PowerShell frontend (`apg-ps`) is a self-contained
-binary, its parser statically linked, that never shells out. The
+binary, its parser statically linked, that never shells out, and the Terraform
+frontend (`apg-terraform`) is a self-contained binary that spawns no child
+processes and needs no network. The
 bundled structural scanner and agent-definition frontend are likewise
 self-contained and never shell out — they need nothing on `PATH`. On Linux the
 base `apg` binary links OpenSSL dynamically, so `libssl.so.3` must be present
@@ -123,6 +135,7 @@ ceiling.
 | COBOL (`apg-cobol`) | stable Rust `1.100.0` + crates.io (`serde`, `serde_json`) | none (self-contained binary, never shells out) | no engine pin (hand-written parser); ceiling = the dialect table: `cobol85` (default), `cobol2002`, `cobol2014`, `ibm` (`cobol2023` is refused) |
 | T-SQL (`apg-sql`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file ReadyToRun publish; reads `.sqlproj` files statically, never runs MSBuild, `dotnet` or a database) | `Microsoft.SqlServer.TransactSql.ScriptDom 180.140.0` (`TSql170Parser`); ceiling = the SQL Server 2025 / Azure SQL T-SQL grammar |
 | PowerShell (`apg-ps`) | stable Rust `1.100.0` + crates.io + a C compiler (compiles the tree-sitter runtime and the woodruffw-trough grammar's generated C sources) | none (self-contained binary, parser statically linked, never shells out, no network) | `woodruffw-trough-tree-sitter-powershell =0.1.6` on the `tree-sitter =0.26.13` runtime, parser ABI 15; ceiling = the grammar's PowerShell 7.5 syntax, workflow and DSC configuration syntax included |
+| Terraform (`apg-terraform`) | stable Rust `1.100.0` + crates.io, with zero C compiler | none (self-contained binary, spawns no child processes, no network) | `hcl-edit =0.10.0`; ceiling = that crate's HCL native syntax, with JSON syntax read by the HCL JSON mapping and each `${…}` string parsed by hcl-edit's template parser |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
 | Agent definitions (`agentfrontend`) | stable Rust + crates.io | none (self-contained binary reading `.opencode/agents/`, never shells out) | `serde` / `serde_json` 1 (no language-version ceiling) |
 | opencode chat plugin (`apg init`) | `bun install` (`@opencode/plugin`) | opencode 2.x (tool plugins into `~/.config/opencode/plugins/`) | `@opencode/plugin` (opencode 2.x plugin API) |
@@ -141,7 +154,8 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-py \
              antz29/apg/apg-cobol \
              antz29/apg/apg-sql \
-             antz29/apg/apg-ps
+             antz29/apg/apg-ps \
+             antz29/apg/apg-terraform
 ```
 
 Install only the frontends you need:
@@ -197,7 +211,7 @@ Options:
 - `--version 0.30.x`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
-- `--frontends L,L...`: comma-separated list of frontends to install (`go`, `rust`, `cpp`, `csharp`, `java`, `ts`, `py`, `cobol`, `sql`, `ps`)
+- `--frontends L,L...`: comma-separated list of frontends to install (`go`, `rust`, `cpp`, `csharp`, `java`, `ts`, `py`, `cobol`, `sql`, `ps`, `terraform`)
 - `--all`: install scanner and all frontends
 - `--force`: overwrite existing files without prompting
 - `--uninstall [component...]`: remove specific components or the entire install
@@ -283,8 +297,9 @@ installed, and an auto-detected scan (no `--language`) also includes every
 `.opencode/agents/` definition when `agentfrontend` is installed — the
 definitions landing as `Agent` nodes. `--language` accepts one or more
 comma-separated values: `java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`,
-`cobol`, `sql`, `ps`; PowerShell (`ps`) claims `.ps1`/`.psm1`/`.psd1` in any
-letter case.
+`cobol`, `sql`, `ps`, `terraform`; PowerShell (`ps`) claims `.ps1`/`.psm1`/`.psd1` in any
+letter case, and Terraform (`terraform`) claims the Terraform and OpenTofu files
+listed under Features in any letter case.
 
 ```
 apg scan
@@ -742,7 +757,7 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`, `ps`;
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`, `ps`, `terraform`;
 `0` to skip all; `struct` is the bundled structural scanner and `agent` the
 agent-definition frontend) to
 limit what build.rs compiles — the split brew formulae rely on this.
@@ -819,6 +834,7 @@ src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo proje
 src/cobollib/        COBOL scanner (hand-written COBOL parser; separate Cargo project)
 src/sqllib/          T-SQL scanner (ScriptDom; separate .NET project)
 src/pslib/           PowerShell scanner (woodruffw-trough-tree-sitter-powershell; separate Cargo project)
+src/terraformlib/     Terraform scanner — .tf/.tf.json/.tfvars/.tofu/.tftest.hcl/.terraform.lock.hcl (hcl-edit; standalone Cargo project)
 src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML (incl. MSBuild .csproj/.vbproj/.vcxproj/.sqlproj/.props/.targets, .config/.resx)/sln/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
 src/agentlib/        bundled agent-definition frontend — `.opencode/agents/*.md` → Agent nodes (standalone non-workspace Rust crate)
 opencode-suite/      install template for `apg init` (plugins/, lib/, agents/; embedded in src/main.rs)
@@ -834,6 +850,7 @@ Formula/apg-py.rb      Python scanner frontend
 Formula/apg-cobol.rb   COBOL scanner frontend
 Formula/apg-sql.rb     T-SQL scanner frontend
 Formula/apg-ps.rb      PowerShell scanner frontend
+Formula/apg-terraform.rb Terraform scanner frontend
 ```
 
 ## License
