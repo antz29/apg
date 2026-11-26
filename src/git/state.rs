@@ -978,8 +978,8 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
     }
 }
 
-/// The refusal message for a stale DB, or `None` when the snapshot's verdict is
-/// fresh (or N/A).
+/// The refusal message for a stale DB **or a named contention**, or `None` when
+/// the snapshot's verdict is fresh (or N/A).
 ///
 /// **One** [`freshness_snapshot`] call supplies everything the message renders —
 /// the verdict, the captured current [`GitState`], the recorded
@@ -988,7 +988,7 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
 /// [`Stale`](FreshnessSnapshot::Stale) verdict always carries a non-empty
 /// `differing`, so the message always names at least one differing input.
 ///
-/// The exact shape (stable — pinned by tests):
+/// The exact stale shape (stable — pinned by tests):
 ///
 /// `graph is stale (recorded <rec>, current <cur>; differing: <labels>) — run `apg scan` before mutating`
 ///
@@ -997,24 +997,43 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
 /// by `, `: `database`, `socket`, `git sha`, `recorded scan`, `pending state`,
 /// `schema`, `authored digest`, `content key`, `sha`, `cleanliness`. A snapshot
 /// with no recorded row (the `socket`/`recorded scan` stales) records `-@-`.
+///
+/// A [`Contended`](FreshnessSnapshot::Contended) verdict renders the named
+/// contention instead, naming the database path and the waited/budget pair:
+///
+/// `database `<path>` is unreadable — waited <waited> of a <budget> budget for the contention to clear; retry once the other process finishes (a stale-graph scan is not the fix)`
+///
+/// A contended message never says `graph is stale` and never asks for
+/// `apg scan` — re-running the scan is not the fix for another process holding
+/// the database.
 pub fn refusal_message(apg_root: &Path) -> Option<String> {
-    let FreshnessSnapshot::Stale {
-        current,
-        recorded,
-        differing,
-    } = freshness_snapshot(apg_root)
-    else {
-        return None;
-    };
-    let rec = match recorded {
-        Some(rec) => state_str(Some(&rec.sha), rec.clean),
-        None => state_str(None, false),
-    };
-    let cur = state_str(current.sha.as_deref(), current.clean);
-    Some(format!(
-        "graph is stale (recorded {rec}, current {cur}; differing: {}) — run `apg scan` before mutating",
-        differing.join(", ")
-    ))
+    match freshness_snapshot(apg_root) {
+        FreshnessSnapshot::Stale {
+            current,
+            recorded,
+            differing,
+        } => {
+            let rec = match recorded {
+                Some(rec) => state_str(Some(&rec.sha), rec.clean),
+                None => state_str(None, false),
+            };
+            let cur = state_str(current.sha.as_deref(), current.clean);
+            Some(format!(
+                "graph is stale (recorded {rec}, current {cur}; differing: {}) — run `apg scan` before mutating",
+                differing.join(", ")
+            ))
+        }
+        FreshnessSnapshot::Contended {
+            database,
+            waited,
+            budget,
+            ..
+        } => Some(format!(
+            "database `{}` is unreadable — waited {waited:?} of a {budget:?} budget for the contention to clear; retry once the other process finishes (a stale-graph scan is not the fix)",
+            database.display()
+        )),
+        FreshnessSnapshot::Fresh { .. } | FreshnessSnapshot::NotApplicable { .. } => None,
+    }
 }
 
 /// The one-line staleness summary `apg scan` prints (requirement 5): recorded
