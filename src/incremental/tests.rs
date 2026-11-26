@@ -125,18 +125,33 @@ mod unit {
         assert_eq!(language_of(".gitconfig"), "ini");
         assert_eq!(language_of(".env"), "ini");
         assert_eq!(language_of(".env.local"), "ini");
-        // Terraform extensions map to the `terraform` language id; the
-        // `.tf.json` double extension is caught ahead of the `.json` arm so
-        // the JSON serialisation format is claimed by the Terraform frontend,
-        // not the structural `json` stream.
-        assert_eq!(language_of("main.tf"), "terraform");
-        assert_eq!(language_of("main.tf.json"), "terraform");
-        assert_eq!(language_of("main.tofu"), "terraform");
-        assert_eq!(language_of("config.hcl"), "terraform");
-        assert_eq!(language_of("prod.tfvars"), "terraform");
-        // Bicep extensions map to the `bicep` language id.
+        // Every Terraform-claimed suffix maps to `terraform` in any letter
+        // case; compound `.json`/`.hcl` suffixes win over the json/misc arms.
+        for p in [
+            "main.tf",
+            "main.tf.json",
+            "prod.tfvars",
+            "prod.tfvars.json",
+            "main.tofu",
+            "main.tofu.json",
+            "t/a.tftest.hcl",
+            "t/a.tofutest.hcl",
+            ".terraform.lock.hcl",
+            "MAIN.TF",
+            "Main.Tf.Json",
+            "PROD.TFVARS.JSON",
+            "A.TOFUTEST.HCL",
+            ".TERRAFORM.LOCK.HCL",
+        ] {
+            assert_eq!(language_of(p), "terraform", "{p}");
+        }
+        // Outside the claim: a plain `.hcl` is residual misc, `.json` is json.
+        assert_eq!(language_of("packer.hcl"), "misc");
+        assert_eq!(language_of("x.json"), "json");
+        // Bicep extensions map to `bicep` in any letter case.
         assert_eq!(language_of("main.bicep"), "bicep");
         assert_eq!(language_of("main.bicepparam"), "bicep");
+        assert_eq!(language_of("MAIN.BICEPPARAM"), "bicep");
         // The residual — unknown extension, extension-less, dotfile, fixture
         // or binary — is the `misc` stream, matching the scanner's residual.
         assert_eq!(language_of("x.unknown"), "misc");

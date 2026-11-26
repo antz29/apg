@@ -77,10 +77,20 @@ pub fn language_of(rel: &str) -> &'static str {
     {
         return "ini";
     }
-    // Terraform's JSON serialisation format — the `.json` extension would
-    // otherwise route to the structural `json` stream ahead of the Terraform
-    // frontend.
-    if name.ends_with(".tf.json") {
+    // Terraform's compound suffixes (any letter case — `name` is lowercased):
+    // their last extension (`.json`/`.hcl`) would otherwise route to the
+    // structural `json` stream or the residual `misc`.
+    if [
+        ".tf.json",
+        ".tfvars.json",
+        ".tofu.json",
+        ".tftest.hcl",
+        ".tofutest.hcl",
+        ".terraform.lock.hcl",
+    ]
+    .iter()
+    .any(|s| name.ends_with(s))
+    {
         return "terraform";
     }
     match ext {
@@ -135,8 +145,20 @@ pub fn language_of(rel: &str) -> &'static str {
         // Any letter case (`Legacy.SLN`), like `stream_for_path`'s lowercasing.
         _ if ext.eq_ignore_ascii_case("sln") => "sln",
         "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
-        "tf" | "tofu" | "hcl" | "tfvars" => "terraform",
-        "bicep" | "bicepparam" => "bicep",
+        // Terraform/OpenTofu and Bicep in any letter case (`.TF`, `.BICEPPARAM`);
+        // a plain `.hcl` stays in the residual `misc`.
+        _ if ["tf", "tfvars", "tofu"]
+            .iter()
+            .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "terraform"
+        }
+        _ if ["bicep", "bicepparam"]
+            .iter()
+            .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "bicep"
+        }
         _ => "misc",
     }
 }
