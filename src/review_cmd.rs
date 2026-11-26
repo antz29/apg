@@ -414,6 +414,10 @@ pub fn set_feedback_at(
 /// `Reviews` reference at all is marked `(no target)` — every record is
 /// reported, never skipped.
 ///
+/// The reviewed-target read-model is read through the **read-only** database
+/// class ([`artifacts::ArtifactDb::open_read_only`]), so listing feedback takes
+/// no exclusive read-write class a concurrent reader or writer needs.
+///
 /// The output stays the CSV the suite's `apg_review` tool consumes — the same
 /// four columns: `f.fqn,f.status,f.disposition,n.fqn`.
 fn review_list(args: &[String]) -> anyhow::Result<()> {
@@ -436,7 +440,9 @@ fn review_list(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let db = artifacts::ArtifactDb::open(&apg_root)?;
+    // `review list` is a verdict read; the read-only class keeps a concurrent
+    // `apg query`/`plan verify`/session reader unblocked.
+    let db = artifacts::ArtifactDb::open_read_only(&apg_root)?;
     println!("f.fqn,f.status,f.disposition,n.fqn");
     for r in &records {
         let Record::Feedback {
