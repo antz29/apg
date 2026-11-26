@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "freshness-read-failure-omits-transient-terminal-kind",
+  "body": "`FreshnessReadFailure` deliberately does not record whether the final failure was transient or terminal; downstream distinguishes them, if ever needed, by calling `is_transient_read_error(&failure.source)`, so upgrade only if a render or gate task needs that distinction without re-walking the message.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.FreshnessReadFailure",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
