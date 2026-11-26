@@ -187,6 +187,20 @@ mod e2e {
         let record = |store: &std::path::Path, sha: &str, manifest: Manifest| {
             std::fs::create_dir_all(store).unwrap();
             manifest.save(store).unwrap();
+            // Model a COMPLETE store: a fact unit per recorded manifest file,
+            // so `prepare`'s per-file completeness promotion re-emits none of
+            // them (the empty-manifest cases add no unit and are unaffected).
+            let mut facts = FactStore::at(store.to_path_buf()).load();
+            for (rel, oid) in &manifest.entries {
+                let frag = FileFragment {
+                    rel_path: rel.clone(),
+                    blob_oid: oid.clone(),
+                    lang: language_of(rel).to_string(),
+                    ..Default::default()
+                };
+                facts.put(&frag, &manifest.root, &key).unwrap();
+            }
+            facts.save_index().unwrap();
             ScanRecord {
                 sha: sha.to_string(),
                 cache_key: key.clone(),
@@ -878,6 +892,21 @@ mod e2e {
             std::fs::create_dir_all(&store).unwrap();
             let manifest = Manifest::build(&repo_dir);
             manifest.save(&store).unwrap();
+            // Model a COMPLETE store: a fact unit per manifest file, so
+            // `prepare`'s per-file completeness promotion re-emits none of the
+            // unchanged files. Only the whole-tree ps widening then moves ps
+            // files into the target set.
+            let mut facts = FactStore::at(store.clone()).load();
+            for (rel, oid) in &manifest.entries {
+                let frag = FileFragment {
+                    rel_path: rel.clone(),
+                    blob_oid: oid.clone(),
+                    lang: language_of(rel).to_string(),
+                    ..Default::default()
+                };
+                facts.put(&frag, &repo_dir.to_string_lossy(), &key).unwrap();
+            }
+            facts.save_index().unwrap();
             ScanRecord {
                 sha,
                 cache_key: key.clone(),
