@@ -281,13 +281,16 @@ pub(crate) fn root_edge_endpoint(
     if has_module_prefix(identities, endpoint) {
         return root_module_fqn(language, endpoint, base);
     }
-    // A terraform root-level resource endpoint (`aws_vpc.main`) names the empty
-    // root module, as a COBOL root-level declaration does below.
+    // A terraform root-level endpoint names the empty root module: a retargeted
+    // key already carries its scope dot (`.var.v` → `terraform..var.v`), a bare
+    // name (`aws_vpc.main`) gets one.
     if language == "terraform" && identities.contains("") {
-        return format!(
-            "{}.{endpoint}",
-            rooted_scope(language, "", module_identities, base)
-        );
+        let root = rooted_scope(language, "", module_identities, base);
+        return if endpoint.starts_with('.') {
+            format!("{root}{endpoint}")
+        } else {
+            format!("{root}.{endpoint}")
+        };
     }
     // A COBOL root-level declaration (`PROG`, `PROG.MAIN-PARA`) names the empty
     // root module, which no `/`/`.` prefix can match.

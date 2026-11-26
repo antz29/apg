@@ -440,6 +440,42 @@ mod unit {
         assert_eq!(root_module_fqn("ps", "ps1", base), "ps.ps1");
     }
 
+    /// terraform `--targets` retarget: a dropped root-module Struct is keyed
+    /// `<parent>.<name>` with the empty root parent (`.var.v`), and renders
+    /// `terraform..var.v`, the real Struct FQN; the root Struct's scope is the
+    /// root module `terraform.`. A nested-module key (`net.var.v`) renders
+    /// `terraform.net.var.v`, and an opaque `tf3` id is never rooted.
+    #[test]
+    fn terraform_root_retarget_renders_the_real_struct_fqn() {
+        let base = Path::new("/repo");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "terraform".to_string(),
+            HashSet::from(["".to_string(), "net".to_string()]),
+        )]);
+        assert_eq!(rooted_scope("terraform", "", &ids, base), "terraform.");
+        assert_eq!(
+            format!("{}.var.v", rooted_scope("terraform", "", &ids, base)),
+            "terraform..var.v"
+        );
+        assert_eq!(
+            root_edge_endpoint("terraform", ".var.v", &ids, base),
+            "terraform..var.v"
+        );
+        assert_eq!(
+            root_edge_endpoint("terraform", "aws_vpc.main", &ids, base),
+            "terraform..aws_vpc.main"
+        );
+        assert_eq!(
+            root_edge_endpoint("terraform", "net.var.v", &ids, base),
+            "terraform.net.var.v"
+        );
+        assert_eq!(root_edge_endpoint("terraform", "tf3", &ids, base), "tf3");
+        assert_eq!(
+            root_stream_edge_endpoint("terraform", "tf3", |_| false, &ids, base),
+            "tf3"
+        );
+    }
+
     /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
     /// `repo_relative_identity` renders a scanner path relative to the
     /// git-toplevel base (the scan root is the non-git fallback),
