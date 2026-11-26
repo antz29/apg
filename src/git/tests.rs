@@ -282,4 +282,99 @@ mod unit {
             "an empty collection folds to the head-only key"
         );
     }
+
+    /// unit tier -- pure in-memory: `classify_freshness` folds constructed
+    /// facts only (no git, filesystem, database or process). Pins that no
+    /// database or no HEAD sha is `NotApplicable` carrying the precondition's
+    /// labels through unchanged, an empty difference set is `Fresh`, and a
+    /// non-empty one is `Stale` carrying exactly those labels in order.
+    #[test]
+    fn classify_freshness_maps_not_applicable_fresh_and_stale() {
+        let current = || GitState {
+            sha: Some("0123456789abcdef0123456789abcdef01234567".into()),
+            clean: true,
+            content_key: Some("0123456789abcdef".into()),
+        };
+        let recorded = || RecordedScan {
+            sha: "0123456789abcdef0123456789abcdef01234567".into(),
+            clean: true,
+            content_key: Some("0123456789abcdef".into()),
+            modules: String::new(),
+        };
+
+        // No database: N/A even with a captured HEAD sha; the precondition's
+        // label passes through unchanged.
+        assert_eq!(
+            classify_freshness(current(), Some(recorded()), false, vec!["database"]),
+            FreshnessSnapshot::NotApplicable {
+                current: current(),
+                recorded: Some(recorded()),
+                differing: vec!["database"],
+            }
+        );
+        // Database present but no HEAD sha (no repo / unborn HEAD): N/A.
+        let unborn = GitState {
+            sha: None,
+            clean: false,
+            content_key: None,
+        };
+        assert_eq!(
+            classify_freshness(unborn.clone(), None, true, vec!["git sha"]),
+            FreshnessSnapshot::NotApplicable {
+                current: unborn,
+                recorded: None,
+                differing: vec!["git sha"],
+            }
+        );
+        // Database + HEAD + nothing differing is Fresh.
+        assert_eq!(
+            classify_freshness(current(), Some(recorded()), true, vec![]),
+            FreshnessSnapshot::Fresh {
+                current: current(),
+                recorded: Some(recorded()),
+            }
+        );
+        // Database + HEAD + differences is Stale, labels exactly in order.
+        assert_eq!(
+            classify_freshness(current(), Some(recorded()), true, vec!["sha", "clean"]),
+            FreshnessSnapshot::Stale {
+                current: current(),
+                recorded: Some(recorded()),
+                differing: vec!["sha", "clean"],
+            }
+        );
+    }
+
+    /// unit tier -- pure in-memory: the freshness invariant is pinned on the
+    /// constructed verdicts — an empty difference set can never be `Stale`
+    /// (it is `Fresh`), and every `Stale` verdict carries a non-empty
+    /// `differing` list, so a stale result always names a differing input.
+    #[test]
+    fn classify_freshness_stale_always_names_a_differing_input() {
+        let current = GitState {
+            sha: Some("0123456789abcdef0123456789abcdef01234567".into()),
+            clean: true,
+            content_key: Some("0123456789abcdef".into()),
+        };
+        assert!(matches!(
+            classify_freshness(current.clone(), None, true, vec![]),
+            FreshnessSnapshot::Fresh { .. }
+        ));
+        for labels in [
+            vec!["sha"],
+            vec!["sha", "clean"],
+            vec!["sha", "clean", "content", "modules"],
+        ] {
+            match classify_freshness(current.clone(), None, true, labels.clone()) {
+                FreshnessSnapshot::Stale { differing, .. } => {
+                    assert!(
+                        !differing.is_empty(),
+                        "a stale verdict always names at least one differing input"
+                    );
+                    assert_eq!(differing, labels, "stale labels carry through in order");
+                }
+                other => panic!("expected Stale for {labels:?}, got {other:?}"),
+            }
+        }
+    }
 }
