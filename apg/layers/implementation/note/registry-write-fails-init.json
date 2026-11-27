@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "registry-write-fails-init",
+  "body": "A failure to open or write the project registry aborts apg init with the registry path named in the error rather than degrading to a warning; make the write best-effort like the migration-guide write when init must tolerate an unwritable or corrupt registry.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.install.cmd_init",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
