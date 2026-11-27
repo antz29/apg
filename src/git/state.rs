@@ -325,6 +325,9 @@ pub enum FreshnessSnapshot {
         database: PathBuf,
         waited: Duration,
         budget: Duration,
+        /// The underlying read failure, rendered (`{:#}`) so a refusal site
+        /// names the cause from this one snapshot instead of re-probing.
+        cause: String,
     },
 }
 
@@ -788,6 +791,7 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
             database: failure.database,
             waited: failure.waited,
             budget: failure.budget,
+            cause: format!("{:#}", failure.source),
         },
     }
 }
@@ -970,6 +974,7 @@ pub fn freshness_differences_with(
             database: failure.database,
             waited: failure.waited,
             budget: failure.budget,
+            cause: format!("{:#}", failure.source),
         },
     }
 }
