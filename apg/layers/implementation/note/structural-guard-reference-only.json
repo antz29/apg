@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "structural-guard-reference-only",
+  "body": "The suite-tools structural guard is a substring check over the embedded suite source, so it pins constant references rather than ordering or behaviour; upgrade by adding behavioural assertions if the discriminant logic grows beyond the three startsWith arms.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.main_e2e.e2e.suite_tools_query_error_guard_is_structural",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

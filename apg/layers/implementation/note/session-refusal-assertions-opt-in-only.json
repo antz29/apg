@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "session-refusal-assertions-opt-in-only",
+  "body": "The boundary e2e asserts a worktree-less startDetachedSession refusal only under APG_SUITE_E2E=1, so the default gate does not exercise it; upgrade by wiring the suite boundary e2e into the default gate if the refusal must be pinned on every run.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.startDetachedSession",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

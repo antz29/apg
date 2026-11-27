@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "no-db-error-orphaned-export",
+  "body": "NO_DB_ERROR no longer has a producer in the suite library, because deriving the root from the resolve verb alone removed its last one, and it survives as an exported constant pinned by the unit test and isQueryError; upgrade by removing the export and its isQueryError arm once no external consumer needs it, in a release that may drop the legacy signal.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.isQueryError",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
