@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "contention-reachable-only-via-real-unreadable-db",
-  "body": "The freshness contention arm is reachable only through a genuinely locked or unreadable `db.lbug`, and the retry budget is the fixed `FRESHNESS_READ_BUDGET` constant — the sleeper is injected but the budget is not; upgrade by making the budget an injectable parameter if a test ever needs to drive exhaustion deterministically.",
+  "body": "The freshness contention arm has no honest end-to-end trigger: lbug admits a read-only freshness open beside a held read-write `db.lbug` (in-process and cross-process), so the read stays `Fresh` and contention requires a real read error; the retried branch is reached only through the injected sleeper in the unit tier, and the retry budget is the fixed `FRESHNESS_READ_BUDGET` (the sleeper is injectable, the budget is not). Upgrade if lbug gains a read-only lock, the freshness read gains a read-write contention path, or the budget must become injectable to drive exhaustion deterministically.",
   "properties": {},
   "out": [
     {
