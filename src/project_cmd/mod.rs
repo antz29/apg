@@ -36,6 +36,11 @@
 //!   shared phase-1 helpers; the default branch and the main checkout are
 //!   never touched (never-touch-default-branch).
 //!
+//! - `apg project resolve <name>` — print the registered worktree path for
+//!   `<name>` on stdout, reading the main checkout's registry. A missing or
+//!   unregistered row is refused naming the project, the registry path and the
+//!   registered project names.
+//!
 //! The cohesive groups live in submodules — the start path ([`start`]), the
 //! merge path ([`merge`]), the abandon path ([`delete`]), and the start-time
 //! toolchain-cache seeder ([`cache_copy`]) — all re-exported here so
@@ -43,6 +48,7 @@
 
 use std::path::PathBuf;
 
+use crate::git;
 use crate::specs;
 
 pub mod cache_copy;
@@ -65,17 +71,62 @@ pub(crate) use delete::project_delete;
 pub(crate) use merge::project_merge;
 pub(crate) use start::project_start;
 
-/// `apg project <start|merge|delete> …`.
+/// `apg project <start|merge|delete|resolve> …`.
 pub fn cmd_project(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg project <start|merge|delete> …");
+        anyhow::bail!("usage: apg project <start|merge|delete|resolve> …");
     };
     match sub {
         "start" => project_start(&args[1..]),
         "merge" => project_merge(&args[1..]),
         "delete" => project_delete(&args[1..]),
+        "resolve" => project_resolve(&args[1..]),
         other => anyhow::bail!("unknown apg project subcommand: {other}"),
     }
+}
+
+/// `apg project resolve <name>` — print the registered worktree path on stdout,
+/// and nothing else. Reads the **main** checkout's registry, so it works from
+/// the main checkout and from inside any project worktree. Read-only: a missing
+/// registry file is an empty registry and is never created here.
+pub(crate) fn project_resolve(args: &[String]) -> anyhow::Result<()> {
+    let Some(name) = args.first() else {
+        anyhow::bail!("usage: apg project resolve <name>");
+    };
+    let apg_root = require_apg_root()?;
+    let identity = git::repo_identity(&apg_root)?;
+    let registry_path = crate::registry::registry_path(&identity.main_root);
+    let registry = if registry_path.exists() {
+        Some(crate::registry::Registry::open(&registry_path)?)
+    } else {
+        None
+    };
+    let entry = match &registry {
+        Some(registry) => registry.get(name)?,
+        None => None,
+    };
+    let Some(entry) = entry else {
+        let mut names: Vec<String> = match &registry {
+            Some(registry) => registry
+                .entries()?
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect(),
+            None => Vec::new(),
+        };
+        names.sort();
+        let registered = if names.is_empty() {
+            "<none>".to_string()
+        } else {
+            names.join(", ")
+        };
+        anyhow::bail!(
+            "refused: project `{name}` is not registered in the project registry `{reg}` (registered projects: {registered}). Fix: start it with `apg project start {name}`, or rebuild the registry from the worktree list with `apg project reconstruct`.",
+            reg = registry_path.display()
+        );
+    };
+    println!("{}", entry.worktree.display());
+    Ok(())
 }
 
 /// The layout root of the checkout the process runs in (walk-up discovery).
