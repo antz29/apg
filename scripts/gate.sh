@@ -215,12 +215,13 @@ step
 # modes until it is classified here (see the header's E2E SELECTION note).
 HERMETIC_E2E_EXCLUDES=(
   # The per-language acceptance binaries: every scenario in each spawns
-  # that language's frontend (cobol/csharp/ps/sql/terraform respectively).
+  # that language's frontend (cobol/csharp/ps/sql/terraform/bicep respectively).
   cobol_scan_e2e
   csharp_scan_e2e
   ps_scan_e2e
   sql_scan_e2e
   terraform_scan_e2e
+  bicep_scan_e2e
 
   # main_e2e — Go fixtures (auto-detected, or an explicit `--language go`):
   # each scan spawns gofrontend.
