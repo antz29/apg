@@ -9,12 +9,22 @@ use super::{load_plan, require_apg_root};
 
 /// `apg plan render <project> [--out <path>|-]` — PLAN.md-style markdown with
 /// the strategy, the phase table, and each phase's tasks as a checkable list.
+/// With `APG_PROJECT` present the read renders the registered worktree's plan
+/// store; with the binding absent it renders the cwd-resolved checkout.
 pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
         anyhow::bail!("usage: apg plan render <project> [--out <path>|-]");
     };
     let apg_root = require_apg_root()?;
+    // The env-gated project binding (phase-02): a bound read renders the
+    // registered project's own plan store, so `APG_PROJECT` present redirects
+    // the store root (and the default `--out` path) to the row's worktree.
+    // With the binding absent the cwd-resolved checkout is unchanged.
+    let apg_root = match crate::registry::require_project(&apg_root)? {
+        Some(row) => row.worktree.join(specs::LAYOUT),
+        None => apg_root,
+    };
     let records = load_plan(&apg_root, project)?;
     let Some((title, strategy)) = records.iter().find_map(|r| match r {
         Record::Plan {
