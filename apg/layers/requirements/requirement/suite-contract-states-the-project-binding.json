@@ -1,0 +1,27 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "suite-contract-states-the-project-binding",
+  "body": "Every suite tool description, the suite documentation and the distributed agent templates state the required `project` name, the absent `directory` input and the claim verb.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.agent-navigation",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    }
+  ]
+}

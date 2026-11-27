@@ -15,12 +15,22 @@
     },
     {
       "kind": "contains",
+      "target": "domain.service.project-authorisation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.service.project-context-guard",
       "properties": {}
     },
     {
       "kind": "contains",
       "target": "domain.service.project-integration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.project-registry",
       "properties": {}
     }
   ],

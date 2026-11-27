@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ownerless-project-refuses-until-claimed",
+  "body": "A reconstructed or ownerless project other than the built-in `main` row refuses every use, naming the project and stating that a claim is required, until a session claims it.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-authorisation",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

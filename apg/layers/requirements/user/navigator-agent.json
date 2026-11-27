@@ -32,17 +32,17 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
       "target": "requirements.requirement.cache-copy-policy-falls-back-to-a-copy",
       "properties": {}
     },
     {
       "kind": "requires",
       "target": "requirements.requirement.cached-fact-assembly-is-warm-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.call-authorised-by-owner-or-ancestor",
       "properties": {}
     },
     {
@@ -78,6 +78,16 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.freshness-checks-the-computed-git-state",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.freshness-doc-names-the-not-applicable-labels",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.freshness-presence-probe-distinguishes-errors",
       "properties": {}
     },
     {
@@ -127,6 +137,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.main-registered-explicitly",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.merge-lands-with-a-current-graph",
       "properties": {}
     },
@@ -138,6 +153,11 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.merge-validates-against-the-branch-database",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.missing-worktree-database-is-a-named-failure",
       "properties": {}
     },
     {
@@ -192,6 +212,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.ownerless-project-refuses-until-claimed",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
       "properties": {}
     },
@@ -222,6 +247,36 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.project-claim-transfers-ownership",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-owned-by-one-navigator-session",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-registry-lifecycle",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-registry-one-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-registry-reconstructible",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.project-registry-store",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.project-start-clones-the-toolchain-cache",
       "properties": {}
     },
@@ -233,6 +288,16 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.read-only-verdicts-open-the-database-read-only",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.registered-project-validated-every-call",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.registry-failure-refuses-instead-of-falling-back",
       "properties": {}
     },
     {
@@ -288,6 +353,21 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.still-planned-node-keeps-node-and-edges",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.suite-directory-input-removed",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.suite-project-input-required",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.suite-resolves-worktree-through-the-binary",
       "properties": {}
     },
     {

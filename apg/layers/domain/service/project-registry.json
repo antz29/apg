@@ -1,0 +1,91 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "project-registry",
+  "body": "The capability that keeps the main checkout's local project registry — each project's worktree, branch, owner session and creation time — and resolves a suite call to exactly one validated registered project.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.main-registered-explicitly",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.missing-worktree-database-is-a-named-failure",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-registry-lifecycle",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-registry-one-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-registry-reconstructible",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-registry-store",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.registered-project-validated-every-call",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.registry-failure-refuses-instead-of-falling-back",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-project-input-required",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-resolves-worktree-through-the-binary",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.project-context",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.cli-session-lifecycle-guards",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-merge-integrator",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-start-seeder",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.tool-path-resolution",
+      "properties": {}
+    }
+  ]
+}

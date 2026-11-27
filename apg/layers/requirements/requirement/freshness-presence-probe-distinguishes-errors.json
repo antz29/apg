@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-presence-probe-distinguishes-errors",
+  "body": "A freshness presence probe reads `NotFound` alone as an absent database, while every other filesystem error reaches the verdict, the freshness predicate and the scan preamble as a named read failure.",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

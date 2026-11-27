@@ -7,6 +7,16 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.concurrent-reader-acceptance-tears-down-on-every-path",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.concurrent-reader-overlap-assertion-is-observed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.concurrent-reader-verify-acceptance",
       "properties": {}
     },

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "main-registered-explicitly",
+  "body": "`apg init` registers the built-in `main` project resolving to the main checkout, whose reads are allowed and whose mutations the default-branch guard refuses, and every tool reaches main through that named project.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-registry",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

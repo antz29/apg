@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "registered-project-validated-every-call",
+  "body": "Every suite call validates the project's registry row, whose worktree is an existing linked worktree of this repository on branch `<name>`, and a mismatch or a missing row refuses naming the project, worktree and branch.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-registry",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "missing-worktree-database-is-a-named-failure",
+  "body": "A missing worktree database surfaces as a named read-or-open failure carrying the project and its worktree path, and the read stops there rather than reaching another checkout's database.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-registry",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

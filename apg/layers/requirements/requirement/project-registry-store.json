@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "project-registry-store",
+  "body": "A main-checkout redb database at `apg/.trans/projects.db` maps each project name to its worktree, branch, owner session and creation time, and stays binary-owned, local, disposable and outside version control.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-registry",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

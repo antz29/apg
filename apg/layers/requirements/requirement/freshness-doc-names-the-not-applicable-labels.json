@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-doc-names-the-not-applicable-labels",
+  "body": "The freshness-differences documentation names `database` and `git sha` as its NotApplicable precondition labels and `socket` as a differing input that reaches the stale verdict while a HEAD sha is present.",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

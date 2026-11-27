@@ -44,6 +44,11 @@
       "kind": "realises",
       "target": "domain.service.project-context-guard",
       "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-registry",
+      "properties": {}
     }
   ],
   "in": [

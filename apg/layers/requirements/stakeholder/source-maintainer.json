@@ -7,6 +7,16 @@
   "out": [
     {
       "kind": "requires",
+      "target": "requirements.requirement.concurrent-reader-acceptance-tears-down-on-every-path",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.concurrent-reader-overlap-assertion-is-observed",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.decomposed-source-modules",
       "properties": {}
     },

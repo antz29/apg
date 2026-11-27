@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "suite-acts-only-on-its-bound-project",
+  "body": "A suite tool acts only on the registered project it is given, validated against the registry and the caller's session, with no path input and no implicit main.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

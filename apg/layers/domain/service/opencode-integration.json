@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.bookkeeping-tool-directory-names-project-worktree",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.generated-agent-shell-single-command-rule",
       "properties": {}
     },
@@ -113,6 +108,26 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-contract-states-the-project-binding",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-directory-input-removed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-project-input-required",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-resolves-worktree-through-the-binary",
       "properties": {}
     },
     {

@@ -7,12 +7,12 @@
   "out": [
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.review-mutations-guard-before-target-resolution",
+      "target": "requirements.requirement.bookkeeping-write-funnel-retains-guard",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.plan-mutations-guard-before-store-resolution",
+      "target": "requirements.requirement.main-checkout-reads-stay-legal",
       "properties": {}
     },
     {
@@ -22,7 +22,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.bookkeeping-write-funnel-retains-guard",
+      "target": "requirements.requirement.plan-mutations-guard-before-store-resolution",
       "properties": {}
     },
     {
@@ -32,7 +32,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.main-checkout-reads-stay-legal",
+      "target": "requirements.requirement.review-mutations-guard-before-target-resolution",
       "properties": {}
     }
   ],
@@ -44,17 +44,7 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.opencode-tool-plugin",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.review-command-surface",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.project-context-guard",
+      "source": "solution.component.cli-session-lifecycle-guards",
       "properties": {}
     },
     {
@@ -64,22 +54,32 @@
     },
     {
       "kind": "realises",
-      "source": "solution.component.cli-session-lifecycle-guards",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
-      "source": "solution.component.spec-lint",
-      "properties": {}
-    },
-    {
-      "kind": "realises",
       "source": "solution.component.feedback-projection",
       "properties": {}
     },
     {
       "kind": "realises",
+      "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "source": "solution.component.project-start-seeder",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.review-command-surface",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.spec-lint",
       "properties": {}
     }
   ]

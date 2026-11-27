@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "opencode-lib-context",
-  "body": "The shared plumbing's opencode-2.x context adaptation: it sources the load location from the plugin context, keeps the caller's directory authoritative, and models the executor context carrying the acting agent's identity and edit scope.",
+  "body": "The shared plumbing's opencode-2.x context adaptation: it sources the session identity, the acting agent, the parent chain and the edit scope from the plugin context, and runs each command in the registered project's worktree.",
   "properties": {},
   "out": [
     {
@@ -28,6 +28,11 @@
     {
       "kind": "realises",
       "target": "domain.service.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-authorisation",
       "properties": {}
     }
   ],

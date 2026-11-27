@@ -6,18 +6,13 @@
   "properties": {},
   "out": [
     {
-      "kind": "realises",
-      "target": "domain.service.project-context-guard",
+      "kind": "implemented-by",
+      "target": "rust.apg.git.identity.membership_refusal",
       "properties": {}
     },
     {
       "kind": "implemented-by",
       "target": "rust.apg.git.identity.require_project_context",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.git.identity.membership_refusal",
       "properties": {}
     },
     {
@@ -28,6 +23,21 @@
     {
       "kind": "is-role",
       "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-authorisation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-context-guard",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-registry",
       "properties": {}
     }
   ],

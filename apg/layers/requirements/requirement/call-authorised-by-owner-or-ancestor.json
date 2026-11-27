@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "call-authorised-by-owner-or-ancestor",
+  "body": "A suite call is authorised only when the caller's session owns the project or the owner lies in the caller's parentID chain, with the built-in `main` row readable by every session and every other caller refused naming project and owner.",
+  "properties": {
+    "feature": "project-registry"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.project-authorisation",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
+}

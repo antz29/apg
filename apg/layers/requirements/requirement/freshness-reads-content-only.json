@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "freshness-reads-content-only",
-  "body": "Freshness compares the tree's content, never its mtime: an unchanged tree and a touched byte-identical file are fresh, one changed byte is stale, and ignored content is outside the verdict.",
+  "body": "Freshness compares the tree's content, rather than its mtime: an unchanged tree and a touched byte-identical file are fresh, one changed byte is stale, and ignored content is outside the verdict.",
   "properties": {
     "feature": "scan-change-identity"
   },

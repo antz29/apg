@@ -32,12 +32,22 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.freshness-doc-names-the-not-applicable-labels",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
       "properties": {}
     },
     {
       "kind": "driven-by",
       "target": "requirements.requirement.freshness-honours-the-requested-module-selection",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.freshness-presence-probe-distinguishes-errors",
       "properties": {}
     },
     {

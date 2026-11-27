@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "absolute-paths-at-tool-boundary",
-  "body": "Curated suite tools hand consumers absolute filesystem paths while the durable graph stores checkout-independent repo-relative identities, and each tool re-bases a stored identity against the project directory it is given.",
+  "body": "Curated suite tools hand consumers absolute filesystem paths while the durable graph stores checkout-independent repo-relative identities, and each tool re-bases a stored identity against the registered project's worktree.",
   "properties": {
     "feature": "graph-identity"
   },

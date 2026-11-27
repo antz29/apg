@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "tool-path-resolution",
-  "body": "The suite tools' path-resolution component: the shared plumbing that discovers the project root and joins a stored repo-relative identity back to an absolute path, owning the tool side of the relative-absolute boundary.",
+  "body": "The suite tools' path-resolution component: the shared plumbing that resolves a registered project's worktree through the binary, joins a stored repo-relative identity to an absolute path, and owns the tool side of that boundary.",
   "properties": {},
   "out": [
     {
@@ -23,6 +23,11 @@
     {
       "kind": "realises",
       "target": "domain.service.graph-identity",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.project-registry",
       "properties": {}
     }
   ],

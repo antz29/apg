@@ -69,6 +69,11 @@
       "kind": "driven-by",
       "target": "requirements.requirement.research-escalation-triage",
       "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.suite-contract-states-the-project-binding",
+      "properties": {}
     }
   ],
   "in": [

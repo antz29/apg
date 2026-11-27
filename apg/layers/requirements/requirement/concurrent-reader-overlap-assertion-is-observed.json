@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "concurrent-reader-overlap-assertion-is-observed",
+  "body": "The concurrent-reader acceptance test asserts each overlap from a reader interval that truly intersects the verify interval, so a round whose reader intervals end before verify begins fails its overlap assertion.",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "driven-by",
+      "source": "domain.service.plan-verification",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "source": "requirements.stakeholder.source-maintainer",
+      "properties": {}
+    }
+  ]
+}

@@ -147,6 +147,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.suite-contract-states-the-project-binding",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.suite-tool-descriptions-name-live-edge-kinds",
       "properties": {}
     }

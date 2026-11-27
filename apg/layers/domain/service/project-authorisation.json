@@ -1,0 +1,56 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "project-authorisation",
+  "body": "The capability that binds each registered project to one owning navigator session, authorises a call only for that owner or a session in its parentID chain, and transfers ownership on a claim that names the previous owner.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.call-authorised-by-owner-or-ancestor",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ownerless-project-refuses-until-claimed",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-claim-transfers-ownership",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.project-owned-by-one-navigator-session",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.project-context",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-lib-context",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.project-context-guard",
+      "properties": {}
+    }
+  ]
+}

@@ -37,6 +37,11 @@
     },
     {
       "kind": "realises",
+      "target": "domain.service.project-authorisation",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
       "target": "domain.service.research-escalation",
       "properties": {}
     },
