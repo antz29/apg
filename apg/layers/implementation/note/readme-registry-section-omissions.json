@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "readme-registry-section-omissions",
+  "body": "The README's registry paragraph omits resolve and reconstruct from the CLI and init usage blocks, and leaves the merge and delete best-effort removal warning (repaired with reconstruct) undocumented; extend the synopsis and document the warning when users need its operational meaning.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/project_cmd/mod.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
