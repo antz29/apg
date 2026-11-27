@@ -1140,6 +1140,13 @@ export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean
  * coordinator that exits after the handshake leaves a diagnostic instead of
  * vanishing with the tool call.
  *
+ * For a project-bound call (`context.worktree` set by `resolveProjectWorktree`),
+ * the coordinator is spawned in that worktree with the caller's project
+ * environment (`callerEnv`) and no `findApgRoot` walk that could reach another
+ * checkout's database — exactly `runCypher`'s project binding. With no
+ * `context.worktree`, the directory-driven walk-up and inherited environment
+ * are unchanged.
+ *
  * Returns a `DetachedSession` on success, or an error STRING on failure —
  * mirroring the lib's string-or-data subprocess contract (`runCli`): no DB
  * found (`NO_DB_ERROR`), a `start` that exited early (a second session already
@@ -1153,7 +1160,7 @@ export async function startDetachedSession(
   directory?: string,
   options?: StartSessionOptions,
 ): Promise<DetachedSession | string> {
-  const root = findApgRoot(context, directory)
+  const root = context.worktree ?? findApgRoot(context, directory)
   if (!root) return NO_DB_ERROR
   const timeoutMs = options?.timeoutMs ?? 15000
   const pollMs = options?.pollMs ?? 50
@@ -1170,6 +1177,7 @@ export async function startDetachedSession(
   try {
     proc = Bun.spawn([apgBinary(), "session", "start"], {
       cwd: root,
+      ...(context.worktree ? { env: callerEnv(context) } : {}),
       // A truly detached coordinator: `detached: true` calls setsid() on POSIX,
       // so the child starts a new session/process group and outlives this
       // process, independent of its process group.

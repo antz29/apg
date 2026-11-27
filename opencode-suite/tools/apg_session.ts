@@ -1,12 +1,12 @@
 import { Plugin } from "@opencode/plugin"
 import {
-  PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
-  runCli,
+  resolveProjectWorktree,
+  runInProject,
   startDetachedSession,
   type ToolContext,
 } from "../lib/apg.ts"
 
-type ApgSessionInput = { action?: "start" | "save" | "end" | "abort"; directory?: string }
+type ApgSessionInput = { action?: "start" | "save" | "end" | "abort"; project: string }
 
 export default Plugin.define({
   id: "apg_session",
@@ -25,12 +25,12 @@ export default Plugin.define({
               enum: ["start", "save", "end", "abort"],
               description: "Lifecycle step: start (default), save, end, or abort.",
             },
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
           },
-          required: [],
+          required: ["project"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -42,11 +42,13 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const action = input.action ?? "start"
           if (action !== "start") {
-            return { content: await runCli(merged, ["session", action], input.directory) }
+            return { content: await runInProject(merged, ["session", action]) }
           }
-          const session = await startDetachedSession(merged, input.directory)
+          const session = await startDetachedSession(merged)
           if (typeof session === "string") {
             return { content: session }
           }

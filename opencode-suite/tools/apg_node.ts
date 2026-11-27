@@ -1,8 +1,8 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
 type ApgNodeInput = {
-  directory?: string
+  project: string
   action: string
   layer: string
   type: string
@@ -24,9 +24,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             action: { type: "string", description: '"add", "update", or "rm" (required).' },
             layer: {
@@ -56,7 +56,7 @@ export default Plugin.define({
               description: "For update: property keys to delete explicitly (repeatable). Omitting this never drops a key.",
             },
           },
-          required: ["action", "layer", "type", "name"],
+          required: ["project", "action", "layer", "type", "name"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -68,6 +68,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { action, layer, type, name } = input
           if (!action || !layer || !type || !name) {
             return { content: "Error: action, layer, type, and name are required" }
@@ -83,7 +85,7 @@ export default Plugin.define({
           if (action === "update") {
             for (const u of input.unsetProperties ?? []) cli.push("--unset-property", u)
           }
-          return { content: await runCli(merged, cli, input.directory) }
+          return { content: await runInProject(merged, cli) }
         },
       })
     })

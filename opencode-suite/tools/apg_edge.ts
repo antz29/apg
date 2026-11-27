@@ -1,8 +1,8 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
 type ApgEdgeInput = {
-  directory?: string
+  project: string
   action: string
   kind: string
   from: string
@@ -23,9 +23,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             action: { type: "string", description: '"add", "update", or "rm" (required).' },
             kind: {
@@ -51,7 +51,7 @@ export default Plugin.define({
                 "For update: property keys to delete explicitly (repeatable). Omitting this never drops a key.",
             },
           },
-          required: ["action", "kind", "from", "to"],
+          required: ["project", "action", "kind", "from", "to"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -63,6 +63,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { action, kind, from, to } = input
           if (!action || !kind || !from || !to) return { content: "Error: action, kind, from, and to are required" }
           if (action !== "add" && action !== "update" && action !== "rm") {
@@ -75,7 +77,7 @@ export default Plugin.define({
           if (action === "update") {
             for (const u of input.unsetProperties ?? []) cli.push("--unset-property", u)
           }
-          return { content: await runCli(merged, cli, input.directory) }
+          return { content: await runInProject(merged, cli) }
         },
       })
     })
