@@ -5675,4 +5675,224 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    // ------------------------------------------------------------------
+    // project-claim (e2e): `apg project claim` replaces the row's single
+    // owner. Reconstruct leaves every row ownerless (so any bound use is
+    // refused until claimed); a claim reports the previous owner and ends
+    // the previous owner's authorisation.
+    // ------------------------------------------------------------------
+
+    /// `apg project reconstruct` rebuilds the live project's row ownerless, and
+    /// every bound use is refused until it is claimed: the refusal names the
+    /// project, the ownerless state, the caller's branch and one claim fix line.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/reconstruct/registry/process); run via cargo test-e2e"]
+    fn project_claim_ownerless_reconstructed_project_refuses_every_use_until_claimed() {
+        let repo = Repo::new("claim-ownerless");
+        let wt = repo.start_project("alpha");
+
+        // Seed an owned row so the reconstruct's owner reset is observable.
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            row.owner = Some("session-a".to_string());
+            reg.put(&row).unwrap();
+        }
+        let rebuilt = testutil::ApgCommand::new(&["project", "reconstruct"])
+            .cwd(&repo.root)
+            .output();
+        assert!(
+            rebuilt.status.success(),
+            "project reconstruct: {}",
+            String::from_utf8_lossy(&rebuilt.stderr)
+        );
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let row = reg
+                .get("alpha")
+                .unwrap()
+                .expect("reconstruct must register the live linked worktree");
+            assert_eq!(row.owner, None, "a reconstructed project is ownerless");
+            assert_eq!(row.branch.as_deref(), Some("alpha"));
+            assert_eq!(row.worktree, wt.canonicalize().unwrap());
+        }
+
+        let out = testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "alpha")
+            .env("APG_CALLER_SESSION", "session-a")
+            .output();
+        assert!(
+            !out.status.success(),
+            "an ownerless project must refuse every bound use until it is claimed"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("project `alpha`"), "{stderr}");
+        assert!(
+            stderr.contains("registered with no owner"),
+            "the refusal must name the ownerless state: {stderr}"
+        );
+        assert!(
+            stderr.contains("until it is claimed"),
+            "the refusal must say no session may use it until it is claimed: {stderr}"
+        );
+        assert!(
+            stderr.contains("branch `main`"),
+            "the refusal must name the caller's branch: {stderr}"
+        );
+        assert_eq!(
+            stderr.matches("apg project claim alpha").count(),
+            1,
+            "the refusal must carry exactly one claim fix line: {stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A claim replaces the single owner: the first claim reports
+    /// `previous owner: none`, a second claim reports the first session, and the
+    /// row carries exactly the latest owner.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/process); run via cargo test-e2e"]
+    fn project_claim_replaces_the_single_owner_and_reports_the_previous_owner() {
+        let repo = Repo::new("claim-replaces");
+        let wt = repo.start_project("alpha");
+        // The row a reconstruct leaves: live worktree, its branch, no owner.
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            reg.put(&row).unwrap();
+        }
+        let claim = |session: &str| {
+            testutil::ApgCommand::new(&["project", "claim", "alpha"])
+                .cwd(&repo.root)
+                .env("APG_CALLER_SESSION", session)
+                .output()
+        };
+        let owner_of = || {
+            registry::Registry::open(&registry_path_of(&repo))
+                .unwrap()
+                .get("alpha")
+                .unwrap()
+                .expect("alpha must stay registered")
+                .owner
+        };
+
+        let first = claim("session-a");
+        assert!(
+            first.status.success(),
+            "the first claim: {}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&first.stdout).trim(),
+            "Project `alpha` claimed by session `session-a` (previous owner: none).",
+            "the first claim must report the previous owner as none"
+        );
+        assert_eq!(owner_of(), Some("session-a".to_string()));
+
+        let second = claim("session-b");
+        assert!(
+            second.status.success(),
+            "the second claim: {}",
+            String::from_utf8_lossy(&second.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&second.stdout).trim(),
+            "Project `alpha` claimed by session `session-b` (previous owner: session-a).",
+            "the second claim must report the session it replaced"
+        );
+        assert_eq!(
+            owner_of(),
+            Some("session-b".to_string()),
+            "the row must carry exactly the latest owner"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A claim ends the previous owner's authorisation: after `session-b`
+    /// claims, `session-a` is refused naming `session-b` and the claim fix line,
+    /// while `session-b` reads the registered worktree's plan store.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/process); run via cargo test-e2e"]
+    fn project_claim_ends_the_previous_owners_authorisation() {
+        let repo = Repo::new("claim-authorisation");
+        let wt = repo.start_project("alpha");
+        // Distinct titles prove which store an authorised read touched.
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.apg_root(), "alpha"),
+            &plan_with_title("alpha", "Main alpha plan"),
+        )
+        .unwrap();
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.project_apg_root("alpha"), "alpha"),
+            &plan_with_title("alpha", "Worktree alpha plan"),
+        )
+        .unwrap();
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            reg.put(&row).unwrap();
+        }
+        for session in ["session-a", "session-b"] {
+            let out = testutil::ApgCommand::new(&["project", "claim", "alpha"])
+                .cwd(&repo.root)
+                .env("APG_CALLER_SESSION", session)
+                .output();
+            assert!(
+                out.status.success(),
+                "claim by {session}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        let render = |session: &str| {
+            testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+                .cwd(&repo.root)
+                .env("APG_PROJECT", "alpha")
+                .env("APG_CALLER_SESSION", session)
+                .output()
+        };
+
+        let refused = render("session-a");
+        assert!(
+            !refused.status.success(),
+            "the previous owner's authorisation must end after the claim"
+        );
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            stderr.contains("owned by session `session-b`"),
+            "the refusal must name the new owner: {stderr}"
+        );
+        assert!(
+            !stderr.contains("owned by session `session-a`"),
+            "the refusal must not name the previous owner: {stderr}"
+        );
+        assert!(
+            stderr.contains("apg project claim alpha"),
+            "the refusal must carry the claim fix line: {stderr}"
+        );
+
+        let allowed = render("session-b");
+        assert!(
+            allowed.status.success(),
+            "the new owner must be authorised: {}",
+            String::from_utf8_lossy(&allowed.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&allowed.stdout);
+        assert!(
+            stdout.contains("# Plan — Worktree alpha plan"),
+            "the authorised read must render the registered worktree's store: {stdout}"
+        );
+        assert!(
+            !stdout.contains("Main alpha plan"),
+            "the authorised read must never render main's store: {stdout}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
