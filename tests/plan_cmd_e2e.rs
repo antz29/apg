@@ -6423,8 +6423,10 @@ mod e2e {
     /// Phase-02 task-21 (e2e): `plan verify` opens the branch database in the
     /// **read-only** class — it coexists with a read-only handle already held in
     /// this process (a read-write open would fail or conflict) — and against a
-    /// present-but-unreadable branch database it refuses naming the contention,
-    /// never the stale-branch-graph refusal (whose `apg scan` is not the fix).
+    /// present-but-unreadable branch database it refuses naming the database and
+    /// the underlying cause, with no waited/budget or another-process contention
+    /// claim — never the stale-branch-graph refusal (whose `apg scan` is not the
+    /// fix).
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn plan_verify_opens_read_only_and_refuses_a_contended_database() {
@@ -6459,28 +6461,52 @@ mod e2e {
             let _ = std::fs::remove_file(format!("{}.{suffix}", db_path.display()));
         }
 
-        let err =
-            plan_verify_at(&apg_root, "foo").expect_err("a contended branch database must refuse");
+        // The corrupt file fails terminally on the first read (no retry), so the
+        // refusal must name the branch database and the underlying cause — and
+        // claim no contention (no wait, budget or another process).
+        let cause = match apg::git::freshness_snapshot(&apg_root) {
+            apg::git::FreshnessSnapshot::Contended { cause, .. } => cause,
+            _ => panic!("a corrupt branch database must read Contended"),
+        };
+        assert!(
+            !cause.is_empty(),
+            "the read failure must carry an underlying cause"
+        );
+
+        let err = plan_verify_at(&apg_root, "foo")
+            .expect_err("an unreadable branch database must refuse");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("unreadable"),
-            "the refusal must name the contention: {msg}"
+            "the refusal must name the unreadable database: {msg}"
         );
         assert!(
             msg.contains(&db_path.display().to_string()),
             "the refusal must name the database path: {msg}"
         );
         assert!(
-            msg.contains("budget"),
-            "the refusal must name the contention budget: {msg}"
+            msg.contains(&cause),
+            "the refusal must name the underlying cause: {msg}"
         );
+        for forbidden in [
+            "waited",
+            "budget",
+            "contention",
+            "another process",
+            "retry once the other process",
+        ] {
+            assert!(
+                !msg.to_lowercase().contains(forbidden),
+                "a terminal first read must not claim `{forbidden}`: {msg}"
+            );
+        }
         assert!(
             !msg.contains("branch graph is stale"),
-            "contention must never read as a stale verdict: {msg}"
+            "an unreadable database must never read as a stale verdict: {msg}"
         );
         assert!(
             !msg.contains("run `apg scan` inside the project worktree first"),
-            "a stale-graph scan is not the contention fix: {msg}"
+            "a stale-graph scan is not the unreadable-database fix: {msg}"
         );
 
         testutil::remove(&repo);
