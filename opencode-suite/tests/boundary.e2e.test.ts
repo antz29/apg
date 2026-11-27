@@ -201,6 +201,19 @@ test.skipIf(!enabled || !binary)(
       expect(refusal).toContain("projects.db")
       expect(refusal).toContain("main")
       expect(refusal).toContain(project)
+      // plan.phase-02.task-2: the refusal names the command it ran, that
+      // command's exit code and the cwd the lookup ran against — the caller's
+      // context directory chain, since no resolved worktree exists yet.
+      const directRefusal = Bun.spawnSync({
+        cmd: [bin, "project", "resolve", "no-such-project"],
+        cwd: repo,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      expect(directRefusal.exitCode).not.toBe(0)
+      expect(refusal).toContain("apg project resolve no-such-project")
+      expect(refusal).toContain(`failed (exit ${directRefusal.exitCode})`)
+      expect(refusal).toContain(`cwd: ${repo}`)
 
       // A project-bound context: the caller's load location stays the MAIN
       // checkout; the resolved worktree is what every spawn runs in.
@@ -237,6 +250,30 @@ test.skipIf(!enabled || !binary)(
       const cwdBefore = process.cwd()
       expect(await runInProject(bound, ["project", "resolve", project])).toBe(worktree)
       expect(process.cwd()).toBe(cwdBefore)
+
+      // plan.phase-02.task-2: an INDUCED non-zero exit names the root/worktree
+      // the command actually ran against, alongside the command, its exit code
+      // and its stderr — so an operator reading a suite error knows which
+      // checkout produced it.
+      const cliFailure = await runCli(bound, ["definitely-not-a-subcommand"])
+      expect(typeof cliFailure).toBe("string")
+      expect(cliFailure).toContain("definitely-not-a-subcommand")
+      expect(cliFailure).toContain("failed (exit ")
+      expect(cliFailure).toContain(`root: ${worktree}`)
+      expect(cliFailure).toContain("unknown subcommand")
+
+      const projectFailure = await runInProject(bound, ["definitely-not-a-subcommand"])
+      expect(typeof projectFailure).toBe("string")
+      expect(projectFailure).toContain("definitely-not-a-subcommand")
+      expect(projectFailure).toContain("failed (exit ")
+      expect(projectFailure).toContain(`worktree: ${worktree}`)
+      expect(projectFailure).toContain("unknown subcommand")
+
+      // An invalid Cypher still returns the QUERY_FAILED_PREFIX payload, with
+      // the resolved worktree appended after it.
+      const queryFailure = await runCypher(bound, "MATCH (")
+      expect(queryFailure.startsWith(QUERY_FAILED_PREFIX)).toBe(true)
+      expect(queryFailure).toContain(worktree)
 
       // `apg_find_symbol`'s kind-aware boundary (feedback-17): its one query
       // returns a File row whose identity is the `n.fqn` cell (column 1) and
@@ -1123,6 +1160,36 @@ test.skipIf(!enabled)(
       expect(started).not.toBe(NO_DB_ERROR)
       expect(Date.now() - t3).toBeLessThan(5000)
     } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+  15000,
+)
+
+// plan.phase-02.task-2: an induced SPAWN failure (a bogus/absent APG_BINARY
+// makes `Bun.spawn` throw) on a WORKTREE-BEARING context still names the root
+// `apg session start` ran against, begins `apg session start` and is never the
+// shared NO_DB_ERROR. Nothing is spawned outside the scratch dir; the previous
+// APG_BINARY is restored in a finally.
+test.skipIf(!enabled)(
+  "e2e: a failed session spawn names the worktree it ran against",
+  async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-spawnfail-"))
+    const previousBinary = process.env.APG_BINARY
+    process.env.APG_BINARY = path.join(base, "no-such-apg-binary")
+    try {
+      const root = path.join(base, "worktree")
+      fs.mkdirSync(root, { recursive: true })
+      const failed = await startDetachedSession(v2Context(root, { worktree: root }), {
+        timeoutMs: 500,
+      })
+      expect(typeof failed).toBe("string")
+      expect((failed as string).startsWith("apg session start")).toBe(true)
+      expect(failed).not.toBe(NO_DB_ERROR)
+      expect(failed as string).toContain(root)
+    } finally {
+      if (previousBinary === undefined) delete process.env.APG_BINARY
+      else process.env.APG_BINARY = previousBinary
       fs.rmSync(base, { recursive: true, force: true })
     }
   },
