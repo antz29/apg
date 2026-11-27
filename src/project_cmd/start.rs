@@ -133,16 +133,18 @@ pub fn project_start_at_with(
 
     // Freshness gate: start seeds the branch DB by copying main's scan, so
     // main must have a CURRENT scan for main's HEAD. One snapshot decides the
-    // three outcomes. `Fresh` proceeds. `Contended` — the main database stayed
-    // unreadable (locked/busy) through the freshness read's bounded retry — is
-    // refused as named contention: the scan is NOT stale or missing, and
-    // re-scanning is not the fix for another process holding the database.
-    // `Stale` and `NotApplicable` (a differing input, or no `db.lbug`/HEAD at
-    // all — `!is_fresh` was true for both) keep the stale-or-missing refusal
-    // asking for `apg scan` in main. This sits AFTER `refuse_start` (dirty/
-    // collision/in-worktree refusals keep precedence) and the version gate,
-    // and BEFORE the gitignore self-heal, so a refusal never mutates the main
-    // checkout and never creates a branch/worktree.
+    // three outcomes. `Fresh` proceeds. `Contended` — a main-database read
+    // failure — splits on the retry: a transient lock/busy read retried to
+    // the budget is refused as named contention, claiming `waited`/`budget`
+    // (another process holds it), while a terminal first read names the
+    // database and its underlying cause with no contention claim. Neither is
+    // stale or missing, so a stale-graph `apg scan` is not the fix. `Stale`
+    // and `NotApplicable` (a differing input, or no `db.lbug`/HEAD at
+    // all — `!is_fresh` was true for both) keep the stale-or-missing
+    // refusal asking for `apg scan` in main. This sits AFTER `refuse_start`
+    // (dirty/collision/in-worktree refusals keep precedence) and the version
+    // gate, and BEFORE the gitignore self-heal, so a refusal never mutates
+    // the main checkout and never creates a branch/worktree.
     match git::freshness_snapshot(apg_root) {
         git::FreshnessSnapshot::Fresh { .. } => {}
         git::FreshnessSnapshot::Contended {
