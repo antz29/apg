@@ -79,6 +79,82 @@ pub fn require_registry(main_root: &Path) -> Result<Registry> {
     })
 }
 
+/// Validates one registry row against the repository it names: the built-in
+/// `main` row must be the main checkout on the repo's default branch, and any
+/// other row must be the live linked worktree of that name on the row's
+/// branch. A stale or foreign row is refused — naming the project, its
+/// worktree and its branch — so a caller never operates on a checkout the row
+/// does not describe. Pure validation: nothing is written.
+pub fn validate_row(main_root: &Path, entry: &RegistryEntry) -> Result<()> {
+    let apg_root = main_root.join(crate::specs::LAYOUT);
+    let identity = crate::git::repo_identity(&apg_root)?;
+    let row_branch = entry.branch.as_deref().unwrap_or("<detached>");
+    if entry.name == "main" {
+        let matches_worktree =
+            crate::git::state::canonical_allow_missing(&entry.worktree) == identity.main_root;
+        if !matches_worktree || entry.branch != identity.default_branch {
+            bail!(
+                "refused: project `main` does not match this repository — the registry row names worktree `{}` on branch `{}`, but the main checkout is `{}` on default branch `{}`. Fix: rebuild the registry with `apg project reconstruct`.",
+                entry.worktree.display(),
+                row_branch,
+                identity.main_root.display(),
+                identity.default_branch.as_deref().unwrap_or("<detached>")
+            );
+        }
+        return Ok(());
+    }
+
+    let repo = git2::Repository::open(&identity.main_root).with_context(|| {
+        format!(
+            "opening the repository at `{}` for project `{}`",
+            identity.main_root.display(),
+            entry.name
+        )
+    })?;
+    // The working directory comes from a repository opened on the worktree (a
+    // worktree's admin path is not its checkout), canonical and live.
+    let linked = repo.find_worktree(&entry.name).ok().and_then(|wt| {
+        let wt_repo = git2::Repository::open_from_worktree(&wt).ok()?;
+        let worktree = std::fs::canonicalize(wt_repo.workdir()?).ok()?;
+        let branch = if wt_repo.head_detached().unwrap_or(true) {
+            None
+        } else {
+            wt_repo
+                .head()
+                .ok()
+                .and_then(|head| head.shorthand().map(str::to_string))
+        };
+        Some((worktree, branch))
+    });
+    let Some((worktree, branch)) = linked else {
+        bail!(
+            "refused: project `{}` is registered at worktree `{}` on branch `{}`, but this repository has no live linked worktree of that name. Fix: rebuild the registry with `apg project reconstruct`.",
+            entry.name,
+            entry.worktree.display(),
+            row_branch
+        );
+    };
+    if worktree != crate::git::state::canonical_allow_missing(&entry.worktree) {
+        bail!(
+            "refused: project `{}` is registered at worktree `{}` on branch `{}`, but its linked worktree is the checkout at `{}`. Fix: rebuild the registry with `apg project reconstruct`.",
+            entry.name,
+            entry.worktree.display(),
+            row_branch,
+            worktree.display()
+        );
+    }
+    if branch != entry.branch {
+        bail!(
+            "refused: project `{}` is registered at worktree `{}` on branch `{}`, but its linked worktree has branch `{}` checked out. Fix: rebuild the registry with `apg project reconstruct`.",
+            entry.name,
+            entry.worktree.display(),
+            row_branch,
+            branch.as_deref().unwrap_or("<detached>")
+        );
+    }
+    Ok(())
+}
+
 /// Seconds since the unix epoch — the row's creation-time unit.
 fn now_unix() -> u64 {
     SystemTime::now()
