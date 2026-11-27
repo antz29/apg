@@ -2680,4 +2680,41 @@ mod e2e {
         assert!(!stale, "contention is never a stale verdict: {stale}");
         testutil::remove(&repo);
     }
+
+    /// A held **read-write** database handle produces no contention claim: the
+    /// read-only freshness read opens the database beside the writer (the
+    /// engine admits the read), so an agreeing scan still reads `Fresh` and the
+    /// refusal projection is `None`. A writer — an `apg query`-style handle, a
+    /// session's own database — must never turn the freshness read into a
+    /// contended or stale refusal.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug); run via cargo test-e2e"]
+    fn locked_database_read_stays_fresh_beside_a_held_writer() {
+        let repo = fixture_repo("fresh-held-writer");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the agreeing scan starts fresh");
+
+        // Hold a read-write handle on the live database for the whole
+        // evaluation — the shape a concurrent writer has.
+        let db_path = apg.join(specs::TRANS).join("db.lbug");
+        let writer = lbug::Database::new(&db_path, testutil::fixture_db_config())
+            .expect("hold a read-write fixture database");
+
+        match freshness_snapshot(&apg) {
+            FreshnessSnapshot::Fresh { .. } => {}
+            other => panic!(
+                "a held read-write writer must not make the freshness read contended or stale: {other:?}"
+            ),
+        }
+        assert!(
+            refusal_message(&apg).is_none(),
+            "a held read-write writer must produce no refusal claim"
+        );
+
+        drop(writer);
+        testutil::remove(&repo);
+    }
 }
