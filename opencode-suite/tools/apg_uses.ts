@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, codeTypeCondition, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, codeTypeCondition, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgUsesInput = { directory?: string; fqn: string; direction?: string; codeType?: string; limit?: string }
+type ApgUsesInput = { project: string; fqn: string; direction?: string; codeType?: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_uses",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             fqn: { type: "string", description: "Symbol FQN (required)" },
             direction: {
@@ -31,7 +31,7 @@ export default Plugin.define({
             },
             limit: { type: "string", description: "Max results (default 500, max 1000)" },
           },
-          required: ["fqn"],
+          required: ["project", "fqn"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -43,6 +43,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const fqn = input.fqn
           if (!fqn) return { content: "Error: fqn is required" }
           const direction = input.direction || "out"
@@ -65,7 +67,7 @@ export default Plugin.define({
             cypher += ` RETURN s.fqn as used_type, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
             rebaseColumns = [1]
           }
-          return { content: await runCypher(merged, cypher, input.directory, { rebaseColumns }) }
+          return { content: await runCypher(merged, cypher, undefined, { rebaseColumns }) }
         },
       })
     })

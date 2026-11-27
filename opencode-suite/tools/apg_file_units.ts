@@ -1,8 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import path from "node:path"
-import { runCypher, lit, findApgRoot, resolveProjectPath, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, resolveProjectPath, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgFileUnitsInput = { directory?: string; path: string; limit?: string }
+type ApgFileUnitsInput = { project: string; path: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_file_units",
@@ -16,14 +16,14 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             path: { type: "string", description: "Absolute path of the file, e.g. /abs/src/Graph.java (required)" },
             limit: { type: "string", description: "Max results (default 500, max 1000)" },
           },
-          required: ["path"],
+          required: ["project", "path"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -35,19 +35,21 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const filePath = input.path
           if (!filePath) return { content: "Error: path is required" }
           const limit = input.limit ? Math.max(1, Math.min(1000, Number(input.limit))) : 500
 
           // The graph stores repo-relative identities; convert the caller's absolute
           // path to the stored form before querying.
-          const root = findApgRoot(merged, input.directory)
+          const root = merged.worktree
           const stored = path.isAbsolute(filePath) && root ? resolveProjectPath(root, filePath) : filePath
 
           const cypher =
             `MATCH (f:File {fqn: ${lit(stored)}})-[:Contains]->(n) ` +
             `RETURN labels(n) as kind, n.fqn, n.start_line, n.end_line ORDER BY n.start_line LIMIT ${limit}`
-          return { content: await runCypher(merged, cypher, input.directory) }
+          return { content: await runCypher(merged, cypher) }
         },
       })
     })

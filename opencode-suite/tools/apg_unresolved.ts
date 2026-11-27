@@ -1,8 +1,8 @@
 import { Plugin } from "@opencode/plugin"
 import path from "node:path"
-import { runCypher, lit, findApgRoot, resolveProjectPath, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, resolveProjectPath, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgUnresolvedInput = { directory?: string; fqn?: string; path?: string; limit?: string }
+type ApgUnresolvedInput = { project: string; fqn?: string; path?: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_unresolved",
@@ -16,14 +16,15 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             fqn: { type: "string", description: "Function or Struct FQN to inspect (mutually exclusive with path)" },
             path: { type: "string", description: "Absolute file path to inspect all units in (mutually exclusive with fqn)" },
             limit: { type: "string", description: "Max results (default 200, max 1000)" },
           },
+          required: ["project"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -35,6 +36,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const fqn = input.fqn
           const filePath = input.path
           if (!fqn && !filePath) return { content: "Error: provide fqn or path" }
@@ -49,13 +52,13 @@ export default Plugin.define({
           } else {
             // The File fqn is the stored repo-relative identity; convert the caller's
             // absolute path before matching.
-            const root = findApgRoot(merged, input.directory)
+            const root = merged.worktree
             const stored = filePath && path.isAbsolute(filePath) && root ? resolveProjectPath(root, filePath) : filePath
             cypher =
               `MATCH (f:File {fqn: ${lit(stored ?? "")}})-[:Contains]->(n)-[r:UnresolvedCall|UnresolvedUse]->(u:UnresolvedTarget) ` +
               `RETURN n.fqn as source, labels(r) as edge, u.fqn, u.category ORDER BY n.fqn, u.fqn LIMIT ${limit}`
           }
-          return { content: await runCypher(merged, cypher, input.directory) }
+          return { content: await runCypher(merged, cypher) }
         },
       })
     })

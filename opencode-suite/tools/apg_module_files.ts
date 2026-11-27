@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, codeTypeCondition, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, codeTypeCondition, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgModuleFilesInput = { directory?: string; fqn: string; codeType?: string; limit?: string }
+type ApgModuleFilesInput = { project: string; fqn: string; codeType?: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_module_files",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             fqn: { type: "string", description: "Module FQN (language-rooted), e.g. java.org.jgrapht.alg or go.github.com/org/repo (required)" },
             codeType: {
@@ -26,7 +26,7 @@ export default Plugin.define({
             },
             limit: { type: "string", description: "Max results (default 500, max 1000)" },
           },
-          required: ["fqn"],
+          required: ["project", "fqn"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -38,6 +38,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const fqn = input.fqn
           if (!fqn) return { content: "Error: fqn is required" }
           const limit = input.limit ? Math.max(1, Math.min(1000, Number(input.limit))) : 500
@@ -48,7 +50,7 @@ export default Plugin.define({
           cypher += ` RETURN f.fqn, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
           // Column 0 is the File fqn — the stored repo-relative identity. Resolve it
           // to an absolute path under the caller's project directory.
-          return { content: await runCypher(merged, cypher, input.directory, { rebaseColumns: [0] }) }
+          return { content: await runCypher(merged, cypher, undefined, { rebaseColumns: [0] }) }
         },
       })
     })

@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, codeTypeCondition, noteIfEmpty, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, codeTypeCondition, noteIfEmpty, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgMethodsInput = { directory?: string; fqn: string; codeType?: string; limit?: string }
+type ApgMethodsInput = { project: string; fqn: string; codeType?: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_methods",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             fqn: {
               type: "string",
@@ -29,7 +29,7 @@ export default Plugin.define({
             },
             limit: { type: "string", description: "Max results (default 500, max 1000)" },
           },
-          required: ["fqn"],
+          required: ["project", "fqn"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -41,6 +41,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const fqn = input.fqn
           if (!fqn) return { content: "Error: fqn is required" }
           const limit = input.limit ? Math.max(1, Math.min(1000, Number(input.limit))) : 500
@@ -50,7 +52,7 @@ export default Plugin.define({
           if (ctCond) cypher += ` WHERE ${ctCond}`
           cypher += ` RETURN f.fqn, f.path, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
           // Column 1 is the function's source-file `path` (stored repo-relative).
-          const out = await runCypher(merged, cypher, input.directory, { rebaseColumns: [1] })
+          const out = await runCypher(merged, cypher, undefined, { rebaseColumns: [1] })
           return {
             content: noteIfEmpty(
               out,

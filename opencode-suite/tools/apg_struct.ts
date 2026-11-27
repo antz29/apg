@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgStructInput = { directory?: string; fqn: string }
+type ApgStructInput = { project: string; fqn: string }
 
 export default Plugin.define({
   id: "apg_struct",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             fqn: {
               type: "string",
@@ -25,7 +25,7 @@ export default Plugin.define({
                 "Struct FQN (language-rooted), e.g. java.org.jgrapht.graph.DefaultGraphType (required)",
             },
           },
-          required: ["fqn"],
+          required: ["project", "fqn"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -37,6 +37,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const fqn = input.fqn
           if (!fqn) return { content: "Error: fqn is required" }
 
@@ -49,8 +51,8 @@ export default Plugin.define({
 
           const [selfOut, nestedOut] = await Promise.all([
             // Column 1 is `s.path`, the stored repo-relative source-file identity.
-            runCypher(merged, self, input.directory, { rebaseColumns: [1] }),
-            runCypher(merged, nested, input.directory),
+            runCypher(merged, self, undefined, { rebaseColumns: [1] }),
+            runCypher(merged, nested),
           ])
           const nestedBody = nestedOut.split("\n").slice(1).join("\n")
           return { content: nestedBody ? `${selfOut}\n-- nested structs --\n${nestedBody}` : selfOut }

@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, type ToolContext } from "../lib/apg.ts"
+import { runCypher, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgQueryInput = { directory?: string; query: string }
+type ApgQueryInput = { project: string; query: string }
 
 export default Plugin.define({
   id: "apg_query",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             query: {
               type: "string",
@@ -25,7 +25,7 @@ export default Plugin.define({
                 "Cypher query, e.g. MATCH (f:File {fqn:'/abs/Graph.java'})-[:Contains]->(n) RETURN labels(n), n.fqn, n.start_line, n.end_line",
             },
           },
-          required: ["query"],
+          required: ["project", "query"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -37,7 +37,9 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
-          return { content: await runCypher(merged, input.query, input.directory) }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
+          return { content: await runCypher(merged, input.query) }
         },
       })
     })

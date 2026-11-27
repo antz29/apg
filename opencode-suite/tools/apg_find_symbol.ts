@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, codeTypeCondition, findSymbolRebaseColumns, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, codeTypeCondition, findSymbolRebaseColumns, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
-type ApgFindSymbolInput = { directory?: string; name: string; kind?: string; codeType?: string; limit?: string }
+type ApgFindSymbolInput = { project: string; name: string; kind?: string; codeType?: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_find_symbol",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             name: { type: "string", description: "Substring to match against node FQNs (required)" },
             kind: {
@@ -30,7 +30,7 @@ export default Plugin.define({
             },
             limit: { type: "string", description: "Max results (default 50, max 500)" },
           },
-          required: ["name"],
+          required: ["project", "name"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -42,6 +42,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const name = input.name
           if (!name) return { content: "Error: name is required" }
           const kind = input.kind || ""
@@ -64,7 +66,7 @@ export default Plugin.define({
           // symbol name. `findSymbolRebaseColumns` rebases the right cell per row —
           // a blind column rebase would turn a symbol fqn into a bogus path.
           return {
-            content: await runCypher(merged, cypher, input.directory, { rebaseColumns: findSymbolRebaseColumns }),
+            content: await runCypher(merged, cypher, undefined, { rebaseColumns: findSymbolRebaseColumns }),
           }
         },
       })

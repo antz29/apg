@@ -534,6 +534,23 @@ export const QUERY_FAILED_PREFIX = "apg query failed"
 export const NO_DB_ERROR =
   "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
 
+/** The caller's project environment for one child process: `APG_PROJECT` (the
+ *  required `context.projectName`), `APG_CALLER_SESSION` (`context.sessionID`)
+ *  and — only when the context carries a session-id chain — `APG_CALLER_ANCESTORS`
+ *  (outermost→innermost, trimmed, empties dropped). `process.env` is copied, never
+ *  mutated, and the caller's own cwd is never changed. Shared by `runCypher`'s
+ *  project-bound path and `runInProject`. */
+function callerEnv(context: ToolContext): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    APG_PROJECT: context.projectName,
+    APG_CALLER_SESSION: context.sessionID,
+  }
+  const ancestors = (context.ancestors ?? []).map((id) => id.trim()).filter((id) => id.length > 0)
+  if (ancestors.length > 0) env.APG_CALLER_ANCESTORS = ancestors.join(",")
+  return env
+}
+
 /**
  * Runs a Cypher query against the project's db and returns CSV text with a
  * header row on success. On failure it returns an error STRING — never a throw,
@@ -542,6 +559,13 @@ export const NO_DB_ERROR =
  * query`'s exit code and stderr verbatim. Both failure signals are built from
  * the constants above, which `isQueryError` also tests against, so the failure
  * contract stays structural rather than duplicated string literals.
+ *
+ * PROJECT BOUND: when the caller resolved a registered project into
+ * `context.worktree` (through `resolveProjectWorktree`), the query runs in that
+ * worktree with the caller's project environment set (`callerEnv`) — never the
+ * caller's cwd, and with no `findApgRoot` walk that could reach another
+ * checkout's database. A missing worktree database is the binary's own named
+ * refusal, surfaced through the same `QUERY_FAILED_PREFIX` string.
  *
  * DEFAULT-RAW seam (`requirements.requirement.absolute-paths-at-tool-boundary`):
  * with no `opts`, the stored form is returned verbatim, so raw `apg query` is
@@ -559,11 +583,13 @@ export async function runCypher(
   directory?: string,
   opts?: { rebaseColumns?: number[] | ((row: string[]) => number[]) },
 ): Promise<string> {
-  const root = findApgRoot(context, directory)
+  const root = context.worktree ?? findApgRoot(context, directory)
   if (!root) {
     return NO_DB_ERROR
   }
-  const result = await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).quiet().nothrow()
+  const result = context.worktree
+    ? await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).env(callerEnv(context)).quiet().nothrow()
+    : await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
     return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
@@ -668,14 +694,7 @@ export async function runInProject(
   if (!worktree || !projectName) {
     throw new Error("runInProject requires a resolved project (call resolveProjectWorktree first)")
   }
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    APG_PROJECT: projectName,
-    APG_CALLER_SESSION: context.sessionID,
-  }
-  const ancestors = (context.ancestors ?? []).map((id) => id.trim()).filter((id) => id.length > 0)
-  if (ancestors.length > 0) env.APG_CALLER_ANCESTORS = ancestors.join(",")
-  const result = await Bun.$`${apgBinary()} ${args}`.cwd(worktree).env(env).quiet().nothrow()
+  const result = await Bun.$`${apgBinary()} ${args}`.cwd(worktree).env(callerEnv(context)).quiet().nothrow()
   if (result.exitCode !== 0) {
     const cmd = [apgBinary(), ...args].join(" ")
     return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
