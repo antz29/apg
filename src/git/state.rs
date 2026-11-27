@@ -960,14 +960,14 @@ pub fn freshness_differences_with(
     }
 }
 
-/// The `&Path` entry point to [`is_fresh_with_state`]: the DB-existence
-/// precondition runs first (no DB → NOT fresh without any git walk); otherwise
-/// it captures the current [`GitState`] once and delegates to the state-based
-/// predicate, so the freshness verdict is one shared rule.
+/// The `&Path` entry point to [`is_fresh_with_state`]: it captures the current
+/// [`GitState`] once and runs the one shared predicate. There is no local
+/// existence pre-check — the DB-existence precondition is the shared gather's
+/// [`db_presence`], so [`std::io::ErrorKind::NotFound`] alone means not fresh
+/// while any other metadata read error is classified
+/// [`Contended`](FreshnessSnapshot::Contended), also not fresh. Every
+/// non-[`Fresh`](FreshnessSnapshot::Fresh) arm is not fresh.
 pub fn is_fresh(apg_root: &Path) -> bool {
-    if !db_path(apg_root).exists() {
-        return false;
-    }
     is_fresh_with_state(apg_root, &git_state(apg_root), None)
 }
 
