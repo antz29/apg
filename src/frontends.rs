@@ -91,6 +91,9 @@ pub fn available_languages() -> Vec<String> {
         if dir.join("terraformfrontend").exists() {
             langs.push("terraform".into());
         }
+        if dir.join("bicepfrontend").exists() {
+            langs.push("bicep".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -174,6 +177,9 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
             "terraform" if dir.join("terraformfrontend").exists() => {
                 return Some(dir.join("terraformfrontend").display().to_string());
             }
+            "bicep" if dir.join("bicepfrontend").exists() => {
+                return Some(dir.join("bicepfrontend").display().to_string());
+            }
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
@@ -207,6 +213,7 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         "sql" => option_env!("APG_FRONTEND_SQL"),
         "ps" => option_env!("APG_FRONTEND_PS"),
         "terraform" => option_env!("APG_FRONTEND_TERRAFORM"),
+        "bicep" => option_env!("APG_FRONTEND_BICEP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
         // JS/TS frontend under the `js` id.
