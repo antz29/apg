@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "validate-row-point-in-time",
+  "body": "validate_row validates a point-in-time git read with no lock held, so a worktree removed or re-pointed between validation and use is not re-detected, and a row must name git's own worktree name, so an alias for a differently named worktree is refused; re-validate at the consumer's open and accept aliases only if rows may ever alias a worktree.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.validate_row",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
