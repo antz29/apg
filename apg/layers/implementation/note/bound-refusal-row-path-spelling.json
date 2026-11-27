@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "bound-refusal-row-path-spelling",
+  "body": "The bound project-context refusal prints the row's worktree exactly as stored, non-canonical, while the mismatch test compares canonical paths; print the canonicalised row path when a spelling-different row must read as the caller's own path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/git/identity.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
