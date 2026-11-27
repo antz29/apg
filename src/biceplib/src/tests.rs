@@ -300,6 +300,52 @@ mod unit {
         );
     }
 
+    fn decl_names(f: &parse::File) -> Vec<&str> {
+        f.decls
+            .iter()
+            .filter_map(|d| d.name.as_ref().map(|n| n.text.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn error_in_multi_line_object_skips_the_whole_body() {
+        let f = parse_text("var x = {\n a:\n b: 1\n}\nparam p string\n");
+        assert_eq!(decl_names(&f), vec!["p"]);
+        assert_eq!(f.errors.len(), 1);
+        assert_eq!(f.errors[0].line, 2);
+    }
+
+    #[test]
+    fn nested_child_in_a_broken_body_is_not_a_phantom_struct() {
+        let f =
+            parse_text("resource r 'a' = {\n a:\n resource child 'b' = {\n}\n}\nparam p string\n");
+        assert_eq!(decl_names(&f), vec!["p"]);
+        assert_eq!(f.errors.len(), 1);
+    }
+
+    #[test]
+    fn error_in_multi_line_array_skips_the_whole_body() {
+        let f = parse_text("var x = [\n 1 2\n]\nparam p string\n");
+        assert_eq!(decl_names(&f), vec!["p"]);
+        assert_eq!(f.errors.len(), 1);
+        assert_eq!(f.errors[0].line, 2);
+    }
+
+    #[test]
+    fn error_in_multi_line_call_args_skips_the_whole_call() {
+        let f = parse_text("var x = f(\n 1 2\n)\nparam p string\n");
+        assert_eq!(decl_names(&f), vec!["p"]);
+        assert_eq!(f.errors.len(), 1);
+        assert_eq!(f.errors[0].line, 2);
+    }
+
+    #[test]
+    fn unbalanced_open_brace_terminates_at_eof() {
+        let f = parse_text("var x = {\n a: 1\nparam p string\n");
+        assert!(f.decls.is_empty());
+        assert_eq!(f.errors.len(), 1);
+    }
+
     #[test]
     fn newline_ends_a_declaration_and_same_line_tokens_are_an_error() {
         let ok = parse_text("var a = 1\nvar b = 2\n");

@@ -356,6 +356,29 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: real filesystem and process; run via cargo test-e2e"]
+    fn broken_multi_line_body_is_one_error_and_later_params_survive() {
+        let dir = Scratch::new("broken-body");
+        dir.write(
+            "broken.bicep",
+            "param p string\nvar x = {\n a:\n b: 1\n}\nparam q int\n",
+        );
+        let root = dir.root();
+        let run = bicep(&[&root]);
+        assert!(run.ok, "{:?}", run.stderr);
+        let prefix = format!("bicep: {root}/broken.bicep:3:");
+        assert_eq!(run.stderr.len(), 2, "{:?}", run.stderr);
+        assert!(run.stderr[0].starts_with(&prefix), "{:?}", run.stderr);
+        assert_eq!(
+            structs(&records(&run.stdout)),
+            [
+                pair("param.p", "broken.bicep"),
+                pair("param.q", "broken.bicep"),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real filesystem and process; run via cargo test-e2e"]
     fn duplicate_declaration_is_reported_and_first_kept() {
         let dir = Scratch::new("dup");
         dir.write("dup.bicep", "param p string\nparam p int\n");

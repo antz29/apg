@@ -1,8 +1,8 @@
 //! Bicep source parsing: a newline-significant lexer and a hand-written
 //! recursive-descent parser over one decoded file. Every span is a raw on-disk
 //! byte range with 1-based inclusive lines. A malformed statement is reported
-//! and skipped to its line's end, so the rest of the file still yields its
-//! declarations. Example: `resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {`
+//! once and skipped to its statement's end (the newline closing its brackets),
+//! so the rest of the file still yields its declarations. Example: `resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {`
 //! parses to one `Resource` declaration named `stg`.
 
 use crate::source::{Decoded, Span};
@@ -124,7 +124,7 @@ pub fn parse(src: &Decoded) -> File {
         if matches!(p.cur(), Tok::Eof) {
             break;
         }
-        let (refs, binders, nl) = (p.refs.len(), p.binders.len(), p.nl_free.len());
+        let (refs, binders, nl, stmt) = (p.refs.len(), p.binders.len(), p.nl_free.len(), p.pos);
         match p.statement() {
             Ok(Some(decl)) => decls.push(decl),
             Ok(None) => {}
@@ -133,7 +133,7 @@ pub fn parse(src: &Decoded) -> File {
                 p.binders.truncate(binders);
                 p.nl_free.truncate(nl);
                 errors.push(e);
-                p.recover();
+                p.recover(stmt);
             }
         }
     }
@@ -559,8 +559,11 @@ impl Parser<'_> {
         }
     }
 
-    /// Error recovery: skip to the next newline at bracket depth zero (consuming it).
-    fn recover(&mut self) {
+    /// Error recovery: rewind to the failed statement's first token `from`, then skip
+    /// to the next newline at bracket depth zero measured from there (consuming it),
+    /// so a broken multi-line body is skipped whole. Unbalanced input runs to EOF.
+    fn recover(&mut self, from: usize) {
+        self.pos = from;
         let mut depth = 0i32;
         loop {
             match &self.toks[self.pos].tok {
@@ -638,7 +641,7 @@ impl Parser<'_> {
         };
         let decl = match word.as_str() {
             "metadata" | "targetScope" | "extension" | "assert" | "test" => {
-                self.recover();
+                self.recover(self.pos);
                 self.refs.truncate(mark);
                 return Ok(None);
             }
