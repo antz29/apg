@@ -438,7 +438,9 @@ mod unit {
     }
 
     /// A terminal failure returns at once: no sleep, one read, and a
-    /// `FreshnessReadFailure` whose `waited` is zero.
+    /// `FreshnessReadFailure` whose `waited` is zero. Its `Display` names the
+    /// database and the underlying cause, and claims no wait, budget or
+    /// contention for a read that never retried.
     #[test]
     fn freshness_read_retry_does_not_retry_a_terminal_error() {
         let database = Path::new("/repo/apg/.trans/db.lbug");
@@ -448,7 +450,9 @@ mod unit {
             database,
             || {
                 reads += 1;
-                Err(anyhow::Error::msg("no such table: Foo"))
+                Err(anyhow::Error::msg(
+                    "Permission denied (os error 13) reading db.lbug",
+                ))
             },
             |_| slept = true,
         )
@@ -460,6 +464,27 @@ mod unit {
             .expect("the error is a FreshnessReadFailure");
         assert_eq!(failure.waited, Duration::ZERO);
         assert_eq!(failure.budget, FRESHNESS_READ_BUDGET);
+        let rendered = failure.to_string();
+        assert!(
+            rendered.contains("/repo/apg/.trans/db.lbug"),
+            "Display names the database path: {rendered}"
+        );
+        assert!(
+            rendered.contains("Permission denied (os error 13) reading db.lbug"),
+            "Display names the underlying cause: {rendered}"
+        );
+        for claim in [
+            "waited",
+            "budget",
+            "contention",
+            "another process",
+            "retry once the other process",
+        ] {
+            assert!(
+                !rendered.contains(claim),
+                "a terminal read makes no `{claim}` claim: {rendered}"
+            );
+        }
     }
 
     /// An always-transient reader stops at the budget with `waited == budget`,
@@ -502,8 +527,16 @@ mod unit {
             "Display names the database path: {rendered}"
         );
         assert!(
-            rendered.contains("500ms"),
-            "Display names the waited budget: {rendered}"
+            rendered.contains("waited 500ms of a 500ms budget"),
+            "Display names the waited/budget pair: {rendered}"
+        );
+        assert!(
+            rendered.contains("contention"),
+            "a retried read keeps the contention phrasing: {rendered}"
+        );
+        assert!(
+            rendered.contains("database is locked"),
+            "Display names the underlying cause: {rendered}"
         );
     }
 
