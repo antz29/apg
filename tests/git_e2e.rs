@@ -2340,4 +2340,129 @@ mod e2e {
         }
         testutil::remove(&repo);
     }
+
+    /// The presence probe's absent arm: a missing `db.lbug` is `NotFound`, so it
+    /// is the `"database"` NotApplicable precondition — never a read failure —
+    /// and both the collect-all snapshot and the scan preamble report it as an
+    /// absent scan, not contention. `is_fresh` is false (nothing to reuse) while
+    /// `is_stale` is false (the gate is N/A), the discriminator that this is the
+    /// absence arm and not the fail-closed error arm.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs); run via cargo test-e2e"]
+    fn presence_probe_absent_is_the_database_precondition() {
+        let repo = fixture_repo("freshness-presence-absent");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        let state = git_state(&apg);
+
+        match freshness_differences(&apg, &state) {
+            FreshnessSnapshot::NotApplicable { differing, .. } => assert_eq!(
+                differing,
+                vec!["database"],
+                "a missing db.lbug is the single `database` precondition, not a read failure"
+            ),
+            other => panic!("a missing db.lbug must read NotApplicable, got {other:?}"),
+        }
+
+        let line = staleness_line(&apg, &state, None);
+        assert!(
+            line.contains("no scan yet"),
+            "an absent database reads as no scan yet: {line}"
+        );
+        assert!(
+            line.contains(&format!("current {sha}@true")),
+            "the absence line still names the current state: {line}"
+        );
+        assert!(
+            !line.contains("CONTENDED"),
+            "an absent database is not contention: {line}"
+        );
+
+        assert!(!is_fresh(&apg), "no db.lbug → not fresh (nothing to reuse)");
+        assert!(
+            !is_stale(&apg),
+            "the gate is N/A without a db.lbug (is_stale != !is_fresh)"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// The presence probe's error arm: a metadata error other than `NotFound`
+    /// (here `EACCES`, induced by denying search permission on the parent
+    /// `.trans` directory) is a named read failure, not a silent absence. It
+    /// reaches `freshness_differences` as `Contended` naming `db.lbug`, reaches
+    /// `staleness_line` as `CONTENDED` naming the path and never `no scan yet`,
+    /// and makes `is_fresh` fail closed — distinct from the absent arm, where
+    /// `is_stale` is also false but for the opposite (N/A) reason. `is_stale`
+    /// stays false because contention is never a stale verdict.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs); run via cargo test-e2e"]
+    #[cfg(unix)]
+    fn presence_probe_metadata_error_is_named_contention() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let repo = fixture_repo("freshness-presence-eacces");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg), "the agreeing scan starts fresh");
+
+        let trans = apg.join(specs::TRANS);
+        let db_path = trans.join("db.lbug");
+        let state = git_state(&apg);
+        let original = std::fs::metadata(&trans).unwrap().permissions();
+
+        // `stat` of `db.lbug` needs search permission on `.trans`, so denying it
+        // makes the presence probe fail with `EACCES` — a non-`NotFound`
+        // metadata error. (chmod on `db.lbug` itself never affects `stat`.)
+        std::fs::set_permissions(&trans, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Permissions are not enforced for root: the probe still succeeds and
+        // this arm cannot be exercised, so restore and skip with a reason.
+        if db_presence(&apg).is_ok() {
+            std::fs::set_permissions(&trans, original).unwrap();
+            println!("skipping metadata-error arm: permissions not enforced for this user");
+            testutil::remove(&repo);
+            return;
+        }
+
+        // Capture every projection while `.trans` is unreadable, then restore
+        // the directory mode BEFORE asserting so the fixture always cleans up.
+        let snapshot = freshness_differences(&apg, &state);
+        let line = staleness_line(&apg, &state, None);
+        let fresh = is_fresh(&apg);
+        let stale = is_stale(&apg);
+        std::fs::set_permissions(&trans, original).unwrap();
+
+        match snapshot {
+            FreshnessSnapshot::Contended { database, .. } => assert_eq!(
+                database, db_path,
+                "the contention snapshot must name the db.lbug the probe could not stat"
+            ),
+            other => {
+                panic!("a non-NotFound metadata error must read Contended, got {other:?}")
+            }
+        }
+
+        let db_display = db_path.display().to_string();
+        assert!(
+            line.contains("CONTENDED"),
+            "the staleness line must name contention: {line}"
+        );
+        assert!(
+            line.contains(&db_display),
+            "the contention line must name the database path: {line}"
+        );
+        assert!(
+            !line.contains("no scan yet"),
+            "a read failure is not an absent scan: {line}"
+        );
+
+        assert!(
+            !fresh,
+            "is_fresh must fail closed on a presence read error, not read the database as absent"
+        );
+        assert!(!stale, "contention is never a stale verdict: {stale}");
+        testutil::remove(&repo);
+    }
 }
