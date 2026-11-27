@@ -1059,6 +1059,26 @@ fn registry_path_of(repo: &testutil::Repo) -> PathBuf {
     registry::registry_path(&repo.root.canonicalize().unwrap())
 }
 
+/// The project-context refusal contract: the caller's current branch is named,
+/// exactly one `Fix:` line is present, and exactly one of `apg project start` /
+/// `apg project claim` (as given by `fix`) appears.
+fn assert_refusal_contract(stderr: &str, current_branch: &str, fix: &str) {
+    assert!(
+        stderr.contains(&format!("branch `{current_branch}`")),
+        "the refusal must name the caller's current branch `{current_branch}`: {stderr}"
+    );
+    assert_eq!(
+        stderr.matches("Fix:").count(),
+        1,
+        "exactly one fix line expected: {stderr}"
+    );
+    assert_eq!(
+        stderr.matches(fix).count(),
+        1,
+        "exactly one `{fix}` expected: {stderr}"
+    );
+}
+
 /// A scratch repo whose main checkout holds a real `db.lbug` and whose
 /// registered `alpha` worktree holds none: the main checkout's registry carries
 /// `alpha` on its branch, owned by `session-a`. Returns the repo, the canonical
@@ -6047,5 +6067,230 @@ mod e2e {
 
         testutil::remove(&repo);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // ------------------------------------------------------------------
+    // project-context refusals (e2e): every guarded mutation on the default
+    // branch, and every bound mutation/read refused by the registry binding,
+    // names the caller's current branch plus exactly one fix line.
+    // ------------------------------------------------------------------
+
+    /// A guarded plan mutation on the default branch refuses naming `main` and
+    /// one `apg project start` fix line (`require_project_context`'s
+    /// default-branch arm).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_plan_add_on_default_branch_names_main_and_start() {
+        let repo = Repo::new("refusal-plan-add-main");
+        let out =
+            testutil::ApgCommand::new(&["plan", "add", "demo", "--title", "T", "--strategy", "S"])
+                .cwd(&repo.root)
+                .output();
+        assert!(
+            !out.status.success(),
+            "a plan mutation on the default branch must refuse"
+        );
+        assert_refusal_contract(
+            &String::from_utf8_lossy(&out.stderr),
+            "main",
+            "apg project start",
+        );
+        testutil::remove(&repo);
+    }
+
+    /// A guarded review mutation on the default branch refuses on the same
+    /// context arm, before any argument or store resolution (`apg review add`
+    /// carries no target here).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_review_add_on_default_branch_names_main_and_start() {
+        let repo = Repo::new("refusal-review-add-main");
+        let out = testutil::ApgCommand::new(&["review", "add"])
+            .cwd(&repo.root)
+            .output();
+        assert!(
+            !out.status.success(),
+            "a review mutation on the default branch must refuse"
+        );
+        assert_refusal_contract(
+            &String::from_utf8_lossy(&out.stderr),
+            "main",
+            "apg project start",
+        );
+        testutil::remove(&repo);
+    }
+
+    /// A guarded node mutation on the default branch refuses on the same
+    /// context arm, before the live-session requirement.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_node_add_on_default_branch_names_main_and_start() {
+        let repo = Repo::new("refusal-node-add-main");
+        let out = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "x",
+            "--body",
+            "y",
+        ])
+        .cwd(&repo.root)
+        .output();
+        assert!(
+            !out.status.success(),
+            "a node mutation on the default branch must refuse"
+        );
+        assert_refusal_contract(
+            &String::from_utf8_lossy(&out.stderr),
+            "main",
+            "apg project start",
+        );
+        testutil::remove(&repo);
+    }
+
+    /// A bound mutation whose caller stands on `main` rather than in the
+    /// registered row's worktree refuses naming the caller's branch, the row's
+    /// worktree and branch, and exactly one `apg project start alpha`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_bound_mutation_outside_the_worktree_names_main_and_start() {
+        let repo = Repo::new("refusal-bound-mutation-main");
+        let wt = repo.start_project("alpha");
+        let wt_canon = wt.canonicalize().unwrap();
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", &wt_canon);
+            row.branch = Some("alpha".to_string());
+            row.owner = Some("session-a".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        let out =
+            testutil::ApgCommand::new(&["plan", "add", "alpha", "--title", "T", "--strategy", "S"])
+                .cwd(&repo.root)
+                .env("APG_PROJECT", "alpha")
+                .env("APG_CALLER_SESSION", "session-a")
+                .output();
+        assert!(
+            !out.status.success(),
+            "a bound mutation from outside the row's worktree must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_refusal_contract(&stderr, "main", "apg project start alpha");
+        assert!(
+            stderr.contains(&wt_canon.display().to_string()),
+            "the refusal must name the row's worktree: {stderr}"
+        );
+        assert!(
+            stderr.contains("branch `alpha`"),
+            "the refusal must name the row's branch: {stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A bound read of an ownerless row refuses naming the caller's branch and
+    /// exactly one `apg project claim alpha` (`require_owner`'s ownerless arm).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_bound_read_ownerless_names_main_and_claim() {
+        let repo = Repo::new("refusal-bound-ownerless");
+        let wt = repo.start_project("alpha");
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        let out = testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "alpha")
+            .output();
+        assert!(
+            !out.status.success(),
+            "a bound read of an ownerless row must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_refusal_contract(&stderr, "main", "apg project claim alpha");
+        assert!(
+            stderr.contains("no owner"),
+            "the refusal must name the ownerless state: {stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A bound read of a row owned by another session refuses naming the
+    /// caller's branch, the owner, and exactly one `apg project claim alpha`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_bound_read_other_owner_names_main_and_claim() {
+        let repo = Repo::new("refusal-bound-other-owner");
+        let wt = repo.start_project("alpha");
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            row.owner = Some("other-session".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        let out = testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "alpha")
+            .env("APG_CALLER_SESSION", "session-a")
+            .output();
+        assert!(
+            !out.status.success(),
+            "a bound read owned by another session must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_refusal_contract(&stderr, "main", "apg project claim alpha");
+        assert!(
+            stderr.contains("other-session"),
+            "the refusal must name the owner: {stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The detached/unborn-HEAD refusal is the one project-context family with
+    /// no branch clause — a checkout with no branch cannot name the caller's
+    /// current branch — so it asserts the fix contract alone.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg); run via cargo test-e2e"]
+    fn project_context_refusal_unborn_head_has_one_fix_and_no_branch_clause() {
+        let root = std::env::temp_dir().join(format!("apg-refusal-unborn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("refs/heads/main");
+        git2::Repository::init_opts(&root, &opts).unwrap();
+        std::fs::create_dir_all(root.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
+
+        let out =
+            testutil::ApgCommand::new(&["plan", "add", "demo", "--title", "T", "--strategy", "S"])
+                .cwd(&root)
+                .output();
+        assert!(
+            !out.status.success(),
+            "a mutation on an unborn HEAD must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("detached or unborn HEAD"), "{stderr}");
+        assert!(stderr.contains("no project context"), "{stderr}");
+        assert_eq!(
+            stderr.matches("Fix:").count(),
+            1,
+            "exactly one fix line expected: {stderr}"
+        );
+        assert_eq!(
+            stderr.matches("apg project start").count(),
+            1,
+            "exactly one `apg project start` expected: {stderr}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
