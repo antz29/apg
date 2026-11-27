@@ -359,6 +359,66 @@ pub fn remove(repo: &Repo) {
     let _ = std::fs::remove_dir_all(&repo.root);
 }
 
+/// Owns a scratch fixture [`Repo`] alongside the live reader threads a test
+/// spawns against it, so the fixture and its readers are torn down on every
+/// exit path. Register each reader immediately after spawning it with
+/// [`register_reader`](Self::register_reader); call
+/// [`stop_and_join`](Self::stop_and_join) before a rendezvous assertion, or let
+/// `Drop` do it — a failed assertion still stops and joins every reader and
+/// removes the fixture, and `Drop` never panics (a panic while unwinding would
+/// abort).
+pub struct ScratchGuard {
+    repo: Repo,
+    readers: Vec<(
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::thread::JoinHandle<()>,
+    )>,
+}
+
+impl ScratchGuard {
+    /// Wraps `repo`, with no readers registered yet.
+    pub fn new(repo: Repo) -> Self {
+        ScratchGuard {
+            repo,
+            readers: Vec::new(),
+        }
+    }
+
+    /// The guard's scratch fixture.
+    pub fn repo(&self) -> &Repo {
+        &self.repo
+    }
+
+    /// Registers a live reader's stop flag and join handle — one per spawn.
+    pub fn register_reader(
+        &mut self,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        handle: std::thread::JoinHandle<()>,
+    ) {
+        self.readers.push((stop, handle));
+    }
+
+    /// Stops and joins every registered reader; a second call is a no-op.
+    pub fn stop_and_join(&mut self) {
+        for (stop, handle) in self.readers.drain(..) {
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            // A panicking reader surfaces here as a join error; the teardown
+            // path swallows it rather than panicking itself.
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for ScratchGuard {
+    fn drop(&mut self) {
+        // Never panic here: a drop while already unwinding would abort, and a
+        // test's failed rendezvous assertion must still stop/join its reader
+        // and remove the fixture.
+        self.stop_and_join();
+        remove(&self.repo);
+    }
+}
+
 /// A located `Graph` node fixture — the File/Struct/Function shape the
 /// frontends emit, with a one-line span at `path`. A pure builder shared by
 /// the unit/int and e2e tiers and single-sourced here per
