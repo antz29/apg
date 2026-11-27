@@ -1388,7 +1388,8 @@ mod e2e {
     /// fast-project-start task-6 (e2e): `apg project start` refuses when
     /// the main checkout has no scan OR a stale one, naming `apg scan` in
     /// the main checkout — or, when its database is present but unreadable,
-    /// names the contention and asks for a retry instead. Every refusal sits
+    /// names the database and the underlying cause without claiming
+    /// contention (a terminal first read never retried). Every refusal sits
     /// before the gitignore self-heal, so it leaves main (and its
     /// `.gitignore`) untouched and creates no branch/worktree.
     #[test]
@@ -1475,11 +1476,11 @@ mod e2e {
 
         // (c) A present-but-unreadable scan: main's `db.lbug` exists (so this
         // is neither "missing" — (a)'s NotApplicable path — nor "stale"), but
-        // its bytes no engine parses. That is named contention: start names
-        // the database and asks to retry once the holder finishes, NOT a
-        // stale-graph `apg scan`. The worktrees ignore entry is dropped, as in
-        // (a), so a refusal that reached the self-heal would visibly mutate
-        // `.gitignore`.
+        // its bytes no engine parses. That read fails terminally on the first
+        // attempt (no retry), so start names the database and the underlying
+        // cause and claims no contention — NOT a stale-graph `apg scan`. The
+        // worktrees ignore entry is dropped, as in (a), so a refusal that
+        // reached the self-heal would visibly mutate `.gitignore`.
         let repo = Repo::new("start-scan-contended");
         repo.write(
             "code/seed.scan.jsonl",
@@ -1500,11 +1501,46 @@ mod e2e {
             let _ = std::fs::remove_file(repo.apg_root().join(specs::TRANS).join(sidecar));
         }
 
+        // The corrupt file fails terminally on the first read (no retry), so the
+        // refusal must name the main database and the underlying cause — and
+        // claim no contention (no wait, budget or another process).
+        let cause = match git::freshness_snapshot(&repo.apg_root()) {
+            git::FreshnessSnapshot::Contended {
+                database, cause, ..
+            } => {
+                assert_eq!(
+                    database, db_path,
+                    "the snapshot must name the database it could not read"
+                );
+                cause
+            }
+            other => panic!("an unreadable database must read Contended, got {other:?}"),
+        };
+        assert!(
+            !cause.is_empty(),
+            "the read failure must carry an underlying cause"
+        );
+
         let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("unreadable"), "{msg}");
         assert!(msg.contains(&db_path.display().to_string()), "{msg}");
-        assert!(msg.contains("retry"), "{msg}");
+        assert!(
+            msg.contains(&cause),
+            "the refusal must name the underlying cause: {msg}"
+        );
+        for forbidden in [
+            "waited",
+            "budget",
+            "contention",
+            "another process holds it",
+            "retry once that process finishes",
+        ] {
+            assert!(
+                !msg.to_lowercase().contains(forbidden),
+                "a terminal first read must not claim `{forbidden}`: {msg}"
+            );
+        }
         // The contention message says "is not stale or missing", so only the
         // stale guidance itself is absent — not the bare phrase.
         assert!(
