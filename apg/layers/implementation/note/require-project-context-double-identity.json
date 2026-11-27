@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "require-project-context-double-identity",
+  "body": "The binding resolves the repo identity twice, once in the guard and once inside require_project, keeps the pre-registry membership_refusal shape until task 7 upgrades it, and adds no unit test at this tier because the binding is e2e-covered; fold the two identity walks into one if the guard becomes hot, and let task 7 own the registry-aware wording.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.identity.require_project_context",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
