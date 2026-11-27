@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "tool-path-resolution",
-  "body": "The suite tools' path-resolution component: the shared plumbing that resolves a registered project's worktree through the binary, joins a stored repo-relative identity to an absolute path, and owns the tool side of that boundary.",
+  "body": "The suite plumbing that resolves a registered project's worktree through the binary's project-resolve verb, joins a stored repo-relative identity to an absolute path, and owns the resolution boundary on both the tool and binary sides.",
   "properties": {},
   "out": [
     {
