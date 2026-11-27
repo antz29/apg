@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "assignment-grant-check-is-prose-only",
+  "body": "The assignment grant-coverage rule is prose in three shipped prompt templates (plan-review's Assignment criterion, the plan-writer's assignment rule, the implementation-phase reviewer's assignment bullet); the binary validator checks only roster membership, so a task whose assigned Agent's declared permissions exclude an operation-edge target path is caught by review reading the Agent definition, never by `apg plan verify`. Upgrade to an automated verify-gate check, comparing each operation-edge target against the assigned Agent's declared permission globs, if an assignment-grant mismatch recurs.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
