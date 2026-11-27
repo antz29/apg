@@ -57,6 +57,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.freshness-refusal-names-cause-not-contention",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.freshness-refusal-names-the-differing-input",
       "properties": {}
     },

@@ -97,6 +97,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.freshness-refusal-names-cause-not-contention",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.freshness-refusal-names-the-differing-input",
       "properties": {}
     },
