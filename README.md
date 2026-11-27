@@ -396,6 +396,19 @@ agent to explore the graph directly — it will pick the right tool:
 > *"Who calls `ComputeContentHash`?"*
 > *"What functions touch lines 190–240 of `store.go`?"*
 
+Every suite tool takes a required `project` argument — a **registered project
+name** (as recorded by `apg project start` / `apg init`) — and none takes a
+`directory` or any other path selector. For a project-bound call the shared
+plumbing resolves the name through the binary's `apg project resolve <project>`
+and runs the real command with the resolved worktree as its working directory
+(the caller's cwd is never changed), re-basing stored repo-relative identities
+to absolute paths at the tool boundary; `apg_project`'s `start` and `merge` are
+main-checkout operations and run from the resolved main checkout instead. An
+unregistered name is refused naming the registry and the registered projects,
+and an ownerless registered project refuses every project-bound use until a
+session claims it with `apg project claim <name>` (the `apg_project` tool's
+`claim` action).
+
 | Tool | What it returns |
 |---|---|
 | `apg_find_symbol` | symbols whose FQN contains a string |
@@ -409,14 +422,14 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_hunk` | units overlapping a line range (diff/review join) |
 | `apg_query` | ad-hoc read-only Cypher (power users) |
 | `apg_scan` | rebuild `apg/.trans/db.lbug` |
-| `apg_project` | project lifecycle — `start` (main → worktree + branch + branch DB), `verify`, `merge` |
+| `apg_project` | project lifecycle — `start` (main → worktree + branch + branch DB), `verify`, `merge`, `claim` (take ownership of an ownerless registered project) |
 | `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges (require a live session) |
 | `apg_session` | start a live session for a worktree — spawns `apg session start` detached, waits for its socket, returns while the session stays live |
 | `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, verify gate |
 | `apg_review` / `apg_review_*` | coordinator-mediated writer↔reviewer feedback cycle (transient mirrors) |
-| `apg_rm` | path-scoped remove — resolves its path against the caller's project dir and self-enforces the acting agent's granted globs + the project/worktree boundary |
-| `apg_mv` | path-scoped move/rename — source and destination each resolved against the caller's project dir and scope-checked (agent globs + worktree boundary; both ends) |
-| `apg_cp` | path-scoped copy — source and destination each resolved against the caller's project dir and scope-checked (agent globs + worktree boundary; both ends) |
+| `apg_rm` | path-scoped remove — resolves each path against the required registered project's worktree and self-enforces the acting agent's granted globs + the project/worktree boundary |
+| `apg_mv` | path-scoped move/rename — source and destination each resolved against the required registered project's worktree and scope-checked (agent globs + worktree boundary; both ends) |
+| `apg_cp` | path-scoped copy — source and destination each resolved against the required registered project's worktree and scope-checked (agent globs + worktree boundary; both ends) |
 
 The code-graph tools above return location data; the `apg_project`/`apg_node`/
 `apg_edge`/`apg_plan_*`/`apg_review_*` tools operate on the project's spec/plan
@@ -511,11 +524,12 @@ A change-set is a **project**: a git branch + its worktree. `apg project start
 <name>` — run from the main checkout — branches off the default branch, creates
 the worktree at `apg/.worktrees/<name>`, copies the main checkout's current
 scan into it (`apg scan` must be current on main first — start refuses a stale
-or missing scan), and **prints the worktree path**; sessions then operate with
-cwd inside the worktree (walk-up discovery finds the worktree's own `apg/` and
-its branch DB). Main is never a mutation place — `apg node`/`apg edge`/`apg
-plan`/`apg review`/`apg session start` refuse outside a project context (the
-default branch is never a mutation place).
+or missing scan), and **prints the worktree path**; sessions then work in that
+worktree — the suite resolves it from the registered project name, and CLI
+invocations run with cwd inside it (walk-up discovery finds the worktree's own
+`apg/` and its branch DB). Main is never a mutation place —
+`apg node`/`apg edge`/`apg plan`/`apg review`/`apg session start` refuse outside
+a project context (the default branch is never a mutation place).
 
 `apg project start <name> --cache-copy auto|clone|copy|skip` (both
 `--flag=value` and `--flag value` are accepted) seeds the new worktree's
@@ -565,7 +579,12 @@ project resolve <name>` prints exactly the registered worktree path — the
 name → worktree lookup — and `apg project reconstruct` rebuilds every row from
 `git worktree list` (the main checkout as `main` plus each linked worktree,
 owner cleared, fresh creation time), the repair path for a stale row; nothing
-durable lives only in the registry.
+durable lives only in the registry. Ownership gates use: a project-bound caller
+is authorised only for the project's owning session or a session whose parentID
+chain contains the owner, while the built-in `main` row is readable by every
+session; an ownerless row refuses every project-bound use until a session claims
+it with `apg project claim <name>` — the claim transfers ownership and reports
+the previous owner, and refuses `main` and an unregistered name.
 
 The durable spec is a **node-file store** under `apg/layers/` — one JSON file
 per node, authored with `apg node add|rm <layer> <type> <name>` and
