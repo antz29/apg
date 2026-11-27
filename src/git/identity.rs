@@ -244,6 +244,17 @@ pub fn require_membership(apg_root: &Path, project: &str) -> anyhow::Result<()> 
 /// project context satisfies the guard; the default branch still never does.
 pub fn require_project_context(apg_root: &Path) -> anyhow::Result<()> {
     let identity = repo_identity(apg_root)?;
+    // The registry binding is env-gated: `require_project` returns `None` when
+    // `APG_PROJECT` is absent, leaving a raw CLI call's behaviour unchanged.
+    // An env-bound caller must be standing in the row's worktree on the row's
+    // branch *before* membership is judged, so a refusal names the project the
+    // caller asked for rather than the branch it happens to be on.
+    if let Some(row) = crate::registry::require_project(apg_root)?
+        && (identity.checkout_root != canonical(&row.worktree)
+            || identity.branch.as_deref() != row.branch.as_deref())
+    {
+        return Err(membership_refusal(&identity, &row.name));
+    }
     let Some(branch) = identity.branch.clone() else {
         anyhow::bail!(
             "mutation refused — no project context: the checkout holds no branch (detached or unborn HEAD). Fix: run `apg project start <name>` from the main checkout and work inside its worktree."
