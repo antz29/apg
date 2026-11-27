@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "require-project-consumer-duties",
+  "body": "require_project resolves and authorises the row only and does not rebase caller paths against the row's worktree, which its consumers own, and it re-derives the git identity and reopens the registry on every call with no caching; consumers must rebase their own paths, and a cache is needed only if a long-lived session calls it in a hot loop.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.require_project",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
