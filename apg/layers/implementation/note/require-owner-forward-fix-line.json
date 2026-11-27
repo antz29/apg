@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "require-owner-forward-fix-line",
+  "body": "require_owner's ownerless fix line names apg project claim before task 8 implements that verb, and owner matching is exact string equality on session ids; the fix line completes once project claim lands, and session identity needs normalisation only if ids ever vary.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.require_owner",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
