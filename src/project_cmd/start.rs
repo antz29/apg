@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 use crate::artifacts::parse_args;
 use crate::git;
 use crate::specs;
@@ -105,6 +107,20 @@ pub fn project_start_at_with(
     version_gate::require_layout_version(apg_root, &format!("re-run `apg project start {name}`"))?;
 
     refuse_start(&identity, name)?;
+
+    // Registry: a name that already maps to a worktree is a duplicate start,
+    // refused before any side effect on git — the row names the worktree to
+    // use instead. Opening the registry creates it under main's gitignored
+    // `apg/.trans/`; the handle drops with this statement.
+    let registry_path = crate::registry::registry_path(&identity.main_root);
+    let existing = crate::registry::Registry::open(&registry_path)?.get(name)?;
+    if let Some(row) = existing {
+        anyhow::bail!(
+            "refused: project `{name}` already has a registry row in the project registry `{reg}` pointing at worktree {wt} — one project name resolves to one worktree. Fix: work in that worktree, or rebuild stale rows with `apg project reconstruct`, then re-run `apg project start {name}`.",
+            reg = registry_path.display(),
+            wt = row.worktree.display()
+        );
+    }
 
     // Spec lock: taken AFTER the refusals and the version gate (a refusing
     // start must not hold it) and BEFORE the freshness gate, held through the
@@ -242,6 +258,24 @@ pub fn project_start_at_with(
     // The copy only seeds `.trans`; the worktree also needs the scratch dir
     // the researcher writes its result markdown into.
     std::fs::create_dir_all(wt_apg.join(specs::SCRATCH))?;
+    // Register the project's row: the one index a bare name resolves through,
+    // carrying the worktree, the branch libgit2 just created, and the calling
+    // session as owner (a raw CLI call has none). A registry write failure
+    // fails the start rather than leaving an unregistered context behind.
+    let wt_root = std::fs::canonicalize(&wt_dir).unwrap_or_else(|_| wt_dir.clone());
+    let mut entry = crate::registry::RegistryEntry::new(name, wt_root);
+    entry.branch = Some(name.to_string());
+    entry.owner = std::env::var("APG_CALLER_SESSION")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    crate::registry::Registry::open(&registry_path)?
+        .put(&entry)
+        .with_context(|| {
+            format!(
+                "registering project `{name}` in the project registry at {}",
+                registry_path.display()
+            )
+        })?;
     Ok(wt_dir)
 }
 
