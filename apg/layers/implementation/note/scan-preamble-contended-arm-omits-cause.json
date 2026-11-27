@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-preamble-contended-arm-omits-cause",
+  "body": "The scan preamble's `Contended` arm (`staleness_line`) renders only the snapshot's `waited`/`budget` pair under a `CONTENDED` label and names no cause, so a terminal data-read failure prints a zero pair as if a retry had been spent; the freshness refusals name the database and cause and claim contention only when the read actually retried. Upgrade when the scan preamble must name the cause or drop the contention label for a terminal read.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.staleness_line",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
