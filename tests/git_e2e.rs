@@ -311,6 +311,120 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Gitignored content is outside the freshness verdict: adding an ignored
+    /// file after the recorded scan, then editing it, changes no tracked or
+    /// untracked-unignored byte — Git still reports the tree clean, the content
+    /// identity is unchanged, and the DB stays fresh (never a false STALE).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn ignored_file_add_and_edit_stay_fresh() {
+        let repo = fixture_repo("ignoredfresh");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        let baseline = git_state(&apg);
+        assert!(baseline.clean);
+        assert!(is_fresh(&apg));
+
+        // A NEW file in the gitignored scratch tree (`apg/.scratch/` is in the
+        // fixture's `.gitignore`): Git reports nothing at all.
+        let ignored = "apg/.scratch/ignored-note.md";
+        repo.write(ignored, "# ignored note\n");
+        assert!(
+            path_is_ignored(&repo.root, Path::new(ignored)),
+            "the scratch note must actually be gitignored"
+        );
+        let after_add = git_state(&apg);
+        assert!(after_add.clean, "an ignored file must not dirty the tree");
+        assert_eq!(
+            after_add.content_key, baseline.content_key,
+            "an ignored file must not move the content key"
+        );
+        assert!(is_fresh(&apg), "adding an ignored file must stay fresh");
+        assert!(!is_stale(&apg), "an ignored file is never stale");
+        let line = staleness_line(&apg, &after_add, None);
+        assert!(
+            line.ends_with("→ FRESH"),
+            "an ignored file must print FRESH: {line}"
+        );
+
+        // Editing it (different bytes) is still outside the verdict.
+        repo.write(ignored, "# ignored note, edited\n");
+        let after_edit = git_state(&apg);
+        assert!(
+            after_edit.clean,
+            "editing an ignored file must not dirty the tree"
+        );
+        assert_eq!(
+            after_edit.content_key, baseline.content_key,
+            "editing an ignored file must not move the content key"
+        );
+        assert!(is_fresh(&apg), "editing an ignored file must stay fresh");
+        assert!(!is_stale(&apg), "an ignored file is never stale");
+        let line = staleness_line(&apg, &after_edit, None);
+        assert!(
+            line.ends_with("→ FRESH"),
+            "an edited ignored file must print FRESH: {line}"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// A tracked byte change is inside the verdict: editing the tracked
+    /// `apg/config.json` at the recorded sha moves the content identity, so the
+    /// DB is not fresh and the gate reads stale naming the changed content.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn tracked_byte_change_reads_stale() {
+        let repo = fixture_repo("trackedstale");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg));
+        repo.write(
+            "apg/config.json",
+            "{\n  \"default\": \"edited\",\n  \"types\": []\n}\n",
+        );
+        assert!(
+            !is_fresh(&apg),
+            "a tracked byte edit must invalidate freshness"
+        );
+        assert!(is_stale(&apg));
+        let line = staleness_line(&apg, &git_state(&apg), None);
+        assert!(line.contains("→ STALE"), "{line}");
+        assert!(line.contains("differing: content key"), "{line}");
+        testutil::remove(&repo);
+    }
+
+    /// An untracked, unignored file is inside the verdict: a new root-level
+    /// file at the recorded sha moves the content identity and dirties the
+    /// tree, so the DB is not fresh and the gate reads stale.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
+    fn untracked_unignored_file_reads_stale() {
+        let repo = fixture_repo("untrackedstale");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg));
+        repo.write("untracked.txt", "new content\n");
+        assert!(
+            !path_is_ignored(&repo.root, Path::new("untracked.txt")),
+            "the new file must be unignored"
+        );
+        assert!(
+            !is_fresh(&apg),
+            "an untracked, unignored file must invalidate freshness"
+        );
+        assert!(is_stale(&apg));
+        let line = staleness_line(&apg, &git_state(&apg), None);
+        assert!(line.contains("→ STALE"), "{line}");
+        assert!(line.contains("differing: content key"), "{line}");
+        testutil::remove(&repo);
+    }
+
     /// `is_fresh_with_state` consumes the caller's captured `GitState`: on the
     /// same state it agrees with `is_fresh` in both directions (fresh, a
     /// byte-identical touch, a one-byte edit), and a state captured before the
