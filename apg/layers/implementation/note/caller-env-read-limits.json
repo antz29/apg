@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "caller-env-read-limits",
+  "body": "The caller reader treats non-Unicode environment values as absent and deliberately does not validate APG_PROJECT against the registry, leaving that to require_project; switch to lossy var_os handling and route validation through require_project only if a caller ever needs non-UTF-8 session ids or an early refusal.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.caller_from_env",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
