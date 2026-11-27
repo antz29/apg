@@ -613,13 +613,22 @@ export function noteIfEmpty(out: string, note: string): string {
  * selector — every project-bound command runs through `runInProject` in the
  * resolved worktree. With it omitted, the root is the resolved
  * `context.worktree`; a caller with neither is refused with
- * `MISSING_WORKTREE_ERROR`. */
+ * `MISSING_WORKTREE_ERROR`.
+ *
+ * The child environment copies `process.env` and names the caller session
+ * (`APG_CALLER_SESSION` from `context.sessionID`) so `apg project start`
+ * records the registry row's owner. `APG_PROJECT` is deliberately never set:
+ * `start` runs before the row exists, so a project binding would refuse it. */
 export async function runCli(context: ToolContext, args: string[], mainRoot?: string): Promise<string> {
   const root = mainRoot ?? context.worktree
   if (!root) {
     return MISSING_WORKTREE_ERROR
   }
-  const result = await Bun.$`${apgBinary()} ${args}`.cwd(root).quiet().nothrow()
+  const result = await Bun.$`${apgBinary()} ${args}`
+    .cwd(root)
+    .env({ ...process.env, APG_CALLER_SESSION: context.sessionID })
+    .quiet()
+    .nothrow()
   if (result.exitCode !== 0) {
     const cmd = [apgBinary(), ...args].join(" ")
     return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}\nroot: ${root}`
