@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "induced-failure-checks-share-the-scan-fixture",
+  "body": "The induced runCli and runInProject failure assertions run inside the boundary e2e's scanned-project scenario, so they are skipped unless APG_SUITE_E2E=1 and share its apg init, scan and project start fixture; upgrade by extracting a lighter fixture if that setup moves or if the failure text must be pinned in the default tier.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.runCli",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

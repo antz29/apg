@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "session-refusal-assertions-opt-in-only",
-  "body": "The boundary e2e asserts a worktree-less startDetachedSession refusal only under APG_SUITE_E2E=1, so the default gate does not exercise it; upgrade by wiring the suite boundary e2e into the default gate if the refusal must be pinned on every run.",
+  "body": "The boundary e2e asserts a worktree-less startDetachedSession refusal only under APG_SUITE_E2E=1, so the default gate does not exercise it; upgrade by wiring the suite boundary e2e into the default gate if the refusal must be pinned on every run. The failed-to-spawn case also tolerates an immediate early-exit shape, because it asserts only the leading prefix, the resolved root and that the result is not NO_DB_ERROR; upgrade by pinning the failed-to-spawn text if that branch itself must be discriminated.",
   "properties": {},
   "out": [
     {
