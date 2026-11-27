@@ -10,6 +10,7 @@ use apg::git;
 use apg::layers::{self, InEdge, NodeFile, OutEdge};
 use apg::plan_cmd;
 use apg::project_cmd::*;
+use apg::registry;
 use apg::schema::Record;
 use apg::specs;
 use apg::testutil::{self, Repo};
@@ -1036,6 +1037,14 @@ fn assert_project_gone(repo: &testutil::Repo, name: &str) {
 
 fn git2_repo_test(repo: &testutil::Repo) -> git2::Repository {
     git2::Repository::open(&repo.root).unwrap()
+}
+
+/// The main checkout's project-registry path, canonicalized the way the
+/// production commands resolve it: `git::repo_identity` canonicalizes the
+/// checkout root, so a `/var` → `/private/var` temp symlink must never split
+/// the store into two files (one the fixture writes, one the binary reads).
+fn registry_path_of(repo: &testutil::Repo) -> PathBuf {
+    registry::registry_path(&repo.root.canonicalize().unwrap())
 }
 
 /// A scratch git repo with real Go sources + a versioned `apg/` layout,
@@ -4963,5 +4972,437 @@ mod e2e {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // ------------------------------------------------------------------
+    // project-registry (e2e): the main checkout's `apg/.trans/projects.db`
+    // maps a project name to its worktree/branch/owner. `apg init` seeds the
+    // built-in `main` row, `project start` records the caller's session as
+    // owner, merge/delete remove the row, and resolve/reconstruct read and
+    // rebuild the index from the worktree list.
+    // ------------------------------------------------------------------
+
+    /// `apg init` writes exactly one `main` row — the canonical main root, the
+    /// checkout's branch, no owner and a creation time — and a second init keeps
+    /// that one row with its original creation time.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/registry); run via cargo test-e2e"]
+    fn registry_init_registers_one_main_row() {
+        let (base, repo_dir, home) = warm_scratch("registry-init");
+        let reg_path = registry::registry_path(&repo_dir.canonicalize().unwrap());
+        assert!(
+            !reg_path.exists(),
+            "a fresh checkout carries no registry: {}",
+            reg_path.display()
+        );
+
+        let first = warm_run(&repo_dir, &home, &["init", "."]);
+        assert!(
+            first.status.success(),
+            "init: {}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+
+        let created_at = {
+            let reg = registry::Registry::open(&reg_path).unwrap();
+            let rows = reg.entries().unwrap();
+            assert_eq!(rows.len(), 1, "init writes exactly one row: {rows:?}");
+            let main = &rows[0];
+            assert_eq!(main.name, "main");
+            assert_eq!(
+                main.worktree,
+                repo_dir.canonicalize().unwrap(),
+                "the main row's worktree is the canonical main root"
+            );
+            assert_eq!(main.branch.as_deref(), Some("main"));
+            assert_eq!(main.owner, None, "main has no owning session");
+            assert!(main.created_at > 0, "the row carries a creation time");
+            main.created_at
+        };
+
+        // A second init keeps the one `main` row and its original creation time.
+        let second = warm_run(&repo_dir, &home, &["init", "."]);
+        assert!(
+            second.status.success(),
+            "second init: {}",
+            String::from_utf8_lossy(&second.stderr)
+        );
+        let reg = registry::Registry::open(&reg_path).unwrap();
+        let rows = reg.entries().unwrap();
+        assert_eq!(rows.len(), 1, "init stays at one `main` row: {rows:?}");
+        assert_eq!(rows[0].name, "main");
+        assert_eq!(
+            rows[0].created_at, created_at,
+            "re-init keeps the `main` row's original creation time"
+        );
+        drop(reg);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `apg project start <name>` records the calling `APG_CALLER_SESSION` as
+    /// the row's owner, beside the branch and the project worktree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/worktree/registry); run via cargo test-e2e"]
+    fn registry_start_records_the_caller_session_as_owner() {
+        let repo = Repo::new("registry-owner");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        start_scan(&repo.root).unwrap();
+
+        let out = testutil::ApgCommand::new(&["project", "start", "owned"])
+            .cwd(&repo.root)
+            .env("APG_CALLER_SESSION", "session-xyz")
+            .output();
+        assert!(
+            out.status.success(),
+            "project start: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+        let row = reg
+            .get("owned")
+            .unwrap()
+            .expect("start must register the project");
+        assert_eq!(row.owner.as_deref(), Some("session-xyz"));
+        assert_eq!(row.branch.as_deref(), Some("owned"));
+        assert_eq!(
+            row.worktree,
+            repo.project_worktree_dir("owned").canonicalize().unwrap()
+        );
+        drop(reg);
+        testutil::remove(&repo);
+    }
+
+    /// A name that already has a registry row is refused by the registry path
+    /// (its branch and worktree do not exist), naming the project, the registry
+    /// path and the row's worktree — and no worktree or branch is created.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/registry); run via cargo test-e2e"]
+    fn registry_start_refuses_an_existing_registry_row() {
+        let repo = Repo::new("registry-dup-start");
+        let reg_path = registry_path_of(&repo);
+        let ghost_wt = repo.root.join("phantom-worktree");
+        {
+            let reg = registry::Registry::open(&reg_path).unwrap();
+            let mut row = registry::RegistryEntry::new("ghost", &ghost_wt);
+            row.branch = Some("ghost".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        let out = testutil::ApgCommand::new(&["project", "start", "ghost"])
+            .cwd(&repo.root)
+            .output();
+        assert!(
+            !out.status.success(),
+            "a registered name must refuse a second start"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("ghost"), "{stderr}");
+        assert!(
+            stderr.contains(&reg_path.display().to_string()),
+            "the refusal must name the registry path: {stderr}"
+        );
+        assert!(
+            stderr.contains(&ghost_wt.display().to_string()),
+            "the refusal must name the row's worktree: {stderr}"
+        );
+
+        // The refusal is before any git side effect.
+        assert!(!repo.project_worktree_dir("ghost").exists());
+        let main_repo = git2_repo_test(&repo);
+        assert!(
+            main_repo
+                .find_branch("ghost", git2::BranchType::Local)
+                .is_err(),
+            "a refused start must create no branch"
+        );
+        assert!(
+            main_repo.find_worktree("ghost").is_err(),
+            "a refused start must create no worktree"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// One worktree belongs to exactly one project: `Registry::put` refuses a
+    /// second name claiming an already-registered worktree, naming both names,
+    /// and leaves the first row intact.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/registry); run via cargo test-e2e"]
+    fn registry_put_refuses_a_worktree_registered_to_another_name() {
+        let repo = Repo::new("registry-one-worktree");
+        let shared = repo.root.join("shared-worktree");
+        let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+        let first = registry::RegistryEntry::new("alpha", &shared);
+        reg.put(&first).unwrap();
+
+        let err = reg
+            .put(&registry::RegistryEntry::new("beta", &shared))
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("alpha"),
+            "the refusal must name the holder: {msg}"
+        );
+        assert!(
+            msg.contains("beta"),
+            "the refusal must name the claimant: {msg}"
+        );
+        assert!(
+            msg.contains(&shared.display().to_string()),
+            "the refusal must name the worktree: {msg}"
+        );
+
+        // The first row survives; the refused name was never written.
+        assert_eq!(reg.get("alpha").unwrap().as_ref(), Some(&first));
+        assert!(reg.get("beta").unwrap().is_none());
+        assert_eq!(reg.entries().unwrap().len(), 1);
+        drop(reg);
+        testutil::remove(&repo);
+    }
+
+    /// A merged project's registry row is removed on the successful merge path,
+    /// after the merge and self-cleanup; the built-in `main` row stays.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/merge/registry); run via cargo test-e2e"]
+    fn registry_merge_removes_the_project_row() {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+            testutil::scan_checkout_locked(dir)
+        }
+        let repo = Repo::new("registry-merge");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(
+                MOD,
+                FILE,
+                &[
+                    "Store",
+                    "ProjectStart",
+                    "MutationGuard",
+                    "LayersSerializer",
+                    "PlanBridge",
+                    "InitVersionGate",
+                ],
+            ),
+        );
+        repo.commit_all("seed code");
+        start_scan_locked(&repo.root).unwrap();
+
+        // The built-in `main` row must survive the project's removal.
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            reg.put(&registry::RegistryEntry::new(
+                "main",
+                repo.root.canonicalize().unwrap(),
+            ))
+            .unwrap();
+        }
+
+        let wt = project_start_at(&repo.apg_root(), "reg-merge").unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+        layers::write_project(&wt_apg, &apg_projects_tier_nodes(), &[]).unwrap();
+        let plan_path = wt_apg
+            .join(specs::TRANS)
+            .join("plans")
+            .join("reg-merge.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "reg-merge",
+            &apg_projects_plan_records("reg-merge"),
+        )
+        .unwrap();
+        plan_cmd::plan_verify_at(&wt_apg, "reg-merge").unwrap();
+
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            assert!(
+                reg.get("reg-merge").unwrap().is_some(),
+                "start must register the project before the merge"
+            );
+        }
+
+        // A stub rebuild reaches the merge success path without a real scan:
+        // the assertion is the registry row's removal, not the graph contents.
+        let stub_rebuild = |_dir: &Path| -> anyhow::Result<()> { Ok(()) };
+        project_merge_at(&repo.apg_root(), "reg-merge", Some(&stub_rebuild)).unwrap();
+
+        let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+        assert!(
+            reg.get("reg-merge").unwrap().is_none(),
+            "a merged project's registry row must be removed"
+        );
+        assert!(
+            reg.get("main").unwrap().is_some(),
+            "the built-in `main` row must stay"
+        );
+        drop(reg);
+        assert_project_gone(&repo, "reg-merge");
+        testutil::remove(&repo);
+    }
+
+    /// A deleted (abandoned) project's registry row is removed after the
+    /// worktree and branch are gone.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/delete/registry); run via cargo test-e2e"]
+    fn registry_delete_removes_the_project_row() {
+        let repo = Repo::new("registry-delete");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        start_scan(&repo.root).unwrap();
+
+        project_start_at(&repo.apg_root(), "doomed").unwrap();
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            assert!(
+                reg.get("doomed").unwrap().is_some(),
+                "start must register the project before the delete"
+            );
+        }
+
+        project_delete_at(&repo.apg_root(), "doomed").unwrap();
+
+        let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+        assert!(
+            reg.get("doomed").unwrap().is_none(),
+            "a deleted project's registry row must be removed"
+        );
+        drop(reg);
+        assert_project_gone(&repo, "doomed");
+        testutil::remove(&repo);
+    }
+
+    /// `apg project resolve <name>` prints exactly the registered worktree path;
+    /// an unknown name exits non-zero naming the project, the registry and the
+    /// registered names (`<none>` on an empty registry).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/registry); run via cargo test-e2e"]
+    fn registry_resolve_prints_exactly_the_registered_worktree() {
+        let repo = Repo::new("registry-resolve");
+        let reg_path = registry_path_of(&repo);
+        assert!(!reg_path.exists(), "the fixture starts with no registry");
+
+        // An absent registry reads as empty: `<none>`.
+        let empty = testutil::ApgCommand::new(&["project", "resolve", "nope"])
+            .cwd(&repo.root)
+            .output();
+        assert!(
+            !empty.status.success(),
+            "an unknown name must exit non-zero"
+        );
+        let stderr = String::from_utf8_lossy(&empty.stderr);
+        assert!(stderr.contains("nope"), "{stderr}");
+        assert!(
+            stderr.contains(&reg_path.display().to_string()),
+            "the refusal must name the registry path: {stderr}"
+        );
+        assert!(
+            stderr.contains("<none>"),
+            "an empty registry must report `<none>`: {stderr}"
+        );
+
+        let wt = repo.root.join("phantom-worktree");
+        {
+            let reg = registry::Registry::open(&reg_path).unwrap();
+            reg.put(&registry::RegistryEntry::new("alpha", &wt))
+                .unwrap();
+        }
+
+        let found = testutil::ApgCommand::new(&["project", "resolve", "alpha"])
+            .cwd(&repo.root)
+            .output();
+        assert!(
+            found.status.success(),
+            "resolve alpha: {}",
+            String::from_utf8_lossy(&found.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&found.stdout).trim(),
+            wt.display().to_string(),
+            "resolve must print exactly the registered worktree path"
+        );
+
+        // A registered registry lists its names on an unknown lookup.
+        let unknown = testutil::ApgCommand::new(&["project", "resolve", "nope"])
+            .cwd(&repo.root)
+            .output();
+        assert!(!unknown.status.success());
+        let stderr = String::from_utf8_lossy(&unknown.stderr);
+        assert!(
+            stderr.contains("alpha"),
+            "the refusal must list the registered names: {stderr}"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// `apg project reconstruct` rebuilds the rows from the git worktree list —
+    /// the main checkout as `main` plus each live project, both ownerless — and
+    /// drops a stale row that no worktree backs.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/reconstruct/registry); run via cargo test-e2e"]
+    fn registry_reconstruct_rebuilds_rows_from_the_worktree_list() {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+            testutil::scan_checkout_locked(dir)
+        }
+        let repo = Repo::new("registry-reconstruct");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        start_scan_locked(&repo.root).unwrap();
+
+        let wt = project_start_at(&repo.apg_root(), "live").unwrap();
+        // A stale row no worktree backs: reconstruct must drop it.
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            reg.put(&registry::RegistryEntry::new(
+                "ghost",
+                repo.root.join("bogus-worktree"),
+            ))
+            .unwrap();
+        }
+
+        let out = testutil::ApgCommand::new(&["project", "reconstruct"])
+            .cwd(&repo.root)
+            .output();
+        assert!(
+            out.status.success(),
+            "project reconstruct: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+        let mut rows = reg.entries().unwrap();
+        rows.sort_by(|a, b| a.name.cmp(&b.name));
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["live", "main"],
+            "reconstruct rebuilds from the worktree list"
+        );
+        let main = rows.iter().find(|r| r.name == "main").unwrap();
+        assert_eq!(main.worktree, repo.root.canonicalize().unwrap());
+        assert_eq!(main.branch.as_deref(), Some("main"));
+        assert_eq!(main.owner, None);
+        assert!(main.created_at > 0);
+        let live = rows.iter().find(|r| r.name == "live").unwrap();
+        assert_eq!(live.worktree, wt.canonicalize().unwrap());
+        assert_eq!(live.branch.as_deref(), Some("live"));
+        assert_eq!(live.owner, None, "a reconstructed project is ownerless");
+        assert!(
+            reg.get("ghost").unwrap().is_none(),
+            "reconstruct must drop a row no worktree backs"
+        );
+        drop(reg);
+        testutil::remove(&repo);
     }
 }
