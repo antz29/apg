@@ -384,11 +384,6 @@ impl ScratchGuard {
         }
     }
 
-    /// The guard's scratch fixture.
-    pub fn repo(&self) -> &Repo {
-        &self.repo
-    }
-
     /// Registers a live reader's stop flag and join handle — one per spawn.
     pub fn register_reader(
         &mut self,
