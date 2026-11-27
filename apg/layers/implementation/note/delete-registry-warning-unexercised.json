@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "delete-registry-warning-unexercised",
+  "body": "The delete path's best-effort registry-removal warning branch is unreachable from the default unit and int suite; add fault injection for it once the registry e2e tier lands, or when the delete-path warning text must be guaranteed.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/project_cmd/delete.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
