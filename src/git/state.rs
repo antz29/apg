@@ -285,10 +285,11 @@ pub struct RecordedScan {
 /// is nothing to compare, [`Fresh`](Self::Fresh) when every input matches,
 /// [`Stale`](Self::Stale) when at least one input differs, and
 /// [`Contended`](Self::Contended) when the database could not be read at all.
-/// The stale/contention split is the load-bearing one: a `Stale` verdict always
-/// carries a **non-empty** `differing` list, while contention is **never** stale
-/// and names no differing input — a persistently unreadable or locked database
-/// is a named contention, never a stale verdict.
+/// The stale/read-failure split is the load-bearing one: a `Stale` verdict
+/// always carries a **non-empty** `differing` list, while the `Contended` arm
+/// is **never** stale and names no differing input — a database read failure
+/// lands there, never in a stale verdict (see
+/// [`Contended`](Self::Contended) for the retried/terminal split).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FreshnessSnapshot {
     /// Nothing to compare: no `db.lbug`, or no git repo / unborn HEAD.
@@ -311,15 +312,19 @@ pub enum FreshnessSnapshot {
         recorded: Option<RecordedScan>,
         differing: Vec<&'static str>,
     },
-    /// The database could not be read within the bounded retry budget: a
-    /// persistently locked or otherwise unreadable database is named
-    /// contention, never [`Stale`](Self::Stale) and never a differing-input
-    /// label.
+    /// A database read failure: the freshness gather's opening read (or the
+    /// [`db_presence`] probe) returned an error — a transient lock/busy failure
+    /// retried to the budget, or a terminal failure that never retried. Never
+    /// [`Stale`](Self::Stale) and never a differing-input label.
     ///
-    /// `database` is the path the read targeted, `waited` the total the retry
-    /// sleeper was asked to wait and `budget` the configured bound it exhausted
-    /// ([`FRESHNESS_READ_BUDGET`]); `current` is the captured checkout state so
-    /// a render can still name it.
+    /// `database` is the path the read targeted and `current` the captured
+    /// checkout state so a render can still name it. `waited`/`budget` are the
+    /// retry's own pair, populated only when a transient lock/busy read
+    /// retried: `waited` is the total the retry sleeper was asked to wait (zero
+    /// when the read never retried — a terminal first read, or the no-retry
+    /// presence probe) and `budget` the configured bound it exhausted
+    /// ([`FRESHNESS_READ_BUDGET`]; zero for the presence probe, which carries
+    /// no budget), so a presence failure with no retry is zero for both.
     Contended {
         current: GitState,
         database: PathBuf,
@@ -650,17 +655,17 @@ pub fn db_presence(apg_root: &Path) -> Result<bool, FreshnessReadFailure> {
 /// sleeper), each against the same `db.lbug` path. A terminal or
 /// budget-exhausted read failure is the facts' `Err`, which
 /// [`freshness_snapshot`] renders as
-/// [`Contended`](FreshnessSnapshot::Contended): a persistently unreadable
-/// database is contention, never a differing-input label.
+/// [`Contended`](FreshnessSnapshot::Contended) — carrying the failure's cause
+/// and, only when the read retried, its waited/budget pair — never a
+/// differing-input label.
 ///
 /// The schema-shape ([`crate::splice::seed::validate_compatible`]) and authored
 /// digest ([`crate::splice::seed::seed_authored_identity`] against
 /// [`crate::splice::seed::tree_authored_identity`]) checks stay **verdicts**
 /// (`"schema"`, `"authored digest"`): each conflates a mismatch on a *readable*
 /// database — a genuine difference — with a read failure, and an unreadable
-/// database has already failed the opening reads above as contention, so
-/// turning either verdict into contention would drop a genuinely differing
-/// input's label.
+/// database has already failed the opening reads above, so turning either
+/// verdict into a read failure would drop a genuinely differing input's label.
 fn freshness_facts(
     apg_root: &Path,
     state: &GitState,
@@ -775,11 +780,14 @@ pub fn classify_freshness(
 /// this is the gate-shaped evaluation, whose callers carry no `--module`
 /// selection.
 ///
-/// A facts read failure ([`FreshnessReadFailure`]) — a database that stayed
-/// unreadable through the bounded retry — is
+/// A facts read failure ([`FreshnessReadFailure`]) — a transient lock/busy read
+/// that exhausted the bounded retry, or a terminal read (or presence-probe)
+/// error that never retried — is
 /// [`Contended`](FreshnessSnapshot::Contended), carrying the captured
-/// [`GitState`], the path the read targeted and the waited/budget pair; every
-/// readable database folds through [`classify_freshness`] exactly as before.
+/// [`GitState`], the path the read targeted, the failure's rendered cause and
+/// the waited/budget pair (both populated only by a retried read; zero for a
+/// no-retry presence failure); every readable database folds through
+/// [`classify_freshness`] exactly as before.
 pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
     let current = git_state(apg_root);
     match freshness_facts(apg_root, &current, None) {
@@ -810,8 +818,8 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
 /// closed: [`NotApplicable`](FreshnessSnapshot::NotApplicable),
 /// [`Stale`](FreshnessSnapshot::Stale) and
 /// [`Contended`](FreshnessSnapshot::Contended) are all NOT fresh, so only the
-/// `Fresh` arm reuses the DB and a contended (unreadable) database is never
-/// fresh. `requested` is the caller's resolved
+/// `Fresh` arm reuses the DB and an unreadable database is never fresh.
+/// `requested` is the caller's resolved
 /// `--module` selection: `None` skips the module comparison (the gates that
 /// carry no selection), `Some(set)` compares it to the recorded one.
 ///
@@ -881,9 +889,10 @@ pub fn is_fresh_with_state(
 /// because both consume the one [`freshness_differences_with`] evaluation; the
 /// STALE refusal / scan preamble can name every reported input.
 ///
-/// A [`Contended`](FreshnessSnapshot::Contended) database is contention, never a
-/// differing-input label and never stale: the arm carries the captured checkout
-/// state, the path the read targeted and the waited/budget pair, and only the
+/// A [`Contended`](FreshnessSnapshot::Contended) database is a read failure,
+/// never a differing-input label and never stale: the arm carries the captured
+/// checkout state, the path the read targeted, the failure's cause and — only
+/// when the read retried — the waited/budget pair, and only the
 /// [`Fresh`](FreshnessSnapshot::Fresh) arm means the DB is reusable as-is.
 ///
 /// The label strings (stable — pinned by tests):
@@ -956,10 +965,12 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
 /// `differing` when there is no HEAD sha). The label set and the `Fresh`
 /// partition match the shared snapshot.
 ///
-/// A gather `Err` (a database unreadable through the bounded retry) is the
-/// [`Contended`](FreshnessSnapshot::Contended) arm — never a differing-input
-/// label — carrying the captured [`GitState`], the path the read targeted and
-/// the waited/budget pair.
+/// A gather `Err` (a database read failure — a transient lock/busy read that
+/// exhausted the bounded retry, or a terminal read/presence error that never
+/// retried) is the [`Contended`](FreshnessSnapshot::Contended) arm — never a
+/// differing-input label — carrying the captured [`GitState`], the path the
+/// read targeted, the rendered cause and the waited/budget pair (both populated
+/// only by a retried read; zero for a no-retry presence failure).
 pub fn freshness_differences_with(
     apg_root: &Path,
     state: &GitState,
@@ -1004,10 +1015,12 @@ pub fn is_fresh(apg_root: &Path) -> bool {
 ///   differs, always named in the snapshot's non-empty `differing` list. A
 ///   missing/pre-hardening recorded key counts here (freshness cannot be
 ///   verified).
-/// - [`Contended`](FreshnessSnapshot::Contended) → **false**: contention is
-///   **never** stale. A persistently unreadable database is reported by
-///   [`refusal_message`]/[`staleness_line`] as named contention (the database
-///   path and waited budget), not by a stale verdict.
+/// - [`Contended`](FreshnessSnapshot::Contended) → **false**: a database read
+///   failure is **never** stale. The split is the read's: a retried transient
+///   lock/busy failure is contention, reported with the database path and the
+///   waited/budget pair, while a terminal failure is reported by naming the
+///   path and its cause and claims no contention (no wait, budget or another
+///   process) — neither is a stale verdict.
 ///
 /// The verdict comes from the single snapshot capture — one git read plus one
 /// pass over the database's own facts — never a second freshness pass, so the
@@ -1051,12 +1064,20 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
 /// `schema`, `authored digest`, `content key`, `sha`, `cleanliness`. A snapshot
 /// with no recorded row (the `socket`/`recorded scan` stales) records `-@-`.
 ///
-/// A [`Contended`](FreshnessSnapshot::Contended) verdict renders the named
-/// contention instead, naming the database path and the waited/budget pair:
+/// A [`Contended`](FreshnessSnapshot::Contended) verdict renders the read
+/// failure instead, retry-conditionally. When the read retried a transient
+/// lock/busy failure, it reports the contention, naming the database path and
+/// the waited/budget pair:
 ///
 /// `database `<path>` is unreadable — waited <waited> of a <budget> budget for the contention to clear; retry once the other process finishes (a stale-graph scan is not the fix)`
 ///
-/// A contended message never says `graph is stale` and never asks for
+/// When it failed terminally without retrying, it names the database path and
+/// the underlying cause and makes no contention claim (no wait, budget or
+/// another process):
+///
+/// `database `<path>` is unreadable: <cause>`
+///
+/// Neither message says `graph is stale`, and the retried one never asks for
 /// `apg scan` — re-running the scan is not the fix for another process holding
 /// the database.
 pub fn refusal_message(apg_root: &Path) -> Option<String> {
@@ -1119,8 +1140,10 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 ///   with no readable `Scan` row reports the single `recorded scan` label with
 ///   recorded `-@-`.
 /// - `Git state: recorded -@- vs current <cur> → CONTENDED (database `<path>`
-///   unreadable; waited <waited> of a <budget> budget)` — the database stayed
-///   unreadable (locked or busy) through the bounded retry. A contended read
+///   unreadable; waited <waited> of a <budget> budget)` — the snapshot's data
+///   read failed (a terminal failure or an exhausted transient retry) after the
+///   presence probe passed; the pair is the snapshot's, so `waited` is zero when
+///   the read never retried, and this arm names no cause. A contended read
 ///   never prints `STALE` and never prints an empty or misleading differing
 ///   list; the recorded state is `-@-` because nothing about the DB is known.
 /// - `Git state: recorded -@- vs current <cur> → CONTENDED (database `<path>`
