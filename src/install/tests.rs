@@ -161,15 +161,15 @@ Patch only.
         const CAPS: [(&str, usize); 9] = [
             ("agent-builder.md", 477),
             ("codebase-navigator.md", 469),
-            ("implementation-phase-reviewer.md", 275),
+            ("implementation-phase-reviewer.md", 262),
             ("spec-writer.md", 169),
-            ("plan-writer.md", 190),
-            ("plan-review.md", 140),
+            ("plan-writer.md", 185),
+            ("plan-review.md", 134),
             ("migration-agent.md", 92),
             ("spec-review.md", 84),
             ("researcher.md", 56),
         ];
-        const CORPUS_CAP: usize = 1_972;
+        const CORPUS_CAP: usize = 1_948;
 
         /// The template's lines, without the empty element a trailing newline
         /// would split out (so the count matches the file's line count).
