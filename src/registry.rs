@@ -155,6 +155,39 @@ pub fn validate_row(main_root: &Path, entry: &RegistryEntry) -> Result<()> {
     Ok(())
 }
 
+/// Authorises one registry row for the caller: the built-in `main` row is
+/// readable by every session, an ownerless row is refused until claimed, and
+/// any other row is authorised only for the owning session or a session in the
+/// caller's parentID chain. `current_branch` is the caller's branch, resolved
+/// by the caller so this check stays cwd-free; every refusal names the project,
+/// the caller's branch and one `apg project claim` fix line. Pure check: no
+/// registry write and no git I/O.
+pub fn require_owner(
+    entry: &RegistryEntry,
+    caller: &Caller,
+    current_branch: Option<&str>,
+) -> Result<()> {
+    if entry.name == "main" {
+        return Ok(());
+    }
+    let current = current_branch.unwrap_or("<detached>");
+    let Some(owner) = entry.owner.as_deref() else {
+        bail!(
+            "refused: project `{}` is registered with no owner, so no session may use it until it is claimed; you are on branch `{current}`. Fix: take ownership with `apg project claim {}`.",
+            entry.name,
+            entry.name
+        );
+    };
+    if caller.session.as_deref() == Some(owner) || caller.ancestors.iter().any(|a| a == owner) {
+        return Ok(());
+    }
+    bail!(
+        "refused: project `{}` is owned by session `{owner}`, and you are on branch `{current}`; only the owning session or a session in its parentID chain may use it. Fix: take ownership with `apg project claim {}`.",
+        entry.name,
+        entry.name
+    )
+}
+
 /// Seconds since the unix epoch — the row's creation-time unit.
 fn now_unix() -> u64 {
     SystemTime::now()
