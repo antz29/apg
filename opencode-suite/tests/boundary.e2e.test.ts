@@ -27,7 +27,6 @@ import {
   branchAddedRequirementNames,
   scopeProjectRequirements,
   fsScopeDecision,
-  findApgRoot,
   mainCheckoutRoot,
   REQUIREMENT_FQN_PREFIX,
   csvToRows,
@@ -48,9 +47,9 @@ import apgScan from "../tools/apg_scan.ts"
 /// A faked opencode 2.x tool-executor context — the V2 shape
 /// `{ agent, sessionID, messageID, id }` (no V1 `directory`/`worktree`) — plus
 /// the plugin instance's load `location` (`ctx.location`, captured at `setup`),
-/// whose `directory` seeds `findApgRoot` / `mainCheckoutRoot` when no project is
-/// resolved. A project-bound scenario adds the resolved `worktree` (and
-/// `projectName`), which is then the sole spawn anchor.
+/// whose `directory` seeds `mainCheckoutRoot` when no project is resolved. A
+/// project-bound scenario adds the resolved `worktree` (and `projectName`),
+/// which is then the sole spawn anchor.
 function v2Context(dir: string, overrides: Partial<ToolContext> = {}): ToolContext {
   return {
     agent: "test-agent",
@@ -105,8 +104,8 @@ function requirementNode(name: string): string {
   return `${JSON.stringify({ layer: "requirements", type: "requirement", name, body: `req ${name}`, feature: "test" })}\n`
 }
 
-/// A scratch git repo with an `apg/` layout: a dummy `apg/.trans/db.lbug` (so
-/// `findApgRoot` resolves) and one PRE-EXISTING requirement node file,
+/// A scratch git repo with an `apg/` layout: a dummy `apg/.trans/db.lbug` and
+/// one PRE-EXISTING requirement node file,
 /// committed on the DEFAULT branch; a LINKED worktree on a `feature` branch
 /// then adds one NEW requirement node file and commits it. The main checkout
 /// stays on the default branch — the real apg topology (project branches live
@@ -209,8 +208,6 @@ test.skipIf(!enabled || !binary)(
       // worktree alone.
       expect((await mainCheckoutRoot(bound))?.root).toBe(fs.realpathSync(repo))
       expect((await mainCheckoutRoot(bound))?.project).toBe(project)
-      // The worktree carries its own apg/.trans (seeded by project start).
-      expect(findApgRoot(v2Context(worktree))).toBe(worktree)
 
       const query = "MATCH (f:File) RETURN f.fqn ORDER BY f.fqn"
       // RAW `apg query` is the graph view: the stored repo-relative form.
@@ -734,64 +731,32 @@ test.skipIf(!enabled)(
   worktreeScopePermission,
 )
 
-// project-binding phase-03.task-8: `findApgRoot` and `mainCheckoutRoot` take no
-// directory selector any more. `findApgRoot` walks up from the plugin load
-// location (`ctx.location.directory`, then `ctx.location.project.directory`,
-// then `ctx.location.project.canonical`, then `process.cwd()`), and
-// `mainCheckoutRoot`'s fs-scope frame is anchored on `context.worktree` ALONE
-// when one was resolved, falling back to that same location chain otherwise.
-// Real I/O (fs + a git subprocess), so opt-in suite e2e.
-
-/// A scratch git repo carrying an `apg/.trans/db.lbug` so `findApgRoot` resolves
-/// it. The base is realpath'd (macOS `os.tmpdir()` sits behind a symlink) so
-/// `mainCheckoutRoot`'s canonical root equals the returned path.
-function scratchApgRootRepo(): string {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-apgroot-")))
-  const repo = path.join(base, "repo")
-  fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
-  fs.mkdirSync(path.join(repo, "src"), { recursive: true })
-  fs.writeFileSync(path.join(repo, "apg", ".trans", "db.lbug"), "")
-  const run = (cmd: string[]) => Bun.spawnSync({ cmd, cwd: repo, stdout: "pipe", stderr: "pipe" })
-  run(["git", "init", "-q", "-b", "main"])
-  run(["git", "config", "user.email", "apg@localhost"])
-  run(["git", "config", "user.name", "apg"])
-  run(["git", "add", "-A"])
-  run(["git", "commit", "-q", "-m", "init"])
-  return repo
-}
+// project-binding phase-03.task-8: `mainCheckoutRoot`'s fs-scope frame is
+// anchored on `context.worktree` ALONE when one was resolved, falling back to the
+// plugin load location (`ctx.location.directory`) otherwise. Real I/O (fs + a git
+// subprocess), so opt-in suite e2e.
 
 test.skipIf(!enabled)(
-  "e2e: findApgRoot walks the load location; mainCheckoutRoot is anchored on context.worktree alone",
+  "e2e: mainCheckoutRoot's frame is anchored on context.worktree alone",
   async () => {
-    const repo = scratchApgRootRepo()
-    const other = scratchApgRootRepo()
+    const repo = scratchRepo()
+    // macOS `os.tmpdir()` sits behind the `/var` → `/private/var` symlink, so
+    // the resolver returns the canonical spelling, never the raw `mkdtemp`
+    // string `scratchRepo` hands back.
+    const repoReal = fs.realpathSync(repo)
     try {
-      const nested = path.join(repo, "src")
-
-      // findApgRoot: the walk-up starts at ctx.location.
-      expect(findApgRoot(v2Context(repo))).toBe(repo)
-      expect(findApgRoot(v2Context(nested))).toBe(repo)
-      // The project.location fallbacks are sourced too.
-      expect(
-        findApgRoot(v2Context(repo, { location: { project: { id: "p", directory: repo } } })),
-      ).toBe(repo)
-      expect(
-        findApgRoot(v2Context(repo, { location: { project: { id: "p", canonical: repo } } })),
-      ).toBe(repo)
-
+      const nested = path.join(repo, "pkg")
       // mainCheckoutRoot with no resolved worktree: the frame comes from
       // ctx.location.directory (canonicalised).
-      expect(await mainCheckoutRoot(v2Context(repo))).toEqual({ root: repo, project: null })
-      expect(await mainCheckoutRoot(v2Context(nested))).toEqual({ root: repo, project: null })
-      // A resolved worktree is the sole anchor: the location (`other`) cannot
-      // override it.
-      expect(await mainCheckoutRoot(v2Context(other, { worktree: repo }))).toEqual({
-        root: repo,
+      expect(await mainCheckoutRoot(v2Context(repo))).toEqual({ root: repoReal, project: null })
+      expect(await mainCheckoutRoot(v2Context(nested))).toEqual({ root: repoReal, project: null })
+      // A resolved worktree is the sole anchor: the location cannot override it.
+      expect(await mainCheckoutRoot(v2Context(os.tmpdir(), { worktree: repoReal }))).toEqual({
+        root: repoReal,
         project: null,
       })
     } finally {
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
-      fs.rmSync(path.dirname(other), { recursive: true, force: true })
     }
   },
 )
@@ -1012,23 +977,26 @@ test.skipIf(!enabled || !binary)(
       expect(existsSync(live.socket)).toBe(false)
       live = null
 
-      // Failure path: a root with no `db.lbug` (a bare dir, then an `apg/.trans`
-      // with no db) fails cleanly with the shared NO_DB_ERROR — the socket can
-      // never appear, and nothing is spawned or thrown. The cwd is moved to the
-      // scratch base first, so `findApgRoot`'s load-location/cwd fallback cannot
-      // reach the checkout this test file lives in.
+      // Failure path: a WORKTREE-BEARING root with no `db.lbug` (a bare dir,
+      // then an `apg/.trans` with no db) proceeds to the spawn — the worktree
+      // short-circuits the root derivation — and `apg session start` refuses
+      // there, so the helper returns its spawn-refusal STRING, which begins
+      // `apg session start`, never the shared NO_DB_ERROR.
       const noDb = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-nodb-"))
-      const previousCwd = process.cwd()
       try {
-        process.chdir(noDb)
         const bare = path.join(noDb, "bare")
         fs.mkdirSync(bare, { recursive: true })
-        expect(await startDetachedSession(v2Context(bare))).toBe(NO_DB_ERROR)
+        const bareRefusal = await startDetachedSession(v2Context(bare, { worktree: bare }))
+        expect(typeof bareRefusal).toBe("string")
+        expect((bareRefusal as string).startsWith("apg session start")).toBe(true)
+        expect(bareRefusal).not.toBe(NO_DB_ERROR)
         const badRoot = path.join(noDb, "bad")
         fs.mkdirSync(path.join(badRoot, "apg", ".trans"), { recursive: true })
-        expect(await startDetachedSession(v2Context(badRoot))).toBe(NO_DB_ERROR)
+        const badRefusal = await startDetachedSession(v2Context(badRoot, { worktree: badRoot }))
+        expect(typeof badRefusal).toBe("string")
+        expect((badRefusal as string).startsWith("apg session start")).toBe(true)
+        expect(badRefusal).not.toBe(NO_DB_ERROR)
       } finally {
-        process.chdir(previousCwd)
         fs.rmSync(noDb, { recursive: true, force: true })
       }
     } finally {
@@ -1100,14 +1068,19 @@ test.skipIf(!enabled)(
       expect(Date.now() - t2).toBeLessThan(5000)
 
       // (4) `startDetachedSession` reports a string error (not a hang) for a
-      // root with no live session — a bare dir with no apg root resolves the
-      // shared NO_DB_ERROR promptly rather than blocking.
+      // WORKTREE-BEARING root with no live session — the worktree short-circuits
+      // the root derivation, so the spawn runs and `apg session start` refuses
+      // there; the returned STRING begins `apg session start` and is never the
+      // shared NO_DB_ERROR.
       const bare = path.join(base, "bare")
       fs.mkdirSync(bare, { recursive: true })
       const t3 = Date.now()
-      const started = await startDetachedSession(v2Context(bare), { timeoutMs: 500 })
+      const started = await startDetachedSession(v2Context(bare, { worktree: bare }), {
+        timeoutMs: 500,
+      })
       expect(typeof started).toBe("string")
-      expect(started as string).toBe(NO_DB_ERROR)
+      expect((started as string).startsWith("apg session start")).toBe(true)
+      expect(started).not.toBe(NO_DB_ERROR)
       expect(Date.now() - t3).toBeLessThan(5000)
     } finally {
       process.chdir(previousCwd)
