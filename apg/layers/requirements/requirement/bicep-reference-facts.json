@@ -1,0 +1,78 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-reference-facts",
+  "body": "Each symbol reference, module path, using target, extends base and import source in a Bicep file is an edge to the target the scan proves it reaches, or else to a categorised unresolved target.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-child-references",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-context-values",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-extends-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-func-calls",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-import-dependency",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-local-module-path",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-missing-local-path",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-path-normalisation",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-registry-reference",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-symbol-uses",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bicep-using-dependency",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.bicep-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

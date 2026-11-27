@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-tfvars-unresolved",
+  "body": "A variable-definition key outside the variable names of the same-directory module is an unresolved use of category unknown named var.<key>.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-block-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

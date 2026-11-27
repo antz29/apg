@@ -1,0 +1,41 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "terraform-test-suite",
+  "body": "The Terraform test suites: unit and int tests beside the crate's sources, and e2e scans of fixture configurations in a per-crate integration crate.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.tests.int",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.tests.unit",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformlib_e2e",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-conformance",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

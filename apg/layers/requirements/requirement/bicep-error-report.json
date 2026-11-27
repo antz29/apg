@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-error-report",
+  "body": "Each Bicep syntax error is one stderr line in the form bicep: file:line:col: message, and the scan continues past it.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.bicep-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.bicep-source-reading",
+      "properties": {}
+    }
+  ]
+}

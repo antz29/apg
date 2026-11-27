@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-override-files",
+  "body": "A configuration file named override or ending in _override before its .tf, .tf.json, .tofu or .tofu.json extension is an override file of its module, applied after the base files in lexicographic file-name order.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-module-identity",
+      "properties": {}
+    }
+  ]
+}

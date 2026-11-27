@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-tofu-shadowing",
+  "body": "A .tofu, .tofu.json or .tofutest.hcl file shadows the same-directory .tf, .tf.json or .tftest.hcl file of the same base name, which keeps its File node and contributes zero Structs and zero edges.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-module-identity",
+      "properties": {}
+    }
+  ]
+}

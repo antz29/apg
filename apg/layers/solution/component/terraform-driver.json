@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "terraform-driver",
+  "body": "The apg scan driver's Terraform arm: the terraform language id and stream prefix, frontend command, zero-tool preflight entry, ingestor Terraform file-edge kinds, incremental re-emission, and the root scan e2e.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.terraform",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraform_scan_e2e",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.scan-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-language-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

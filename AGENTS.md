@@ -25,7 +25,13 @@ files — the system of record at rest).
   (`TSql170Parser`), claiming `.sql` in any letter case and reading `.sqlproj`
   membership statically, PowerShell: `src/pslib` — a standalone `psfrontend`
   binary on the pinned `woodruffw-trough-tree-sitter-powershell` grammar,
-  claiming `.ps1`/`.psm1`/`.psd1` in any letter case, the bundled
+  claiming `.ps1`/`.psm1`/`.psd1` in any letter case, Terraform:
+  `src/terraformlib` — a standalone `terraformfrontend` binary on the pinned
+  `hcl-edit =0.10.0` engine, claiming `.tf`/`.tf.json`/`.tfvars`/`.tfvars.json`/
+  `.tofu`/`.tofu.json`/`.tftest.hcl`/`.tofutest.hcl`/`.terraform.lock.hcl` in any
+  letter case (OpenTofu included), with plain `.hcl` staying `misc`, Bicep:
+  `src/biceplib` — a standalone `bicepfrontend` binary with a hand-written
+  parser, claiming `.bicep`/`.bicepparam` in any case, the bundled
   structural scanner: `src/structlib` — a standalone `structfrontend` binary
   that graphs every tracked text/config/packaging file the code frontends don't
   claim, serving the Markdown stream (absorbing the retired `src/mdlib`
@@ -51,7 +57,7 @@ files — the system of record at rest).
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
   tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
   the Python (`src/pylib`), COBOL (`src/cobollib`), PowerShell (`src/pslib`),
-  bundled structural
+  Terraform (`src/terraformlib`), Bicep (`src/biceplib`), bundled structural
   (`src/structlib`) and bundled agent (`src/agentlib`) crates, `dotnet publish`
   (self-contained single-file) for the T-SQL frontend — `src/sqllib`) and stages them to
   `target/<profile>/frontends`. The base `apg` binary itself is
@@ -63,7 +69,7 @@ files — the system of record at rest).
   runtime relative to the binary (`<exe_dir>/frontends` or
   `<exe_dir>/../libexec/frontends`) or via `APG_FRONTEND_DIR`.
   `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`, `cpp`, `rust`, `ts`,
-  `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`, `ps`; `0` to skip) limits what build.rs
+  `csharp`, `struct`, `py`, `agent`, `cobol`, `sql`, `ps`, `terraform`, `bicep`; `0` to skip) limits what build.rs
   compiles — `struct` and `agent` are the bundled structural and
   agent-definition scanners.
 - **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
@@ -115,7 +121,16 @@ files — the system of record at rest).
   `tree_sitter_powershell`, and is bounded by
   `woodruffw-trough-tree-sitter-powershell =0.1.6` on `tree-sitter =0.26.13`
   at parser ABI 15 (the grammar's PowerShell 7.5 syntax, workflow and DSC
-  configuration syntax included). The bundled structural scanner (`structfrontend`,
+  configuration syntax included). Terraform (`src/terraformlib`) builds with
+  stable Rust `1.100.0` + crates.io with no C compiler, needs nothing at scan
+  time (a self-contained binary that never shells out and spawns no child
+  process), and is bounded by `hcl-edit =0.10.0` (its HCL native syntax; JSON
+  syntax by the HCL JSON mapping with each `${…}` string parsed by hcl-edit's
+  template parser). Bicep (`src/biceplib`) builds with stable Rust `1.100.0` +
+  crates.io (`serde`/`serde_json`), needs nothing at scan time (a self-contained
+  binary that never shells out — no network, no `az` or `bicep` CLI), has no
+  engine pin (hand-written parser), and is bounded by its hand-written grammar.
+  The bundled structural scanner (`structfrontend`,
   `src/structlib`, absorbing the retired `src/mdlib` Markdown frontend) builds
   with stable Rust + crates.io and needs nothing at scan time (it never shells
   out), bounded by `serde`/`serde_json`/`unicode-normalization` 0.1 with no
@@ -129,7 +144,7 @@ files — the system of record at rest).
   frontend-compiling path, exact where the mechanism can enforce it: Rust
   `1.100.0` (the repo-root `rust-toolchain.toml`, covering the main build and every
   cargo frontend crate — `src/rustlib`, `src/pylib`, `src/structlib`,
-  `src/agentlib`, `src/cobollib`, `src/pslib`) and Node on the `26.x` line
+  `src/agentlib`, `src/cobollib`, `src/pslib`, `src/terraformlib`, `src/biceplib`) and Node on the `26.x` line
   (`src/tslib/package.json` `engines.node` range `>=26.8.1 <27`, enforced
   fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the exact
   `26.9.0`). Go is exact on the release Linux CI path (`GOTOOLCHAIN` +
@@ -236,7 +251,7 @@ The project builds a single `apg` binary (package `apg`):
   — run the pipeline; produces `apg/.trans/db.lbug` (derived from the durable
   `apg/layers/**` node files and the scanned code) and
   `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
-  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`, `sql`, `ps`); when omitted, `apg` auto-detects **every** language present and
+  languages (`java`, `go`, `cpp`, `rust`, `ts`, `csharp`, `py`, `cobol`, `sql`, `ps`, `terraform`, `bicep`); when omitted, `apg` auto-detects **every** language present and
   scans them all, merging their graphs into one database (a multi-language repo
   like a Go backend + TS frontend gets a single `apg/.trans/db.lbug`). Each frontend's
   opaque ids are namespaced per language (`--id-prefix`), and the ingestor
@@ -247,7 +262,7 @@ The project builds a single `apg` binary (package `apg`):
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
   is always skipped; C# claims `.cs`, `.csx`, `.cshtml` and `.razor` sources;
   COBOL claims `.cob`, `.cbl`, `.cobol` and `.cpy` sources in any case; SQL claims `.sql` sources in any case; PowerShell claims
-  `.ps1`, `.psm1` and `.psd1` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
+  `.ps1`, `.psm1` and `.psd1` sources in any case; Terraform claims `.tf`, `.tf.json`, `.tfvars`, `.tfvars.json`, `.tofu`, `.tofu.json`, `.tftest.hcl`, `.tofutest.hcl` and `.terraform.lock.hcl` sources in any case, OpenTofu included; Bicep claims `.bicep` and `.bicepparam` sources in any case). `--std <dialect>` is the COBOL dialect: `cobol85` (default),
   `cobol2002`, `cobol2014` or `ibm` (overrides `cobol.dialect` in
   `apg/config.json`; `cobol2023` is refused); `--copy-path <dir>` is a COBOL
   copybook search directory (repeatable). `--force` is a true rebuild: it discards `db.lbug` (with
@@ -378,7 +393,7 @@ The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): the base `scanner` formula (the binary
 plus the bundled structural scanner), and the per-language frontend formulae —
 `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`,
-`apg-cobol`, `apg-sql`, `apg-ps` —
+`apg-cobol`, `apg-sql`, `apg-ps`, `apg-terraform`, `apg-bicep` —
 each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
 `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
@@ -456,7 +471,7 @@ Every test in the repo belongs to exactly one of three tiers, defined by the law
 declaration in the production module — the frontend crates' library roots
 included (`src/structlib/src/tests.rs`, `src/pylib/src/tests.rs`,
 `src/agentlib/src/tests.rs`, `src/cobollib/src/tests.rs`,
-`src/pslib/src/tests.rs`). Every
+`src/pslib/src/tests.rs`, `src/terraformlib/src/tests.rs`, `src/biceplib/src/tests.rs`). Every
 unit/int test still sits in an inner `unit` or `int` submodule, so libtest's
 path filter selects a tier (`…::tests::unit::`, `…::tests::int::`). The **e2e**
 tier moved OUT of the production module tree into the crate's own top-level
@@ -464,7 +479,7 @@ tier moved OUT of the production module tree into the crate's own top-level
 (e.g. `tests/main_e2e.rs`, `tests/splice_e2e.rs`) plus the frontend crates'
 `src/structlib/tests/structlib_e2e.rs`, `src/pylib/tests/pylib_e2e.rs`,
 `src/agentlib/tests/agentlib_e2e.rs`, `src/cobollib/tests/*_e2e.rs` and
-`src/pslib/tests/pslib_e2e.rs`. Each
+`src/pslib/tests/pslib_e2e.rs`, `src/terraformlib/tests/terraformlib_e2e.rs`, `src/biceplib/tests/biceplib_e2e.rs`. Each
 is wrapped in `mod e2e`, so its libtest paths are `e2e::…` (no longer
 `tests::e2e::…`); the root, structlib and pylib e2e files share their crate's
 `tests/common/mod.rs`, while the agentlib, cobollib and pslib e2e files hold their
@@ -551,11 +566,15 @@ gate beneath itself while it is running.
 `[workspace]`), so their tiers are run from their own directories, never by the
 root gate: `(cd src/structlib && cargo test)` /
 `(cd src/structlib && cargo test e2e:: -- --ignored --test-threads=4)`, and
-likewise `src/pylib`, `src/agentlib`, `src/cobollib` and `src/pslib`
+likewise `src/pylib`, `src/agentlib`, `src/cobollib`, `src/pslib`, `src/terraformlib` and `src/biceplib`
 (`cargo test --manifest-path src/cobollib/Cargo.toml` /
 `cargo test --manifest-path src/cobollib/Cargo.toml e2e:: -- --ignored --test-threads=4`,
 and `cargo test --manifest-path src/pslib/Cargo.toml` /
-`cargo test --manifest-path src/pslib/Cargo.toml e2e:: -- --ignored --test-threads=4`).
+`cargo test --manifest-path src/pslib/Cargo.toml e2e:: -- --ignored --test-threads=4`,
+and `cargo test --manifest-path src/terraformlib/Cargo.toml` /
+`cargo test --manifest-path src/terraformlib/Cargo.toml e2e:: -- --ignored --test-threads=4`,
+and `cargo test --manifest-path src/biceplib/Cargo.toml` /
+`cargo test --manifest-path src/biceplib/Cargo.toml e2e:: -- --ignored --test-threads=4`).
 The opt-in COBOL cobc agreement and budget e2e
 (`src/cobollib/tests/cobollib_cobc_e2e.rs`) needs
 `cargo build --release --manifest-path src/cobollib/Cargo.toml` first (it
@@ -879,7 +898,7 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    This commit is the **release HEAD**.
 4. **Repoint every formula (the base `scanner` plus each per-language formula)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
    `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-cobol`, `apg-sql`,
-   `apg-ps`):
+   `apg-ps`, `apg-terraform`, `apg-bicep`):
    `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
    `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
@@ -943,9 +962,9 @@ Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
 `Language` node per `lang_switch` stream (its FQN is the bare language id, e.g.
 `rust`) and roots every module FQN under it. `<language-id>` is the stream's
 declared id verbatim: the code frontends' `go`/`java`/`cpp`/`rust`/`ts`/`js`/
-`csharp`/`py`/`cobol`/`sql`/`ps`, the agent frontend's `agent`, and the bundled structural
+`csharp`/`py`/`cobol`/`sql`/`ps`/`terraform`/`bicep`, the agent frontend's `agent`, and the bundled structural
 scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
-`sln`/`misc` — the twenty-three ids `layers::LANGUAGE_ROOTS` names (see
+`sln`/`misc` — the twenty-five ids `layers::LANGUAGE_ROOTS` names (see
 `src/layers/code_refs.rs`, mirrored by `src/ingest/` and
 `src/incremental/language.rs`).
 
@@ -960,6 +979,8 @@ scanner's `md`/`sh`/`yaml`/`json`/`toml`/`xml`/`dockerfile`/`makefile`/`ini`/
 | TypeScript | `<language-id>.<pkg.relpath.name>` — the rooted npm package + dot-path prefix per ES-module file (`ts.@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
 | C# | solution module `csharp.<repo-relative .sln path>`; project module `csharp.<repo-relative project path>` (path kept whole, contained by every listing solution; an unlisted project sits at the `csharp` root); declarations keep namespace-based FQNs, a cross-project duplicate only taking the collision-qualified `csharp.<project path>.<Namespace>.<Type>`; a global-namespace type is `csharp.<Type>` (members `csharp.<Type>.<member>`), and one declared in more than one compilation is qualified directly under its project module as `csharp.<repo-relative project path>.<Type>`, no namespace segment (projectless members keep `csharp.<Type>`); a file several projects compile is emitted once under one owning project; a namespace-less C# file (declaring no namespace, owned by no project module) is contained directly by the `csharp` Language root; the first listed target framework is compiled |
 | PowerShell | module `ps.<identity>` rendered verbatim — a manifest module is its whole repo-relative `.psd1` path, extension included; any other file's module is its repo-relative directory, the repository root rendering as `ps.`, so a script Struct directly in the root module is `ps..<name>`; each `.ps1`/`.psm1` file is one script Struct named by its path relative to its module's base directory, and a script Struct whose base-relative FQN equals another script Struct's or a PowerShell Module's is named `<base-relative path>//<repo-relative path>`; a script's top-level statements are one Function named `<script>` under its script Struct; each function/filter/workflow is a Function and each class/enum a Struct under the script Struct, a class method a Function under its class Struct and a constructor its Function named `new`; every member of a same-name class-member group of two or more renders the overloaded form `M(T1,T2)` — each typed parameter as the type written inside its brackets, an untyped parameter as `object`; a class/enum Struct whose FQN equals another PowerShell Struct's or Module's, and a Function whose FQN equals another Function's or any PowerShell Struct's or Module's (or either one that already ends in `//<repo-relative path>:<digits>`), appends `//<repo-relative path>:<unit ordinal>` — so for `class Foo` and `function Foo` in one script only the Function is suffixed and the Struct stays plain — the unit ordinal being its 1-based position among its file's class/enum Structs and Functions (methods included) by start offset, with `<script>` first |
+| Terraform | module `terraform.<repo-relative directory>` — each claimed Terraform file other than a test file belongs to its directory's module, the repository root rendering as `terraform.`, so a root resource is `terraform..<type>.<name>` and a directory `net/sub` is `terraform.net/sub`; each `resource` block is a Struct named `<type>.<name>` and each `data` block one named `data.<type>.<name>`, contained by its File; `var.<name>` for a `variable` block, `output.<name>` for an `output` block, `module.<name>` for a `module` block and `provider.<name>` (or `provider.<name>.<alias>` when it sets a literal alias) for a `provider` block, each contained by its File; `local.<name>` for each `locals` entry, spanning that entry; `tfvars.<file name>` for a `.tfvars` or `.tfvars.json` file; `lock.<provider source address>` for each provider block of a `.terraform.lock.hcl` file; a test file is one Struct named `test.<path relative to its module's directory>`, and each `run` block in it is a Struct named `run.<name>` contained by that test Struct. Example: `azurerm_resource_group.main` is `terraform..azurerm_resource_group.main` at the repository root |
+| Bicep | module `bicep.<repo-relative file path>` — one per `.bicep`/`.bicepparam` file; each declaration is a Struct `bicep.<path>.<keyword>.<name>` contained by its file's module (e.g. `bicep.app/net/vnet.bicep.resource.vnet`), and each `func` declaration a Function `func.<name>` under the same module |
 | agent | `agent.<file-stem>` — one per `.opencode/agents/` definition file, at its repo-relative path and line span |
 
 A `File` FQN is its repo-relative path (relative to the git toplevel, or the
@@ -1063,7 +1084,7 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
     `{"kind":"dot-source"}` or `{"kind":"import-module"}`): a script holds at
     most one `Uses` edge to a given File, of kind `dot-source` when any of its
     sites dot-sources that File and `import-module` otherwise, whatever the
-    order and count of its sites. SQL `Uses` edges
+    order and count of its sites; and for Terraform `module-source` and `override` edges (from a Struct to the File, the File's FQN its repo-relative path, `properties` = `{"kind":"module-source"}` or `{"kind":"override"}`). SQL `Uses` edges
     carry `properties` = `{"kind":"read"|"write"|"trigger"|"type"}`:
     `read`/`write` from a procedure/function/trigger (Function) to the
     table/view/sequence/synonym (Struct) it reads or writes,
@@ -1105,6 +1126,8 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 ### `UnresolvedTarget.category`
 
 One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` (call through a function-valued variable or IIFE), `interface-method` (method on a universe-scope interface, e.g. `error.Error`), or `unknown` (fallback / frontend omitted it). Go populates this exactly from the type checker; Java classifies stdlib (`java.*`/`javax.*`/`jdk.*`) vs `external`; C++ is heuristic (`external` for qualified names, `func-value` for bare identifiers). Rust classifies a resolved declaration or macro by crate origin (sysroot `std`/`core`/`alloc` → `stdlib`, dependency crates → `external`, project `macro_rules!` → `unknown`), and a nameless callee — a closure or other non-path expression — gets a site-keyed `<nameless@repo-relative:offset>` sentinel categorized `unknown`, never `func-value`. PowerShell classifies on a PowerShell 7.6 basis: `stdlib` for a command of the 7.6 engine or the in-box `Microsoft.PowerShell.*` modules or a 7.6 default alias of any platform, an in-box `Microsoft.PowerShell.*` module, and a System type (`System`, `System.*`, or a 7.6 type accelerator whose full name begins with `System.`); `external` for any other out-of-scan command, module or type — a static method call on a type outside the scan included, `stdlib` for a System type (`[System.IO.Path]::Combine()` → `System.IO.Path.Combine`) and `external` otherwise; `unknown` for an ambiguous match, an instance method call other than a selected `$this.M()`, or a static call on a scanned enum or one selecting no single member of its scanned class, each named as written, and for a dynamic dot-source, a computed `Import-Module` argument or an `Import-Module` path outside the scanned `.psm1`/`.psd1` files, each keyed `<nameless@repo-relative:offset>`; `func-value` for a `&` on a script block/variable/computed expression or a `.` on a script block, keyed `<nameless@repo-relative:offset>`; each name is emitted once per scan carrying the first of `unknown`, `func-value`, `external`, `stdlib` that any site assigns.
+
+Terraform classifies a module source given as a registry, git, mercurial, http, s3, gcs or oci address, or as an absolute path, as `external` (named as written); `unknown` covers an out-of-module declaration traversal, a missing or root-escaping local module source, an unmatched tfvars key, and a computed module source keyed `<nameless@repo-relative:offset>`.
 
 Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are routed to `Uses`/`UnresolvedUse` edges, not `UnresolvedCall`. The `target_type` property only carries data on `UnresolvedCall` edges whose target is `func-value`.
 
@@ -1261,6 +1284,8 @@ Built-in defaults (per language):
 - **COBOL**: `test` = a `test`/`tests` path segment or a `test_*`, `*_test.*` or `*-test.*` filename (case-insensitive); `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src` — copybooks (`.cpy`) included.
 - **SQL**: `test` = `test`/`tests` segment; `generated` = `gen`/`generated`/`obj` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src`.
 - **PowerShell**: `test` = a `test`/`tests` segment or a Pester `*.Tests.ps1` filename; `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`/`thirdparty` segment; else `src` — case-insensitive.
+- **Terraform**: `test` = a `test`/`tests` segment or a `.tftest.hcl`/`.tofutest.hcl` filename; `generated` = `gen`/`generated` segment; `external` = `vendor`/`.terraform` segment; else `src` — case-insensitive.
+- **Bicep**: `test` = a `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`/`.terraform` segment; else `src` — case-insensitive, path segments only.
 
 An `apg/config.json` at the project root **replaces** the defaults. Shape:
 

@@ -1,0 +1,22 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "iac",
+  "body": "The infrastructure-as-code source-scanning subdomain: the declarative configuration languages whose files declare cloud resources, each scanned by its own frontend into the program graph.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.group.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.group.terraform-frontend",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

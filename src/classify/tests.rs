@@ -137,6 +137,75 @@ mod unit {
         }
     }
 
+    /// iac-frontends phase-01 task-2: a Terraform file is test under a
+    /// test/tests segment or a `.tftest.hcl`/`.tofutest.hcl` filename,
+    /// generated under gen/generated, external under vendor/.terraform, and
+    /// `src` otherwise — matched case-insensitively.
+    #[test]
+    fn terraform_code_type_follows_spec() {
+        for (p, want) in [
+            ("test/main.tf", "test"),
+            ("Tests/x.tf", "test"),
+            ("tf/test/main.tofu", "test"),
+            ("main.tftest.hcl", "test"),
+            ("X.TOFUTEST.HCL", "test"),
+            ("tests/vars.tfvars", "test"),
+            ("gen/outputs.tf", "generated"),
+            ("GENERATED/providers.hcl", "generated"),
+            ("vendor/modules/main.tf.json", "external"),
+            ("VENDOR/main.tf", "external"),
+            (".terraform/modules/x/main.tf", "external"),
+            ("third_party/stack.tf", "src"),
+            ("thirdparty/import.tf", "src"),
+            ("main.tf", "src"),
+            ("src/variables.tf", "src"),
+            ("env/main.tf.json", "src"),
+            ("test_main.tf", "src"),
+            ("testing/main.tf", "src"),
+        ] {
+            assert_eq!(
+                builtin_code_type(p, "terraform"),
+                want,
+                "{p} must be {want}"
+            );
+            assert_eq!(
+                classify_code_type(p, &format!("terraform.{p}"), "terraform", None),
+                want,
+                "{p} must classify as {want}"
+            );
+        }
+    }
+
+    /// iac-frontends phase-01 task-14: a Bicep file is test under a test/tests
+    /// segment, generated under gen/generated, external under vendor/.terraform,
+    /// and `src` otherwise — matched case-insensitively, no filename marker.
+    #[test]
+    fn bicep_code_type_follows_spec() {
+        for (p, want) in [
+            ("test/main.bicep", "test"),
+            ("Tests/params.bicepparam", "test"),
+            ("gen/module.bicep", "generated"),
+            ("GEN/x.bicep", "generated"),
+            ("generated/resources.bicepparam", "generated"),
+            ("vendor/modules/network.bicep", "external"),
+            (".terraform/storage.bicep", "external"),
+            ("VENDOR/aks.bicep", "external"),
+            ("third_party/storage.bicep", "src"),
+            ("thirdparty/aks.bicep", "src"),
+            ("main.bicep", "src"),
+            ("src/variables.bicepparam", "src"),
+            ("test_main.bicep", "src"),
+            ("main.tftest.hcl", "src"),
+        ] {
+            assert_eq!(builtin_code_type(p, "bicep"), want, "{p} must be {want}");
+            assert_eq!(
+                classify_code_type(p, &format!("bicep.{p}"), "bicep", None),
+                want,
+                "{p} must classify as {want}"
+            );
+        }
+    }
+
     /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in

@@ -88,6 +88,12 @@ pub fn available_languages() -> Vec<String> {
         if dir.join("psfrontend").exists() {
             langs.push("ps".into());
         }
+        if dir.join("terraformfrontend").exists() {
+            langs.push("terraform".into());
+        }
+        if dir.join("bicepfrontend").exists() {
+            langs.push("bicep".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -168,6 +174,12 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
             "ps" if dir.join("psfrontend").exists() => {
                 return Some(dir.join("psfrontend").display().to_string());
             }
+            "terraform" if dir.join("terraformfrontend").exists() => {
+                return Some(dir.join("terraformfrontend").display().to_string());
+            }
+            "bicep" if dir.join("bicepfrontend").exists() => {
+                return Some(dir.join("bicepfrontend").display().to_string());
+            }
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
@@ -200,6 +212,8 @@ pub fn frontend_cmd(language: &str) -> Option<String> {
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "sql" => option_env!("APG_FRONTEND_SQL"),
         "ps" => option_env!("APG_FRONTEND_PS"),
+        "terraform" => option_env!("APG_FRONTEND_TERRAFORM"),
+        "bicep" => option_env!("APG_FRONTEND_BICEP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
         // JS/TS frontend under the `js` id.
@@ -242,26 +256,28 @@ const PY_DETECTOR_SKIP: &[&str] = &[
     "*.egg-info",
 ];
 
-/// True when extension `ext` (no leading dot) is one of `exts` (each with its
-/// leading dot). `case_insensitive` ignores letter case; otherwise it is exact.
-/// Only the C#, COBOL, SQL and PowerShell candidates pass
-/// `case_insensitive = true` (SQL: `.sql` in any letter case, like
-/// sqlfrontend's own discovery and `language_of`; PowerShell:
-/// `.ps1`/`.psm1`/`.psd1` in any letter case); every other language matches
-/// exact-case.
-fn ext_matches(ext: &str, exts: &[&str], case_insensitive: bool) -> bool {
-    let dotted = format!(".{ext}");
+/// True when file name `name` ends with one of `exts` (each a dotted suffix,
+/// possibly compound like `.tf.json`). `case_insensitive` ignores ASCII letter
+/// case; otherwise it is exact. Only the C#, COBOL, SQL, PowerShell, Bicep and
+/// Terraform candidates pass `case_insensitive = true`; every other language
+/// matches exact-case.
+fn ext_matches(name: &str, exts: &[&str], case_insensitive: bool) -> bool {
+    let name = name.as_bytes();
     exts.iter().any(|x| {
-        if case_insensitive {
-            x.eq_ignore_ascii_case(&dotted)
-        } else {
-            *x == dotted
+        let x = x.as_bytes();
+        name.len() >= x.len() && {
+            let tail = &name[name.len() - x.len()..];
+            if case_insensitive {
+                tail.eq_ignore_ascii_case(x)
+            } else {
+                tail == x
+            }
         }
     })
 }
 
-/// True when `dir` holds, within `depth` directory levels, a file whose
-/// extension is one of `exts` (each with its leading dot), compared with
+/// True when `dir` holds, within `depth` directory levels, a file whose name
+/// ends with one of `exts` (each with its leading dot), compared with
 /// `ext_matches`' `case_insensitive` rule.
 ///
 /// `skip_set` names directories never descended into. Each entry is matched
@@ -306,10 +322,7 @@ pub fn has_extension(
             if has_extension(&p, exts, depth - 1, skip_set, case_insensitive) {
                 return true;
             }
-        } else if p
-            .extension()
-            .is_some_and(|e| ext_matches(e.to_str().unwrap_or(""), exts, case_insensitive))
-        {
+        } else if ext_matches(name, exts, case_insensitive) {
             return true;
         }
     }
@@ -332,8 +345,8 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
     // Every candidate shares the ONE generalised `has_extension` walker; each
     // names only the non-hidden directories it must not descend into
     // (`skip_set`), and the depth bound is explicit per candidate rather than a
-    // shared magic literal. Matching is exact-case except C#, COBOL, SQL and
-    // PowerShell.
+    // shared magic literal. Matching is a file-name suffix test, exact-case
+    // except C#, COBOL, SQL, PowerShell, Bicep and Terraform.
     let candidates = vec![
         (
             "java",
@@ -395,6 +408,34 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
         (
             "ps",
             &[".ps1", ".psm1", ".psd1"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+            true,
+        ),
+        // Bicep claims `.bicep` and `.bicepparam` in any letter case.
+        (
+            "bicep",
+            &[".bicep", ".bicepparam"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+            true,
+        ),
+        // Terraform claims exactly these suffixes in any letter case (a plain
+        // `.hcl`/`.json` stays structural); the hidden `.terraform` cache dir
+        // is pruned by the walker's dot-name rule.
+        (
+            "terraform",
+            &[
+                ".tf",
+                ".tf.json",
+                ".tfvars",
+                ".tfvars.json",
+                ".tofu",
+                ".tofu.json",
+                ".tftest.hcl",
+                ".tofutest.hcl",
+                ".terraform.lock.hcl",
+            ],
             5,
             DEFAULT_DETECTOR_SKIP,
             true,
@@ -467,6 +508,8 @@ pub fn id_prefix_for(language: &str) -> &'static str {
         "cobol" => "cb",
         "sql" => "sq",
         "ps" => "ps",
+        "terraform" => "tf",
+        "bicep" => "bp",
         // The agent-definition frontend's stream keeps its own prefix, distinct
         // from `x` (the unknown-id fallback) so a merged agent stream cannot
         // collide opaque ids.
@@ -706,7 +749,7 @@ pub fn should_spawn_language(
 /// The scan-time tools a selected language's frontend requires on `PATH` when
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
 /// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`,
-/// `agent`, `sql`, `ps`) and the bundled structural scanner's every stream id (`md`, `sh`,
+/// `agent`, `sql`, `ps`, `terraform`, `bicep`) and the bundled structural scanner's every stream id (`md`, `sh`,
 /// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `sln`, `misc`)
 /// require nothing — the structural, agent, sql and ps arms are explicit so the
 /// exemption is intentional, not the unknown-id catch-all — and neither does an
@@ -730,6 +773,8 @@ pub fn scan_time_tools(language: &str) -> &'static [&'static str] {
         "sql" => &[],
         // The self-contained psfrontend needs no tool on `PATH` either.
         "ps" => &[],
+        // The self-contained terraformfrontend and bicepfrontend spawn nothing.
+        "terraform" | "bicep" => &[],
         _ => &[],
     }
 }

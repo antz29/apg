@@ -1,0 +1,58 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-source-handling",
+  "body": "Each Terraform file is read through its text encoding and its native-syntax or JSON-syntax parse into facts located in that file, or into its File node alone when its parse fails.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-crash-reason",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-error-count",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-json-syntax",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-line-spans",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-native-parse",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-parse-failure",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.terraform-text-encoding",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ]
+}

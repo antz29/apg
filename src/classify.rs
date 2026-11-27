@@ -221,6 +221,49 @@ fn ps_code_type(path: &str) -> &'static str {
     "src"
 }
 
+/// Terraform: every comparison is case-insensitive; a `.tftest.hcl` or
+/// `.tofutest.hcl` filename marks a test. The terraform frontend claims the
+/// `.tf`/`.tofu`/`.tfvars` sources.
+fn terraform_code_type(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    let segments: Vec<&str> = lower.split('/').collect();
+    let (filename, dirs) = segments.split_last().unwrap_or((&"", &[]));
+    let has_seg = |names: &[&str]| dirs.iter().any(|s| names.contains(s));
+    if filename.ends_with(".tftest.hcl")
+        || filename.ends_with(".tofutest.hcl")
+        || has_seg(&["test", "tests"])
+    {
+        return "test";
+    }
+    if has_seg(&["gen", "generated"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", ".terraform"]) {
+        return "external";
+    }
+    "src"
+}
+
+/// Bicep: every comparison is case-insensitive and path-segment only (no
+/// filename marker). The bicep frontend claims the `.bicep`/`.bicepparam`
+/// sources.
+fn bicep_code_type(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    let segments: Vec<&str> = lower.split('/').collect();
+    let (_, dirs) = segments.split_last().unwrap_or((&"", &[]));
+    let has_seg = |names: &[&str]| dirs.iter().any(|s| names.contains(s));
+    if has_seg(&["test", "tests"]) {
+        return "test";
+    }
+    if has_seg(&["gen", "generated"]) {
+        return "generated";
+    }
+    if has_seg(&["vendor", ".terraform"]) {
+        return "external";
+    }
+    "src"
+}
+
 fn builtin_code_type(path: &str, language: &str) -> &'static str {
     let segments: Vec<&str> = path.split('/').collect();
     let has_seg = |names: &[&str]| segments.iter().any(|s| names.contains(s));
@@ -394,6 +437,11 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "docs"
         }
+        // Terraform and Bicep: infrastructure-as-code formats streamed by their
+        // own frontends. They classify as code (`src` by default) rather than
+        // `config`, matched case-insensitively.
+        "terraform" => terraform_code_type(path),
+        "bicep" => bicep_code_type(path),
         // The bundled structural scanner's non-Markdown streams: the structural
         // formats are configuration/data, so with no config they classify
         // `config` — never the code default `src`. Markdown keeps its own `md`

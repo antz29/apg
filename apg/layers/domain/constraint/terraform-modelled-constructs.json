@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "terraform-modelled-constructs",
+  "body": "The Terraform frontend models resource, data, variable, output, locals, module and provider blocks, tfvars, test runs and lock-file providers alone; terraform, moved, import, removed and check blocks form no graph unit.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

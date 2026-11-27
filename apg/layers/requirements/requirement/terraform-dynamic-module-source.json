@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-dynamic-module-source",
+  "body": "A module source that is an expression other than a literal string is an unresolved use of category unknown keyed <nameless@repo-relative:offset> at its expression's raw on-disk byte offset.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "bicep-declaration-scanning",
+  "body": "The capability that makes each Bicep file its own module and turns its declarations, child resources, imports and parameter-file statements into graph units located in that file.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-child-resources",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-declaration-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-declaration-structs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-duplicate-declaration",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-file-module",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-func-functions",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-import-structs",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-param-file-structs",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-declaration-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-fact-emitter",
+      "properties": {}
+    }
+  ]
+}

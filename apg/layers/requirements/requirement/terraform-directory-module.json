@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-directory-module",
+  "body": "Each claimed Terraform file other than a test file belongs to the module terraform.<repository-relative directory>, the repository root rendering as terraform., and each subdirectory is a distinct module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-module-identity",
+      "properties": {}
+    }
+  ]
+}

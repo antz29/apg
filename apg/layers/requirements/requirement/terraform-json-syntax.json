@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-json-syntax",
+  "body": "A .tf.json, .tofu.json or .tfvars.json file maps its root properties to block types with one nested object level per block label, skips each // comment property, and draws references from its ${…} template strings.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ]
+}

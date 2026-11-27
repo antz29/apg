@@ -1,0 +1,31 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "bicep-conformance",
+  "body": "The capability that proves the Bicep frontend against fixture templates and parameter files covering every declaration kind, reference form, file dependency and error path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-fixture-coverage",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-test-suite",
+      "properties": {}
+    }
+  ]
+}

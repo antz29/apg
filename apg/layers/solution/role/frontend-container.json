@@ -15,6 +15,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.container.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.container.cobol-frontend",
       "properties": {}
     },
@@ -40,6 +45,11 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.container.ps-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.container.py-frontend",
       "properties": {}
     },
@@ -55,12 +65,12 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.container.ts-frontend",
+      "source": "solution.container.terraform-frontend",
       "properties": {}
     },
     {
       "kind": "is-role",
-      "source": "solution.container.ps-frontend",
+      "source": "solution.container.ts-frontend",
       "properties": {}
     }
   ]

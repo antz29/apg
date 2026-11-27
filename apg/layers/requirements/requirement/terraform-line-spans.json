@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-line-spans",
+  "body": "Each Terraform File record carries its 1-based start and end lines, and each Struct record carries byte offsets in its file's raw on-disk bytes and 1-based inclusive lines derived from those offsets.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ]
+}

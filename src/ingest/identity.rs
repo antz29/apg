@@ -176,6 +176,11 @@ pub(crate) fn rooted_scope(
     if language == "ps" {
         return format!("ps.{parent}");
     }
+    // An empty terraform parent is the repo-root module `terraform.`, so a root
+    // resource renders `terraform..<type>.<name>`.
+    if language == "terraform" {
+        return root_module_fqn(language, parent, base);
+    }
     if parent.is_empty() && language == "csharp" {
         return language.to_string();
     }
@@ -213,6 +218,14 @@ fn is_ps_opaque_id(endpoint: &str) -> bool {
     })
 }
 
+/// A terraform opaque record id: `tf<digits>` (the merged-scan `--id-prefix`).
+/// No terraform module identity has that shape, so it is never rendered as one.
+fn is_tf_opaque_id(endpoint: &str) -> bool {
+    endpoint
+        .strip_prefix("tf")
+        .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Roots a `contains` endpoint iff it is a known module identity (the frontends
 /// emit `Module -> Module` containment with the raw identity endpoints, while
 /// declaration containment uses opaque ids this must never rewrite). Module
@@ -227,6 +240,9 @@ pub(crate) fn root_module_endpoint(
     // psfrontend emits no Module->Module contains: a module named `ps1`/`n3`
     // must not re-root an opaque id.
     if language == "ps" && is_ps_opaque_id(endpoint) {
+        return endpoint.to_string();
+    }
+    if language == "terraform" && is_tf_opaque_id(endpoint) {
         return endpoint.to_string();
     }
     match module_identities.get(language) {
@@ -256,11 +272,25 @@ pub(crate) fn root_edge_endpoint(
         }
         return format!("ps.{endpoint}");
     }
+    if language == "terraform" && is_tf_opaque_id(endpoint) {
+        return endpoint.to_string();
+    }
     let Some(identities) = module_identities.get(language) else {
         return endpoint.to_string();
     };
     if has_module_prefix(identities, endpoint) {
         return root_module_fqn(language, endpoint, base);
+    }
+    // A terraform root-level endpoint names the empty root module: a retargeted
+    // key already carries its scope dot (`.var.v` → `terraform..var.v`), a bare
+    // name (`aws_vpc.main`) gets one.
+    if language == "terraform" && identities.contains("") {
+        let root = rooted_scope(language, "", module_identities, base);
+        return if endpoint.starts_with('.') {
+            format!("{root}{endpoint}")
+        } else {
+            format!("{root}.{endpoint}")
+        };
     }
     // A COBOL root-level declaration (`PROG`, `PROG.MAIN-PARA`) names the empty
     // root module, which no `/`/`.` prefix can match.

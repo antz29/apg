@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "terraform-block-scanner",
+  "body": "The Terraform block scanner: resource, data, variable, output, local, module and provider Structs, tfvars, test, run and lock-provider Structs, and duplicate-declaration handling.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.units",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-block-scanning",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

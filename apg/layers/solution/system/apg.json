@@ -12,6 +12,11 @@
     },
     {
       "kind": "contains",
+      "target": "solution.container.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.container.build-pipeline",
       "properties": {}
     },
@@ -73,6 +78,11 @@
     {
       "kind": "contains",
       "target": "solution.container.structural-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.terraform-frontend",
       "properties": {}
     },
     {

@@ -4,7 +4,8 @@ set -euo pipefail
 # apg release helper (steps 4-5 of "Deploying a release" in AGENTS.md).
 #
 # Repoints every Homebrew formula (Formula/*.rb: scanner, apg-go, apg-java,
-# apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-cobol, apg-sql, apg-ps) at a new
+# apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-cobol, apg-sql, apg-ps,
+# apg-terraform, apg-bicep) at a new
 # tag and creates the annotated release tag — in the CORRECT order, so that
 # when you push the tag the bottle workflow builds bottles of the NEW version,
 # not the previous one (the bottle job builds from the tap formulae on `main`,
@@ -71,7 +72,7 @@ git add Formula
 git commit -m "Point formula revisions at the $TAG release HEAD
 
 Formula/scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp,
-apg-py, apg-cobol, apg-sql, apg-ps: tag -> $TAG, revision -> $RELEASE_SHA (the release HEAD),
+apg-py, apg-cobol, apg-sql, apg-ps, apg-terraform, apg-bicep: tag -> $TAG, revision -> $RELEASE_SHA (the release HEAD),
 bottle root_url -> releases/download/$TAG, and rebuild bumped by one. This
 writes no bottle sha256; the CI publish job's brew bottle --merge --write
 writes every bottle checksum from the build JSON."

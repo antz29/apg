@@ -9,6 +9,16 @@
   "out": [
     {
       "kind": "contains",
+      "target": "solution.component.bicep-driver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.bicep-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.cli-session-coordinator",
       "properties": {}
     },
@@ -245,6 +255,16 @@
     {
       "kind": "contains",
       "target": "solution.component.sql-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-driver",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.terraform-source-claim",
       "properties": {}
     },
     {

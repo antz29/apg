@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "terraform-lone-lock-file-undetected",
+  "body": "Language detection matches the Terraform claim by file-name suffix, but its walker skips every dot-named entry, files included, so a repository whose only Terraform file is `.terraform.lock.hcl` is not detected as terraform; a real configuration always carries `.tf` files beside its lock file, so detection is unaffected in practice. Upgrade when a lone lock file must trigger detection: admit dot-named files to the walker for the candidates that claim a dot-prefixed suffix, without also admitting dotfiles such as `.eslintrc.js` to the other languages.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.frontends.auto_detect_languages",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

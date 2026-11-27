@@ -16,9 +16,9 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 /// granularity key for the fact store.
 ///
 /// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
-/// `csharp`, `py`, `cpp`, `sql`, `ps`, `agent`, `md`, and the bundled structural scanner's
-/// `sh`, `yaml`, `json`, `toml`, `xml`, `sln`, `dockerfile`, `makefile`, `ini`,
-/// `misc`) so it can be compared directly against the scan's detected/requested
+/// `csharp`, `py`, `cpp`, `sql`, `ps`, `terraform`, `bicep`, `agent`, `md`, and the
+/// bundled structural scanner's `sh`, `yaml`, `json`, `toml`, `xml`, `sln`,
+/// `dockerfile`, `makefile`, `ini`, `misc`) so it can be compared directly against the scan's detected/requested
 /// language ids — `apg.targets_for_language` filters the win-B target set with
 /// exactly this comparison. `.py`/`.pyi` therefore return `"py"`, NOT
 /// `"python"` (the scan-side vocabulary is `py`: the detector candidate,
@@ -77,6 +77,22 @@ pub fn language_of(rel: &str) -> &'static str {
     {
         return "ini";
     }
+    // Terraform's compound suffixes (any letter case — `name` is lowercased):
+    // their last extension (`.json`/`.hcl`) would otherwise route to the
+    // structural `json` stream or the residual `misc`.
+    if [
+        ".tf.json",
+        ".tfvars.json",
+        ".tofu.json",
+        ".tftest.hcl",
+        ".tofutest.hcl",
+        ".terraform.lock.hcl",
+    ]
+    .iter()
+    .any(|s| name.ends_with(s))
+    {
+        return "terraform";
+    }
     match ext {
         "go" => "go",
         "java" => "java",
@@ -129,6 +145,20 @@ pub fn language_of(rel: &str) -> &'static str {
         // Any letter case (`Legacy.SLN`), like `stream_for_path`'s lowercasing.
         _ if ext.eq_ignore_ascii_case("sln") => "sln",
         "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
+        // Terraform/OpenTofu and Bicep in any letter case (`.TF`, `.BICEPPARAM`);
+        // a plain `.hcl` stays in the residual `misc`.
+        _ if ["tf", "tfvars", "tofu"]
+            .iter()
+            .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "terraform"
+        }
+        _ if ["bicep", "bicepparam"]
+            .iter()
+            .any(|c| ext.eq_ignore_ascii_case(c)) =>
+        {
+            "bicep"
+        }
         _ => "misc",
     }
 }

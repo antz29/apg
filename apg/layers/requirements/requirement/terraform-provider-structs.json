@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-provider-structs",
+  "body": "A provider block is a Struct named provider.<name>, or provider.<name>.<alias> when it sets a literal alias, contained by its File and rooted under its module.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-block-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-block-scanning",
+      "properties": {}
+    }
+  ]
+}

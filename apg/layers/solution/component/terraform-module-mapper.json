@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "terraform-module-mapper",
+  "body": "The Terraform module mapper: directory modules, test-file ownership through tests directories, .tofu shadowing of same-base-name files, and override-file recognition and ordering.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.terraformfrontend.module",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.terraform-module-identity",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.terraform-frontend",
+      "properties": {}
+    }
+  ]
+}

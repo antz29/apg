@@ -12,6 +12,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.bicep-language-root",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.classification-config-in-cache-key",
       "properties": {}
     },
@@ -52,6 +57,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-language-root",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.python-namespace-package-identity",
       "properties": {}
     },
@@ -82,7 +92,7 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.ps-language-root",
+      "target": "requirements.requirement.terraform-language-root",
       "properties": {}
     }
   ],

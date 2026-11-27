@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-native-parse",
+  "body": "A .tf, .tofu, .tfvars, .tftest.hcl, .tofutest.hcl or .terraform.lock.hcl file parses as one HCL native-syntax body, and HCL valid within the engine ceiling parses with zero errors.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ]
+}

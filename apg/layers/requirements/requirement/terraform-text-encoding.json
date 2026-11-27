@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-text-encoding",
+  "body": "A Terraform file is read as UTF-8 text with an optional byte-order mark and LF or CRLF line endings, and its line spans count the lines of that text.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-source-reading",
+      "properties": {}
+    }
+  ]
+}

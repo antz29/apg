@@ -1,0 +1,31 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "terraform-conformance",
+  "body": "The capability that proves the Terraform frontend against fixture configurations covering every claimed suffix, block kind, module source form and failure path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-fixture-coverage",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-verification",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.terraform-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.terraform-test-suite",
+      "properties": {}
+    }
+  ]
+}

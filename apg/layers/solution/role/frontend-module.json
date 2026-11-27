@@ -15,6 +15,31 @@
     },
     {
       "kind": "is-role",
+      "source": "solution.component.bicep-declaration-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.bicep-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.bicep-reference-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.bicep-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.bicep-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.cobol-call-resolver",
       "properties": {}
     },
@@ -146,6 +171,36 @@
     {
       "kind": "is-role",
       "source": "solution.component.sql-test-suite",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-block-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-fact-emitter",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-module-mapper",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-reference-resolver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-source-reader",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-test-suite",
       "properties": {}
     },
     {

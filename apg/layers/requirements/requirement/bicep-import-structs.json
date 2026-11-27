@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-import-structs",
+  "body": "Each symbol a compile-time import binds is a Struct named import.<local name>, its as alias where given, and a wildcard import * as ns is one Struct named import.ns, each contained by its File.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.bicep-declaration-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.bicep-declaration-scanning",
+      "properties": {}
+    }
+  ]
+}

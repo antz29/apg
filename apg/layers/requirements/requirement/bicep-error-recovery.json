@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-error-recovery",
+  "body": "A Bicep syntax error skips to the next newline at nesting depth zero or to its construct's matching closer, so a file yields every declaration and reference outside the skipped text and the scan continues.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.bicep-source-handling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.bicep-source-reading",
+      "properties": {}
+    }
+  ]
+}

@@ -109,12 +109,54 @@ mod unit {
     #[test]
     fn ext_matches_is_case_insensitive_only_when_asked() {
         let cobol = [".cob", ".cbl", ".cobol", ".cpy"];
-        assert!(ext_matches("CBL", &cobol, true));
-        assert!(ext_matches("Cpy", &cobol, true));
-        assert!(!ext_matches("CBL", &cobol, false));
+        assert!(ext_matches("a.CBL", &cobol, true));
+        assert!(ext_matches("a.Cpy", &cobol, true));
+        assert!(!ext_matches("a.CBL", &cobol, false));
         let java = [".java"];
-        assert!(ext_matches("java", &java, false));
-        assert!(!ext_matches("JAVA", &java, false));
+        assert!(ext_matches("Main.java", &java, false));
+        assert!(!ext_matches("Main.JAVA", &java, false));
+        assert!(!ext_matches("java", &java, false));
+    }
+
+    /// iac-frontends phase-01 task-1: the suffix test matches compound
+    /// Terraform suffixes in any case, never a plain `.hcl`/`.json`.
+    #[test]
+    fn ext_matches_terraform_compound_suffixes() {
+        let tf = [
+            ".tf",
+            ".tf.json",
+            ".tfvars",
+            ".tfvars.json",
+            ".tofu",
+            ".tofu.json",
+            ".tftest.hcl",
+            ".tofutest.hcl",
+            ".terraform.lock.hcl",
+        ];
+        for name in [
+            "main.tf",
+            "main.tf.json",
+            "prod.tfvars",
+            "prod.tfvars.json",
+            "main.tofu",
+            "main.tofu.json",
+            "a.tftest.hcl",
+            "a.tofutest.hcl",
+            "x.terraform.lock.hcl",
+            "MAIN.TF",
+            "Main.Tf.Json",
+            "A.TFTEST.HCL",
+        ] {
+            assert!(ext_matches(name, &tf, true), "{name} must match");
+        }
+        for name in ["packer.hcl", "x.json", "main.tfx", "tf", "é.hcl"] {
+            assert!(!ext_matches(name, &tf, true), "{name} must not match");
+        }
+        assert!(ext_matches(
+            "Main.BICEPPARAM",
+            &[".bicep", ".bicepparam"],
+            true
+        ));
     }
 
     /// sql-frontend phase-06 task-19: `sql` is a language root whose `sq`
@@ -132,9 +174,9 @@ mod unit {
             assert_ne!(prefix, id_prefix_for(language), "sql vs {language}");
         }
         assert!(scan_time_tools("sql").is_empty());
-        assert!(ext_matches("SQL", &[".sql"], true));
-        assert!(ext_matches("Sql", &[".sql"], true));
-        assert!(!ext_matches("SQL", &[".sql"], false));
+        assert!(ext_matches("a.SQL", &[".sql"], true));
+        assert!(ext_matches("a.Sql", &[".sql"], true));
+        assert!(!ext_matches("a.SQL", &[".sql"], false));
     }
 
     /// powershell-frontend phase-07 task-10: `ps` is a language root whose
@@ -156,11 +198,36 @@ mod unit {
         assert!(scan_time_tools("ps").is_empty());
         assert!(!passes_targets_flag("ps", false));
         let ps = [".ps1", ".psm1", ".psd1"];
-        assert!(ext_matches("PS1", &ps, true));
-        assert!(ext_matches("Psm1", &ps, true));
-        assert!(ext_matches("psd1", &ps, true));
-        assert!(!ext_matches("ps", &ps, true));
-        assert!(!ext_matches("ps1xml", &ps, true));
+        assert!(ext_matches("a.PS1", &ps, true));
+        assert!(ext_matches("a.Psm1", &ps, true));
+        assert!(ext_matches("a.psd1", &ps, true));
+        assert!(!ext_matches("a.ps", &ps, true));
+        assert!(!ext_matches("a.ps1xml", &ps, true));
+    }
+
+    /// iac-frontends phase-01 task-6: `terraform` (`tf`) and `bicep` (`bp`)
+    /// prefixes collide with no language root's, each other's nor the `x`
+    /// fallback; both are tool-less and use the default `--targets` hand-off.
+    #[test]
+    fn terraform_and_bicep_registration_is_distinct_and_tool_less() {
+        for (lang, want) in [("terraform", "tf"), ("bicep", "bp")] {
+            let prefix = id_prefix_for(lang);
+            assert_eq!(prefix, want);
+            assert_ne!(
+                prefix,
+                id_prefix_for("not-a-language"),
+                "{lang} vs fallback"
+            );
+            let others = crate::layers::LANGUAGE_ROOTS
+                .iter()
+                .chain(&["terraform", "bicep"])
+                .filter(|l| **l != lang);
+            for language in others {
+                assert_ne!(prefix, id_prefix_for(language), "{lang} vs {language}");
+            }
+            assert!(scan_time_tools(lang).is_empty());
+            assert!(!passes_targets_flag(lang, false));
+        }
     }
 
     /// sql-frontend phase-06 task-30: `sql` always carries `--targets` (its

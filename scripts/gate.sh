@@ -37,11 +37,12 @@
 # (`structfrontend`), its bundled agent frontend (`agentfrontend`),
 # `touch_db`/`scan_checkout` payload fixtures, git, node/plan/review/artifacts
 # and the suite boundary e2e. A scenario is therefore excluded from `--e2e`
-# when it needs one of the ten per-language frontends (`gofrontend`,
+# when it needs one of the twelve per-language frontends (`gofrontend`,
 # `javafrontend`, `cppfrontend`, `rustfrontend`, `tsfrontend`,
 # `csharpfrontend`, `pyfrontend`, `cobolfrontend`, `sqlfrontend`,
-# `psfrontend`) — via an explicit `--language <lang>` or an auto-detected
-# fixture carrying that language's sources — or when it is the pinned-scale
+# `psfrontend`, `terraformfrontend`, `bicepfrontend`) — via an explicit
+# `--language <lang>` or an auto-detected fixture carrying that language's
+# sources — or when it is the pinned-scale
 # 50k-file one-file-rescan acceptance. HERMETIC_E2E_EXCLUDES below holds one
 # entry per scenario, never a glob: an unclassified NEW test therefore runs
 # in BOTH modes until it is classified there.
@@ -213,12 +214,14 @@ step
 # One entry per scenario — no prefix globs — so a newly added test joins BOTH
 # modes until it is classified here (see the header's E2E SELECTION note).
 HERMETIC_E2E_EXCLUDES=(
-  # The four per-language acceptance binaries: every scenario in each spawns
-  # that language's frontend (cobol/csharp/ps/sql respectively).
+  # The per-language acceptance binaries: every scenario in each spawns
+  # that language's frontend (cobol/csharp/ps/sql/terraform/bicep respectively).
   cobol_scan_e2e
   csharp_scan_e2e
   ps_scan_e2e
   sql_scan_e2e
+  terraform_scan_e2e
+  bicep_scan_e2e
 
   # main_e2e — Go fixtures (auto-detected, or an explicit `--language go`):
   # each scan spawns gofrontend.

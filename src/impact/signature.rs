@@ -39,6 +39,8 @@ pub fn granularity(language: &str) -> Granularity {
         "python" | "py" => Granularity::PackageOrModule,
         "cpp" | "c++" | "c" => Granularity::File,
         "cobol" => Granularity::File,
+        "terraform" => Granularity::File,
+        "bicep" => Granularity::File,
         "md" | "markdown" => Granularity::File,
         "sql" => Granularity::Language,
         _ => Granularity::File,

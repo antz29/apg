@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "iac-static-reading",
+  "body": "The Terraform and Bicep frontends read syntax alone, never evaluating an expression, running terraform, tofu, bicep or az, reading state, or fetching a module, provider or registry artefact.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

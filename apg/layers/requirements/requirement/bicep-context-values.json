@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bicep-context-values",
+  "body": "A call to a built-in function such as resourceGroup() or concat(), and an az or sys namespace access, are evaluation-context values that draw zero edges.",
+  "properties": {
+    "feature": "bicep-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.bicep-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.bicep-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

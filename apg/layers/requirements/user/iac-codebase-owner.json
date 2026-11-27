@@ -1,0 +1,20 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "iac-codebase-owner",
+  "body": "A developer or team whose repository holds infrastructure-as-code, Terraform or OpenTofu configurations and Azure Bicep templates and parameter files, and who scans them to read their program graph.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
+      "target": "requirements.requirement.terraform-frontend",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

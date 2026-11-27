@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-reference-unresolved",
+  "body": "A declaration traversal whose target lies outside its own module's declarations is an unresolved use of category unknown, named by its declaration prefix as written, such as var.region or aws_vpc.main.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

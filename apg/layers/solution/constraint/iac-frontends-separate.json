@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "iac-frontends-separate",
+  "body": "The Terraform and Bicep frontends are two standalone crates, binaries, build ids, formulae and Linux packages, each with its own language root, stream and id prefix, and neither links the other.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "terraform-providers-map-bare-name",
+  "body": "Provider meta-arguments resolve a bare name only on a provider attribute (provider = aws gives provider.aws); a bare name used as a value inside a providers object (providers = { aws = aws }) is not surfaced by the parse view, so it draws no edge, while traversal values such as aws.west still resolve to provider.aws.west. Upgrade by surfacing bare-variable values in the parse object walk when providers maps with bare names must link to provider.<name>.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.terraformfrontend.resolve.Resolver.attr",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

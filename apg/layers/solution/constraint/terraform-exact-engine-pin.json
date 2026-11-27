@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "terraform-exact-engine-pin",
+  "body": "terraformfrontend pins hcl-edit with an exact = version requirement, since that crate makes breaking changes between minor releases, and a bump of the pin is a deliberate change of the language ceiling.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

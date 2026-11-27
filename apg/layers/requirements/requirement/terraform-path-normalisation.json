@@ -1,0 +1,22 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "terraform-path-normalisation",
+  "body": "A local module source normalises to a repository-relative path by dropping each . segment and each .. segment together with the segment before it.",
+  "properties": {
+    "feature": "terraform-frontend"
+  },
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.terraform-reference-facts",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "source": "domain.service.terraform-reference-resolution",
+      "properties": {}
+    }
+  ]
+}

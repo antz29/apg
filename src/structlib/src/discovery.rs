@@ -19,7 +19,10 @@ use crate::paths::{absolutize, repo_relative_identity};
 /// The walk additionally prunes a top-level `apg/` — the project layout itself
 /// (config, layers, transient state), not authored content — but only at the
 /// scan root: a nested `apg/` deeper in the tree is claimed like any directory.
-const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"];
+///
+/// `.terraform` is Terraform's download cache (modules, provider plugins,
+/// state), never authored content.
+const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees", ".terraform"];
 
 /// The code-frontend extensions the structural scanner never claims: a file a
 /// code frontend parses stays that frontend's. This is the UNION of every
@@ -29,13 +32,63 @@ const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"]
 /// (`cpp cc cxx c++ h hpp hh hxx tpp ipp`), and the unified JS/TS module
 /// variants (`ts tsx mts cts js jsx mjs cjs`), the COBOL frontend's
 /// (`cob cbl cobol cpy`), the SQL frontend's (`sql`), and the PowerShell
-/// frontend's (`ps1 psm1 psd1`). `.c` is deliberately absent —
-/// the C++ frontend does not claim it, so a tracked `.c` file falls to the
-/// residual `misc` stream.
+/// frontend's (`ps1 psm1 psd1`), Terraform's (`tf tfvars tofu`; its compound
+/// suffixes are [`TERRAFORM_SUFFIXES`]) and Bicep's (`bicep bicepparam`).
+/// `hcl` and `c` are deliberately absent — no frontend claims a plain `.hcl`
+/// or `.c` (the C++ frontend does not), so either falls to residual `misc`.
 const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp", "ts",
-    "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor", "py", "pyi",
-    "cob", "cbl", "cobol", "cpy", "sql", "ps1", "psm1", "psd1",
+    "rs",
+    "go",
+    "java",
+    "cpp",
+    "cc",
+    "cxx",
+    "c++",
+    "h",
+    "hpp",
+    "hh",
+    "hxx",
+    "tpp",
+    "ipp",
+    "ts",
+    "tsx",
+    "mts",
+    "cts",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "cs",
+    "csx",
+    "cshtml",
+    "razor",
+    "py",
+    "pyi",
+    "cob",
+    "cbl",
+    "cobol",
+    "cpy",
+    "sql",
+    "ps1",
+    "psm1",
+    "psd1",
+    "tf",
+    "tfvars",
+    "tofu",
+    "bicep",
+    "bicepparam",
+];
+
+/// Terraform's compound suffixes (matched case-insensitively on the file
+/// name): their last extension (`json`/`hcl`) is otherwise structural, so a
+/// plain `.json` stays `json` and a plain `.hcl` stays residual `misc`.
+const TERRAFORM_SUFFIXES: &[&str] = &[
+    ".tf.json",
+    ".tfvars.json",
+    ".tofu.json",
+    ".tftest.hcl",
+    ".tofutest.hcl",
+    ".terraform.lock.hcl",
 ];
 
 /// Reads the pinned `--targets` list: absolute source paths, one per line,
@@ -76,6 +129,10 @@ pub(crate) fn stream_for_path(path: &Path) -> Option<&'static str> {
         if CODE_EXTENSIONS.contains(&e) {
             return None;
         }
+    }
+
+    if TERRAFORM_SUFFIXES.iter().any(|s| lower.ends_with(s)) {
+        return None;
     }
 
     // Filename-keyed formats first: Dockerfile/Makefile and the extension-less

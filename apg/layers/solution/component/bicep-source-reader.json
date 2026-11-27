@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "bicep-source-reader",
+  "body": "The Bicep source reader: the claimed-file walk, UTF-8 decoding, the newline-significant lexer with string interpolation, and the hand-written recursive-descent parser with line-based recovery.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.bicepfrontend.parse",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.bicepfrontend.source",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.bicep-source-reading",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.bicep-frontend",
+      "properties": {}
+    }
+  ]
+}

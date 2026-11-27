@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "bicep-modelled-constructs",
+  "body": "The Bicep frontend models param, var, resource, module, output, type, func, import, using and extends declarations alone; metadata, targetScope, extension, test and assert statements form no graph unit.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

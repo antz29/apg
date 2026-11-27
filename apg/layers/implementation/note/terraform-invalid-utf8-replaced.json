@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "terraform-invalid-utf8-replaced",
+  "body": "Invalid UTF-8 byte runs in a Terraform source are decoded lossily: each run becomes one U+FFFD in the decoded text while the offset map keeps raw on-disk byte offsets, so the file still parses and no diagnostic is emitted for the bad bytes. Upgrade to a per-file stderr diagnostic (or a parse failure) if the spec comes to require rejecting non-UTF-8 Terraform files.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.terraformfrontend.source.utf8",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

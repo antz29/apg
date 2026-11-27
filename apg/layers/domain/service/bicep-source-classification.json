@@ -1,0 +1,51 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "bicep-source-classification",
+  "body": "The capability that claims Bicep files consistently across detection, incremental mapping and the structural scanner, and assigns each its code type from its path.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-auto-detection",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-code-type",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-structural-handoff",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.bicep-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.bicep-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.language-claim-map",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "source": "solution.component.structural-claiming",
+      "properties": {}
+    }
+  ]
+}

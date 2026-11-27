@@ -10038,6 +10038,60 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// iac-frontends phase-01 task-1 (e2e): `auto_detect_languages` detects
+    /// `terraform` from each claimed suffix in any case, never from a plain
+    /// `.hcl`/`.json` or a `.tf` only under a pruned `.terraform/`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir fs); run via cargo test-e2e"]
+    fn auto_detect_languages_detects_terraform_claim_only() {
+        let base = std::env::temp_dir().join(format!("apg-tf-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let available = ["terraform".to_string(), "bicep".to_string()];
+        let tree_with = |name: &str, file: &str| {
+            let tree = base.join(name);
+            let path = tree.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "# iac\n").unwrap();
+            tree
+        };
+        for (i, file) in [
+            "main.tf",
+            "main.tf.json",
+            "prod.tfvars",
+            "prod.tfvars.json",
+            "main.tofu",
+            "main.tofu.json",
+            "tests/a.tftest.hcl",
+            "tests/a.tofutest.hcl",
+            "MAIN.TF",
+            "Prod.TFVARS.JSON",
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert_eq!(
+                auto_detect_languages(&tree_with(&format!("tf{i}"), file), &available),
+                vec!["terraform".to_string()],
+                "a tree holding only {file} must detect terraform"
+            );
+        }
+        for (name, file) in [
+            ("packer", "packer.hcl"),
+            ("json", "x.json"),
+            ("cache", ".terraform/modules/m/main.tf"),
+        ] {
+            assert!(
+                auto_detect_languages(&tree_with(name, file), &available).is_empty(),
+                "a tree holding only {file} must detect nothing"
+            );
+        }
+        assert_eq!(
+            auto_detect_languages(&tree_with("bicep", "Main.BICEPPARAM"), &available),
+            vec!["bicep".to_string()]
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// schema-alignment phase-03 task-12 (e2e, scratch /tmp repo, CANDIDATE
     /// binary only — `global.constraint.no-real-project-test`): a REAL scan of
     /// a checkout carrying agent definitions yields one tier-4 Agent node per

@@ -7,6 +7,21 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.bicep-build-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-language-ceiling",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.bicep-scan-time-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.build-toolchain-pins",
       "properties": {}
     },
@@ -37,6 +52,21 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.ps-build-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-engine-pin",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-scan-time-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.scan-time-toolchain-preflight",
       "properties": {}
     },
@@ -57,17 +87,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.ps-build-deps",
+      "target": "requirements.requirement.terraform-build-deps",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.ps-engine-pin",
+      "target": "requirements.requirement.terraform-engine-pin",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.ps-scan-time-deps",
+      "target": "requirements.requirement.terraform-scan-time-deps",
       "properties": {}
     }
   ],

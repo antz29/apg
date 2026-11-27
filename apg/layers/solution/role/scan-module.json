@@ -10,6 +10,16 @@
   "in": [
     {
       "kind": "is-role",
+      "source": "solution.component.bicep-driver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.bicep-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
       "source": "solution.component.cli-session-coordinator",
       "properties": {}
     },
@@ -256,6 +266,16 @@
     {
       "kind": "is-role",
       "source": "solution.component.sql-source-claim",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-driver",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "source": "solution.component.terraform-source-claim",
       "properties": {}
     },
     {

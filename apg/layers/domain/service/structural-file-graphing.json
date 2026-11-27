@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.bicep-structural-handoff",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.dotnet-msbuild-xml-stream",
       "properties": {}
     },
@@ -28,6 +33,11 @@
     {
       "kind": "driven-by",
       "target": "requirements.requirement.no-new-scan-time-deps",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.ps-structural-handoff",
       "properties": {}
     },
     {
@@ -67,7 +77,17 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.ps-structural-handoff",
+      "target": "requirements.requirement.terraform-cache-prune",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-hcl-residual",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
+      "target": "requirements.requirement.terraform-structural-handoff",
       "properties": {}
     }
   ],

@@ -459,11 +459,86 @@ mod unit {
         // The PowerShell frontend claims `.ps1/.psm1/.psd1` in any letter case;
         // near misses like `.ps`/`.ps1xml` stay residual `misc`.
         let code = [
-            "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
-            "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "csx", "cshtml", "razor",
-            "py", "pyi", "cob", "cbl", "cobol", "cpy", "COB", "Cbl", "COBOL", "Cpy", "sql", "SQL",
-            "Sql", "ps1", "psm1", "psd1", "PS1", "Psm1", "PSD1",
+            "rs",
+            "go",
+            "java",
+            "cpp",
+            "cc",
+            "cxx",
+            "c++",
+            "h",
+            "hpp",
+            "hh",
+            "hxx",
+            "tpp",
+            "ipp",
+            "ts",
+            "tsx",
+            "mts",
+            "cts",
+            "js",
+            "jsx",
+            "mjs",
+            "cjs",
+            "cs",
+            "csx",
+            "cshtml",
+            "razor",
+            "py",
+            "pyi",
+            "cob",
+            "cbl",
+            "cobol",
+            "cpy",
+            "COB",
+            "Cbl",
+            "COBOL",
+            "Cpy",
+            "sql",
+            "SQL",
+            "Sql",
+            "ps1",
+            "psm1",
+            "psd1",
+            "PS1",
+            "Psm1",
+            "PSD1",
+            "tf",
+            "TF",
+            "Tf",
+            "tofu",
+            "Tofu",
+            "tfvars",
+            "TFVARS",
+            "bicep",
+            "Bicep",
+            "bicepparam",
+            "BICEPPARAM",
         ];
+        // Terraform's compound suffixes are filename suffixes, skipped in any case.
+        for suffix in [
+            "tf.json",
+            "TF.JSON",
+            "Tf.Json",
+            "tfvars.json",
+            "TFVARS.JSON",
+            "tofu.json",
+            "Tofu.Json",
+            "tftest.hcl",
+            "TFTEST.HCL",
+            "tofutest.hcl",
+            "TofuTest.Hcl",
+            "terraform.lock.hcl",
+            "TERRAFORM.LOCK.HCL",
+        ] {
+            assert_eq!(
+                stream_for_path(Path::new(&format!("src/main.{suffix}"))),
+                None,
+                ".{suffix} must be skipped"
+            );
+        }
+        assert_eq!(stream_for_path(Path::new(".terraform.lock.hcl")), None);
+
         for ext in code {
             assert_eq!(
                 stream_for_path(Path::new(&format!("src/file.{ext}"))),
@@ -511,6 +586,10 @@ mod unit {
             ("a.c", Some("misc")),
             ("a.ps", Some("misc")),
             ("a.ps1xml", Some("misc")),
+            // Outside the Terraform claim: `.hcl` is residual, `.json` is json.
+            ("packer.hcl", Some("misc")),
+            ("X.HCL", Some("misc")),
+            ("x.json", Some("json")),
         ];
         for (path, want) in routed {
             assert_eq!(stream_for_path(Path::new(path)), want, "routing for {path}");
@@ -521,11 +600,16 @@ mod unit {
         assert!(is_pruned_dir("node_modules"));
         assert!(is_pruned_dir(".git"));
         assert!(is_pruned_dir(".worktrees"));
+        assert!(is_pruned_dir(".terraform"));
         assert!(!is_pruned_dir("src"));
         let root = Path::new("/repo");
         assert!(under_excluded_tree(Path::new("/repo/target/a.sh"), root));
         assert!(under_excluded_tree(
             Path::new("/repo/node_modules/x/a.sh"),
+            root
+        ));
+        assert!(under_excluded_tree(
+            Path::new("/repo/infra/.terraform/modules/x/README.md"),
             root
         ));
         assert!(!under_excluded_tree(Path::new("/repo/src/a.sh"), root));

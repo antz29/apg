@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "bicep-declaration-scanner",
+  "body": "The Bicep declaration scanner: file modules, keyword-named declaration Structs, func Functions, nested child-resource Structs, import Structs, parameter-file Structs and duplicate handling.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.bicepfrontend.units",
+      "properties": {}
+    },
+    {
+      "kind": "is-role",
+      "target": "solution.role.frontend-module",
+      "properties": {}
+    },
+    {
+      "kind": "realises",
+      "target": "domain.service.bicep-declaration-scanning",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.bicep-frontend",
+      "properties": {}
+    }
+  ]
+}
