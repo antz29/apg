@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "rust.apg.artifacts.db.open_project_db",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "rust.apg.git.identity.membership_refusal",
       "properties": {}
     },
@@ -18,6 +23,61 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.cmd_plan",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.project_claim",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.project_reconstruct",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.Caller",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.Registry",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.caller_from_env",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.require_owner",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.require_project",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.require_registry",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.registry.validate_row",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "src/registry.rs",
       "properties": {}
     },
     {

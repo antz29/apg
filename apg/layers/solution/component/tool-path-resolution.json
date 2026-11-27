@@ -7,6 +7,11 @@
   "out": [
     {
       "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.project_resolve",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "ts.apg-opencode-suite.lib.apg.findApgRoot",
       "properties": {}
     },

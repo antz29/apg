@@ -12,6 +12,11 @@
     },
     {
       "kind": "implemented-by",
+      "target": "rust.apg.testutil.ScratchGuard",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
       "target": "scripts/gate.sh",
       "properties": {}
     },

@@ -21,6 +21,11 @@
       "properties": {}
     },
     {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.resolveProjectWorktree",
+      "properties": {}
+    },
+    {
       "kind": "is-role",
       "target": "solution.role.suite-module",
       "properties": {}
