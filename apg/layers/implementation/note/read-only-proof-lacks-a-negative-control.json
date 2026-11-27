@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "read-only-proof-lacks-a-negative-control",
-  "body": "The read-only coexistence assertion pins that verify succeeds while another read-only handle is held, but it does not independently demonstrate that a read-write open would fail (lbug's handle classes may not conflict on this fixture), so the exclusive-class claim rests on the production code using `open_read_only`; add a negative control if a read-write conflict becomes observable.",
+  "body": "The plan-verify read-only proof pins that verify succeeds while another read-only handle is held, but does not independently demonstrate a read-write open would fail (lbug's handle classes may not conflict on this fixture), so the exclusive-class claim rests on the production code using `open_read_only`; its terminal-corrupt arm also asserts the refusal's cause by containment against the same snapshot rather than byte-pinning it, because lbug's open/read error wording is not stable across engine versions. Add a negative control if a read-write conflict becomes observable; tighten to an exact cause clause only if the engine error text becomes pinned.",
   "properties": {},
   "out": [
     {
