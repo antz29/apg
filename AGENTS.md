@@ -315,7 +315,9 @@ The project builds a single `apg` binary (package `apg`):
   `--target <destination-fqn>` supplying a renames/moves destination; `add`
   requires `--assigned-to`, while `update` takes the same task flags and leaves
   an omitted dimension unchanged (see *Plans, tasks & feedback*).
-- `apg project <sub> …` — project contexts (worktrees, git2-operated):
+- `apg project <sub> …` — project contexts (worktrees, git2-operated), resolved
+  through the main checkout's binary-owned project registry
+  (`<main>/apg/.trans/projects.db`):
   `start <name>` (from the main checkout: worktree + branch + branch DB off
   the default branch, prints `apg/.worktrees/<name>`), `merge <name>` (from
   the main checkout: verify gate → merge → unguarded main rebuild; a rebuild
@@ -329,7 +331,14 @@ The project builds a single `apg` binary (package `apg`):
   worktree and delete its branch, discarding the branch's commits; refuses an
   invalid name, the default branch, a branch the main checkout has checked
   out, a missing project or mismatched worktree, and tracked uncommitted
-  changes in the worktree).
+  changes in the worktree),
+  `resolve <name>` (print exactly the registered worktree path for `<name>` and
+  nothing else, suitable for shell capture; reads the main checkout's registry,
+  so it works from the main checkout or inside any project worktree),
+  `reconstruct` (rebuild the registry from the repository's `git worktree
+  list` — the main checkout as `main` plus each linked worktree under its
+  worktree name, each carrying its checked-out branch, no owner and a fresh
+  creation time, replacing every stale row in one write).
 - `apg review <sub> …` — the closed, coordinator-mediated writer↔reviewer
   feedback cycle over the transient `.trans` mirrors: `add`, `action`,
   `resolve`, `reject`, `list`. The owning writer returns an ACTIONED/WONT-FIX
@@ -399,6 +408,20 @@ builds individual packages (`apg-linux-*.tar.gz`, `apg-<lang>-linux-*.tar.gz`)
 plus `sha256sums.txt` per tag.
 In the repo itself, run it via `cargo run -- scan <dir>` or
 `target/debug/apg scan <dir>`.
+
+The **project registry** (`<main>/apg/.trans/projects.db`) is the main
+checkout's binary-owned, local, disposable index mapping a project name → its
+worktree, branch, owning session and creation time. `apg init` registers the
+built-in `main` row (a re-init refreshes it in place, clearing the owner and
+keeping its original creation time); `apg project start` records the new
+project's row with the caller's `APG_CALLER_SESSION` as owner and refuses a
+name that already has a row, naming the registered worktree (repair stale rows
+with `apg project reconstruct`); `merge` and `delete` remove the row once they
+succeed — an absent row is a no-op, and a removal failure is only a warning, so
+a completed operation is never turned red. One worktree belongs to at most one
+name. The registry is an index, not the authority: the git worktree and branch,
+and the project's own `apg/` layout, remain what sessions operate on, and a
+stale row is repaired with `apg project reconstruct`.
 
 #### Sessions: caller-owned durable mutation
 
