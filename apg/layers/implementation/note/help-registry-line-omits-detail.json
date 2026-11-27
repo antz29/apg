@@ -7,7 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.help_text",
+      "target": "src/lib.rs",
       "properties": {}
     }
   ],
