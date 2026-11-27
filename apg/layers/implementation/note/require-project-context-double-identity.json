@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "require-project-context-double-identity",
-  "body": "The binding resolves the repo identity twice, once in the guard and once inside require_project, keeps the pre-registry membership_refusal shape until task 7 upgrades it, and adds no unit test at this tier because the binding is e2e-covered; fold the two identity walks into one if the guard becomes hot, and let task 7 own the registry-aware wording.",
+  "body": "The project binding resolves the repo identity twice per guarded act, once in require_project_context and once inside require_project, and adds no unit test at this tier because the binding is e2e-covered; the bound refusal is registry-aware, naming the row's worktree and branch beside the caller's current branch and one `apg project start` fix line. Fold the two identity walks into one if the guard becomes hot.",
   "properties": {},
   "out": [
     {
