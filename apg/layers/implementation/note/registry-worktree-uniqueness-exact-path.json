@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "registry-worktree-uniqueness-exact-path",
+  "body": "Registry worktree uniqueness compares stored PathBuf values exactly, without canonicalisation, so a caller must pass the canonical worktree path; canonicalise before put or replace_all when project reconstruct supplies paths from git worktree list that can differ in spelling.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.Registry.put",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

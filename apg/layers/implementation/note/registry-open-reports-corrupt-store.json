@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "registry-open-reports-corrupt-store",
+  "body": "Registry open reports a corrupt or foreign store as a named open failure rather than deleting it; add discard-and-reopen recovery when a lifecycle verb needs to repair a broken registry.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.Registry.open",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

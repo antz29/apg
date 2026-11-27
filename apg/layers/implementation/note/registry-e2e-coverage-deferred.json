@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "registry-e2e-coverage-deferred",
+  "body": "The registry store carries no in-module tests because opening redb is real I/O and belongs to the e2e tier; its coverage is the registry acceptance test, and the limit ends when that test lands.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/registry.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
