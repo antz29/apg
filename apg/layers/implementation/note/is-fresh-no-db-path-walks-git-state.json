@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "is-fresh-no-db-path-walks-git-state",
+  "body": "The no-database path of `is_fresh` now pays one `git_state` status walk before returning false (it previously short-circuited on a bare existence check); upgrade if a future caller needs the no-database result on a hot path, by handing in a caller-captured `GitState` or restoring a `db_presence` short-circuit that still classifies a non-NotFound error.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.is_fresh",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
