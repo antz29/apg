@@ -17,6 +17,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.repo-gate-suite-test-type-check",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.repo-gate-suite-type-check",
       "properties": {}
     },
