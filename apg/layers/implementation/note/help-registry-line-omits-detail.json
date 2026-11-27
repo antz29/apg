@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "help-registry-line-omits-detail",
+  "body": "The help block advertises the registry in one clause, omitting that apg init registers the main row, that start refuses a duplicate name naming the row's worktree, and that resolve's refusal lists the registered names; add a per-verb detail level when help grows a fuller user-facing surface.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.help_text",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
