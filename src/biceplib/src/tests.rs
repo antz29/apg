@@ -360,6 +360,35 @@ mod unit {
     }
 
     #[test]
+    fn broken_decorated_declaration_reports_one_error() {
+        let f = parse_text("@description('d')\nparam p string = {\n a:\n}\nparam q int\n");
+        assert_eq!(decl_names(&f), vec!["q"]);
+        assert_eq!(f.errors.len(), 1);
+        assert_eq!(f.errors[0].line, 3);
+    }
+
+    #[test]
+    fn broken_multi_line_decorated_body_is_skipped_whole() {
+        let f = parse_text("@description('d')\nvar x = {\n a:\n b: 1\n}\nparam p string\n");
+        assert_eq!(decl_names(&f), vec!["p"]);
+        assert_eq!(f.errors.len(), 1);
+    }
+
+    #[test]
+    fn multi_line_decorator_arguments_parse_clean() {
+        let f = parse_text("@metadata({\n a: 1\n})\nparam p string\n");
+        assert_eq!(decl_names(&f), vec!["p"]);
+        assert!(f.errors.is_empty());
+    }
+
+    #[test]
+    fn error_inside_decorator_arguments_keeps_later_declarations() {
+        let f = parse_text("@description('a' 'b')\nparam q int\n");
+        assert_eq!(decl_names(&f), vec!["q"]);
+        assert_eq!(f.errors.len(), 1);
+    }
+
+    #[test]
     fn lambda_and_for_variables_are_marked_local_refs() {
         let f = parse_text("var xs = [for x in items: x]\nvar f = (a) => a + outer\n");
         let refs = |i: usize| {

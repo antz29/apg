@@ -112,6 +112,7 @@ pub fn parse(src: &Decoded) -> File {
         refs: Vec::new(),
         binders: Vec::new(),
         nl_free: Vec::new(),
+        decl_at: 0,
     };
     let mut errors: Vec<ParseError> = lx
         .errors
@@ -124,7 +125,8 @@ pub fn parse(src: &Decoded) -> File {
         if matches!(p.cur(), Tok::Eof) {
             break;
         }
-        let (refs, binders, nl, stmt) = (p.refs.len(), p.binders.len(), p.nl_free.len(), p.pos);
+        let (refs, binders, nl) = (p.refs.len(), p.binders.len(), p.nl_free.len());
+        p.decl_at = p.pos;
         match p.statement() {
             Ok(Some(decl)) => decls.push(decl),
             Ok(None) => {}
@@ -133,7 +135,7 @@ pub fn parse(src: &Decoded) -> File {
                 p.binders.truncate(binders);
                 p.nl_free.truncate(nl);
                 errors.push(e);
-                p.recover(stmt);
+                p.recover(p.decl_at);
             }
         }
     }
@@ -391,6 +393,8 @@ struct Parser<'a> {
     binders: Vec<String>,
     /// One entry per open bracket: `true` makes newlines insignificant (inside parentheses).
     nl_free: Vec<bool>,
+    /// First token after the current statement's decorators: where recovery resumes.
+    decl_at: usize,
 }
 
 impl Parser<'_> {
@@ -620,6 +624,7 @@ impl Parser<'_> {
             refs: std::mem::take(&mut self.refs),
             binders: self.binders.clone(),
             nl_free: vec![true],
+            decl_at: 0,
         };
         let result = match sub.expr() {
             Ok(()) if matches!(sub.cur(), Tok::Eof) => Ok(()),
@@ -636,6 +641,7 @@ impl Parser<'_> {
         let mark = self.refs.len();
         let start = self.cur_start();
         self.decorators()?;
+        self.decl_at = self.pos;
         let Some(word) = self.ident_text() else {
             return self.err("expected a declaration");
         };
