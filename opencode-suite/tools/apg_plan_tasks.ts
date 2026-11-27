@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, csvToRows, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, csvToRows, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
 /** The per-kind operation rel tables (SCHEMA.md task tier) with the kind and
  *  verb each one carries, in the projection's table order. */
@@ -61,7 +61,7 @@ function operationQuery(): string {
   ].join(" UNION ALL ")
 }
 
-type ApgPlanTasksInput = { directory?: string; project: string; status?: string; limit?: string }
+type ApgPlanTasksInput = { project: string; status?: string; limit?: string }
 
 export default Plugin.define({
   id: "apg_plan_tasks",
@@ -75,11 +75,10 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
-            project: { type: "string", description: "Plan project (required)." },
             status: {
               type: "string",
               description: 'Only tasks in this state: "pending" or "done".',
@@ -98,6 +97,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const project = input.project
           if (!project) return { content: "Error: project is required" }
           const limit = input.limit ? Math.max(1, Math.min(1000, Number(input.limit))) : 500
@@ -106,9 +107,9 @@ export default Plugin.define({
           let edges: string[][]
           try {
             tasks = csvToRows(
-              await runCypher(merged, tasksQuery(project, input.status, limit + 1), input.directory),
+              await runCypher(merged, tasksQuery(project, input.status, limit + 1), undefined),
             )
-            edges = csvToRows(await runCypher(merged, operationQuery(), input.directory))
+            edges = csvToRows(await runCypher(merged, operationQuery(), undefined))
           } catch (e) {
             // Surface the verbatim `apg query failed …` message instead of an
             // opaque crash (or a benign "no tasks") when the guard rejects the result.

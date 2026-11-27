@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgPlanCompleteInput = { directory?: string; project: string; phaseNumber: string }
+type ApgPlanCompleteInput = { project: string; phaseNumber: string }
 
 export default Plugin.define({
   id: "apg_plan_complete",
@@ -15,11 +15,10 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
-            project: { type: "string", description: "Plan project (required)." },
             phaseNumber: { type: "string", description: "The phase number to complete (required)." },
           },
           required: ["project", "phaseNumber"],
@@ -34,9 +33,11 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { project, phaseNumber } = input
           if (!project || !phaseNumber) return { content: "Error: project and phaseNumber are required" }
-          return { content: await runCli(merged, ["plan", "complete", project, phaseNumber], input.directory) }
+          return { content: await runInProject(merged, ["plan", "complete", project, phaseNumber]) }
         },
       })
     })

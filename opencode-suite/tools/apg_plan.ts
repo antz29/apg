@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { runCypher, lit, csvToRows, type ToolContext } from "../lib/apg.ts"
+import { runCypher, lit, csvToRows, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
 /** The per-kind operation rel tables (SCHEMA.md task tier) with the kind and
  *  verb each one carries, in the projection's table order. */
@@ -26,7 +26,7 @@ function taskEdgeQuery(): string {
   ].join(" UNION ALL ")
 }
 
-type ApgPlanInput = { directory?: string; project?: string }
+type ApgPlanInput = { project: string }
 
 export default Plugin.define({
   id: "apg_plan",
@@ -40,16 +40,12 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
-              type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
-            },
             project: {
               type: "string",
-              description: "Restrict to one plan project (default: all).",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
           },
-          required: [],
+          required: ["project"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -61,18 +57,20 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
-          const where = input.project ? ` WHERE p.fqn = ${lit(`${input.project}/plan`)}` : ""
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
+          const where = ` WHERE p.fqn = ${lit(`${input.project}/plan`)}`
           let plans: string[][]
           let phases: string[][]
           let sat: string[][]
           let tasks: string[][]
           let edges: string[][]
           try {
-            plans = csvToRows(await runCypher(merged, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`, input.directory))
-            phases = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable", input.directory))
-            sat = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn", input.directory))
-            tasks = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status", input.directory))
-            edges = csvToRows(await runCypher(merged, taskEdgeQuery(), input.directory))
+            plans = csvToRows(await runCypher(merged, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`, undefined))
+            phases = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable", undefined))
+            sat = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn", undefined))
+            tasks = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status", undefined))
+            edges = csvToRows(await runCypher(merged, taskEdgeQuery(), undefined))
           } catch (e) {
             // Surface the verbatim `apg query failed …` message instead of an
             // opaque crash when the guard rejects a result.

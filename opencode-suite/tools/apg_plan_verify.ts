@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgPlanVerifyInput = { directory?: string; project: string }
+type ApgPlanVerifyInput = { project: string }
 
 export default Plugin.define({
   id: "apg_plan_verify",
@@ -15,11 +15,10 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
-            project: { type: "string", description: "Plan project (required)." },
           },
           required: ["project"],
           additionalProperties: false,
@@ -33,9 +32,11 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { project } = input
           if (!project) return { content: "Error: project is required" }
-          return { content: await runCli(merged, ["plan", "verify", project], input.directory) }
+          return { content: await runInProject(merged, ["plan", "verify", project]) }
         },
       })
     })

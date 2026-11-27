@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
 const OPERATION_KINDS = ["module", "file", "struct", "function"]
 
@@ -37,7 +37,6 @@ function appendOperations(
 }
 
 type ApgPlanAddInput = {
-  directory?: string
   action?: string
   project: string
   kind?: string
@@ -72,12 +71,11 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
-              type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
-            },
             action: { type: "string", description: '"add" (default), "update", or "rm".' },
-            project: { type: "string", description: "Plan project (required)." },
+            project: {
+              type: "string",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
+            },
             kind: {
               type: "string",
               description: 'Optional sub-entity: "phase", "task", or "planned". Omit it for the plan record itself.',
@@ -168,6 +166,8 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { project, kind } = input
           if (!project) return { content: "Error: project is required" }
           const action = input.action ?? "add"
@@ -193,7 +193,7 @@ export default Plugin.define({
               cli.push("planned", input.fqn)
             }
             if (input.force) cli.push("--force")
-            return { content: await runCli(merged, cli, input.directory) }
+            return { content: await runInProject(merged, cli) }
           }
 
           if (action === "update") {
@@ -223,7 +223,7 @@ export default Plugin.define({
               if (input.title) cli.push("--title", input.title)
               if (input.strategy) cli.push("--strategy", input.strategy)
             }
-            return { content: await runCli(merged, cli, input.directory) }
+            return { content: await runInProject(merged, cli) }
           }
 
           // action === "add"
@@ -254,7 +254,7 @@ export default Plugin.define({
             if (input.title) cli.push("--title", input.title)
             if (input.strategy) cli.push("--strategy", input.strategy)
           }
-          return { content: await runCli(merged, cli, input.directory) }
+          return { content: await runInProject(merged, cli) }
         },
       })
     })

@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgPlanNoteInput = { directory?: string; project: string; task: string; body: string }
+type ApgPlanNoteInput = { project: string; task: string; body: string }
 
 export default Plugin.define({
   id: "apg_plan_note",
@@ -15,11 +15,10 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
-            project: { type: "string", description: "Plan project (required)." },
             task: {
               type: "string",
               description:
@@ -39,10 +38,12 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { project, task, body } = input
           if (!project || !task || !body) return { content: "Error: project, task, and body are required" }
           const fqn = task.includes("/") ? task : `${project}/${task.replace(/^plan\./, "plan.")}`
-          return { content: await runCli(merged, ["plan", "note", project, fqn, "--body", body], input.directory) }
+          return { content: await runInProject(merged, ["plan", "note", project, fqn, "--body", body]) }
         },
       })
     })
