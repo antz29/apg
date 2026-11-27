@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgReviewAddInput = { directory?: string; target: string; body: string; project?: string }
+type ApgReviewAddInput = { project: string; target: string; body: string }
 
 export default Plugin.define({
   id: "apg_review_add",
@@ -15,21 +15,17 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             target: {
               type: "string",
               description: "FQN of the node being reviewed — a layer node (`requirements.requirement.x`), a plan/phase/task FQN, or a code FQN (required).",
             },
             body: { type: "string", description: "The review comment / issue (required)." },
-            project: {
-              type: "string",
-              description: "Required when the target is a code FQN or a durable layer FQN (routes the feedback into the branch's .trans mirror).",
-            },
           },
-          required: ["target", "body"],
+          required: ["project", "target", "body"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -41,11 +37,13 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { target, body } = input
           if (!target || !body) return { content: "Error: target and body are required" }
           const cli = ["review", "add", target, "--body", body]
           if (input.project) cli.push("--project", input.project)
-          return { content: await runCli(merged, cli, input.directory) }
+          return { content: await runInProject(merged, cli) }
         },
       })
     })

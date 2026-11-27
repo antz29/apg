@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgReviewActionInput = { directory?: string; feedback: string; disposition: string }
+type ApgReviewActionInput = { project: string; feedback: string; disposition: string }
 
 export default Plugin.define({
   id: "apg_review_action",
@@ -15,9 +15,9 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             feedback: {
               type: "string",
@@ -28,7 +28,7 @@ export default Plugin.define({
               description: 'How it was handled: "fix" or "wont-fix" (required).',
             },
           },
-          required: ["feedback", "disposition"],
+          required: ["project", "feedback", "disposition"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -40,13 +40,15 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { feedback, disposition } = input
           if (!feedback || !disposition) return { content: "Error: feedback and disposition are required" }
           if (disposition !== "fix" && disposition !== "wont-fix") {
             return { content: 'Error: disposition must be "fix" or "wont-fix"' }
           }
           return {
-            content: await runCli(merged, ["review", "action", feedback, `--${disposition}`], input.directory),
+            content: await runInProject(merged, ["review", "action", feedback, `--${disposition}`]),
           }
         },
       })

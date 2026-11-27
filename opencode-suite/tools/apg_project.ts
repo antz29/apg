@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { runCli, type ToolContext } from "../lib/apg.ts"
+import { mainCheckoutRoot, resolveProjectWorktree, runCli, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgProjectInput = { directory?: string; action: string; name: string }
+type ApgProjectInput = { project: string; action: "start" | "verify" | "merge" | "claim" }
 
 export default Plugin.define({
   id: "apg_project",
@@ -11,18 +11,17 @@ export default Plugin.define({
         name: "apg_project",
         options: { codemode: false },
         description:
-          "Project lifecycle. `start <name>` — run from the MAIN checkout: creates the project worktree at <main>/apg/.worktrees/<name>, a branch off the repo's default branch, and seeds the branch DB by copying the main checkout's current scan (run `apg scan` on main first — start refuses a stale or missing scan); the binary prints the worktree path and sessions then operate with cwd INSIDE that worktree (walk-up discovery finds the worktree's own apg/). `verify <name>` — the pre-merge coherence gate (`apg plan verify`): every planned node realized, all feedback resolved, derived solution coverage holds; read-only. `merge <name>` — run from the MAIN checkout: verify gate → merge the project branch → rebuild main's graph unguarded. Main is never a mutation place.",
+          "Project lifecycle. `start <project>` — run from the MAIN checkout: creates the project worktree at <main>/apg/.worktrees/<project>, a branch off the repo's default branch, and seeds the branch DB by copying the main checkout's current scan (run `apg scan` on main first — start refuses a stale or missing scan); the binary prints the worktree path and sessions then operate in that worktree. `verify <project>` — the pre-merge coherence gate (`apg plan verify`): every planned node realized, all feedback resolved, derived solution coverage holds; read-only. `merge <project>` — run from the MAIN checkout: verify gate → merge the project branch → rebuild main's graph unguarded. `claim <project>` — take ownership of an ownerless registered project (e.g. one recorded by `apg project reconstruct`): replaces the single owner with the calling session, reports the previous owner, and refuses `main` and an unregistered name. Main is never a mutation place.",
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory (a worktree path to operate on). Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
-            action: { type: "string", description: '"start", "verify", or "merge" (required).' },
-            name: { type: "string", description: "Project name (== branch name == worktree dir) (required)." },
+            action: { type: "string", description: '"start", "verify", "merge", or "claim" (required).' },
           },
-          required: ["action", "name"],
+          required: ["project", "action"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -34,15 +33,29 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
-          const { action, name } = input
-          if (!action || !name) return { content: "Error: action and name are required" }
+          const { action, project } = input
+          if (!action || !project) return { content: "Error: action and project are required" }
+          // verify/claim act on the project's own row: resolve it to its worktree
+          // and run there with the caller's project environment set.
+          if (action === "verify" || action === "claim") {
+            merged.projectName = project
+            merged.worktree = await resolveProjectWorktree(merged, project)
+            const cli = action === "verify" ? ["plan", "verify", project] : ["project", "claim", project]
+            return { content: await runInProject(merged, cli) }
+          }
+          // start/merge are main-checkout operations and need no registry row
+          // (start creates it): run from the main root, never the caller's cwd.
           if (action === "start" || action === "merge") {
-            return { content: await runCli(merged, ["project", action, name], input.directory) }
+            const main = await mainCheckoutRoot(merged)
+            if (!main) {
+              return {
+                content:
+                  "Error: no main checkout root resolved from the caller's context. Run `apg init` in the main checkout, then `apg project start <project>` from there.",
+              }
+            }
+            return { content: await runCli(merged, ["project", action, project], main.root) }
           }
-          if (action === "verify") {
-            return { content: await runCli(merged, ["plan", "verify", name], input.directory) }
-          }
-          return { content: 'Error: action must be "start", "verify", or "merge"' }
+          return { content: 'Error: action must be "start", "verify", "merge", or "claim"' }
         },
       })
     })

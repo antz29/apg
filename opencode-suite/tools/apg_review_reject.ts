@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
-import { PROJECT_WORKTREE_DIRECTORY_DESCRIPTION, runCli, type ToolContext } from "../lib/apg.ts"
+import { resolveProjectWorktree, runInProject, type ToolContext } from "../lib/apg.ts"
 
-type ApgReviewRejectInput = { directory?: string; feedback: string }
+type ApgReviewRejectInput = { project: string; feedback: string }
 
 export default Plugin.define({
   id: "apg_review_reject",
@@ -15,16 +15,16 @@ export default Plugin.define({
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree.",
             },
             feedback: {
               type: "string",
               description: "Feedback FQN, e.g. <project>/feedback-1 (required).",
             },
           },
-          required: ["feedback"],
+          required: ["project", "feedback"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -36,9 +36,11 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
+          merged.projectName = input.project
+          merged.worktree = await resolveProjectWorktree(merged, input.project)
           const { feedback } = input
           if (!feedback) return { content: "Error: feedback is required" }
-          return { content: await runCli(merged, ["review", "reject", feedback], input.directory) }
+          return { content: await runInProject(merged, ["review", "reject", feedback]) }
         },
       })
     })
