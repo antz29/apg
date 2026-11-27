@@ -1079,7 +1079,8 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 /// The exact line shapes:
 ///
 /// - `Git state: N/A (not a git repo)` — no HEAD sha to compare;
-/// - `Git state: no scan yet (current <sha>@<clean>)` — no `db.lbug`;
+/// - `Git state: no scan yet (current <sha>@<clean>)` — [`db_presence`] reports
+///   the database absent ([`std::io::ErrorKind::NotFound`] alone);
 /// - `Git state: recorded <rec> vs current <cur> → FRESH` — byte-identical to
 ///   the pre-collect-all line, with no parenthetical;
 /// - `Git state: recorded <rec> vs current <cur> → STALE (differing: <labels>)`
@@ -1093,6 +1094,11 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 ///   unreadable (locked or busy) through the bounded retry. A contended read
 ///   never prints `STALE` and never prints an empty or misleading differing
 ///   list; the recorded state is `-@-` because nothing about the DB is known.
+/// - `Git state: recorded -@- vs current <cur> → CONTENDED (database `<path>`
+///   unreadable: <cause>)` — the [`db_presence`] metadata probe itself failed
+///   with something other than `NotFound` (permission, symlink loop, I/O). The
+///   probe never retries, so the line names only the path and the underlying
+///   cause, never a wait/budget it did not spend.
 ///
 /// The verdict is the SAME content-identity rule [`is_fresh_with_state`] uses —
 /// it is [`freshness_differences_with`] with the same `requested` selection — so
@@ -1107,13 +1113,21 @@ pub fn staleness_line(apg_root: &Path, current: &GitState, requested: Option<&[S
     let Some(cur_sha) = current.sha.as_deref() else {
         return "Git state: N/A (not a git repo)".to_string();
     };
-    if !db_path(apg_root).exists() {
-        return format!(
-            "Git state: no scan yet (current {})",
-            state_str(Some(cur_sha), current.clean)
-        );
-    }
     let cur = state_str(Some(cur_sha), current.clean);
+    match db_presence(apg_root) {
+        Ok(false) => return format!("Git state: no scan yet (current {cur})"),
+        Ok(true) => {}
+        Err(failure) => {
+            // `db_presence` never retries, so its `Display`'s "waited … for the
+            // contention to clear" would misstate the probe; render the path and
+            // cause directly instead.
+            return format!(
+                "Git state: recorded -@- vs current {cur} → CONTENDED (database `{}` unreadable: {:#})",
+                failure.database.display(),
+                failure.source
+            );
+        }
+    }
     let rec = |recorded: Option<&RecordedScan>| match recorded {
         Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
