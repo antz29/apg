@@ -206,6 +206,18 @@ fn plan_records(with_feedback: bool) -> Vec<Record> {
     r
 }
 
+/// A minimal renderable plan store for `project`: one `Plan` record carrying
+/// `title`, written with the plain JSONL primitive (no re-ingest, no database).
+/// The rendered first line is `# Plan — <title>`, so a binding test can tell
+/// which checkout's store a bound read actually touched.
+fn plan_with_title(project: &str, title: &str) -> Vec<Record> {
+    vec![Record::Plan {
+        fqn: format!("{project}/plan"),
+        title: title.to_string(),
+        strategy: String::new(),
+    }]
+}
+
 // ------------------------------------------------------------------
 // phase-5 task-1 (e2e): bootstrap dogfood — the apg-projects change-set
 // re-materializes in the layers model through the REAL project flow
@@ -5403,6 +5415,264 @@ mod e2e {
             "reconstruct must drop a row no worktree backs"
         );
         drop(reg);
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // project-binding (e2e): with `APG_PROJECT` present a read binds to the
+    // registered project's worktree. `apg plan render <project> --out -` is the
+    // driver — it calls `require_project` before touching any store and needs
+    // no `db.lbug`, so every refusal is proven without a database.
+    // ------------------------------------------------------------------
+
+    /// A valid row resolves the bound read to its own worktree: with
+    /// `APG_PROJECT=alpha` and the caller on the main checkout, `plan render`
+    /// reads the registered worktree's plan store (its title), never main's.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/process); run via cargo test-e2e"]
+    fn project_binding_valid_row_resolves_to_its_worktree() {
+        let repo = Repo::new("bind-valid");
+        let wt = repo.start_project("alpha");
+
+        // Distinct titles prove which store the bound read touched.
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.apg_root(), "alpha"),
+            &plan_with_title("alpha", "Main alpha plan"),
+        )
+        .unwrap();
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.project_apg_root("alpha"), "alpha"),
+            &plan_with_title("alpha", "Worktree alpha plan"),
+        )
+        .unwrap();
+
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            row.owner = Some("session-owner".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        let out = testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "alpha")
+            .env("APG_CALLER_SESSION", "session-owner")
+            .output();
+        assert!(
+            out.status.success(),
+            "a valid bound read must succeed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("# Plan — Worktree alpha plan"),
+            "the bound read must render the registered worktree's store: {stdout}"
+        );
+        assert!(
+            !stdout.contains("Main alpha plan"),
+            "the bound read must never render main's store: {stdout}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A stale row is refused before any store is read: a wrong worktree path
+    /// and a wrong branch each refuse naming the project, the worktree and the
+    /// branch (the row's, and for the branch case the actual checkout).
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/process); run via cargo test-e2e"]
+    fn project_binding_mismatched_worktree_and_branch_refuse() {
+        let repo = Repo::new("bind-mismatch");
+        let wt = repo.start_project("alpha");
+        let wt_canon = wt.canonicalize().unwrap();
+        let reg_path = registry_path_of(&repo);
+        let render = || {
+            testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+                .cwd(&repo.root)
+                .env("APG_PROJECT", "alpha")
+                .output()
+        };
+
+        // (a) The row's worktree is not the live linked worktree of that name.
+        let bogus_wt = repo.root.join("not-a-worktree");
+        {
+            let reg = registry::Registry::open(&reg_path).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", &bogus_wt);
+            row.branch = Some("alpha".to_string());
+            row.owner = Some("session-owner".to_string());
+            reg.put(&row).unwrap();
+        }
+        let out = render();
+        assert!(!out.status.success(), "a mismatched worktree must refuse");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("alpha"), "{stderr}");
+        assert!(
+            stderr.contains(&bogus_wt.display().to_string()),
+            "the refusal must name the row's worktree: {stderr}"
+        );
+        assert!(
+            stderr.contains("branch `alpha`"),
+            "the refusal must name the row's branch: {stderr}"
+        );
+
+        // (b) The row's branch differs from the linked worktree's checkout.
+        {
+            let reg = registry::Registry::open(&reg_path).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", &wt_canon);
+            row.branch = Some("wrong-branch".to_string());
+            row.owner = Some("session-owner".to_string());
+            reg.put(&row).unwrap();
+        }
+        let out = render();
+        assert!(!out.status.success(), "a mismatched branch must refuse");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("alpha"), "{stderr}");
+        assert!(
+            stderr.contains(&wt_canon.display().to_string()),
+            "the refusal must name the worktree: {stderr}"
+        );
+        assert!(
+            stderr.contains("wrong-branch"),
+            "the refusal must name the row's recorded branch: {stderr}"
+        );
+        assert!(
+            stderr.contains("checked out"),
+            "the refusal must name the actual branch mismatch: {stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// With the registry file lost a bound read refuses, naming the registry
+    /// path, and prints nothing from the main checkout's store — there is no
+    /// fallback.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/registry/process); run via cargo test-e2e"]
+    fn project_binding_lost_registry_refuses_with_no_fallback_to_main() {
+        let repo = Repo::new("bind-lost-registry");
+        // Main holds a renderable plan; a fallback would print it.
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.apg_root(), "main"),
+            &plan_with_title("main", "Main fallback plan"),
+        )
+        .unwrap();
+        let reg_path = registry_path_of(&repo);
+        {
+            let reg = registry::Registry::open(&reg_path).unwrap();
+            reg.put(&registry::RegistryEntry::new(
+                "main",
+                repo.root.canonicalize().unwrap(),
+            ))
+            .unwrap();
+        }
+        std::fs::remove_file(&reg_path).unwrap();
+        assert!(!reg_path.exists(), "the registry file must be gone");
+
+        let out = testutil::ApgCommand::new(&["plan", "render", "main", "--out", "-"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "main")
+            .output();
+        assert!(
+            !out.status.success(),
+            "a lost registry must refuse a bound read"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(&reg_path.display().to_string()),
+            "the refusal must name the registry path: {stderr}"
+        );
+        assert!(stderr.contains("does not exist"), "{stderr}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.trim().is_empty(),
+            "a refused bound read must print nothing from main's store: {stdout}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A row owned by another session refuses a caller whose session differs
+    /// and whose ancestor chain is empty, naming the project and the owner.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/process); run via cargo test-e2e"]
+    fn project_binding_unauthorised_session_refuses() {
+        let repo = Repo::new("bind-unauthorised");
+        let wt = repo.start_project("alpha");
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("alpha", wt.canonicalize().unwrap());
+            row.branch = Some("alpha".to_string());
+            row.owner = Some("other-session".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        let out = testutil::ApgCommand::new(&["plan", "render", "alpha", "--out", "-"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "alpha")
+            .env("APG_CALLER_SESSION", "caller-session")
+            .output();
+        assert!(
+            !out.status.success(),
+            "a non-owning session must be refused"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("alpha"), "{stderr}");
+        assert!(
+            stderr.contains("other-session"),
+            "the refusal must name the owner: {stderr}"
+        );
+        assert!(
+            stderr.contains("apg project claim alpha"),
+            "the refusal must carry the claim fix line: {stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The built-in `main` row (ownerless) stays readable by every session —
+    /// including from inside a project worktree — so `APG_PROJECT=main` reads
+    /// the main checkout's store from any caller identity.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/process); run via cargo test-e2e"]
+    fn project_binding_main_row_readable_from_every_session_and_worktree() {
+        let repo = Repo::new("bind-main-readable");
+        let wt = repo.start_project("alpha");
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&repo.apg_root(), "main"),
+            &plan_with_title("main", "Main home plan"),
+        )
+        .unwrap();
+        {
+            let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+            let mut row = registry::RegistryEntry::new("main", repo.root.canonicalize().unwrap());
+            row.branch = Some("main".to_string());
+            reg.put(&row).unwrap();
+        }
+
+        // Run inside the project worktree (its own `apg/.trans` marker makes
+        // walk-up resolve the worktree layout) under two session identities and
+        // with no session at all.
+        for session in [Some("session-a"), Some("session-b"), None] {
+            let mut cmd = testutil::ApgCommand::new(&["plan", "render", "main", "--out", "-"])
+                .cwd(&wt)
+                .env("APG_PROJECT", "main");
+            if let Some(s) = session {
+                cmd = cmd.env("APG_CALLER_SESSION", s);
+            }
+            let out = cmd.output();
+            assert!(
+                out.status.success(),
+                "main must stay readable for session {session:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                stdout.contains("# Plan — Main home plan"),
+                "main's store must render from inside the worktree for {session:?}: {stdout}"
+            );
+        }
+
         testutil::remove(&repo);
     }
 }
