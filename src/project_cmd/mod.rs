@@ -46,6 +46,10 @@
 //!   worktree under its worktree name, each carrying its branch, no owner and a
 //!   fresh creation time. Replaces stale rows in one write.
 //!
+//! - `apg project claim <name>` — replace the registered project's single owner
+//!   with the calling session (`APG_CALLER_SESSION`), reporting the previous
+//!   owner. The built-in `main` row and an unregistered name are refused.
+//!
 //! The cohesive groups live in submodules — the start path ([`start`]), the
 //! merge path ([`merge`]), the abandon path ([`delete`]), and the start-time
 //! toolchain-cache seeder ([`cache_copy`]) — all re-exported here so
@@ -77,10 +81,10 @@ pub(crate) use delete::project_delete;
 pub(crate) use merge::project_merge;
 pub(crate) use start::project_start;
 
-/// `apg project <start|merge|delete|resolve|reconstruct> …`.
+/// `apg project <start|merge|delete|resolve|reconstruct|claim> …`.
 pub fn cmd_project(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg project <start|merge|delete|resolve|reconstruct> …");
+        anyhow::bail!("usage: apg project <start|merge|delete|resolve|reconstruct|claim> …");
     };
     match sub {
         "start" => project_start(&args[1..]),
@@ -88,6 +92,7 @@ pub fn cmd_project(args: &[String]) -> anyhow::Result<()> {
         "delete" => project_delete(&args[1..]),
         "resolve" => project_resolve(&args[1..]),
         "reconstruct" => project_reconstruct(&args[1..]),
+        "claim" => project_claim(&args[1..]),
         other => anyhow::bail!("unknown apg project subcommand: {other}"),
     }
 }
@@ -217,6 +222,60 @@ pub(crate) fn project_reconstruct(args: &[String]) -> anyhow::Result<()> {
         "Reconstructed {} project registry row(s) at {}",
         rows.len(),
         registry_path.display()
+    );
+    Ok(())
+}
+
+/// `apg project claim <name>` — take ownership of a registered project: the
+/// row's single owner becomes the calling session (`APG_CALLER_SESSION`) and
+/// the previous owner is reported. Reads and rewrites the **main** checkout's
+/// registry, so it works from the main checkout and from inside any project
+/// worktree. The built-in `main` row is never claimable, and an unregistered
+/// name is refused rather than created.
+pub(crate) fn project_claim(args: &[String]) -> anyhow::Result<()> {
+    let Some(name) = args.first() else {
+        anyhow::bail!("usage: apg project claim <name>");
+    };
+    let apg_root = require_apg_root()?;
+    let identity = git::repo_identity(&apg_root)?;
+    let registry = crate::registry::require_registry(&identity.main_root)?;
+    let Some(mut entry) = registry.get(name)? else {
+        let mut names: Vec<String> = registry
+            .entries()?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        let registered = if names.is_empty() {
+            "<none>".to_string()
+        } else {
+            names.join(", ")
+        };
+        anyhow::bail!(
+            "refused: project `{name}` is not registered in the project registry `{reg}` (registered projects: {registered}). Fix: start it with `apg project start {name}`, or rebuild the registry from the worktree list with `apg project reconstruct`.",
+            reg = registry.path().display()
+        );
+    };
+    if name == "main" {
+        anyhow::bail!(
+            "refused: project `main` is the built-in main-checkout row and is not claimable."
+        );
+    }
+    let Some(claimant) = std::env::var("APG_CALLER_SESSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        anyhow::bail!(
+            "refused: `apg project claim {name}` needs a session identity, but `APG_CALLER_SESSION` is unset or empty. Fix: claim the project from a session."
+        );
+    };
+    let previous = entry.owner.take();
+    entry.owner = Some(claimant.clone());
+    registry.put(&entry)?;
+    println!(
+        "Project `{name}` claimed by session `{claimant}` (previous owner: {}).",
+        previous.as_deref().unwrap_or("none")
     );
     Ok(())
 }
