@@ -5937,12 +5937,13 @@ mod e2e {
     ///
     /// This is a STRUCTURAL check over the embedded suite consts (`APG_LIB` /
     /// `SUITE_TOOLS`), not full-file equality: it pins that the guard sits on
-    /// the shared parse boundary (so a caller cannot forget it), that the
-    /// producer (`runCypher`) and the discriminant (`isQueryError`) share the
-    /// same prefix constants (so the failure signals cannot drift apart), and
-    /// that the three observed crash sites route their parse through the guarded
-    /// boundary and return the verbatim message. It fails on the pre-fix suite
-    /// (where `csvToRows` split `out` directly and the guard was dead code).
+    /// the shared parse boundary (so a caller cannot forget it), that each of
+    /// the producer (`runCypher`) and the discriminant (`isQueryError`)
+    /// references the exported refusal signals it actually produces or tests
+    /// (so the failure signals cannot drift apart), and that the three observed
+    /// crash sites route their parse through the guarded boundary and return
+    /// the verbatim message. It fails on the pre-fix suite (where `csvToRows`
+    /// split `out` directly and the guard was dead code).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn suite_tools_query_error_guard_is_structural() {
@@ -6013,9 +6014,13 @@ mod e2e {
 
         // 2. An error result cannot be mistaken for data: `runCypher` (the
         //    producer) and `isQueryError` (the discriminant) both build on the
-        //    exported constants, so the prefixes cannot drift out of sync; and
+        //    exported constants, so the signals cannot drift out of sync; and
         //    `runCypher` RETURNS the error string on the non-zero exit path —
-        //    it never throws and never yields data.
+        //    it never throws and never yields data. The reference set is
+        //    per-function: a worktree-less `runCypher` returns the shared
+        //    `MISSING_WORKTREE_ERROR` refusal (the no-database signal is the
+        //    binary's own refusal, surfaced through `QUERY_FAILED_PREFIX`),
+        //    while `isQueryError` tests all three exported signals.
         assert!(
             APG_LIB.contains("export const QUERY_FAILED_PREFIX")
                 && APG_LIB.contains("export const NO_DB_ERROR"),
@@ -6023,8 +6028,23 @@ mod e2e {
         );
         let run_body = function_body(APG_LIB, "export async function runCypher");
         let is_err_body = function_body(APG_LIB, "export function isQueryError");
-        for (who, body) in [("runCypher", run_body), ("isQueryError", is_err_body)] {
-            for const_name in ["QUERY_FAILED_PREFIX", "NO_DB_ERROR"] {
+        for (who, body, consts) in [
+            (
+                "runCypher",
+                run_body,
+                &["QUERY_FAILED_PREFIX", "MISSING_WORKTREE_ERROR"][..],
+            ),
+            (
+                "isQueryError",
+                is_err_body,
+                &[
+                    "QUERY_FAILED_PREFIX",
+                    "NO_DB_ERROR",
+                    "MISSING_WORKTREE_ERROR",
+                ][..],
+            ),
+        ] {
+            for const_name in consts {
                 assert!(
                     body.contains(const_name),
                     "{who} must reference the shared `{const_name}` discriminant: {body}"
