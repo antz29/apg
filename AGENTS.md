@@ -332,6 +332,10 @@ The project builds a single `apg` binary (package `apg`):
   invalid name, the default branch, a branch the main checkout has checked
   out, a missing project or mismatched worktree, and tracked uncommitted
   changes in the worktree),
+  `claim <name>` (transfer an ownerless — or taken-over — project row's
+  ownership to the calling session and print the previous owner, `none` when
+  absent; an ownerless project refuses every project-bound use until claimed;
+  refuses `main` and an unregistered name),
   `resolve <name>` (print exactly the registered worktree path for `<name>` and
   nothing else, suitable for shell capture; reads the main checkout's registry,
   so it works from the main checkout or inside any project worktree),
@@ -368,7 +372,7 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the project/spec/plan/review suite:
-`apg_project` (start/verify/merge), `apg_node` / `apg_edge` (durable
+`apg_project` (start/verify/merge/claim), `apg_node` / `apg_edge` (durable
 node-file add/update/rm mutations), `apg_session` (start a detached live
 session for the mandatory-session durable-mutation workflow), `apg_plan_add`
 (the plan add/update/rm
@@ -379,13 +383,27 @@ self-enforce the acting agent's granted path scope and the project/worktree
 boundary).
 Shared plumbing
 lives in `~/.config/opencode/lib/apg.ts`
-(root discovery, `apg query`/`apg project`/`apg node`/`apg edge`/`apg session`/`apg plan`/`apg review` subprocess,
+(project resolution, `apg query`/`apg project`/`apg node`/`apg edge`/`apg session`/`apg plan`/`apg review` subprocess,
 Cypher literal escaping). The suite's plugin dependency is `@opencode/plugin`
 (opencode 2.x), installed with `bun install` (the suite's lockfile is
 `bun.lock`); `apg init` writes the plugin's `package.json` naming that
-dependency and runs `bun install` if needed. All suite
-tools take an optional `codeType` (default: all code); exact-FQN tools hint
-when a lookup comes up empty (overloads carry `(params)` suffixes).
+dependency and runs `bun install` if needed.
+
+Every suite tool, read and mutation alike, requires a `project` argument — a
+**registered project name** — and has no `directory` or other path selector.
+The shared plumbing resolves the name through the binary's
+`apg project resolve <name>` and runs the real command with that worktree as its
+working directory (the filesystem tools resolve their paths against it),
+leaving the caller's cwd unchanged; an unregistered name is
+refused, naming the registry and the registered projects. `apg_project`'s
+`start` and `merge` are the one exception to that resolve step: both are
+main-checkout operations and run from the main root the caller's load location
+resolves. The curated lookup tools resolve a stored repo-relative identity
+(`File.fqn`, a symbol's `path`) to an absolute path under the resolved worktree
+at the tool boundary — the raw `apg_query` returns the stored form unchanged —
+and the lookup tools that filter by code type take an optional `codeType`
+(default: all code); exact-FQN tools hint when a lookup comes up empty
+(overloads carry `(params)` suffixes).
 
 The suite targets opencode **2.x** and installs at the opencode 2.x global
 config root `~/.config/opencode/`; `apg init` neither reads nor writes the V1
@@ -421,7 +439,11 @@ succeed — an absent row is a no-op, and a removal failure is only a warning, s
 a completed operation is never turned red. One worktree belongs to at most one
 name. The registry is an index, not the authority: the git worktree and branch,
 and the project's own `apg/` layout, remain what sessions operate on, and a
-stale row is repaired with `apg project reconstruct`.
+stale row is repaired with `apg project reconstruct`. The registry also
+authorises project-bound use: a project-bound call is authorised only for the
+row's owning session or a session in that session's parentID chain; the
+built-in `main` row is readable by every session, and an ownerless row refuses
+project-bound use until `apg project claim`.
 
 #### Sessions: caller-owned durable mutation
 
@@ -1270,14 +1292,14 @@ route).
     report to the coordinator** instead — the coordinator carries it into the
     final human-gate summary. Don't store it in the plan.
   - `apg_plan_done` is fine and is still how a task is marked done (call it with
-    `directory=` set to the worktree).
+    `project` and `task`, as every plan tool requires).
   - If a plan note already exists and spec writes are refused with that message —
     **stop and tell the coordinator**; don't work around it.
 - **Recovery** (coordinator/builder only). Plan files are transient and
   gitignored, so recovery changes no commit: delete every `"type":"note"` record
   and every `"type":"details"` record whose `from` contains `.note-` from
-  `apg/.trans/plans/<project>.jsonl` (back it up first), then `apg_scan` the
-  worktree.
+  `apg/.trans/plans/<project>.jsonl` (back it up first), then run `apg_scan` for
+  that project.
 - **Current state.** The graph has no plan notes right now — nor any spec
   `Note` at all: under `global.constraint.note-implementation-only` a note lives
   only in the implementation layer (attach-only). The failure condition
