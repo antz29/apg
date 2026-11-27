@@ -285,7 +285,8 @@ pub struct Prepared {
     /// reverse-dependency closure over the cached dep index ∪ overload peers
     /// ∪ every ps file when any ps file is targeted
     /// ([`crate::ps::widen_targets`]) ∪ every terraform file when any terraform
-    /// file is targeted ([`crate::terraform::widen_targets`]).
+    /// file is targeted ([`crate::terraform::widen_targets`]) ∪ every bicep file
+    /// when any bicep file is targeted ([`crate::bicep::widen_targets`]).
     pub targets_rel: BTreeSet<String>,
     /// The changed files (checkout-relative).
     pub changed_rel: BTreeSet<String>,
@@ -524,6 +525,9 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     // The terraform stream is whole-module too: any targeted terraform file
     // re-targets every terraform file in the manifest, so none is reused.
     crate::terraform::widen_targets(&mut targets_rel, &manifest);
+    // The bicep stream is whole-template-set too: any targeted bicep file
+    // re-targets every bicep file in the manifest, so none is reused.
+    crate::bicep::widen_targets(&mut targets_rel, &manifest);
 
     // FULL-UNIVERSE SEAM (feedback-92): the incremental path derives the full
     // code-FQN universe from the PREVIOUS database. With a non-empty target set
