@@ -56,6 +56,29 @@ pub fn registry_path(main_root: &Path) -> PathBuf {
     main_root.join("apg").join(".trans").join(REGISTRY_FILE)
 }
 
+/// Opens the project registry of the main checkout at `main_root`, refusing a
+/// missing or unreadable store instead of creating one or falling back to any
+/// other checkout's rows. The caller supplies the main root, so this read path
+/// never consults the cwd.
+pub fn require_registry(main_root: &Path) -> Result<Registry> {
+    let path = registry_path(main_root);
+    let exists = path
+        .try_exists()
+        .with_context(|| format!("reading the project registry `{}`", path.display()))?;
+    if !exists {
+        bail!(
+            "the project registry `{}` does not exist; rebuild it with `apg project reconstruct`, or run `apg init` for a fresh layout",
+            path.display()
+        );
+    }
+    Registry::open(&path).with_context(|| {
+        format!(
+            "the project registry `{}` is unusable; rebuild it with `apg project reconstruct`, or run `apg init` for a fresh layout",
+            path.display()
+        )
+    })
+}
+
 /// Seconds since the unix epoch — the row's creation-time unit.
 fn now_unix() -> u64 {
     SystemTime::now()
