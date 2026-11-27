@@ -190,8 +190,16 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
             database,
             waited,
             budget,
+            cause,
             ..
         } => {
+            // A terminal first read never retried, so a wait/budget contention claim would misstate it.
+            if waited.is_zero() {
+                anyhow::bail!(
+                    "cannot verify `{project}`: the branch database at `{}` is unreadable: {cause}",
+                    database.display()
+                );
+            }
             anyhow::bail!(
                 "cannot verify `{project}`: the branch database at `{}` is unreadable — waited {waited:?} of a {budget:?} budget for the contention to clear; retry once the other process finishes (a stale-graph `apg scan` is not the fix)",
                 database.display()
