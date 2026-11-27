@@ -55,24 +55,17 @@ export interface ToolContext {
    *  `ctx.location.project`). */
   location?: { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
   /** The required registered project name a project-bound call names (the
-   *  binary's `APG_PROJECT`). Absent for the current directory-driven
-   *  behaviour. */
+   *  binary's `APG_PROJECT`), resolved through `resolveProjectWorktree`. */
   projectName?: string
   /** The resolved worktree path `resolveProjectWorktree` returned for
-   *  `projectName` — the working directory every project-bound spawn runs in.
-   *  Absent for the current directory-driven behaviour. */
+   *  `projectName` — the working directory every project-bound spawn runs in,
+   *  and the base stored repo-relative identities rebase against. */
   worktree?: string
   /** The caller's session-id ancestor chain, outermost→innermost, when the
    *  context carries one (the binary's `APG_CALLER_ANCESTORS`). The current
    *  opencode 2.x executor context does not, so the variable is omitted. */
   ancestors?: readonly string[]
 }
-
-/** The `directory` description every bookkeeping mutation tool gives its input:
- *  the mutations are legal only inside a project worktree, so there is no
- *  workspace-root fallback to name. */
-export const PROJECT_WORKTREE_DIRECTORY_DESCRIPTION =
-  "The project worktree the tool acts on (the worktree path printed by `apg project start`); there is no workspace-root default."
 
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
 export function apgBinary(): string {
@@ -114,31 +107,23 @@ export async function resolveProjectWorktree(context: ToolContext, projectName: 
 
 /** Walks up looking for the project's `apg/.trans/db.lbug`. In a project
  *  worktree this resolves to the worktree's OWN `apg/` (and its branch DB) —
- *  never the main checkout's — so the tools work unchanged with cwd inside the
- *  worktree.
+ *  never the main checkout's.
  *
  *  The walk-up START comes from the plugin instance's V2 load location
  *  (`context.location`, captured from `ctx.location` at `setup`):
  *  `location.directory`, then `location.project.directory`, then
  *  `location.project.canonical` when present, then `process.cwd()` — the only
- *  context source read.
- *
- *  `directory` (the tools' optional arg) is the caller's project directory and
- *  is AUTHORITATIVE: when given, the walk-up starts there and only there, so
- *  the returned project root is the caller's checkout — the base the curated
- *  tools rebase stored repo-relative identities onto
- *  (`requirements.requirement.absolute-paths-at-tool-boundary`) — never a
- *  project the session merely happens to have cwd in. The load-location/cwd
- *  dirs are fallbacks only when no `directory` is given. */
-export function findApgRoot(context: ToolContext, directory?: string): string | null {
-  const starts = directory
-    ? [directory]
-    : [
-        context.location?.directory,
-        context.location?.project?.directory,
-        context.location?.project?.canonical,
-        process.cwd(),
-      ]
+ *  context source read. There is no directory selector: a project-bound call
+ *  does not walk at all (`runCypher`/`runCli`/`startDetachedSession` run in the
+ *  resolved `context.worktree`), and this walk-up is the fallback for a caller
+ *  with no resolved project. */
+export function findApgRoot(context: ToolContext): string | null {
+  const starts = [
+    context.location?.directory,
+    context.location?.project?.directory,
+    context.location?.project?.canonical,
+    process.cwd(),
+  ]
   for (const s of starts) {
     if (!s) continue
     let dir = s
@@ -159,20 +144,18 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * The suite runs with cwd inside `<main>/apg/.worktrees/<project>`, but the
  * write boundary the fs tools enforce is anchored to the MAIN checkout — the
  * repo root the worktree shares its `.git` with — so a tool must resolve
- * `<main>` from whatever directory the caller passed, in ANY string form
- * (relative, trailing slash, through a symlink). `root` is that main checkout;
- * `project` is the linked worktree's name `<project>`, or `null` when the
- * caller is in the main checkout itself.
+ * `<main>` from the caller's resolved project worktree. `root` is that main
+ * checkout; `project` is the linked worktree's name `<project>`, or `null` when
+ * the caller is in the main checkout itself.
  *
- * The START directory comes from the plugin instance's V2 load location
- * (`context.location`, captured from `ctx.location` at `setup`):
- * `location.directory`, then `location.project.directory`, then
- * `location.project.canonical` when present, then `process.cwd()` — the only
- * context source read. A resolved project worktree (`context.worktree`, from
- * `resolveProjectWorktree`) is AUTHORITATIVE: when present it is the sole
- * start. Otherwise an explicit `directory` arg (the tools' optional project
- * dir) is AUTHORITATIVE: when given, the start is that path and only that path.
- * With neither, the location/cwd chain above is unchanged.
+ * The fs-scope frame is anchored on `context.worktree` ALONE: when a project
+ * was resolved (every fs tool does this before asserting), that worktree is the
+ * sole start, so the frame root is the main checkout it belongs to and never a
+ * directory the session merely has cwd in. With no resolved worktree the START
+ * comes from the plugin instance's V2 load location (`context.location`,
+ * captured from `ctx.location` at `setup`): `location.directory`, then
+ * `location.project.directory`, then `location.project.canonical` when present,
+ * then `process.cwd()` — the only context source read.
  *
  * Resolution is canonical-first and path-first: the caller's directory is made
  * absolute and symlink-resolved, then the documented
@@ -192,18 +175,15 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  */
 export async function mainCheckoutRoot(
   context: ToolContext,
-  directory?: string,
 ): Promise<{ root: string; project: string | null } | null> {
   const starts = context.worktree
     ? [context.worktree]
-    : directory
-      ? [directory]
-      : [
-          context.location?.directory,
-          context.location?.project?.directory,
-          context.location?.project?.canonical,
-          process.cwd(),
-        ]
+    : [
+        context.location?.directory,
+        context.location?.project?.directory,
+        context.location?.project?.canonical,
+        process.cwd(),
+      ]
   for (const s of starts) {
     if (!s) continue
     // Canonicalise so relative/trailing-slash/symlinked spellings of the same
@@ -571,19 +551,18 @@ function callerEnv(context: ToolContext): Record<string, string | undefined> {
  * with no `opts`, the stored form is returned verbatim, so raw `apg query` is
  * untouched. A curated tool opts in by naming the CSV columns that carry a
  * stored repo-relative identity; those cells are resolved to absolute paths
- * under the caller's project directory before the CSV is re-serialized. A
- * tool whose identity cell depends on the row's kind (e.g. `apg_find_symbol`,
- * where a File's identity is its fqn cell and a symbol's is its path cell)
- * passes a predicate `(row) => number[]` instead of a fixed column list. The
- * header row is never rebased.
+ * under the RESOLVED WORKTREE (`context.worktree`) before the CSV is
+ * re-serialized. A tool whose identity cell depends on the row's kind (e.g.
+ * `apg_find_symbol`, where a File's identity is its fqn cell and a symbol's is
+ * its path cell) passes a predicate `(row) => number[]` instead of a fixed
+ * column list. The header row is never rebased.
  */
 export async function runCypher(
   context: ToolContext,
   cypher: string,
-  directory?: string,
   opts?: { rebaseColumns?: number[] | ((row: string[]) => number[]) },
 ): Promise<string> {
-  const root = context.worktree ?? findApgRoot(context, directory)
+  const root = context.worktree ?? findApgRoot(context)
   if (!root) {
     return NO_DB_ERROR
   }
@@ -645,12 +624,17 @@ export function noteIfEmpty(out: string, note: string): string {
 
 /**
  * Runs an `apg` CLI subcommand (`apg node …` / `apg edge …` / `apg plan …` /
- * `apg review …` / `apg project …`) from the project root, returning its
- * stdout (or an error string prefixed with the subcommand). Authoring tools
- * are thin wrappers over this.
- */
-export async function runCli(context: ToolContext, args: string[], directory?: string): Promise<string> {
-  const root = findApgRoot(context, directory)
+ * `apg review …` / `apg project …`), returning its stdout (or an error string
+ * prefixed with the subcommand). Authoring tools are thin wrappers over this.
+ *
+ * `mainRoot` is the one main-checkout root override: `apg_project`'s `start`
+ * and `merge` are main-checkout operations with no project worktree to resolve,
+ * so they pass `mainCheckoutRoot`'s root. It is never a tool input or a project
+ * selector — every project-bound command runs through `runInProject` in the
+ * resolved worktree. With it omitted, the root is `context.worktree` and then
+ * the load-location walk-up. */
+export async function runCli(context: ToolContext, args: string[], mainRoot?: string): Promise<string> {
+  const root = mainRoot ?? context.worktree ?? findApgRoot(context)
   if (!root) {
     return NO_DB_ERROR
   }
@@ -990,20 +974,22 @@ async function defaultBranchRef(projectRoot: string): Promise<string | null> {
  *
  * Real I/O — `Bun.$` git subprocesses with cwd at the project root — so it is
  * covered by the opt-in suite e2e, never the side-effect-free unit tier. The
- * pure `scopeProjectRequirements` consumes its result (the returned names feed
- * its `branchAdded` argument). Returns an empty set when no project root is
- * found, when no default branch resolves (a detached/unborn main checkout with
- * no `origin/HEAD`), or when the resolved name has neither a local nor a
- * remote-tracking ref, so the caller falls back to the Satisfies-only scope.
- * Only the first of these mirrors the binary's `default_branch`-None empty-delta
+ * project root is the resolved worktree (`context.worktree`), so the delta is
+ * measured on the branch the worktree has checked out, with the load-location
+ * walk-up as the fallback for a caller with no resolved project. The pure
+ * `scopeProjectRequirements` consumes its result (the returned names feed its
+ * `branchAdded` argument). Returns an empty set when no project root is found,
+ * when no default branch resolves (a detached/unborn main checkout with no
+ * `origin/HEAD`), or when the resolved name has neither a local nor a remote
+ * tracking ref, so the caller falls back to the Satisfies-only scope. Only the
+ * first of these mirrors the binary's `default_branch`-None empty-delta
  * fallback; the unresolvable-ref case is an error there, and the suite stays
  * deliberately conservative (empty, not a throw).
  */
 export async function branchAddedRequirementNames(
   context: ToolContext,
-  directory?: string,
 ): Promise<Set<string>> {
-  const root = findApgRoot(context, directory)
+  const root = context.worktree ?? findApgRoot(context)
   if (!root) return new Set()
   const branch = await defaultBranchRef(root)
   if (!branch) return new Set()
@@ -1144,8 +1130,8 @@ export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean
  * the coordinator is spawned in that worktree with the caller's project
  * environment (`callerEnv`) and no `findApgRoot` walk that could reach another
  * checkout's database — exactly `runCypher`'s project binding. With no
- * `context.worktree`, the directory-driven walk-up and inherited environment
- * are unchanged.
+ * `context.worktree`, the load-location walk-up and inherited environment are
+ * the fallback for a caller with no resolved project.
  *
  * Returns a `DetachedSession` on success, or an error STRING on failure —
  * mirroring the lib's string-or-data subprocess contract (`runCli`): no DB
@@ -1157,10 +1143,9 @@ export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean
  */
 export async function startDetachedSession(
   context: ToolContext,
-  directory?: string,
   options?: StartSessionOptions,
 ): Promise<DetachedSession | string> {
-  const root = context.worktree ?? findApgRoot(context, directory)
+  const root = context.worktree ?? findApgRoot(context)
   if (!root) return NO_DB_ERROR
   const timeoutMs = options?.timeoutMs ?? 15000
   const pollMs = options?.pollMs ?? 50

@@ -107,9 +107,9 @@ export default Plugin.define({
           let edges: string[][]
           try {
             tasks = csvToRows(
-              await runCypher(merged, tasksQuery(project, input.status, limit + 1), undefined),
+              await runCypher(merged, tasksQuery(project, input.status, limit + 1)),
             )
-            edges = csvToRows(await runCypher(merged, operationQuery(), undefined))
+            edges = csvToRows(await runCypher(merged, operationQuery()))
           } catch (e) {
             // Surface the verbatim `apg query failed …` message instead of an
             // opaque crash (or a benign "no tasks") when the guard rejects the result.

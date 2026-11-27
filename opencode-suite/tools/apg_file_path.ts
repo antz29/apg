@@ -50,13 +50,13 @@ export default Plugin.define({
           const joined =
             `MATCH (m:Module)-[:Contains]->(f:File {fqn: ${lit(stored)}}) ` +
             `RETURN m.fqn as module, f.fqn, f.start_line, f.end_line, f.code_type`
-          const res = await runCypher(merged, joined, undefined, { rebaseColumns: [1] })
+          const res = await runCypher(merged, joined, { rebaseColumns: [1] })
           if (res.includes("\n")) return { content: res }
 
           const bare =
             `MATCH (f:File {fqn: ${lit(stored)}}) ` +
             `RETURN '' as module, f.fqn, f.start_line, f.end_line, f.code_type`
-          return { content: await runCypher(merged, bare, undefined, { rebaseColumns: [1] }) }
+          return { content: await runCypher(merged, bare, { rebaseColumns: [1] }) }
         },
       })
     })

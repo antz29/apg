@@ -52,7 +52,7 @@ export default Plugin.define({
           if (ctCond) cypher += ` WHERE ${ctCond}`
           cypher += ` RETURN f.fqn, f.path, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
           // Column 1 is the function's source-file `path` (stored repo-relative).
-          const out = await runCypher(merged, cypher, undefined, { rebaseColumns: [1] })
+          const out = await runCypher(merged, cypher, { rebaseColumns: [1] })
           return {
             content: noteIfEmpty(
               out,

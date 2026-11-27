@@ -66,11 +66,11 @@ export default Plugin.define({
           let tasks: string[][]
           let edges: string[][]
           try {
-            plans = csvToRows(await runCypher(merged, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`, undefined))
-            phases = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable", undefined))
-            sat = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn", undefined))
-            tasks = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status", undefined))
-            edges = csvToRows(await runCypher(merged, taskEdgeQuery(), undefined))
+            plans = csvToRows(await runCypher(merged, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`))
+            phases = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable"))
+            sat = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn"))
+            tasks = csvToRows(await runCypher(merged, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status"))
+            edges = csvToRows(await runCypher(merged, taskEdgeQuery()))
           } catch (e) {
             // Surface the verbatim `apg query failed …` message instead of an
             // opaque crash when the guard rejects a result.

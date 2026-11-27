@@ -51,7 +51,7 @@ export default Plugin.define({
 
           const [selfOut, nestedOut] = await Promise.all([
             // Column 1 is `s.path`, the stored repo-relative source-file identity.
-            runCypher(merged, self, undefined, { rebaseColumns: [1] }),
+            runCypher(merged, self, { rebaseColumns: [1] }),
             runCypher(merged, nested),
           ])
           const nestedBody = nestedOut.split("\n").slice(1).join("\n")

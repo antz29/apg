@@ -20,7 +20,9 @@ import path from "node:path"
 
 import {
   runCypher,
+  runInProject,
   resolveProjectPath,
+  resolveProjectWorktree,
   findSymbolRebaseColumns,
   branchAddedRequirementNames,
   scopeProjectRequirements,
@@ -32,6 +34,7 @@ import {
   startDetachedSession,
   sessionLiveAt,
   NO_DB_ERROR,
+  QUERY_FAILED_PREFIX,
   type DetachedSession,
   type ToolContext,
 } from "../lib/apg.ts"
@@ -45,9 +48,9 @@ import apgScan from "../tools/apg_scan.ts"
 /// A faked opencode 2.x tool-executor context — the V2 shape
 /// `{ agent, sessionID, messageID, id }` (no V1 `directory`/`worktree`) — plus
 /// the plugin instance's load `location` (`ctx.location`, captured at `setup`),
-/// whose `directory` seeds `findApgRoot` / `mainCheckoutRoot`. The scenarios
-/// that pin an AUTHORITATIVE path pass it as the helpers' explicit `directory`
-/// arg, so the location only needs to be present for the type.
+/// whose `directory` seeds `findApgRoot` / `mainCheckoutRoot` when no project is
+/// resolved. A project-bound scenario adds the resolved `worktree` (and
+/// `projectName`), which is then the sole spawn anchor.
 function v2Context(dir: string, overrides: Partial<ToolContext> = {}): ToolContext {
   return {
     agent: "test-agent",
@@ -143,7 +146,7 @@ function scratchRequirementRepo(defaultBranch = "main"): { repo: string; worktre
 }
 
 test.skipIf(!enabled || !binary)(
-  "e2e: curated boundary rebases stored identities to absolute, raw apg query stays stored",
+  "e2e: a required project resolves through the registry and rebases stored identities against its worktree",
   async () => {
     const bin = binary as string
     const previousBinary = process.env.APG_BINARY
@@ -156,66 +159,99 @@ test.skipIf(!enabled || !binary)(
     fs.mkdirSync(path.join(home, ".config", "opencode", "node_modules", "@opencode", "plugin"), {
       recursive: true,
     })
-    const env = { ...process.env, HOME: home }
-    const run = (args: string[]) =>
-      Bun.spawnSync({ cmd: [bin, ...args], cwd: repo, env, stdout: "pipe", stderr: "pipe" })
-
+    const env = { ...process.env, HOME: home, APG_CALLER_SESSION: "s1" }
+    const project = "suite-boundary"
+    const worktreeRaw = path.join(repo, "apg", ".worktrees", project)
     try {
-      const init = run(["init", "."])
-      expect(init.exitCode).toBe(0)
+      const run = (args: string[], cwd: string = repo) =>
+        Bun.spawnSync({ cmd: [bin, ...args], cwd, env, stdout: "pipe", stderr: "pipe" })
+      const git = (args: string[]) =>
+        Bun.spawnSync({ cmd: ["git", ...args], cwd: repo, stdout: "pipe", stderr: "pipe" })
+
+      expect(run(["init", "."]).exitCode).toBe(0)
+      // Commit the scaffold so the recorded scan matches the checkout state.
+      git(["add", "-A"])
+      git(["commit", "-q", "-m", "apg init"])
       const scan = run(["scan", "."])
       if (scan.exitCode !== 0) {
         throw new Error(`scan failed: ${scan.stderr.toString()}`)
       }
+      const started = run(["project", "start", project])
+      if (started.exitCode !== 0) {
+        throw new Error(`project start failed: ${started.stderr.toString()}`)
+      }
+      // The registry stores the canonical worktree path.
+      const worktree = fs.realpathSync(worktreeRaw)
 
+      // The caller sits in the MAIN checkout; the required project name
+      // resolves through the registry to the project's own worktree.
       const context = v2Context(repo)
+      expect(await resolveProjectWorktree(context, project)).toBe(worktree)
+
+      // An unregistered name is refused by the binary, naming the registry path
+      // and the registered names — never a fabricated path or a cwd fallback.
+      let refusal = ""
+      try {
+        await resolveProjectWorktree(context, "no-such-project")
+      } catch (e) {
+        refusal = e instanceof Error ? e.message : String(e)
+      }
+      expect(refusal).toContain("not registered")
+      expect(refusal).toContain("projects.db")
+      expect(refusal).toContain("main")
+      expect(refusal).toContain(project)
+
+      // A project-bound context: the caller's load location stays the MAIN
+      // checkout; the resolved worktree is what every spawn runs in.
+      const bound: ToolContext = { ...v2Context(repo), projectName: project, worktree }
+
+      // The fs-scope frame is the MAIN checkout, decoded from the resolved
+      // worktree alone.
+      expect((await mainCheckoutRoot(bound))?.root).toBe(fs.realpathSync(repo))
+      expect((await mainCheckoutRoot(bound))?.project).toBe(project)
+      // The worktree carries its own apg/.trans (seeded by project start).
+      expect(findApgRoot(v2Context(worktree))).toBe(worktree)
+
       const query = "MATCH (f:File) RETURN f.fqn ORDER BY f.fqn"
-
-      // RAW `apg query` is the graph view: the stored repo-relative form,
-      // unchanged (no absolute checkout path).
-      const raw = await runCypher(context, query, repo)
+      // RAW `apg query` is the graph view: the stored repo-relative form.
+      const raw = await runCypher(bound, query)
       expect(raw).toContain("pkg/a.go")
-      expect(raw).not.toContain(repo)
+      expect(raw).not.toContain(worktree)
 
-      // A curated tool opts in to rebasing the File-fqn column: the stored
-      // identity resolves to an existing absolute path under the caller's
-      // project directory. The structural scanner also graphs the `init`
-      // scaffold (`.gitignore`, `apg/config.json`) and `go.mod`, so select the
-      // Go file's row rather than assuming row order.
-      const rebased = await runCypher(context, query, repo, { rebaseColumns: [0] })
+      // A curated tool rebases the File-fqn column: the stored identity resolves
+      // to an absolute path under the RESOLVED WORKTREE, not the caller's cwd.
+      const rebased = await runCypher(bound, query, { rebaseColumns: [0] })
       const rows = csvToRows(rebased)
       const resolved = rows
         .slice(1)
         .map((r) => r[0])
         .find((v) => v.endsWith(path.join("pkg", "a.go")))
-      expect(resolved).toBe(path.join(repo, "pkg/a.go"))
-      const stored = resolveProjectPath(repo, resolved as string)
-      expect(stored).toBe("pkg/a.go")
+      expect(resolved).toBe(path.join(worktree, "pkg", "a.go"))
       expect(existsSync(resolved as string)).toBe(true)
-      // The same stored identity resolves under a DIFFERENT checkout root to a
-      // different absolute path (the two checkouts at one commit).
-      const other = path.join(path.dirname(repo), "other-checkout")
-      expect(resolveProjectPath(other, stored)).toBe(path.join(other, "pkg/a.go"))
+      expect(resolveProjectPath(worktree, resolved as string)).toBe("pkg/a.go")
+      // The caller's own checkout has no such absolute path: the rebase is
+      // anchored on the resolved worktree, never on `context.location`.
+      expect(resolved).not.toBe(path.join(repo, "pkg", "a.go"))
 
-      // An absolute input maps back to the stored value the query matched.
-      expect(resolveProjectPath(repo, path.join(repo, "pkg/a.go"))).toBe(stored)
+      // `runInProject` runs in the resolved worktree with the caller's project
+      // environment set, leaving the caller's own cwd untouched.
+      const cwdBefore = process.cwd()
+      expect(await runInProject(bound, ["project", "resolve", project])).toBe(worktree)
+      expect(process.cwd()).toBe(cwdBefore)
 
       // `apg_find_symbol`'s kind-aware boundary (feedback-17): its one query
       // returns a File row whose identity is the `n.fqn` cell (column 1) and
-      // File nodes carry no `path`, so the old blind `rebaseColumns: [2]` was
-      // a no-op and a consumer got the stored relative path. Rebasing with
-      // `findSymbolRebaseColumns` resolves that fqn cell to an absolute path.
+      // File nodes carry no `path`, so `findSymbolRebaseColumns` resolves that
+      // fqn cell to an absolute path under the resolved worktree.
       const toolQuery =
         "MATCH (n) WHERE n.fqn CONTAINS 'a.go' AND labels(n) = 'File' " +
         "RETURN labels(n) as kind, n.fqn, n.path, n.start_line, n.end_line"
       const toolRows = csvToRows(
-        await runCypher(context, toolQuery, repo, { rebaseColumns: findSymbolRebaseColumns }),
+        await runCypher(bound, toolQuery, { rebaseColumns: findSymbolRebaseColumns }),
       )
       const fileRow = toolRows.slice(1).find((r) => r[0] === "File")
       expect(fileRow).toBeDefined()
-      const fileFqn = (fileRow as string[])[1]
-      expect(fileFqn).toBe(path.join(repo, "pkg/a.go"))
-      expect(existsSync(fileFqn)).toBe(true)
+      expect((fileRow as string[])[1]).toBe(path.join(worktree, "pkg", "a.go"))
     } finally {
       if (previousBinary === undefined) delete process.env.APG_BINARY
       else process.env.APG_BINARY = previousBinary
@@ -236,8 +272,8 @@ test.skipIf(!enabled)(
   async () => {
     const { repo, worktree } = scratchRequirementRepo()
     try {
-      const context = v2Context(worktree)
-      const added = await branchAddedRequirementNames(context, worktree)
+      const context = v2Context(worktree, { worktree })
+      const added = await branchAddedRequirementNames(context)
 
       // Exactly the requirement node file added on this branch — not the
       // pre-existing one already carried by the default branch.
@@ -246,7 +282,7 @@ test.skipIf(!enabled)(
 
       // The main checkout, on the default branch, sees an empty delta: no false
       // positives.
-      const none = await branchAddedRequirementNames(v2Context(repo), repo)
+      const none = await branchAddedRequirementNames(v2Context(repo, { worktree: repo }))
       expect([...none]).toEqual([])
     } finally {
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
@@ -259,8 +295,8 @@ test.skipIf(!enabled)(
   async () => {
     const { worktree } = scratchRequirementRepo()
     try {
-      const context = v2Context(worktree)
-      const branchAdded = await branchAddedRequirementNames(context, worktree)
+      const context = v2Context(worktree, { worktree })
+      const branchAdded = await branchAddedRequirementNames(context)
 
       const req = (name: string) => `${REQUIREMENT_FQN_PREFIX}${name}`
       // `req-preexisting` was delivered by an earlier project (its transient
@@ -291,8 +327,8 @@ test.skipIf(!enabled)(
   async () => {
     const { repo, worktree } = scratchRequirementRepo("master")
     try {
-      const context = v2Context(worktree)
-      const added = await branchAddedRequirementNames(context, worktree)
+      const context = v2Context(worktree, { worktree })
+      const added = await branchAddedRequirementNames(context)
 
       // The default resolved to the main checkout's `master`, so the
       // branch-added requirement IS reported — not a silent empty set from a
@@ -611,10 +647,10 @@ test.skipIf(!enabled)(
 // The WORKTREE frame: the acting agent's `edit` grants are written against the
 // MAIN checkout (a code-writer's grants are `apg/.worktrees/*/<glob>`), while
 // the directory being processed is the linked worktree. `fsScopeDecision`
-// therefore resolves the frame root from the worktree and asserts BARE
-// main-relative resources — the form those grants match — never the absolute
-// paths that would re-trigger the opening `*` deny. Every expectation below is
-// derived from the fixture's canonical `realpathSync` spellings: macOS
+// therefore resolves the frame root from `context.worktree` ALONE and asserts
+// BARE main-relative resources — the form those grants match — never the
+// absolute paths that would re-trigger the opening `*` deny. Every expectation
+// below is derived from the fixture's canonical `realpathSync` spellings: macOS
 // `os.tmpdir()` sits behind the `/var` → `/private/var` symlink, so the raw
 // `mkdtemp` string is NOT the frame root.
 async function worktreeScopePermission(): Promise<void> {
@@ -622,10 +658,15 @@ async function worktreeScopePermission(): Promise<void> {
     scratchWorktreeFsRepo()
   // The bare main-relative resource the decision asserts for a canonical path.
   const anchored = (p: string) => path.relative(repoReal, p).split(path.sep).join("/")
+  // The load location is deliberately NOT the worktree: the frame is anchored
+  // on `context.worktree` alone, so a location that would resolve elsewhere
+  // cannot change it.
+  const ctx: ToolContext = { ...v2Context(os.tmpdir()), worktree }
   try {
     // The frame root is the MAIN checkout, decoded from the documented
-    // `<repo>/apg/.worktrees/demo` layout — not the worktree being processed.
-    const root = await mainCheckoutRoot(v2Context(worktree))
+    // `<repo>/apg/.worktrees/demo` layout the resolved worktree occupies — not
+    // the worktree being processed.
+    const root = await mainCheckoutRoot(ctx)
     expect(root).not.toBeNull()
     expect(root?.root).toBe(repoReal)
     expect(root?.project).toBe("demo")
@@ -634,7 +675,7 @@ async function worktreeScopePermission(): Promise<void> {
     // the ABSOLUTE spelling, so an allow proves the asserted resource is the
     // bare main-relative form — and the pinned value names that form exactly.
     const rmStub = stubPermission([fileReal])
-    const rm = await fsScopeDecision(rmStub.permission, v2Context(worktree), [file], [file])
+    const rm = await fsScopeDecision(rmStub.permission, ctx, [file], [file])
     expect(rm.allowed).toBe(true)
     expect(rm.reason).toBe(null)
     expect(rmStub.calls).toHaveLength(1)
@@ -652,7 +693,7 @@ async function worktreeScopePermission(): Promise<void> {
     const dstStub = stubPermission([anchored(deniedDestinationReal)])
     const mv = await fsScopeDecision(
       dstStub.permission,
-      v2Context(worktree),
+      ctx,
       [src, deniedDestination],
       [src, deniedDestination],
     )
@@ -672,7 +713,7 @@ async function worktreeScopePermission(): Promise<void> {
     const outsideStub = stubPermission([outsideReal])
     const external = await fsScopeDecision(
       outsideStub.permission,
-      v2Context(worktree),
+      ctx,
       [outside],
       [outside],
     )
@@ -693,14 +734,13 @@ test.skipIf(!enabled)(
   worktreeScopePermission,
 )
 
-// opencode-2x-support phase-02.task-41 (task-2/task-6 acceptance, flagged from
-// phase-1): `findApgRoot` and `mainCheckoutRoot` source their walk-up START from
-// the plugin load location (`ctx.location.directory`, then
-// `ctx.location.project.directory`, then `ctx.location.project.canonical`, then
-// `process.cwd()`) when no explicit `directory` arg is given, and never read the
-// retired V1 `ctx.directory`/`ctx.worktree` fields. An explicit `directory` arg
-// stays AUTHORITATIVE and wins over the location. Real I/O (fs + a git
-// subprocess), so opt-in suite e2e.
+// project-binding phase-03.task-8: `findApgRoot` and `mainCheckoutRoot` take no
+// directory selector any more. `findApgRoot` walks up from the plugin load
+// location (`ctx.location.directory`, then `ctx.location.project.directory`,
+// then `ctx.location.project.canonical`, then `process.cwd()`), and
+// `mainCheckoutRoot`'s fs-scope frame is anchored on `context.worktree` ALONE
+// when one was resolved, falling back to that same location chain otherwise.
+// Real I/O (fs + a git subprocess), so opt-in suite e2e.
 
 /// A scratch git repo carrying an `apg/.trans/db.lbug` so `findApgRoot` resolves
 /// it. The base is realpath'd (macOS `os.tmpdir()` sits behind a symlink) so
@@ -721,14 +761,14 @@ function scratchApgRootRepo(): string {
 }
 
 test.skipIf(!enabled)(
-  "e2e: findApgRoot/mainCheckoutRoot start from ctx.location; an explicit directory stays authoritative",
+  "e2e: findApgRoot walks the load location; mainCheckoutRoot is anchored on context.worktree alone",
   async () => {
     const repo = scratchApgRootRepo()
     const other = scratchApgRootRepo()
     try {
       const nested = path.join(repo, "src")
 
-      // findApgRoot with NO directory arg: the walk-up starts at ctx.location.
+      // findApgRoot: the walk-up starts at ctx.location.
       expect(findApgRoot(v2Context(repo))).toBe(repo)
       expect(findApgRoot(v2Context(nested))).toBe(repo)
       // The project.location fallbacks are sourced too.
@@ -739,16 +779,16 @@ test.skipIf(!enabled)(
         findApgRoot(v2Context(repo, { location: { project: { id: "p", canonical: repo } } })),
       ).toBe(repo)
 
-      // An explicit directory wins over the location (here `other` also has a
-      // root, so the explicit path is what decides).
-      expect(findApgRoot(v2Context(other), repo)).toBe(repo)
-
-      // mainCheckoutRoot with NO directory arg: the frame comes from
+      // mainCheckoutRoot with no resolved worktree: the frame comes from
       // ctx.location.directory (canonicalised).
       expect(await mainCheckoutRoot(v2Context(repo))).toEqual({ root: repo, project: null })
       expect(await mainCheckoutRoot(v2Context(nested))).toEqual({ root: repo, project: null })
-      // An explicit directory stays authoritative over the location.
-      expect(await mainCheckoutRoot(v2Context(repo), other)).toEqual({ root: other, project: null })
+      // A resolved worktree is the sole anchor: the location (`other`) cannot
+      // override it.
+      expect(await mainCheckoutRoot(v2Context(other, { worktree: repo }))).toEqual({
+        root: repo,
+        project: null,
+      })
     } finally {
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
       fs.rmSync(path.dirname(other), { recursive: true, force: true })
@@ -756,53 +796,78 @@ test.skipIf(!enabled)(
   },
 )
 
-// opencode-2x-support phase-02.task-41: the ported suite tools are V2
+// project-binding phase-03.task-8: the ported suite tools are V2
 // `Plugin.define` plugins. Importing a tool module runs `Plugin.define({ id,
 // setup })` at module scope; its `setup(ctx)` registers the tool through
 // `ctx.tool.transform((editor) => editor.add({...}))`. Without a live opencode
 // host this is pinned structurally: the plugin object carries the id + a setup
 // function, a faked plugin context captures the added tool, and the tool's
-// `execute` returns the `{ content }` result shape.
-test.skipIf(!enabled)(
+// `execute` returns the `{ content }` result shape. `apg_query` now requires a
+// registered `project`; a project whose worktree has no database is refused by
+// the binary, NAMING the project and its worktree, never the shared
+// `NO_DB_ERROR` and never a fallback to another checkout's database.
+test.skipIf(!enabled || !binary)(
   "e2e: a ported tool registers through Plugin.define/ctx.tool.transform(editor.add) and executes to {content}",
   async () => {
+    const bin = binary as string
+    const previousBinary = process.env.APG_BINARY
+    process.env.APG_BINARY = bin
+
     // The default export IS the `Plugin.define` result (identity id + setup).
     expect(apgQuery.id).toBe("apg_query")
     expect(typeof apgQuery.setup).toBe("function")
 
-    // A faked plugin context: `ctx.tool.transform` runs the editor callback and
-    // captures the tool added through `editor.add`.
-    type AddedTool = {
-      name?: string
-      description?: string
-      execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
-    }
-    const added: AddedTool[] = []
-    const editor = { add: (tool: AddedTool) => added.push(tool) }
-    const pluginCtx = {
-      location: { directory: os.tmpdir() },
-      permission: { assert: async () => {} },
-      tool: { transform: async (fn: (editor: typeof editor) => void) => void fn(editor) },
-    }
-    await apgQuery.setup(pluginCtx as never)
-
-    expect(added).toHaveLength(1)
-    const tool = added[0]
-    expect(tool.name).toBe("apg_query")
-    expect(typeof tool.description).toBe("string")
-    expect(typeof tool.execute).toBe("function")
-
-    // execute -> { content }: an explicit `directory` outside any apg project
-    // resolves the shared NO_DB_ERROR string rather than throwing.
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-nodb-"))
+    const repo = scratchRepo()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-nodb-home-"))
+    fs.mkdirSync(path.join(home, ".config", "opencode", "node_modules", "@opencode", "plugin"), {
+      recursive: true,
+    })
     try {
+      // `apg init` registers the built-in `main` row in the registry; no scan
+      // follows, so the registered project's worktree has no database.
+      const env = { ...process.env, HOME: home }
+      const init = Bun.spawnSync({ cmd: [bin, "init", "."], cwd: repo, env, stdout: "pipe", stderr: "pipe" })
+      expect(init.exitCode).toBe(0)
+
+      // A faked plugin context: `ctx.tool.transform` runs the editor callback and
+      // captures the tool added through `editor.add`.
+      type AddedTool = {
+        name?: string
+        description?: string
+        execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
+      }
+      const added: AddedTool[] = []
+      const editor = { add: (tool: AddedTool) => added.push(tool) }
+      const pluginCtx = {
+        location: { directory: repo },
+        permission: { assert: async () => {} },
+        tool: { transform: async (fn: (editor: typeof editor) => void) => void fn(editor) },
+      }
+      await apgQuery.setup(pluginCtx as never)
+
+      expect(added).toHaveLength(1)
+      const tool = added[0]
+      expect(tool.name).toBe("apg_query")
+      expect(typeof tool.description).toBe("string")
+      expect(typeof tool.execute).toBe("function")
+
+      // A required registered project: `main` resolves through the registry to
+      // the main checkout, whose missing database is the binary's project-named
+      // refusal — not the shared NO_DB_ERROR string.
       const result = await tool.execute!(
-        { query: "MATCH (n) RETURN n", directory: outside },
-        v2Context(outside),
+        { query: "MATCH (n) RETURN n", project: "main" },
+        v2Context(repo),
       )
-      expect(result).toEqual({ content: NO_DB_ERROR })
+      const content = result.content
+      expect(content.startsWith(QUERY_FAILED_PREFIX)).toBe(true)
+      expect(content).toContain("refused: project `main`")
+      expect(content).toContain(fs.realpathSync(repo))
+      expect(content).not.toBe(NO_DB_ERROR)
     } finally {
-      fs.rmSync(outside, { recursive: true, force: true })
+      if (previousBinary === undefined) delete process.env.APG_BINARY
+      else process.env.APG_BINARY = previousBinary
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+      fs.rmSync(home, { recursive: true, force: true })
     }
   },
 )
@@ -838,9 +903,16 @@ test.skipIf(!enabled || !binary)(
     })
     process.env.HOME = home
 
-    const runIn = (dir: string, args: string[]) =>
-      Bun.spawnSync({ cmd: [bin, ...args], cwd: dir, stdout: "pipe", stderr: "pipe" })
-    const run = (args: string[]) => runIn(repo, args)
+    const sessionId = "s1"
+    const runIn = (dir: string, args: string[], extraEnv: Record<string, string> = {}) =>
+      Bun.spawnSync({
+        cmd: [bin, ...args],
+        cwd: dir,
+        env: { ...process.env, ...extraEnv },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+    const run = (args: string[], extraEnv: Record<string, string> = {}) => runIn(repo, args, extraEnv)
 
     let live: DetachedSession | null = null
     let worktree: string | null = null
@@ -858,19 +930,26 @@ test.skipIf(!enabled || !binary)(
 
       // Durable mutations are legal only inside a project worktree on the
       // project branch (R3), so start a project from the scanned main checkout
-      // and drive the session from its worktree — the documented flow.
+      // and drive the session from its worktree — the documented flow. The
+      // calling session owns the registry row, so the project-bound session
+      // start is authorised.
       const project = "suite-session"
-      const startedProject = run(["project", "start", project])
+      const startedProject = run(["project", "start", project], { APG_CALLER_SESSION: sessionId })
       if (startedProject.exitCode !== 0) {
         throw new Error(`project start failed: ${startedProject.stderr.toString()}`)
       }
       worktree = path.join(repo, "apg", ".worktrees", project)
 
-      const context = v2Context(worktree)
+      const context: ToolContext = {
+        ...v2Context(worktree),
+        projectName: project,
+        worktree,
+        sessionID: sessionId,
+      }
 
       // The tool's plugin-free core: detached `apg session start`, returning
       // once the socket answers live while the coordinator keeps running.
-      const started = await startDetachedSession(context, worktree, { timeoutMs: 30000 })
+      const started = await startDetachedSession(context, { timeoutMs: 30000 })
       expect(typeof started).not.toBe("string")
       live = started as DetachedSession
       expect(live.root).toBe(worktree)
@@ -908,7 +987,7 @@ test.skipIf(!enabled || !binary)(
       // A SECOND detached start while one is live fails cleanly: `apg session
       // start` exits early (one session per worktree DB), so no socket ever
       // appears and the helper reports an error string instead of blocking.
-      const second = await startDetachedSession(context, worktree, { timeoutMs: 30000 })
+      const second = await startDetachedSession(context, { timeoutMs: 30000 })
       expect(typeof second).toBe("string")
       expect(second as string).toContain("apg session start failed")
 
@@ -935,16 +1014,21 @@ test.skipIf(!enabled || !binary)(
 
       // Failure path: a root with no `db.lbug` (a bare dir, then an `apg/.trans`
       // with no db) fails cleanly with the shared NO_DB_ERROR — the socket can
-      // never appear, and nothing is spawned or thrown.
+      // never appear, and nothing is spawned or thrown. The cwd is moved to the
+      // scratch base first, so `findApgRoot`'s load-location/cwd fallback cannot
+      // reach the checkout this test file lives in.
       const noDb = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-nodb-"))
+      const previousCwd = process.cwd()
       try {
+        process.chdir(noDb)
         const bare = path.join(noDb, "bare")
         fs.mkdirSync(bare, { recursive: true })
-        expect(await startDetachedSession(v2Context(bare), bare)).toBe(NO_DB_ERROR)
+        expect(await startDetachedSession(v2Context(bare))).toBe(NO_DB_ERROR)
         const badRoot = path.join(noDb, "bad")
         fs.mkdirSync(path.join(badRoot, "apg", ".trans"), { recursive: true })
-        expect(await startDetachedSession(v2Context(badRoot), badRoot)).toBe(NO_DB_ERROR)
+        expect(await startDetachedSession(v2Context(badRoot))).toBe(NO_DB_ERROR)
       } finally {
+        process.chdir(previousCwd)
         fs.rmSync(noDb, { recursive: true, force: true })
       }
     } finally {
@@ -984,7 +1068,12 @@ test.skipIf(!enabled)(
   "e2e: sessionLiveAt resolves false without hanging for absent/removed socket paths",
   async () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-probe-"))
+    // Anchor the cwd fallback inside the scratch dir: `startDetachedSession`'s
+    // load-location/cwd walk must not reach the checkout this test file lives
+    // in (no real project, ever).
+    const previousCwd = process.cwd()
     try {
+      process.chdir(base)
       // (1) A path that was never bound.
       const missing = path.join(base, "never-bound.sock")
       const t0 = Date.now()
@@ -1016,39 +1105,59 @@ test.skipIf(!enabled)(
       const bare = path.join(base, "bare")
       fs.mkdirSync(bare, { recursive: true })
       const t3 = Date.now()
-      const started = await startDetachedSession(v2Context(bare), bare, { timeoutMs: 500 })
+      const started = await startDetachedSession(v2Context(bare), { timeoutMs: 500 })
       expect(typeof started).toBe("string")
       expect(started as string).toBe(NO_DB_ERROR)
       expect(Date.now() - t3).toBeLessThan(5000)
     } finally {
+      process.chdir(previousCwd)
       fs.rmSync(base, { recursive: true, force: true })
     }
   },
   15000,
 )
 
+/** A scratch project served by an argv-recording stub binary: `project resolve`
+ *  prints the resolved worktree (so the tool's project binding succeeds) and
+ *  every other invocation records its argv, so `apg_scan`'s spawned scan can be
+ *  inspected without a real scan — never against the apg repo
+ *  (`global.constraint.no-real-project-test`). */
+function scanStubTool(base: string): {
+  repo: string
+  worktree: string
+  stub: string
+  argv: () => string[]
+} {
+  const repo = path.join(base, "repo")
+  const worktree = path.join(repo, "apg", ".worktrees", "suite-scan")
+  fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
+  fs.mkdirSync(worktree, { recursive: true })
+  const recorded = path.join(base, "argv.txt")
+  const stub = path.join(base, "stub-apg")
+  fs.writeFileSync(
+    stub,
+    `#!/bin/sh\n` +
+      `if [ "$1" = "project" ] && [ "$2" = "resolve" ]; then\n` +
+      `  printf '%s\\n' '${worktree}'\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      `printf '%s\\n' "$@" > '${recorded}'\n` +
+      `exit 0\n`,
+    { mode: 0o755 },
+  )
+  const argv = () => fs.readFileSync(recorded, "utf8").split("\n").filter(Boolean)
+  return { repo, worktree, stub, argv }
+}
+
 // scan-force phase-02.task-3: the `apg_scan` tool's spawned argv carries
 // `--force` when the caller asks for a from-scratch rebuild, and not otherwise.
-// `APG_BINARY` points at an argv-recording STUB, so the stub replaces the binary
-// entirely: no real scan runs, let alone against the apg repo
-// (`global.constraint.no-real-project-test`).
+// The required project resolves through the stub, and the scan runs in the
+// RESOLVED WORKTREE — never an implicit workspace root.
 test.skipIf(!enabled)(
   "e2e: apg_scan passes --force to the spawned scan only when force is set",
   async () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-scan-force-"))
-    // The scratch project carries an `apg/.trans` dir so the tool's
-    // findProjectRoot resolves repo as the root from the plugin load location.
-    const repo = path.join(base, "repo")
-    fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
-
-    const recorded = path.join(base, "argv.txt")
-    const stub = path.join(base, "stub-apg")
-    // Record the argv the tool hands over, then exit 0 (an empty summary
-    // renders as the tool's "Scan completed successfully.").
-    fs.writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" > '${recorded}'\nexit 0\n`, {
-      mode: 0o755,
-    })
-    const argv = () => fs.readFileSync(recorded, "utf8").split("\n").filter(Boolean)
+    const { repo, worktree, stub, argv } = scanStubTool(base)
 
     type AddedTool = {
       execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
@@ -1068,16 +1177,16 @@ test.skipIf(!enabled)(
       const tool = added[0]
 
       // force: true -> the spawned scan carries --force.
-      expect(await tool.execute!({ force: true }, v2Context(repo))).toEqual({
+      expect(await tool.execute!({ project: "suite-scan", force: true }, v2Context(repo))).toEqual({
         content: "Scan completed successfully.",
       })
-      expect(argv()).toEqual(["scan", repo, "--force"])
+      expect(argv()).toEqual(["scan", worktree, "--force"])
 
       // force omitted -> the default scan argv, with no --force.
-      expect(await tool.execute!({}, v2Context(repo))).toEqual({
+      expect(await tool.execute!({ project: "suite-scan" }, v2Context(repo))).toEqual({
         content: "Scan completed successfully.",
       })
-      expect(argv()).toEqual(["scan", repo])
+      expect(argv()).toEqual(["scan", worktree])
     } finally {
       if (previousBinary === undefined) delete process.env.APG_BINARY
       else process.env.APG_BINARY = previousBinary
@@ -1093,15 +1202,7 @@ test.skipIf(!enabled)(
   "e2e: apg_scan passes dialect to the spawned scan as --std only when set",
   async () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-scan-std-"))
-    const repo = path.join(base, "repo")
-    fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
-
-    const recorded = path.join(base, "argv.txt")
-    const stub = path.join(base, "stub-apg")
-    fs.writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" > '${recorded}'\nexit 0\n`, {
-      mode: 0o755,
-    })
-    const argv = () => fs.readFileSync(recorded, "utf8").split("\n").filter(Boolean)
+    const { repo, worktree, stub, argv } = scanStubTool(base)
 
     type AddedTool = {
       execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
@@ -1120,15 +1221,20 @@ test.skipIf(!enabled)(
       expect(added).toHaveLength(1)
       const tool = added[0]
 
-      expect(await tool.execute!({ language: "cobol", dialect: "cobol2002" }, v2Context(repo))).toEqual({
+      expect(
+        await tool.execute!(
+          { project: "suite-scan", language: "cobol", dialect: "cobol2002" },
+          v2Context(repo),
+        ),
+      ).toEqual({
         content: "Scan completed successfully.",
       })
-      expect(argv()).toEqual(["scan", repo, "--language", "cobol", "--std", "cobol2002"])
+      expect(argv()).toEqual(["scan", worktree, "--language", "cobol", "--std", "cobol2002"])
 
-      expect(await tool.execute!({}, v2Context(repo))).toEqual({
+      expect(await tool.execute!({ project: "suite-scan" }, v2Context(repo))).toEqual({
         content: "Scan completed successfully.",
       })
-      expect(argv()).toEqual(["scan", repo])
+      expect(argv()).toEqual(["scan", worktree])
     } finally {
       if (previousBinary === undefined) delete process.env.APG_BINARY
       else process.env.APG_BINARY = previousBinary

@@ -61,7 +61,7 @@ export default Plugin.define({
           const feedbackUnderReview = new Set<string>()
           try {
             phases = csvToRows(
-              await runCypher(merged, `MATCH (pp:PlanPhase) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, pp.number, pp.title ORDER BY pp.number`, undefined),
+              await runCypher(merged, `MATCH (pp:PlanPhase) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, pp.number, pp.title ORDER BY pp.number`),
             )
             if (phases.length <= 1) return { content: `No plan for \`${project}\`.` }
 
@@ -71,7 +71,7 @@ export default Plugin.define({
             // scoped findings and is unioned with the scope, so a requirement the
             // scope does not cover is never emitted.
             const allReqs = csvToRows(
-              await runCypher(merged, `MATCH (r:Requirement) RETURN r.fqn`, undefined),
+              await runCypher(merged, `MATCH (r:Requirement) RETURN r.fqn`),
             )
               .slice(1)
               .map((r) => r[0])
@@ -83,27 +83,27 @@ export default Plugin.define({
             // and the exactly-one-phase rule.
             const satBy = new Map<string, string[]>()
             for (const [r, p] of csvToRows(
-              await runCypher(merged, `MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN r.fqn, pp.fqn`, undefined),
+              await runCypher(merged, `MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN r.fqn, pp.fqn`),
             ).slice(1)) {
               satBy.set(r, [...(satBy.get(r) ?? []), p])
             }
 
             // The scope DECISION is the shared pure core; the git branch delta that
             // feeds it is the shared subprocess wrapper (real I/O, e2e-covered).
-            const branchAdded = await branchAddedRequirementNames(merged, merged.worktree)
+            const branchAdded = await branchAddedRequirementNames(merged)
             scope = scopeProjectRequirements(allReqs, branchAdded, satBy)
 
             gates = csvToRows(
-              await runCypher(merged, `MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH ${lit(pfx)} RETURN a.fqn, b.fqn`, undefined),
+              await runCypher(merged, `MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH ${lit(pfx)} RETURN a.fqn, b.fqn`),
             ).slice(1) as Array<[string, string]>
             for (const [phase, , status] of csvToRows(
-              await runCypher(merged, `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.status`, undefined),
+              await runCypher(merged, `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.status`),
             ).slice(1)) {
               taskCount.set(phase, (taskCount.get(phase) ?? 0) + 1)
               if (status === "done") doneSet.add(phase)
             }
             for (const [, status, , target] of csvToRows(
-              await runCypher(merged, "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn", undefined),
+              await runCypher(merged, "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn"),
             ).slice(1)) {
               if (status !== "resolved" && target.startsWith(pfx)) feedbackUnderReview.add(target)
             }

@@ -66,7 +66,7 @@ export default Plugin.define({
           // symbol name. `findSymbolRebaseColumns` rebases the right cell per row —
           // a blind column rebase would turn a symbol fqn into a bogus path.
           return {
-            content: await runCypher(merged, cypher, undefined, { rebaseColumns: findSymbolRebaseColumns }),
+            content: await runCypher(merged, cypher, { rebaseColumns: findSymbolRebaseColumns }),
           }
         },
       })

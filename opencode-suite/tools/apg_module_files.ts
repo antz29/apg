@@ -49,8 +49,8 @@ export default Plugin.define({
           if (ctCond) cypher += ` WHERE ${ctCond}`
           cypher += ` RETURN f.fqn, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
           // Column 0 is the File fqn — the stored repo-relative identity. Resolve it
-          // to an absolute path under the caller's project directory.
-          return { content: await runCypher(merged, cypher, undefined, { rebaseColumns: [0] }) }
+          // to an absolute path under the resolved project worktree.
+          return { content: await runCypher(merged, cypher, { rebaseColumns: [0] }) }
         },
       })
     })

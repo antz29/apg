@@ -50,7 +50,7 @@ export default Plugin.define({
           if (ctCond) cypher += ` WHERE ${ctCond}`
           cypher += ` RETURN s.fqn, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
           // Column 1 is the struct's source-file `path` (stored repo-relative).
-          return { content: await runCypher(merged, cypher, undefined, { rebaseColumns: [1] }) }
+          return { content: await runCypher(merged, cypher, { rebaseColumns: [1] }) }
         },
       })
     })

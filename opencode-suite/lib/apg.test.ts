@@ -22,29 +22,49 @@ import {
   REQUIREMENT_FQN_PREFIX,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
-  PROJECT_WORKTREE_DIRECTORY_DESCRIPTION,
 } from "./apg.ts"
 
-// project-context-guard phase-06.task-13 (extended by phase-07.task-9): the 12
-// bookkeeping mutation tools (whose `directory` input must name the project
-// worktree) plus the two read tools (`apg_plan`, `apg_review`) whose existing
-// description must stay put.
+// project-binding phase-03.task-8: every registered suite tool takes a REQUIRED
+// registered `project` name and no `directory` selector. The full roster is
+// imported so the contract is pinned tool by tool, not sampled.
+import apgScan from "../tools/apg_scan.ts"
+import apgQuery from "../tools/apg_query.ts"
+import apgFindSymbol from "../tools/apg_find_symbol.ts"
+import apgModules from "../tools/apg_modules.ts"
+import apgModuleFiles from "../tools/apg_module_files.ts"
+import apgModuleStructs from "../tools/apg_module_structs.ts"
+import apgFileUnits from "../tools/apg_file_units.ts"
+import apgFilePath from "../tools/apg_file_path.ts"
+import apgMethods from "../tools/apg_methods.ts"
+import apgStruct from "../tools/apg_struct.ts"
+import apgCallers from "../tools/apg_callers.ts"
+import apgCallees from "../tools/apg_callees.ts"
+import apgUses from "../tools/apg_uses.ts"
+import apgUnresolved from "../tools/apg_unresolved.ts"
+import apgHunk from "../tools/apg_hunk.ts"
+import apgProject from "../tools/apg_project.ts"
+import apgNode from "../tools/apg_node.ts"
+import apgEdge from "../tools/apg_edge.ts"
+import apgSession from "../tools/apg_session.ts"
 import apgPlanAdd from "../tools/apg_plan_add.ts"
+import apgPlan from "../tools/apg_plan.ts"
+import apgPlanPhases from "../tools/apg_plan_phases.ts"
+import apgPlanTasks from "../tools/apg_plan_tasks.ts"
+import apgPlanVerify from "../tools/apg_plan_verify.ts"
 import apgPlanDone from "../tools/apg_plan_done.ts"
 import apgPlanUndone from "../tools/apg_plan_undone.ts"
 import apgPlanComplete from "../tools/apg_plan_complete.ts"
+import apgPlanRender from "../tools/apg_plan_render.ts"
 import apgPlanNote from "../tools/apg_plan_note.ts"
+import apgReview from "../tools/apg_review.ts"
 import apgReviewAdd from "../tools/apg_review_add.ts"
 import apgReviewAction from "../tools/apg_review_action.ts"
 import apgReviewResolve from "../tools/apg_review_resolve.ts"
 import apgReviewReject from "../tools/apg_review_reject.ts"
-import apgNode from "../tools/apg_node.ts"
-import apgEdge from "../tools/apg_edge.ts"
-import apgSession from "../tools/apg_session.ts"
-import apgPlanTasks from "../tools/apg_plan_tasks.ts"
-import apgPlan from "../tools/apg_plan.ts"
-import apgReview from "../tools/apg_review.ts"
-import apgScan from "../tools/apg_scan.ts"
+import apgSpecLint from "../tools/apg_spec_lint.ts"
+import apgRm from "../tools/apg_rm.ts"
+import apgMv from "../tools/apg_mv.ts"
+import apgCp from "../tools/apg_cp.ts"
 
 test("lit single-quotes and escapes \\ ' \" and newlines", () => {
   expect(lit("plain")).toBe("'plain'")
@@ -799,9 +819,8 @@ test("mainAnchoredResource takes no canonicaliser argument", () => {
   expect(mainAnchoredResource.length).toBe(2)
 })
 
-// project-context-guard phase-06.task-13: the bookkeeping MUTATION tools say
-// `directory` is the project worktree they act on (no workspace-root default),
-// while the read tools keep the description they already had. A tool is a V2
+// project-binding phase-03.task-8: every registered suite tool now names a
+// REQUIRED registered `project` and has no `directory` selector. A tool is a V2
 // `Plugin.define` plugin: its `setup(ctx)` registers through
 // `ctx.tool.transform(editor.add)`, faked below; `execute` never runs, so the
 // test stays pure in-memory.
@@ -815,7 +834,7 @@ type AddedToolProperty = {
 type AddedTool = {
   name?: string
   description?: string
-  input?: { properties?: Record<string, AddedToolProperty> }
+  input?: { properties?: Record<string, AddedToolProperty>; required?: string[] }
 }
 
 /** Register one tool against a faked plugin context and return what it added. */
@@ -832,41 +851,82 @@ async function registeredTool(plugin: { setup: (ctx: never) => unknown }): Promi
   return added[0]
 }
 
-const MUTATION_TOOLS: Record<string, { setup: (ctx: never) => unknown }> = {
+type RegisteredPlugin = { setup: (ctx: never) => unknown }
+
+const SUITE_TOOLS: Record<string, RegisteredPlugin> = {
+  apg_scan: apgScan,
+  apg_query: apgQuery,
+  apg_find_symbol: apgFindSymbol,
+  apg_modules: apgModules,
+  apg_module_files: apgModuleFiles,
+  apg_module_structs: apgModuleStructs,
+  apg_file_units: apgFileUnits,
+  apg_file_path: apgFilePath,
+  apg_methods: apgMethods,
+  apg_struct: apgStruct,
+  apg_callers: apgCallers,
+  apg_callees: apgCallees,
+  apg_uses: apgUses,
+  apg_unresolved: apgUnresolved,
+  apg_hunk: apgHunk,
+  apg_project: apgProject,
+  apg_node: apgNode,
+  apg_edge: apgEdge,
+  apg_session: apgSession,
   apg_plan_add: apgPlanAdd,
+  apg_plan: apgPlan,
+  apg_plan_phases: apgPlanPhases,
+  apg_plan_tasks: apgPlanTasks,
+  apg_plan_verify: apgPlanVerify,
   apg_plan_done: apgPlanDone,
   apg_plan_undone: apgPlanUndone,
   apg_plan_complete: apgPlanComplete,
+  apg_plan_render: apgPlanRender,
   apg_plan_note: apgPlanNote,
+  apg_review: apgReview,
   apg_review_add: apgReviewAdd,
   apg_review_action: apgReviewAction,
   apg_review_resolve: apgReviewResolve,
   apg_review_reject: apgReviewReject,
-  apg_node: apgNode,
-  apg_edge: apgEdge,
-  apg_session: apgSession,
+  apg_spec_lint: apgSpecLint,
+  apg_rm: apgRm,
+  apg_mv: apgMv,
+  apg_cp: apgCp,
 }
 
-test("every bookkeeping mutation tool names the project worktree, with no workspace-root default", async () => {
-  expect(Object.keys(MUTATION_TOOLS)).toHaveLength(12)
-  for (const [name, plugin] of Object.entries(MUTATION_TOOLS)) {
+// The whole registered roster — the code-graph reads, the durable mutations,
+// the session/plan/review/project tools and the fs/scan tools — takes a
+// REQUIRED registered `project` name, resolves it to that project's worktree,
+// and exposes no `directory` input at all.
+test("every registered suite tool declares a required project and no directory selector", async () => {
+  expect(Object.keys(SUITE_TOOLS)).toHaveLength(38)
+  for (const [name, plugin] of Object.entries(SUITE_TOOLS)) {
     const tool = await registeredTool(plugin)
     expect(tool.name).toBe(name)
-    const description = tool.input?.properties?.directory?.description
-    expect(description).toBe(PROJECT_WORKTREE_DIRECTORY_DESCRIPTION)
-    expect(description).toContain("project worktree")
-    expect(description).not.toContain("Defaults to the workspace root")
+    const props = tool.input?.properties ?? {}
+    // No directory selector survives on any tool.
+    expect(props.directory).toBeUndefined()
+    // The project is a required string naming the registered project and the
+    // tool's own worktree resolution.
+    expect(props.project?.type).toBe("string")
+    expect(props.project?.description).toContain("registered project name")
+    expect(props.project?.description).toContain("worktree")
+    expect(tool.input?.required ?? []).toContain("project")
   }
 })
 
-test("the apg_plan and apg_review read tools keep their existing directory description", async () => {
-  const existing =
-    "Project root directory (a worktree path to operate on). Defaults to the workspace root."
-  for (const [name, plugin] of Object.entries({ apg_plan: apgPlan, apg_review: apgReview })) {
-    const tool = await registeredTool(plugin)
-    expect(tool.name).toBe(name)
-    expect(tool.input?.properties?.directory?.description).toBe(existing)
-  }
+// project-context-guard phase-02.task-8: `apg_project` exposes the `claim` verb
+// as one of its actions — the tool that takes ownership of an ownerless
+// registered project (e.g. one recorded by `apg project reconstruct`).
+test("apg_project exposes the claim action for an ownerless registered project", async () => {
+  const tool = await registeredTool(apgProject)
+  expect(tool.name).toBe("apg_project")
+  const description = tool.description ?? ""
+  expect(description).toContain("claim")
+  expect(description).toContain("ownerless")
+  const action = tool.input?.properties?.action
+  expect(action?.type).toBe("string")
+  expect(action?.description ?? "").toContain('"claim"')
 })
 
 // schema-alignment phase-05.task-20: the plan-authoring tools speak the task

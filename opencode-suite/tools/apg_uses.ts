@@ -67,7 +67,7 @@ export default Plugin.define({
             cypher += ` RETURN s.fqn as used_type, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
             rebaseColumns = [1]
           }
-          return { content: await runCypher(merged, cypher, undefined, { rebaseColumns }) }
+          return { content: await runCypher(merged, cypher, { rebaseColumns }) }
         },
       })
     })
