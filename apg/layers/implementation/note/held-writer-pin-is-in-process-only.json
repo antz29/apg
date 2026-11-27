@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "held-writer-pin-is-in-process-only",
+  "body": "The held-writer freshness pin holds an in-process read-write `lbug::Database` beside the read-only freshness read; a cross-process writer's lock shape is not exercised by this test (the separate review-list e2e covers a cross-process read-only reader beside a held writer). Extend if lbug's file-lock semantics change or a cross-process writer scenario must be pinned.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.git_e2e.e2e.locked_database_read_stays_fresh_beside_a_held_writer",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
