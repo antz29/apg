@@ -242,7 +242,7 @@ impl Resolver<'_, '_> {
 }
 
 /// A registry reference: `br:`, `br/<alias>:`, `ts:` or `ts/<alias>:`.
-fn registry(src: &str) -> bool {
+pub(crate) fn registry(src: &str) -> bool {
     let Some((head, _)) = src.split_once(':') else {
         return false;
     };
