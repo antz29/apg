@@ -30,6 +30,7 @@ pub mod progress;
 pub mod project_cmd;
 pub mod ps;
 pub mod query;
+pub mod registry;
 pub mod review_cmd;
 pub mod scan;
 pub mod schema;
