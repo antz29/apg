@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "registry-e2e-stubbed-rebuild",
+  "body": "The merge row-removal acceptance test stubs the main rebuild, so it proves row removal on the success path but not the rebuilt graph, and the re-init assertion can only prove created_at preservation inside one sub-second window; exercise the real rebuild and use a sentinel timestamp when either limit becomes a risk.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "tests/project_cmd_e2e.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
