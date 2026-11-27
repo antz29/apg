@@ -376,7 +376,7 @@ pub const FRESHNESS_READ_BUDGET: Duration = Duration::from_millis(500);
 /// loop at 20 retries.
 pub const FRESHNESS_READ_STEP: Duration = Duration::from_millis(25);
 
-/// The contention value a freshness read yields when it stops retrying: the
+/// The failure value a freshness read (or the [`db_presence`] probe) yields: the
 /// database it read, how long the caller's sleeper was asked to wait, the
 /// budget that bounded the wait, and the last underlying read error.
 ///
@@ -391,7 +391,8 @@ pub struct FreshnessReadFailure {
     pub database: PathBuf,
     /// The total the injected sleeper was asked to wait before giving up.
     pub waited: Duration,
-    /// The retry budget that bounded `waited` ([`FRESHNESS_READ_BUDGET`]).
+    /// The retry budget that bounded `waited` ([`FRESHNESS_READ_BUDGET`]);
+    /// `Duration::ZERO` for a probe that performs no retry.
     pub budget: Duration,
     /// The last read error (transient on exhaustion, terminal otherwise).
     pub source: anyhow::Error,
@@ -595,11 +596,36 @@ fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedSca
     }))
 }
 
+/// True when `<apg_root>/.trans/db.lbug` exists, false when the filesystem
+/// reports it absent ([`std::io::ErrorKind::NotFound`] alone); any other
+/// metadata error — permission, symlink loop, I/O — is a named
+/// [`FreshnessReadFailure`] carrying the database path and the underlying
+/// error, never a silent "absent".
+///
+/// The probe is a single `try_exists` metadata read, not a data read: it
+/// performs no retry, so a failure carries a zero wait and a zero budget
+/// (there is no retry wait to claim).
+pub fn db_presence(apg_root: &Path) -> Result<bool, FreshnessReadFailure> {
+    let database = db_path(apg_root);
+    database
+        .try_exists()
+        .map_err(|source| FreshnessReadFailure {
+            database,
+            waited: Duration::ZERO,
+            budget: Duration::ZERO,
+            source: source.into(),
+        })
+}
+
 /// Collects the freshness facts from **one** capture of the database and the
 /// caller's already-captured [`GitState`]: whether `db.lbug` exists, its own
 /// [`RecordedScan`] row (when readable) and the other DB facts (pending state,
 /// schema, authored digest, session socket), folded into the list of inputs
 /// that differ (empty = fresh).
+///
+/// The presence precondition is [`db_presence`]: `NotFound` alone is the
+/// `"database"` absence; any other metadata error is the facts' `Err`, a named
+/// read failure rather than a silent absence.
 ///
 /// The precondition failures short-circuit exactly as the collect-all form
 /// always has — `"database"`, `"socket"`, `"git sha"` and `"recorded scan"`
@@ -628,7 +654,7 @@ fn freshness_facts(
     state: &GitState,
     requested: Option<&[String]>,
 ) -> Result<(bool, Option<RecordedScan>, Vec<&'static str>), FreshnessReadFailure> {
-    if !db_path(apg_root).exists() {
+    if !db_presence(apg_root)? {
         return Ok((false, None, vec!["database"]));
     }
     let socket = crate::session::socket_path(apg_root);
