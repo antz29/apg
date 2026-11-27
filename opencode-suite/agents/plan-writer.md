@@ -229,6 +229,16 @@ graph lacks is drift) and may name the Component it `implements`. The code it to
 | `deletes` (`*_delete`) | removes code | existing code only |
 | `renames` / `moves` | FQN changes | the live source FQN plus `--target` the planned destination |
 A target-less activity is allowed: supply no operation flag at all (an empty edge set).
+
+**Confirm the grant before you assign.** The Agent's declared `permissions:` grant (its
+`.opencode/agents/**` definition) must cover **every operation-edge target path** the task will
+name: compare its worktree-rooted grant glob (`apg/.worktrees/*/<path>`) against the repo-relative
+target path (`requirements.constraint.code-writer-scope-worktree-only`) and cite the deciding
+permission line as evidence. Ownership follows the path glob, not the language label — suite
+TypeScript under `opencode-suite/**` is the core implementer's, not the TS frontend Agent's;
+`AGENTS.md`/`scripts/**` are the build implementer's. An Agent whose grant excludes any target
+path is the wrong assignee — pick the path's owner, not the nearest role — even though the binary
+validator accepts any roster Agent.
 ### Task shape
 A task's own properties are **title** and **status**; everything else is an edge. **Split, don't
 shoehorn** — "implement + unit-test X" is two tasks, each assigned to the Agent that owns its
