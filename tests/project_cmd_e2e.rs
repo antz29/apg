@@ -1059,6 +1059,46 @@ fn registry_path_of(repo: &testutil::Repo) -> PathBuf {
     registry::registry_path(&repo.root.canonicalize().unwrap())
 }
 
+/// A scratch repo whose main checkout holds a real `db.lbug` and whose
+/// registered `alpha` worktree holds none: the main checkout's registry carries
+/// `alpha` on its branch, owned by `session-a`. Returns the repo, the canonical
+/// worktree root and the worktree's (absent) database path. The main database
+/// existing is what makes an empty stdout/read meaningful: a fall-through would
+/// find it and answer.
+fn missing_worktree_db_fixture(tag: &str) -> (Repo, PathBuf, PathBuf) {
+    let repo = Repo::new(tag);
+    repo.write(
+        "code/seed.scan.jsonl",
+        &testutil::code_payload(MOD, FILE, &["Store"]),
+    );
+    repo.commit_all("seed code");
+    testutil::scan_checkout(&repo.root).unwrap();
+    let main_db = repo.apg_root().join(specs::TRANS).join("db.lbug");
+    assert!(
+        main_db.exists(),
+        "the main checkout must hold a real database: {}",
+        main_db.display()
+    );
+
+    let wt_canon = repo.start_project("alpha").canonicalize().unwrap();
+    let wt_db = wt_canon
+        .join(specs::LAYOUT)
+        .join(specs::TRANS)
+        .join("db.lbug");
+    assert!(
+        !wt_db.exists(),
+        "the alpha worktree must hold no database: {}",
+        wt_db.display()
+    );
+
+    let reg = registry::Registry::open(&registry_path_of(&repo)).unwrap();
+    let mut row = registry::RegistryEntry::new("alpha", &wt_canon);
+    row.branch = Some("alpha".to_string());
+    row.owner = Some("session-a".to_string());
+    reg.put(&row).unwrap();
+    (repo, wt_canon, wt_db)
+}
+
 /// A scratch git repo with real Go sources + a versioned `apg/` layout,
 /// driven by the REAL candidate binary. The isolated `home` is a sibling
 /// OUTSIDE the repo, so the checkout stays clean for `project start`.
@@ -5894,5 +5934,118 @@ mod e2e {
         );
 
         testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // missing-worktree-database (e2e): a bound read/session targets the
+    // registered worktree's own `db.lbug`; its absence is that project's
+    // refusal, named with the project and worktree, never a fall-through to
+    // the main checkout's database.
+    // ------------------------------------------------------------------
+
+    /// A bound `apg query` on a worktree with no database refuses, naming the
+    /// project, the worktree, the worktree's database path and the `apg scan`
+    /// fix line — and prints nothing, though the main checkout's database
+    /// exists and would answer the same query.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/spawned apg); run via cargo test-e2e"]
+    fn missing_worktree_database_query_refuses_named_without_falling_through() {
+        let (repo, wt_canon, wt_db) = missing_worktree_db_fixture("missing-db-query");
+
+        let out = testutil::ApgCommand::new(&["query", "MATCH (n:Scan) RETURN n.git_sha"])
+            .cwd(&repo.root)
+            .env("APG_PROJECT", "alpha")
+            .env("APG_CALLER_SESSION", "session-a")
+            .output();
+        assert!(
+            !out.status.success(),
+            "a bound read on a worktree with no database must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("project `alpha`"), "{stderr}");
+        assert!(
+            stderr.contains(&wt_canon.display().to_string()),
+            "the refusal must name the worktree: {stderr}"
+        );
+        assert!(
+            stderr.contains(&wt_db.display().to_string()),
+            "the refusal must name the worktree's database path: {stderr}"
+        );
+        assert!(
+            stderr.contains(&format!(
+                "Fix: run `apg scan` inside `{}`",
+                wt_canon.display()
+            )),
+            "the refusal must carry the scan fix line: {stderr}"
+        );
+        // Main's database exists and answers this query; an empty stdout proves
+        // the read never fell through to it.
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.trim().is_empty(),
+            "a refused bound read must not answer from main's database: {stdout}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// A bound `apg session start` on the same missing worktree database
+    /// refuses immediately, naming the project, the worktree and its missing
+    /// `db.lbug` (the same `open_owned_db` wording), and leaves no session
+    /// socket bound.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/spawned apg); run via cargo test-e2e"]
+    fn missing_worktree_database_session_start_refuses_named_without_a_socket() {
+        let (repo, wt_canon, wt_db) = missing_worktree_db_fixture("missing-db-session");
+        let wt_apg = wt_canon.join(specs::LAYOUT);
+        let home = std::env::temp_dir().join(format!(
+            "apg-missing-db-session-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+
+        // The missing database is checked before the socket is bound, so the
+        // refusal returns immediately: `output()`, not the blocking session
+        // harness (which panics on an early exit), is the correct spawn.
+        let out = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&wt_canon)
+            .env("HOME", &home.to_string_lossy())
+            .env("APG_PROJECT", "alpha")
+            .env("APG_CALLER_SESSION", "session-a")
+            .output();
+        assert!(
+            !out.status.success(),
+            "a session start on a worktree with no database must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("project `alpha`"), "{stderr}");
+        assert!(
+            stderr.contains(&wt_canon.display().to_string()),
+            "the refusal must name the worktree: {stderr}"
+        );
+        assert!(
+            stderr.contains(&wt_db.display().to_string()),
+            "the refusal must name the missing database: {stderr}"
+        );
+        assert!(
+            stderr.contains(&format!(
+                "has no database `{}`. Fix: run `apg scan` inside `{}`.",
+                wt_db.display(),
+                wt_canon.display()
+            )),
+            "the refusal must carry the scan fix line: {stderr}"
+        );
+
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "a refused start must leave no live session"
+        );
+        assert!(
+            !apg::session::socket_path(&wt_apg).exists(),
+            "a refused start must bind no session socket"
+        );
+
+        testutil::remove(&repo);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
