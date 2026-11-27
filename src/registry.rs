@@ -188,6 +188,43 @@ pub fn require_owner(
     )
 }
 
+/// The env-gated project-binding seam: with `APG_PROJECT` absent this returns
+/// `None` (a raw CLI call has no project binding); with it present it opens the
+/// main checkout's registry (`require_registry`), resolves the named row,
+/// validates it against the repository (`validate_row`) and authorises it for
+/// the caller (`require_owner`), returning the row or the first refusal.
+/// `apg_root` supplies the checkout, so the read never consults the cwd and
+/// never writes the registry.
+pub fn require_project(apg_root: &Path) -> Result<Option<RegistryEntry>> {
+    let Some(caller) = caller_from_env() else {
+        return Ok(None);
+    };
+    let identity = crate::git::repo_identity(apg_root)?;
+    let registry = require_registry(&identity.main_root)?;
+    let Some(entry) = registry.get(&caller.project)? else {
+        let mut names: Vec<String> = registry
+            .entries()?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        let registered = if names.is_empty() {
+            "<none>".to_string()
+        } else {
+            names.join(", ")
+        };
+        bail!(
+            "refused: project `{}` is not registered in the project registry `{}` (registered projects: {registered}). Fix: start it with `apg project start {}`, or rebuild the registry from the worktree list with `apg project reconstruct`.",
+            caller.project,
+            registry.path().display(),
+            caller.project
+        );
+    };
+    validate_row(&identity.main_root, &entry)?;
+    require_owner(&entry, &caller, identity.branch.as_deref())?;
+    Ok(Some(entry))
+}
+
 /// Seconds since the unix epoch — the row's creation-time unit.
 fn now_unix() -> u64 {
     SystemTime::now()
