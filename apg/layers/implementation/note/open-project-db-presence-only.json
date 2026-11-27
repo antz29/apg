@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "open-project-db-presence-only",
+  "body": "open_project_db checks presence only, so a stale-but-present worktree database is served, and a bound query still locates the project through the registry resolved from the cwd's walked-up apg root; wire the phase-04 freshness predicate into the read open and make the query path cwd-independent if the suite ever needs it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.open_project_db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
