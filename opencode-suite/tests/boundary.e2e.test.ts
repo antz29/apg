@@ -20,6 +20,7 @@ import path from "node:path"
 
 import {
   runCypher,
+  runCli,
   runInProject,
   resolveProjectPath,
   resolveProjectWorktree,
@@ -32,6 +33,7 @@ import {
   csvToRows,
   startDetachedSession,
   sessionLiveAt,
+  MISSING_WORKTREE_ERROR,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
   type DetachedSession,
@@ -758,6 +760,45 @@ test.skipIf(!enabled)(
     } finally {
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
     }
+  },
+)
+
+// suite-root-plumbing phase-01.task-3: a caller with NO resolved project
+// worktree (`context.worktree`) is refused by every project-bound helper with
+// the shared MISSING_WORKTREE_ERROR signal — the helpers never walk up from the
+// load location or cwd to find a database. The string-returning helpers
+// (runCypher, runCli, startDetachedSession) return the refusal verbatim; the
+// helpers that hand back a structured value (`branchAddedRequirementNames`
+// returns a Set) throw it, and `runInProject` throws its own pre-existing
+// missing-resolved-project refusal, which is a distinct message. Every path is
+// a pure refusal (no spawn, no fs write), so the opt-in suite-e2e gate alone
+// enables it.
+test.skipIf(!enabled)(
+  "e2e: a worktree-less context is refused by every project-bound helper",
+  async () => {
+    const context = v2Context(os.tmpdir())
+    expect(context.worktree).toBeUndefined()
+
+    expect(await runCypher(context, "MATCH (n) RETURN n")).toBe(MISSING_WORKTREE_ERROR)
+    expect(await runCli(context, ["query", "MATCH (n) RETURN n"])).toBe(MISSING_WORKTREE_ERROR)
+    expect(await startDetachedSession(context)).toBe(MISSING_WORKTREE_ERROR)
+
+    let branchRefusal = ""
+    try {
+      await branchAddedRequirementNames(context)
+    } catch (e) {
+      branchRefusal = e instanceof Error ? e.message : String(e)
+    }
+    expect(branchRefusal).toBe(MISSING_WORKTREE_ERROR)
+
+    let projectRefusal = ""
+    try {
+      await runInProject(context, ["project", "resolve", "main"])
+    } catch (e) {
+      projectRefusal = e instanceof Error ? e.message : String(e)
+    }
+    expect(projectRefusal).toContain("requires a resolved project")
+    expect(projectRefusal).not.toBe(MISSING_WORKTREE_ERROR)
   },
 )
 
