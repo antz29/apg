@@ -10,7 +10,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{git, specs, version_gate};
+use anyhow::Context;
+
+use crate::{git, registry, specs, version_gate};
 
 /// The opencode tool suite that `apg init` installs into `~/.config/opencode/`.
 /// Each entry is a file under `plugins/` (opencode 2.x plugin discovery under
@@ -767,6 +769,30 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
         write_migration_guide(&apg_dir, old_version.as_deref());
     }
     version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
+
+    // Register the built-in `main` row in the main checkout's project registry
+    // (`<main>/apg/.trans/projects.db`) on every init. Git is discovered
+    // tolerantly from the target: outside a repository (the pre-git bootstrap)
+    // the target itself is the main root and the row carries no branch. A
+    // re-init refreshes the worktree and branch, clears the owner, and keeps the
+    // original creation time — `main` is one row however often init runs.
+    let identity = git::repo_identity(&apg_dir).ok();
+    let main_root = identity
+        .as_ref()
+        .map(|id| id.main_root.clone())
+        .unwrap_or_else(|| dir.clone());
+    let branch = identity.and_then(|id| id.branch);
+    let path = registry::registry_path(&main_root);
+    let reg = registry::Registry::open(&path)
+        .with_context(|| format!("opening the project registry at {}", path.display()))?;
+    let mut entry = match reg.get("main")? {
+        Some(existing) => existing,
+        None => registry::RegistryEntry::new("main", &main_root),
+    };
+    entry.worktree = main_root;
+    entry.branch = branch;
+    entry.owner = None;
+    reg.put(&entry)?;
 
     let opencode_dir = user_opencode_dir()?;
     let (suite_files, agents, pruned) = install_suite(&opencode_dir)?;
