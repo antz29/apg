@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "merge-registry-open-creates-store",
+  "body": "The merge's best-effort registry removal opens the main checkout's projects.db even when no store exists, creating an empty one; guard on the file's existence when a stray empty registry becomes observable, for example in a fidelity assertion on a repository that never registered a project.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.merge.project_merge_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
