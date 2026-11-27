@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scratch-guard-join-has-no-timeout",
+  "body": "`stop_and_join` joins registered readers sequentially in registration order, and `Drop` gives each join no timeout — correct for the round-robin rendezvous whose reader polls its stop flag, but a future reader that can block indefinitely would stall teardown; upgrade to a bounded join (a finished flag plus a timeout) only if a reader is ever written that does not poll its stop flag.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.testutil.ScratchGuard.stop_and_join",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
