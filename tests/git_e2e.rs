@@ -2335,11 +2335,14 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// A database made unreadable is **named contention** — the database path
-    /// and the waited/budget pair — never a stale verdict naming a differing
-    /// input, while a genuine difference in a separate fixture still reads
-    /// `Stale` and names its labels. The two fixtures keep the contention split
-    /// from swallowing the genuine-difference arm.
+    /// A database made unreadable is **named contention** — the database path,
+    /// and the waited/budget pair only when the read actually retried — never a
+    /// stale verdict naming a differing input, while a genuine difference in a
+    /// separate fixture still reads `Stale` and names its labels. The two
+    /// fixtures keep the contention split from swallowing the genuine-difference
+    /// arm. The corrupt-DB arm fails terminally on the first read, so its
+    /// refusal names only the database and the underlying cause — no
+    /// waited/budget pair and no contention wording.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug); run via cargo test-e2e"]
     fn contended_database_is_named_contention_never_stale() {
@@ -2361,13 +2364,35 @@ mod e2e {
             let _ = std::fs::remove_file(format!("{}.{suffix}", db_path.display()));
         }
 
-        match freshness_snapshot(&apg) {
-            FreshnessSnapshot::Contended { database, .. } => assert_eq!(
-                &database, &db_path,
-                "the contention snapshot must name the database it could not read"
-            ),
+        let (waited, budget, cause) = match freshness_snapshot(&apg) {
+            FreshnessSnapshot::Contended {
+                database,
+                waited,
+                budget,
+                cause,
+                ..
+            } => {
+                assert_eq!(
+                    database, db_path,
+                    "the contention snapshot must name the database it could not read"
+                );
+                (waited, budget, cause)
+            }
             other => panic!("an unreadable database must read Contended, got {other:?}"),
-        }
+        };
+        assert_eq!(
+            waited,
+            std::time::Duration::ZERO,
+            "a corrupt database fails terminally on the first read (no retry)"
+        );
+        assert_eq!(
+            budget, FRESHNESS_READ_BUDGET,
+            "the terminal read still carries the configured retry budget"
+        );
+        assert!(
+            !cause.is_empty(),
+            "the snapshot must carry the underlying read failure"
+        );
         assert!(
             !is_stale(&apg),
             "contention is never stale — an unreadable database names no differing input"
@@ -2383,6 +2408,16 @@ mod e2e {
             msg.contains("unreadable"),
             "the contention refusal must say unreadable: {msg}"
         );
+        assert!(
+            msg.contains(&cause),
+            "the refusal must name the underlying cause: {msg}"
+        );
+        for forbidden in ["waited", "budget", "contention", "another process"] {
+            assert!(
+                !msg.to_lowercase().contains(forbidden),
+                "a terminal first read must not claim `{forbidden}`: {msg}"
+            );
+        }
         assert!(
             !msg.contains("graph is stale"),
             "contention must never read as a stale verdict: {msg}"
@@ -2503,11 +2538,15 @@ mod e2e {
     /// The presence probe's error arm: a metadata error other than `NotFound`
     /// (here `EACCES`, induced by denying search permission on the parent
     /// `.trans` directory) is a named read failure, not a silent absence. It
-    /// reaches `freshness_differences` as `Contended` naming `db.lbug`, reaches
-    /// `staleness_line` as `CONTENDED` naming the path and never `no scan yet`,
-    /// and makes `is_fresh` fail closed — distinct from the absent arm, where
-    /// `is_stale` is also false but for the opposite (N/A) reason. `is_stale`
-    /// stays false because contention is never a stale verdict.
+    /// reaches `freshness_differences` as `Contended` naming `db.lbug` with a
+    /// zero wait/budget (the probe never retries), reaches `staleness_line` as
+    /// `CONTENDED` naming the path and never `no scan yet`, and makes
+    /// `is_fresh` fail closed — distinct from the absent arm, where `is_stale`
+    /// is also false but for the opposite (N/A) reason. `refusal_message`
+    /// names the database and the underlying permission cause and makes **no**
+    /// contention claim: no waited/budget pair, no "another process", no
+    /// retry-the-other-process advice. `is_stale` stays false because
+    /// contention is never a stale verdict.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs); run via cargo test-e2e"]
     #[cfg(unix)]
@@ -2540,25 +2579,87 @@ mod e2e {
             return;
         }
 
-        // Capture every projection while `.trans` is unreadable, then restore
-        // the directory mode BEFORE asserting so the fixture always cleans up.
-        let snapshot = freshness_differences(&apg, &state);
-        let line = staleness_line(&apg, &state, None);
-        let fresh = is_fresh(&apg);
-        let stale = is_stale(&apg);
+        // Capture every projection while `.trans` is unreadable, restoring the
+        // directory mode even if a capture panics, so the fixture always
+        // cleans up.
+        let captured = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let snapshot = freshness_differences(&apg, &state);
+            let refusal = refusal_message(&apg);
+            let line = staleness_line(&apg, &state, None);
+            let fresh = is_fresh(&apg);
+            let stale = is_stale(&apg);
+            (snapshot, refusal, line, fresh, stale)
+        }));
         std::fs::set_permissions(&trans, original).unwrap();
+        let (snapshot, refusal, line, fresh, stale) = match captured {
+            Ok(captured) => captured,
+            Err(payload) => std::panic::resume_unwind(payload),
+        };
 
         match snapshot {
-            FreshnessSnapshot::Contended { database, .. } => assert_eq!(
-                database, db_path,
-                "the contention snapshot must name the db.lbug the probe could not stat"
-            ),
+            FreshnessSnapshot::Contended {
+                database,
+                waited,
+                budget,
+                cause,
+                ..
+            } => {
+                assert_eq!(
+                    database, db_path,
+                    "the contention snapshot must name the db.lbug the probe could not stat"
+                );
+                assert_eq!(
+                    waited,
+                    std::time::Duration::ZERO,
+                    "the presence probe never retries, so the snapshot carries no wait"
+                );
+                assert_eq!(
+                    budget,
+                    std::time::Duration::ZERO,
+                    "the presence probe spends no retry budget, so the snapshot carries none"
+                );
+                assert!(
+                    !cause.is_empty(),
+                    "the snapshot must carry the underlying permission cause"
+                );
+            }
             other => {
                 panic!("a non-NotFound metadata error must read Contended, got {other:?}")
             }
         }
 
         let db_display = db_path.display().to_string();
+        let msg = refusal.expect("a presence read failure must refuse, not read as absent");
+        assert!(
+            msg.contains(&db_display),
+            "the refusal must name the database path: {msg}"
+        );
+        assert!(
+            msg.contains("unreadable"),
+            "the refusal must say unreadable: {msg}"
+        );
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("permission denied"),
+            "the refusal must name the underlying permission cause: {msg}"
+        );
+        for forbidden in [
+            "waited",
+            "budget",
+            "contention",
+            "another process",
+            "retry once the other process",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "a no-retry presence failure must not claim `{forbidden}`: {msg}"
+            );
+        }
+        assert!(
+            !msg.contains("graph is stale"),
+            "a presence failure is never a stale verdict: {msg}"
+        );
+
         assert!(
             line.contains("CONTENDED"),
             "the staleness line must name contention: {line}"
