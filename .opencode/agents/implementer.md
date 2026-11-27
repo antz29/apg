@@ -91,7 +91,6 @@ permissions:
   - { action: edit, resource: ".github/**", effect: deny }
   - { action: edit, resource: "AGENTS.md", effect: deny }
   - { action: edit, resource: "README.md", effect: deny }
-  - { action: edit, resource: "SPEC*.md", effect: deny }
   - { action: edit, resource: "plans/**", effect: deny }
   - { action: edit, resource: "scripts/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/build.rs", effect: deny }
@@ -104,7 +103,6 @@ permissions:
   - { action: edit, resource: "apg/.worktrees/*/.github/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/AGENTS.md", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/README.md", effect: deny }
-  - { action: edit, resource: "apg/.worktrees/*/SPEC*.md", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/plans/**", effect: deny }
   - { action: edit, resource: "apg/.worktrees/*/scripts/**", effect: deny }
   - { action: edit, resource: ".opencode/**", effect: deny }
