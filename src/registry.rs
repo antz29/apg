@@ -243,3 +243,46 @@ impl Registry {
         Ok(())
     }
 }
+
+/// The caller's project context, parsed from the environment: `APG_PROJECT`
+/// names the registered project, `APG_CALLER_SESSION` the calling session, and
+/// `APG_CALLER_ANCESTORS` the comma-separated parentID chain, outermost first.
+#[derive(Debug, Clone)]
+pub struct Caller {
+    /// The project name (`APG_PROJECT`).
+    pub project: String,
+    /// The calling session id (`APG_CALLER_SESSION`), when set.
+    pub session: Option<String>,
+    /// The parentID chain (`APG_CALLER_ANCESTORS`), outermost to innermost.
+    pub ancestors: Vec<String>,
+}
+
+/// Parses the caller's project context from `APG_PROJECT`, `APG_CALLER_SESSION`
+/// and the comma-separated `APG_CALLER_ANCESTORS` chain. Returns `None` when
+/// `APG_PROJECT` is absent or blank, so a raw CLI call keeps its current
+/// behaviour (no project binding).
+pub fn caller_from_env() -> Option<Caller> {
+    let project = std::env::var("APG_PROJECT").ok()?.trim().to_string();
+    if project.is_empty() {
+        return None;
+    }
+    let session = std::env::var("APG_CALLER_SESSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let ancestors = std::env::var("APG_CALLER_ANCESTORS")
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Caller {
+        project,
+        session,
+        ancestors,
+    })
+}
