@@ -255,13 +255,13 @@ fn has_suffix(path: &str, suffixes: &[&str]) -> bool {
 }
 
 /// The directory part of a repo-relative file path (empty at the root).
-fn directory(path: &str) -> &str {
+pub fn directory(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
 /// `src` joined onto `dir`, with `.` dropped and each `..` dropped with the segment
 /// before it. A `..` left over (above the root) stays in the result.
-fn normalise(dir: &str, src: &str) -> String {
+pub fn normalise(dir: &str, src: &str) -> String {
     let mut out: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
     for seg in src.split('/') {
         match seg {
