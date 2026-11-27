@@ -487,16 +487,49 @@ impl Coordinator {
     /// Open the owned DB handle once (the amortized open) and emit the
     /// observable open marker. A session only starts against an existing
     /// `db.lbug`; an absent DB is a hard refusal naming `apg scan` as the
-    /// remedy, and the returned handle is the non-optional owned DB.
+    /// remedy — naming the bound project and its worktree when `APG_PROJECT`
+    /// binds one — and the returned handle is the non-optional owned DB.
     fn open_owned_db(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
-        let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+        // The env-gated registry binding (phase-02): a bound session owns the
+        // registered project's own database, so its absence and any open failure
+        // are refused naming the project and its worktree, never a bare path.
+        // The pre-check mirrors the shared `open_project_db` wording because that
+        // function cannot supply this handle (`ArtifactDb` has no constructor
+        // from a `Database`, and a second open would take the DB twice); with no
+        // binding the path and refusal below are unchanged.
+        let bound = crate::registry::require_project(apg_root)?;
+        let db_path = match &bound {
+            Some(row) => row
+                .worktree
+                .join(specs::LAYOUT)
+                .join(specs::TRANS)
+                .join("db.lbug"),
+            None => apg_root.join(specs::TRANS).join("db.lbug"),
+        };
         if !db_path.exists() {
-            anyhow::bail!(
-                "{} does not exist — run `apg scan` first",
-                db_path.display()
-            );
+            match &bound {
+                Some(row) => anyhow::bail!(
+                    "refused: project `{}` at worktree `{}` has no database `{}`. Fix: run `apg scan` inside `{}`.",
+                    row.name,
+                    row.worktree.display(),
+                    db_path.display(),
+                    row.worktree.display()
+                ),
+                None => anyhow::bail!(
+                    "{} does not exist — run `apg scan` first",
+                    db_path.display()
+                ),
+            }
         }
-        let db = ArtifactDb::open(apg_root)?;
+        let db = ArtifactDb::open(apg_root).map_err(|err| match &bound {
+            Some(row) => anyhow::anyhow!(
+                "project `{}` at worktree `{}`: opening `{}`: {err}",
+                row.name,
+                row.worktree.display(),
+                db_path.display()
+            ),
+            None => err,
+        })?;
         eprintln!("{DB_OPEN_MARKER}");
         Ok(db)
     }
