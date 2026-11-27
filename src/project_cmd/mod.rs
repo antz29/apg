@@ -41,11 +41,17 @@
 //!   unregistered row is refused naming the project, the registry path and the
 //!   registered project names.
 //!
+//! - `apg project reconstruct` — rebuild every registry row from the
+//!   repository's worktree list: the main checkout as `main` plus each linked
+//!   worktree under its worktree name, each carrying its branch, no owner and a
+//!   fresh creation time. Replaces stale rows in one write.
+//!
 //! The cohesive groups live in submodules — the start path ([`start`]), the
 //! merge path ([`merge`]), the abandon path ([`delete`]), and the start-time
 //! toolchain-cache seeder ([`cache_copy`]) — all re-exported here so
 //! `crate::project_cmd::<name>` keeps resolving.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::git;
@@ -71,16 +77,17 @@ pub(crate) use delete::project_delete;
 pub(crate) use merge::project_merge;
 pub(crate) use start::project_start;
 
-/// `apg project <start|merge|delete|resolve> …`.
+/// `apg project <start|merge|delete|resolve|reconstruct> …`.
 pub fn cmd_project(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg project <start|merge|delete|resolve> …");
+        anyhow::bail!("usage: apg project <start|merge|delete|resolve|reconstruct> …");
     };
     match sub {
         "start" => project_start(&args[1..]),
         "merge" => project_merge(&args[1..]),
         "delete" => project_delete(&args[1..]),
         "resolve" => project_resolve(&args[1..]),
+        "reconstruct" => project_reconstruct(&args[1..]),
         other => anyhow::bail!("unknown apg project subcommand: {other}"),
     }
 }
@@ -126,6 +133,91 @@ pub(crate) fn project_resolve(args: &[String]) -> anyhow::Result<()> {
         );
     };
     println!("{}", entry.worktree.display());
+    Ok(())
+}
+
+/// `apg project reconstruct` — rebuild every registry row from the repository's
+/// worktree list: the main checkout as `main` and each linked worktree under its
+/// worktree name, each carrying its checked-out branch, no owner and a fresh
+/// creation time. Stale rows are replaced in one write. Reads and rewrites the
+/// **main** checkout's registry, so it works from the main checkout and from
+/// inside any project worktree.
+pub(crate) fn project_reconstruct(args: &[String]) -> anyhow::Result<()> {
+    if !args.is_empty() {
+        anyhow::bail!("usage: apg project reconstruct");
+    }
+    let apg_root = require_apg_root()?;
+    let identity = git::repo_identity(&apg_root)?;
+    let repo = git2::Repository::open(&identity.main_root)?;
+
+    let mut rows = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    // The main checkout is always the built-in `main` row.
+    let mut main_row = crate::registry::RegistryEntry::new("main", &identity.main_root);
+    main_row.branch = if repo.head_detached().unwrap_or(true) {
+        None
+    } else {
+        repo.head()
+            .ok()
+            .and_then(|head| head.shorthand().map(str::to_string))
+    };
+    rows.push(main_row);
+    seen.insert(identity.main_root.clone());
+
+    // Every linked worktree: its working directory comes from a repository
+    // opened on the worktree (an admin-dir path would not name the checkout),
+    // and its branch from that repository's HEAD.
+    let worktrees = repo.worktrees()?;
+    for name in worktrees.iter().flatten() {
+        let Ok(wt) = repo.find_worktree(name) else {
+            eprintln!("warning: skipping worktree `{name}`: its git entry cannot be opened");
+            continue;
+        };
+        let wt_repo = match git2::Repository::open_from_worktree(&wt) {
+            Ok(wt_repo) => wt_repo,
+            Err(err) => {
+                eprintln!(
+                    "warning: skipping worktree `{name}`: its working directory cannot be resolved ({err})"
+                );
+                continue;
+            }
+        };
+        let Some(dir) = wt_repo.workdir() else {
+            eprintln!(
+                "warning: skipping worktree `{name}`: its working directory cannot be resolved"
+            );
+            continue;
+        };
+        let Ok(worktree) = std::fs::canonicalize(dir) else {
+            eprintln!(
+                "warning: skipping worktree `{name}`: `{}` does not exist",
+                dir.display()
+            );
+            continue;
+        };
+        if !seen.insert(worktree.clone()) {
+            continue;
+        }
+        let mut row = crate::registry::RegistryEntry::new(name, &worktree);
+        row.branch = if wt_repo.head_detached().unwrap_or(true) {
+            None
+        } else {
+            wt_repo
+                .head()
+                .ok()
+                .and_then(|head| head.shorthand().map(str::to_string))
+        };
+        rows.push(row);
+    }
+
+    let registry_path = crate::registry::registry_path(&identity.main_root);
+    crate::registry::Registry::open(&registry_path)?.replace_all(&rows)?;
+    println!(
+        "Reconstructed {} project registry row(s) at {}",
+        rows.len(),
+        registry_path.display()
+    );
     Ok(())
 }
 
