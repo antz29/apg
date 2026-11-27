@@ -403,7 +403,10 @@ pub fn set_feedback_at(
 /// project_transient_files`]) — carries every Feedback item and its
 /// reviewed-target reference, and holds them until a reviewer closes the item.
 /// A project's review state is branch-local, so the current worktree's branch
-/// is the project whose set this reads.
+/// is the project whose set this reads. With `APG_PROJECT` present the read
+/// lists the registered worktree's review state (its store root, its project
+/// key and its database); with the binding absent it is the cwd-resolved
+/// checkout, unchanged.
 ///
 /// The branch DB's `Feedback`/`Reviews` projection is only a derived
 /// read-model: it keeps a Reviews edge while the reviewed target resolves and
@@ -423,6 +426,14 @@ pub fn set_feedback_at(
 fn review_list(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let apg_root = require_apg_root()?;
+    // The env-gated project binding (phase-02): a bound read lists the
+    // registered project's own review state, so `APG_PROJECT` present
+    // redirects the store root, the project key and the DB open to the row's
+    // worktree. With the binding absent the cwd-resolved checkout is unchanged.
+    let apg_root = match crate::registry::require_project(&apg_root)? {
+        Some(row) => row.worktree.join(specs::LAYOUT),
+        None => apg_root,
+    };
     let filter = p.positional.first();
 
     let project = crate::git::repo_identity(&apg_root)?
