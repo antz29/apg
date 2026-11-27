@@ -388,6 +388,70 @@ mod unit {
     }
 
     #[test]
+    fn normalise_joins_relative_paths_and_drops_dots() {
+        assert_eq!(resolve::normalise("", "main.bicep"), "main.bicep");
+        assert_eq!(
+            resolve::normalise("net", "./sub//x.bicep"),
+            "net/sub/x.bicep"
+        );
+        assert_eq!(resolve::normalise("a/b", "../c.bicep"), "a/c.bicep");
+        assert_eq!(resolve::normalise("a", "../../x.bicep"), "../x.bicep");
+        assert_eq!(resolve::normalise("", "../x.bicep"), "../x.bicep");
+    }
+
+    #[test]
+    fn directory_is_the_part_before_the_last_slash() {
+        assert_eq!(resolve::directory("app/net/vnet.bicep"), "app/net");
+        assert_eq!(resolve::directory("main.bicep"), "");
+    }
+
+    #[test]
+    fn registry_references_are_br_and_ts_with_or_without_alias() {
+        for s in [
+            "br:mcr.microsoft.com/x:1",
+            "br/alias:x:1",
+            "ts:spec:1",
+            "ts/alias:spec",
+        ] {
+            assert!(resolve::registry(s), "{s}");
+        }
+        for s in ["./net.bicep", "net.bicep", "brx:x", "bicep:x", "tsx/a:b"] {
+            assert!(!resolve::registry(s), "{s}");
+        }
+    }
+
+    #[test]
+    fn spans_are_raw_lf_byte_offsets_with_one_based_lines() {
+        let f = parse_text("param p string\nvar v = 1\n");
+        assert_eq!(at(&f.decls[0].span), (0, 14, 1, 1));
+        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (6, 7, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (15, 24, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (19, 20, 2, 2));
+    }
+
+    #[test]
+    fn spans_count_crlf_as_one_line_break_and_offsets_as_raw_bytes() {
+        let f = parse_text("param p string\r\nvar v = 1\r\n");
+        assert_eq!(at(&f.decls[0].span), (0, 14, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (16, 25, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (20, 21, 2, 2));
+    }
+
+    #[test]
+    fn spans_after_a_multibyte_string_use_byte_offsets() {
+        // `Köln` is 5 bytes (ö is 2), so the next line starts at byte 19, not char 18.
+        let f = parse_text("var city = 'Köln'\nparam p string\n");
+        assert_eq!(at(&f.decls[0].span), (0, 18, 1, 1));
+        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (4, 8, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (19, 33, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (25, 26, 2, 2));
+    }
+}
+
+mod int {
+    use super::*;
+
+    #[test]
     fn keyword_names_prefix_each_declaration_and_func_is_a_function() {
         let f = parse_text(
             "param p string\nvar v = 1\noutput o string = v\ntype t = string\n\
@@ -489,52 +553,6 @@ mod unit {
     }
 
     #[test]
-    fn normalise_joins_relative_paths_and_drops_dots() {
-        assert_eq!(resolve::normalise("", "main.bicep"), "main.bicep");
-        assert_eq!(
-            resolve::normalise("net", "./sub//x.bicep"),
-            "net/sub/x.bicep"
-        );
-        assert_eq!(resolve::normalise("a/b", "../c.bicep"), "a/c.bicep");
-        assert_eq!(resolve::normalise("a", "../../x.bicep"), "../x.bicep");
-        assert_eq!(resolve::normalise("", "../x.bicep"), "../x.bicep");
-    }
-
-    #[test]
-    fn directory_is_the_part_before_the_last_slash() {
-        assert_eq!(resolve::directory("app/net/vnet.bicep"), "app/net");
-        assert_eq!(resolve::directory("main.bicep"), "");
-    }
-
-    #[test]
-    fn registry_references_are_br_and_ts_with_or_without_alias() {
-        for s in [
-            "br:mcr.microsoft.com/x:1",
-            "br/alias:x:1",
-            "ts:spec:1",
-            "ts/alias:spec",
-        ] {
-            assert!(resolve::registry(s), "{s}");
-        }
-        for s in ["./net.bicep", "net.bicep", "brx:x", "bicep:x", "tsx/a:b"] {
-            assert!(!resolve::registry(s), "{s}");
-        }
-    }
-}
-
-mod int {
-    use super::*;
-
-    #[test]
-    fn spans_are_raw_lf_byte_offsets_with_one_based_lines() {
-        let f = parse_text("param p string\nvar v = 1\n");
-        assert_eq!(at(&f.decls[0].span), (0, 14, 1, 1));
-        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (6, 7, 1, 1));
-        assert_eq!(at(&f.decls[1].span), (15, 24, 2, 2));
-        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (19, 20, 2, 2));
-    }
-
-    #[test]
     fn spans_count_the_bom_bytes_in_raw_offsets() {
         let f = parse::parse(&source::decode_mapped(
             b"\xEF\xBB\xBFparam p string\nvar v = 1\n",
@@ -543,24 +561,6 @@ mod int {
         assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (9, 10, 1, 1));
         assert_eq!(at(&f.decls[1].span), (18, 27, 2, 2));
         assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (22, 23, 2, 2));
-    }
-
-    #[test]
-    fn spans_count_crlf_as_one_line_break_and_offsets_as_raw_bytes() {
-        let f = parse_text("param p string\r\nvar v = 1\r\n");
-        assert_eq!(at(&f.decls[0].span), (0, 14, 1, 1));
-        assert_eq!(at(&f.decls[1].span), (16, 25, 2, 2));
-        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (20, 21, 2, 2));
-    }
-
-    #[test]
-    fn spans_after_a_multibyte_string_use_byte_offsets() {
-        // `Köln` is 5 bytes (ö is 2), so the next line starts at byte 19, not char 18.
-        let f = parse_text("var city = 'Köln'\nparam p string\n");
-        assert_eq!(at(&f.decls[0].span), (0, 18, 1, 1));
-        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (4, 8, 1, 1));
-        assert_eq!(at(&f.decls[1].span), (19, 33, 2, 2));
-        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (25, 26, 2, 2));
     }
 
     #[test]
