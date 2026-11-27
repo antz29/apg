@@ -1077,12 +1077,11 @@ test.skipIf(!enabled)(
   "e2e: sessionLiveAt resolves false without hanging for absent/removed socket paths",
   async () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-probe-"))
-    // Anchor the cwd fallback inside the scratch dir: `startDetachedSession`'s
-    // load-location/cwd walk must not reach the checkout this test file lives
-    // in (no real project, ever).
-    const previousCwd = process.cwd()
+    // The scratch dir and its socket paths are self-contained: `sessionLiveAt`
+    // probes absolute paths under `base`, and the worktree-bearing
+    // `startDetachedSession` call in (4) spawns in its own worktree — neither
+    // reaches the checkout this test file lives in (no real project, ever).
     try {
-      process.chdir(base)
       // (1) A path that was never bound.
       const missing = path.join(base, "never-bound.sock")
       const t0 = Date.now()
@@ -1124,7 +1123,6 @@ test.skipIf(!enabled)(
       expect(started).not.toBe(NO_DB_ERROR)
       expect(Date.now() - t3).toBeLessThan(5000)
     } finally {
-      process.chdir(previousCwd)
       fs.rmSync(base, { recursive: true, force: true })
     }
   },
