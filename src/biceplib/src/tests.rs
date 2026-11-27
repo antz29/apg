@@ -11,6 +11,11 @@ fn parse_text(text: &str) -> parse::File {
     parse::parse(&source::decode_mapped(text.as_bytes()))
 }
 
+/// A span as `(start, end, start_line, end_line)`: raw byte offsets, 1-based lines.
+fn at(s: &source::Span) -> (usize, usize, usize, usize) {
+    (s.start, s.end, s.start_line, s.end_line)
+}
+
 /// One resolved fact as `kind from -> to`, naming units by their keyword names.
 fn render(sources: &[resolve::Source], file: usize, fact: &resolve::Fact) -> String {
     let here = |i: usize| sources[file].units.units[i].name.as_str();
@@ -183,28 +188,6 @@ mod unit {
         assert_eq!(source::line_count(""), 1);
         assert_eq!(source::line_count("a\nb\n"), 2);
         assert_eq!(source::line_count("a\n\nb"), 3);
-    }
-
-    #[test]
-    fn span_gives_one_based_inclusive_lines() {
-        let d = source::decode_mapped(b"param a int\nvar b = 1\n");
-        // "param a int\n" is bytes 0..12; its line break stays on line 1.
-        let span = |start, end, start_line, end_line| source::Span {
-            start,
-            end,
-            start_line,
-            end_line,
-        };
-        assert_eq!(source::span(&d, 0, 12), span(0, 12, 1, 1));
-        assert_eq!(source::span(&d, 12, 21), span(12, 21, 2, 2));
-        assert_eq!(source::span(&d, 0, 22), span(0, 22, 1, 2));
-    }
-
-    #[test]
-    fn span_reports_raw_offsets_after_a_bom() {
-        let d = source::decode_mapped(b"\xEF\xBB\xBFvar a = 1\n");
-        let span = source::span(&d, 0, 9);
-        assert_eq!((span.start, span.end, span.start_line), (3, 12, 1));
     }
 
     #[test]
@@ -541,6 +524,44 @@ mod unit {
 
 mod int {
     use super::*;
+
+    #[test]
+    fn spans_are_raw_lf_byte_offsets_with_one_based_lines() {
+        let f = parse_text("param p string\nvar v = 1\n");
+        assert_eq!(at(&f.decls[0].span), (0, 14, 1, 1));
+        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (6, 7, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (15, 24, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (19, 20, 2, 2));
+    }
+
+    #[test]
+    fn spans_count_the_bom_bytes_in_raw_offsets() {
+        let f = parse::parse(&source::decode_mapped(
+            b"\xEF\xBB\xBFparam p string\nvar v = 1\n",
+        ));
+        assert_eq!(at(&f.decls[0].span), (3, 17, 1, 1));
+        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (9, 10, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (18, 27, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (22, 23, 2, 2));
+    }
+
+    #[test]
+    fn spans_count_crlf_as_one_line_break_and_offsets_as_raw_bytes() {
+        let f = parse_text("param p string\r\nvar v = 1\r\n");
+        assert_eq!(at(&f.decls[0].span), (0, 14, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (16, 25, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (20, 21, 2, 2));
+    }
+
+    #[test]
+    fn spans_after_a_multibyte_string_use_byte_offsets() {
+        // `Köln` is 5 bytes (ö is 2), so the next line starts at byte 19, not char 18.
+        let f = parse_text("var city = 'Köln'\nparam p string\n");
+        assert_eq!(at(&f.decls[0].span), (0, 18, 1, 1));
+        assert_eq!(at(&f.decls[0].name.as_ref().unwrap().span), (4, 8, 1, 1));
+        assert_eq!(at(&f.decls[1].span), (19, 33, 2, 2));
+        assert_eq!(at(&f.decls[1].name.as_ref().unwrap().span), (25, 26, 2, 2));
+    }
 
     #[test]
     fn resolves_imports_modules_registry_and_unknown_paths_across_files() {

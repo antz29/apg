@@ -68,29 +68,6 @@ pub struct Span {
     pub end_line: usize,
 }
 
-/// The span of decoded byte offsets `start_byte..end_byte` into `Decoded.text`.
-pub fn span(src: &Decoded, start_byte: usize, end_byte: usize) -> Span {
-    // An end just past a line break stays on the preceding line.
-    let last = if end_byte > start_byte {
-        end_byte - 1
-    } else {
-        start_byte
-    };
-    Span {
-        start: src.raw_offset(start_byte),
-        end: src.raw_offset(end_byte),
-        start_line: line_of(&src.text, start_byte),
-        end_line: line_of(&src.text, last),
-    }
-}
-
-fn line_of(text: &str, byte: usize) -> usize {
-    1 + text.as_bytes()[..byte.min(text.len())]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-}
-
 /// The Bicep sources (`.bicep` templates and `.bicepparam` parameter files),
 /// in any letter case.
 pub fn is_bicep_source(path: &Path) -> bool {
