@@ -15,6 +15,6 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true
   },
-  "include": ["tools/**/*.ts"],
+  "include": ["tools/**/*.ts", "lib/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules"]
 }
