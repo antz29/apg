@@ -122,6 +122,11 @@
     },
     {
       "kind": "driven-by",
+      "target": "requirements.requirement.suite-failure-names-its-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "driven-by",
       "target": "requirements.requirement.suite-project-input-required",
       "properties": {}
     },

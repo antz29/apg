@@ -367,6 +367,11 @@
     },
     {
       "kind": "requires",
+      "target": "requirements.requirement.suite-failure-names-its-worktree",
+      "properties": {}
+    },
+    {
+      "kind": "requires",
       "target": "requirements.requirement.suite-project-input-required",
       "properties": {}
     },
