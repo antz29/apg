@@ -147,11 +147,21 @@ pub fn project_start_at_with(
             database,
             waited,
             budget,
+            cause,
             ..
-        } => anyhow::bail!(
-            "refused: the main checkout's scan is not stale or missing — its database at `{}` is unreadable because another process holds it (waited {waited:?} of a {budget:?} budget for the contention to clear). Fix: retry `apg project start {name}` once that process finishes; a stale-graph `apg scan` is not the fix.",
-            database.display()
-        ),
+        } => {
+            // A terminal first read never retried, so a contention claim would misstate it.
+            if waited.is_zero() {
+                anyhow::bail!(
+                    "refused: the main checkout's scan is not stale or missing — its database at `{}` is unreadable: {cause}",
+                    database.display()
+                );
+            }
+            anyhow::bail!(
+                "refused: the main checkout's scan is not stale or missing — its database at `{}` is unreadable because another process holds it (waited {waited:?} of a {budget:?} budget for the contention to clear). Fix: retry `apg project start {name}` once that process finishes; a stale-graph `apg scan` is not the fix.",
+                database.display()
+            )
+        }
         git::FreshnessSnapshot::Stale { .. } | git::FreshnessSnapshot::NotApplicable { .. } => {
             anyhow::bail!(
                 "refused: the main checkout's scan is stale or missing — `apg project start` copies main's scan into the branch, so main must have a current scan. Fix: run `apg scan` in the main checkout, then re-run `apg project start {name}`."
