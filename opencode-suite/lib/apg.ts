@@ -77,9 +77,10 @@ export function apgBinary(): string {
  * `apg project resolve <projectName>` verb, returning exactly the path it
  * prints (trimmed). The binary reads the main checkout's registry and refuses
  * an unregistered name naming the registry path and the registered project
- * names; that refusal is surfaced as a thrown `Error` carrying the binary's
- * stderr verbatim — never a fabricated path and never a fallback to the
- * caller's cwd.
+ * names; that refusal is surfaced as a thrown `Error` naming the
+ * `apg project resolve <name>` command, its exit code, the cwd the lookup ran
+ * against and the binary's stderr verbatim — never a fabricated path and never
+ * a fallback to the caller's cwd.
  *
  * The lookup runs from the caller's context directory chain
  * (`context.location` / `process.cwd()`), so no new directory selector is
@@ -96,11 +97,13 @@ export async function resolveProjectWorktree(context: ToolContext, projectName: 
     process.cwd()
   const result = await Bun.$`${apgBinary()} project resolve ${projectName}`.cwd(cwd).quiet().nothrow()
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.toString().trim())
+    throw new Error(
+      `apg project resolve ${projectName} failed (exit ${result.exitCode}):\ncwd: ${cwd}\n${result.stderr.toString().trim()}`,
+    )
   }
   const worktree = result.stdout.toString().trim()
   if (!worktree) {
-    throw new Error(`apg project resolve ${projectName}: no worktree path on stdout`)
+    throw new Error(`apg project resolve ${projectName}: no worktree path on stdout (cwd: ${cwd})`)
   }
   return worktree
 }
@@ -513,7 +516,8 @@ function callerEnv(context: ToolContext): Record<string, string | undefined> {
  * with a header row on success. On failure it returns an error STRING — never a
  * throw, never data — that `isQueryError` recognizes: `MISSING_WORKTREE_ERROR`
  * (the caller has no resolved project worktree) or a string beginning with
- * `QUERY_FAILED_PREFIX`, carrying `apg query`'s exit code and stderr verbatim.
+ * `QUERY_FAILED_PREFIX`, carrying `apg query`'s exit code, stderr verbatim and
+ * the resolved worktree it ran against.
  * Both failure signals are built from the constants above, which `isQueryError`
  * also tests against, so the failure contract stays structural rather than
  * duplicated string literals.
@@ -546,7 +550,7 @@ export async function runCypher(
   }
   const result = await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).env(callerEnv(context)).quiet().nothrow()
   if (result.exitCode !== 0) {
-    return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
+    return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}\nworktree: ${root}`
   }
   const out = result.stdout.toString().trim()
   const colsOpt = opts?.rebaseColumns
@@ -618,7 +622,7 @@ export async function runCli(context: ToolContext, args: string[], mainRoot?: st
   const result = await Bun.$`${apgBinary()} ${args}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
     const cmd = [apgBinary(), ...args].join(" ")
-    return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
+    return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}\nroot: ${root}`
   }
   return result.stdout.toString().trim()
 }
@@ -658,7 +662,7 @@ export async function runInProject(
   const result = await Bun.$`${apgBinary()} ${args}`.cwd(worktree).env(callerEnv(context)).quiet().nothrow()
   if (result.exitCode !== 0) {
     const cmd = [apgBinary(), ...args].join(" ")
-    return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
+    return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}\nworktree: ${worktree}`
   }
   const out = result.stdout.toString().trim()
   const colsOpt = opts?.rebaseColumns
@@ -1156,7 +1160,7 @@ export async function startDetachedSession(
     })
   } catch (e) {
     closeSync(fd)
-    return `apg session start failed to spawn: ${e instanceof Error ? e.message : String(e)}`
+    return `apg session start failed to spawn: ${e instanceof Error ? e.message : String(e)} (root: ${root})`
   }
   closeSync(fd)
   proc.unref()
