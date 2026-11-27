@@ -400,6 +400,15 @@ pub struct FreshnessReadFailure {
 
 impl std::fmt::Display for FreshnessReadFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // A terminal first read never retried, so a wait/budget contention claim would misstate it.
+        if self.waited.is_zero() {
+            return write!(
+                f,
+                "database `{}` is unreadable: {:#}",
+                self.database.display(),
+                self.source
+            );
+        }
         write!(
             f,
             "database `{}` is unreadable — waited {:?} of a {:?} budget for the contention to clear: {:#}",
