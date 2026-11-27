@@ -3,7 +3,7 @@
 // auto-discover it as a tool.
 //
 // Each suite tool shells out to `apg query` with a curated, fixed Cypher
-// template. This module owns the project-root discovery, the subprocess call,
+// template. This module owns project/worktree resolution, the subprocess call,
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
 //
@@ -103,38 +103,6 @@ export async function resolveProjectWorktree(context: ToolContext, projectName: 
     throw new Error(`apg project resolve ${projectName}: no worktree path on stdout`)
   }
   return worktree
-}
-
-/** Walks up looking for the project's `apg/.trans/db.lbug`. In a project
- *  worktree this resolves to the worktree's OWN `apg/` (and its branch DB) —
- *  never the main checkout's.
- *
- *  The walk-up START comes from the plugin instance's V2 load location
- *  (`context.location`, captured from `ctx.location` at `setup`):
- *  `location.directory`, then `location.project.directory`, then
- *  `location.project.canonical` when present, then `process.cwd()` — the only
- *  context source read. There is no directory selector: a project-bound call
- *  does not walk at all (`runCypher`/`runCli`/`startDetachedSession` run in the
- *  resolved `context.worktree`), and this walk-up is the fallback for a caller
- *  with no resolved project. */
-export function findApgRoot(context: ToolContext): string | null {
-  const starts = [
-    context.location?.directory,
-    context.location?.project?.directory,
-    context.location?.project?.canonical,
-    process.cwd(),
-  ]
-  for (const s of starts) {
-    if (!s) continue
-    let dir = s
-    while (true) {
-      if (existsSync(path.join(dir, "apg", ".trans", "db.lbug"))) return dir
-      const parent = path.dirname(dir)
-      if (parent === dir) break
-      dir = parent
-    }
-  }
-  return null
 }
 
 /**
@@ -508,9 +476,18 @@ export function findSymbolRebaseColumns(row: string[]): number[] {
  *  the producer and the discriminant cannot silently drift apart. */
 export const QUERY_FAILED_PREFIX = "apg query failed"
 
-/** The error string runCypher returns when no `apg/.trans/db.lbug` is found on
- *  the walk-up. Shared with `isQueryError` so the producer and the discriminant
- *  cannot silently drift apart. */
+/** The refusal the project-bound helpers surface when the caller has no
+ *  resolved project worktree (`context.worktree`): they never walk up from a
+ *  load location or cwd to find a database, so an unresolved project is a hard
+ *  refusal rather than a silent query against another checkout. Distinct from
+ *  `NO_DB_ERROR` and shared with `isQueryError`, so `runCypher`'s returned
+ *  refusal can never be misparsed as CSV. */
+export const MISSING_WORKTREE_ERROR =
+  "Error: no resolved project worktree. Resolve a registered project before running this tool."
+
+/** The no-database failure signal — no `apg/.trans/db.lbug` was found. Kept
+ *  distinct from `MISSING_WORKTREE_ERROR` and shared with `isQueryError` so the
+ *  discriminant and any producer cannot silently drift apart. */
 export const NO_DB_ERROR =
   "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
 
@@ -518,8 +495,8 @@ export const NO_DB_ERROR =
  *  required `context.projectName`), `APG_CALLER_SESSION` (`context.sessionID`)
  *  and — only when the context carries a session-id chain — `APG_CALLER_ANCESTORS`
  *  (outermost→innermost, trimmed, empties dropped). `process.env` is copied, never
- *  mutated, and the caller's own cwd is never changed. Shared by `runCypher`'s
- *  project-bound path and `runInProject`. */
+ *  mutated, and the caller's own cwd is never changed. Shared by `runCypher`,
+ *  `startDetachedSession` and `runInProject`. */
 function callerEnv(context: ToolContext): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -532,20 +509,21 @@ function callerEnv(context: ToolContext): Record<string, string | undefined> {
 }
 
 /**
- * Runs a Cypher query against the project's db and returns CSV text with a
- * header row on success. On failure it returns an error STRING — never a throw,
- * never data — that `isQueryError` recognizes: either `NO_DB_ERROR` (no db
- * found) or a string beginning with `QUERY_FAILED_PREFIX`, carrying `apg
- * query`'s exit code and stderr verbatim. Both failure signals are built from
- * the constants above, which `isQueryError` also tests against, so the failure
- * contract stays structural rather than duplicated string literals.
+ * Runs a Cypher query against the resolved project's db and returns CSV text
+ * with a header row on success. On failure it returns an error STRING — never a
+ * throw, never data — that `isQueryError` recognizes: `MISSING_WORKTREE_ERROR`
+ * (the caller has no resolved project worktree) or a string beginning with
+ * `QUERY_FAILED_PREFIX`, carrying `apg query`'s exit code and stderr verbatim.
+ * Both failure signals are built from the constants above, which `isQueryError`
+ * also tests against, so the failure contract stays structural rather than
+ * duplicated string literals.
  *
- * PROJECT BOUND: when the caller resolved a registered project into
- * `context.worktree` (through `resolveProjectWorktree`), the query runs in that
- * worktree with the caller's project environment set (`callerEnv`) — never the
- * caller's cwd, and with no `findApgRoot` walk that could reach another
- * checkout's database. A missing worktree database is the binary's own named
- * refusal, surfaced through the same `QUERY_FAILED_PREFIX` string.
+ * PROJECT BOUND: the query runs in the resolved `context.worktree` (through
+ * `resolveProjectWorktree`) with the caller's project environment set
+ * (`callerEnv`) — never the caller's cwd, and never a walk-up that could reach
+ * another checkout's database. A missing worktree is `MISSING_WORKTREE_ERROR`;
+ * a missing database inside it is the binary's own named refusal, surfaced
+ * through the same `QUERY_FAILED_PREFIX` string.
  *
  * DEFAULT-RAW seam (`requirements.requirement.absolute-paths-at-tool-boundary`):
  * with no `opts`, the stored form is returned verbatim, so raw `apg query` is
@@ -562,13 +540,11 @@ export async function runCypher(
   cypher: string,
   opts?: { rebaseColumns?: number[] | ((row: string[]) => number[]) },
 ): Promise<string> {
-  const root = context.worktree ?? findApgRoot(context)
+  const root = context.worktree
   if (!root) {
-    return NO_DB_ERROR
+    return MISSING_WORKTREE_ERROR
   }
-  const result = context.worktree
-    ? await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).env(callerEnv(context)).quiet().nothrow()
-    : await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).quiet().nothrow()
+  const result = await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).env(callerEnv(context)).quiet().nothrow()
   if (result.exitCode !== 0) {
     return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
@@ -631,12 +607,13 @@ export function noteIfEmpty(out: string, note: string): string {
  * and `merge` are main-checkout operations with no project worktree to resolve,
  * so they pass `mainCheckoutRoot`'s root. It is never a tool input or a project
  * selector — every project-bound command runs through `runInProject` in the
- * resolved worktree. With it omitted, the root is `context.worktree` and then
- * the load-location walk-up. */
+ * resolved worktree. With it omitted, the root is the resolved
+ * `context.worktree`; a caller with neither is refused with
+ * `MISSING_WORKTREE_ERROR`. */
 export async function runCli(context: ToolContext, args: string[], mainRoot?: string): Promise<string> {
-  const root = mainRoot ?? context.worktree ?? findApgRoot(context)
+  const root = mainRoot ?? context.worktree
   if (!root) {
-    return NO_DB_ERROR
+    return MISSING_WORKTREE_ERROR
   }
   const result = await Bun.$`${apgBinary()} ${args}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
@@ -711,10 +688,10 @@ export function projectOf(fqn: string): string | null {
 }
 
 /** Parses `apg query`'s CSV output (header + rows, quoted fields) into rows.
- *  Guards the result first: a `runCypher` error string (query failure or
- *  missing DB) throws verbatim from `expectQueryOk` rather than being
- *  misparsed as data. Calling the parse boundary is therefore sufficient —
- *  callers cannot forget the guard. */
+ *  Guards the result first: a `runCypher` error string (query failure, missing
+ *  DB, or missing project worktree) throws verbatim from `expectQueryOk` rather
+ *  than being misparsed as data. Calling the parse boundary is therefore
+ *  sufficient — callers cannot forget the guard. */
 export function csvToRows(out: string): string[][] {
   const rows: string[][] = []
   for (const line of expectQueryOk(out).split("\n")) {
@@ -725,13 +702,18 @@ export function csvToRows(out: string): string[][] {
 }
 
 /**
- * True when a runCypher result is an error string (query failure or missing
- * DB), not CSV data — checked before it is ever fed to csvToRows. Tests the
- * exact signals runCypher builds (`QUERY_FAILED_PREFIX` / `NO_DB_ERROR`), so
- * the two cannot drift apart.
+ * True when a runCypher result is an error string (query failure, missing DB,
+ * or missing project worktree), not CSV data — checked before it is ever fed
+ * to csvToRows. Tests the exact signals the helpers build
+ * (`QUERY_FAILED_PREFIX` / `NO_DB_ERROR` / `MISSING_WORKTREE_ERROR`), so the
+ * discriminant and the producers cannot drift apart.
  */
 export function isQueryError(out: string): boolean {
-  return out.startsWith(QUERY_FAILED_PREFIX) || out.startsWith(NO_DB_ERROR)
+  return (
+    out.startsWith(QUERY_FAILED_PREFIX) ||
+    out.startsWith(NO_DB_ERROR) ||
+    out.startsWith(MISSING_WORKTREE_ERROR)
+  )
 }
 
 /**
@@ -975,22 +957,23 @@ async function defaultBranchRef(projectRoot: string): Promise<string | null> {
  * Real I/O — `Bun.$` git subprocesses with cwd at the project root — so it is
  * covered by the opt-in suite e2e, never the side-effect-free unit tier. The
  * project root is the resolved worktree (`context.worktree`), so the delta is
- * measured on the branch the worktree has checked out, with the load-location
- * walk-up as the fallback for a caller with no resolved project. The pure
+ * measured on the branch the worktree has checked out; a caller with no
+ * resolved project worktree is refused with `MISSING_WORKTREE_ERROR` (thrown —
+ * this helper returns a Set, so there is no string form to return). The pure
  * `scopeProjectRequirements` consumes its result (the returned names feed its
- * `branchAdded` argument). Returns an empty set when no project root is found,
- * when no default branch resolves (a detached/unborn main checkout with no
- * `origin/HEAD`), or when the resolved name has neither a local nor a remote
- * tracking ref, so the caller falls back to the Satisfies-only scope. Only the
- * first of these mirrors the binary's `default_branch`-None empty-delta
- * fallback; the unresolvable-ref case is an error there, and the suite stays
- * deliberately conservative (empty, not a throw).
+ * `branchAdded` argument). Returns an empty set when no default branch resolves
+ * (a detached/unborn main checkout with no `origin/HEAD`), or when the resolved
+ * name has neither a local nor a remote tracking ref, so the caller falls back
+ * to the Satisfies-only scope. The no-default-branch case mirrors the binary's
+ * `default_branch`-None empty-delta fallback; the unresolvable-ref case is an
+ * error there, and the suite stays deliberately conservative (empty, not a
+ * throw).
  */
 export async function branchAddedRequirementNames(
   context: ToolContext,
 ): Promise<Set<string>> {
-  const root = context.worktree ?? findApgRoot(context)
-  if (!root) return new Set()
+  const root = context.worktree
+  if (!root) throw new Error(MISSING_WORKTREE_ERROR)
   const branch = await defaultBranchRef(root)
   if (!branch) return new Set()
 
@@ -1128,15 +1111,15 @@ export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean
  *
  * For a project-bound call (`context.worktree` set by `resolveProjectWorktree`),
  * the coordinator is spawned in that worktree with the caller's project
- * environment (`callerEnv`) and no `findApgRoot` walk that could reach another
- * checkout's database — exactly `runCypher`'s project binding. With no
- * `context.worktree`, the load-location walk-up and inherited environment are
- * the fallback for a caller with no resolved project.
+ * environment (`callerEnv`) — exactly `runCypher`'s project binding, with no
+ * walk-up that could reach another checkout's database. A missing
+ * `context.worktree` is a hard refusal (`MISSING_WORKTREE_ERROR`).
  *
  * Returns a `DetachedSession` on success, or an error STRING on failure —
- * mirroring the lib's string-or-data subprocess contract (`runCli`): no DB
- * found (`NO_DB_ERROR`), a `start` that exited early (a second session already
- * owns the worktree, a bad layout, …), or a socket that never answered live
+ * mirroring the lib's string-or-data subprocess contract (`runCli`): no
+ * resolved project worktree (`MISSING_WORKTREE_ERROR`), a `start` that exited
+ * early (a second session already owns the worktree, a bad layout, …), or a
+ * socket that never answered live
  * within the timeout. A timeout kills the half-started process. The captured
  * `start` output — and the retained log path — are carried in the returned
  * error for diagnosis.
@@ -1145,8 +1128,8 @@ export async function startDetachedSession(
   context: ToolContext,
   options?: StartSessionOptions,
 ): Promise<DetachedSession | string> {
-  const root = context.worktree ?? findApgRoot(context)
-  if (!root) return NO_DB_ERROR
+  const root = context.worktree
+  if (!root) return MISSING_WORKTREE_ERROR
   const timeoutMs = options?.timeoutMs ?? 15000
   const pollMs = options?.pollMs ?? 50
 
@@ -1162,7 +1145,7 @@ export async function startDetachedSession(
   try {
     proc = Bun.spawn([apgBinary(), "session", "start"], {
       cwd: root,
-      ...(context.worktree ? { env: callerEnv(context) } : {}),
+      env: callerEnv(context),
       // A truly detached coordinator: `detached: true` calls setsid() on POSIX,
       // so the child starts a new session/process group and outlives this
       // process, independent of its process group.
