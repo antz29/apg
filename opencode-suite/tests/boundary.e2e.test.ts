@@ -996,7 +996,7 @@ test.skipIf(!enabled || !binary)(
       const pluginCtx = {
         location: { directory: repo },
         permission: { assert: async () => {} },
-        tool: { transform: async (fn: (editor: typeof editor) => void) => void fn(editor) },
+        tool: { transform: async (fn: (editorApi: typeof editor) => void) => void fn(editorApi) },
       }
       await apgQuery.setup(pluginCtx as never)
 
