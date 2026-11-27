@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "resolve-registry-read-limits",
+  "body": "project resolve does not validate the project name, so a malformed name reads as unregistered and answers with the registry listing, and a corrupt registry surfaces the store's own open error rather than a resolution refusal; validate names and add rebuild-on-read recovery when resolve must distinguish those cases.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.project_resolve",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
