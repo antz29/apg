@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "claim-open-limits",
+  "body": "claim does not validate the row against git, orders the main-row refusal after the registry open and the unregistered lookup, and rewrites the row even when the caller is already the owner, reporting itself as the previous owner; validate stale rows, make the main refusal unconditional and make a same-owner claim a no-op only if those behaviours become observable.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.project_claim",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
