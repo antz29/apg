@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "require-registry-flat-refusal",
+  "body": "require_registry treats every registry open failure, corrupt, foreign or transient lock contention alike, as an unusable registry with the same refusal; add a retry or a typed freshness policy only when lock contention against a live writer is observed in practice.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.registry.require_registry",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
