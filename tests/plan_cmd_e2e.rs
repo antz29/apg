@@ -11,7 +11,7 @@ use apg::load;
 use apg::plan_cmd::*;
 use apg::schema::Record;
 use apg::specs;
-use apg::testutil::{self, Repo, av, nf, task_recs, with_cwd, wt_commit_paths};
+use apg::testutil::{self, Repo, ScratchGuard, av, nf, task_recs, with_cwd, wt_commit_paths};
 use lbug::Connection;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -6507,6 +6507,10 @@ mod e2e {
         const READER_QUERY: &str = "MATCH (s:Scan) RETURN s.git_sha";
 
         let (apg_root, repo, wt) = fixture("verify-concurrent-reader");
+        // Owns the fixture and every round's reader: any panic below (a failed
+        // rendezvous included) still stops and joins the reader and removes the
+        // fixture.
+        let mut guard = ScratchGuard::new(repo);
         artifacts::write_jsonl_and_reingest(
             &apg_root,
             &specs::plan_jsonl_path(&apg_root, "foo"),
@@ -6523,6 +6527,13 @@ mod e2e {
         );
 
         let t0 = Instant::now();
+        // One predicate decides overlap, applied to both the observed reader
+        // intervals and a synthesized pre-verify set it must reject.
+        let overlaps = |intervals: &[(Instant, Instant)], v_start: Instant, v_end: Instant| {
+            intervals
+                .iter()
+                .any(|(r_start, r_end)| *r_start <= v_end && v_start <= *r_end)
+        };
         for round in 0..ROUNDS {
             let stop = Arc::new(AtomicBool::new(false));
             let runs: Arc<Mutex<Vec<(Instant, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
@@ -6554,6 +6565,7 @@ mod e2e {
                     }
                 })
             };
+            guard.register_reader(Arc::clone(&stop), reader);
 
             // Rendezvous: the reader has completed a full invocation, so it is
             // demonstrably in flight before verify starts.
@@ -6570,9 +6582,9 @@ mod e2e {
             let verify = testutil::spawn_apg(&["plan", "verify", "foo"], &wt);
             let v_end = Instant::now();
 
-            // Join only after verify returns.
-            stop.store(true, Ordering::SeqCst);
-            reader.join().expect("the reader thread panicked");
+            // Join only after verify returns; the guard owns the handle so a
+            // panic above still tears the reader down.
+            guard.stop_and_join();
 
             let stdout = String::from_utf8_lossy(&verify.stdout);
             let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -6604,19 +6616,44 @@ mod e2e {
                 "round {round}: every reader invocation must exit 0 with the CSV header: {reader_failures:?}"
             );
 
-            let runs = runs.lock().unwrap();
+            let observed = runs.lock().unwrap().clone();
             assert!(
-                runs.iter()
-                    .any(|(r_start, r_end)| *r_start <= v_end && v_start <= *r_end),
+                overlaps(&observed, v_start, v_end),
                 "round {round}: no observed reader/verify overlap — verify {:?}..{:?}, reader intervals {:?}",
                 v_start.duration_since(t0),
                 v_end.duration_since(t0),
-                runs.iter()
+                observed
+                    .iter()
                     .map(|(s, e)| (s.duration_since(t0), e.duration_since(t0)))
                     .collect::<Vec<_>>()
             );
-        }
 
-        testutil::remove(&repo);
+            // Negative control: the same predicate must reject a reader set
+            // whose every interval ends before verify began, so a non-empty run
+            // list alone never satisfies the overlap assertion.
+            let pre_verify_only = [
+                (
+                    v_start - Duration::from_secs(2),
+                    v_start - Duration::from_secs(1),
+                ),
+                (
+                    v_start - Duration::from_secs(1),
+                    v_start - Duration::from_millis(500),
+                ),
+            ];
+            assert!(
+                !overlaps(&pre_verify_only, v_start, v_end),
+                "round {round}: the overlap predicate accepted a pre-verify-only reader set — verify {:?}..{:?}, synthesized intervals {:?}",
+                v_start.duration_since(t0),
+                v_end.duration_since(t0),
+                pre_verify_only
+                    .iter()
+                    .map(|(s, e)| (
+                        v_start.saturating_duration_since(*s),
+                        v_start.saturating_duration_since(*e)
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 }
