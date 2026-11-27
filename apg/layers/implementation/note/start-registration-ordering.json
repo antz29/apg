@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "start-registration-ordering",
+  "body": "The start registry refusal runs after the git-collision refusals, so a live branch or worktree duplicate still reports the git-state wording while the row wording covers only the stale-row case; and the row is written after worktree creation, so a failed registry write leaves the new worktree and branch in place. Reorder the refusal and add post-creation rollback when either ordering becomes user-visible.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.start.project_start_at_with",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
