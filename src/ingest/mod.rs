@@ -1382,13 +1382,14 @@ fn ingest_records(
                     to,
                     properties,
                 } => {
-                    // A COBOL COPY copybook, a PowerShell dot-source / import-module or a
-                    // Terraform module-source / override target is a File identity, not a
-                    // symbol: leave it unrooted.
+                    // A COBOL COPY copybook, a PowerShell dot-source / import-module, a
+                    // Terraform module-source / override or a Bicep module / using / extends /
+                    // import target is a File identity, not a symbol: leave it unrooted.
                     let file_edge = properties.get("kind").is_some_and(|k| {
                         k == "copy"
                             || crate::ps::is_file_edge_kind(k)
                             || crate::terraform::is_file_edge_kind(k)
+                            || crate::bicep::is_file_edge_kind(k)
                     });
                     let to = if file_edge {
                         to
@@ -1674,13 +1675,15 @@ fn ingest_records(
                     to,
                     properties,
                 } => {
-                    // A COBOL COPY copybook, a PowerShell dot-source / import-module or a
-                    // Terraform module-source / override target is an absolute File path:
-                    // render it to the same repo-relative File identity Record::File uses.
+                    // A COBOL COPY copybook, a PowerShell dot-source / import-module, a
+                    // Terraform module-source / override or a Bicep module / using / extends /
+                    // import target is an absolute File path: render it to the same
+                    // repo-relative File identity Record::File uses.
                     let file_edge = properties.get("kind").is_some_and(|k| {
                         k == "copy"
                             || crate::ps::is_file_edge_kind(k)
                             || crate::terraform::is_file_edge_kind(k)
+                            || crate::bicep::is_file_edge_kind(k)
                     });
                     let a = resolve(&from);
                     let b = if file_edge {
@@ -2164,6 +2167,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
                             k == "copy"
                                 || crate::ps::is_file_edge_kind(k)
                                 || crate::terraform::is_file_edge_kind(k)
+                                || crate::bicep::is_file_edge_kind(k)
                         })))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {

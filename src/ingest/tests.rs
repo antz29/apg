@@ -476,6 +476,50 @@ mod unit {
         );
     }
 
+    /// bicep `--targets` retarget: a bicep file module is its repo-relative path
+    /// (never the empty root), so a dropped `uses` keyed `<file>.<keyword>.<name>`
+    /// roots under the file module and renders the real Struct FQN
+    /// (`bicep.shared/store.bicep.type.skuName`), a nested file likewise, and an
+    /// opaque `bp3` id is left unrooted.
+    #[test]
+    fn bicep_file_module_retarget_renders_the_real_struct_fqn() {
+        let base = Path::new("/repo");
+        let ids: HashMap<String, HashSet<String>> = HashMap::from([(
+            "bicep".to_string(),
+            HashSet::from([
+                "shared/store.bicep".to_string(),
+                "net/vnet.bicep".to_string(),
+            ]),
+        )]);
+        assert_eq!(
+            format!(
+                "{}.type.skuName",
+                rooted_scope("bicep", "shared/store.bicep", &ids, base)
+            ),
+            "bicep.shared/store.bicep.type.skuName"
+        );
+        assert_eq!(
+            root_edge_endpoint("bicep", "shared/store.bicep.type.skuName", &ids, base),
+            "bicep.shared/store.bicep.type.skuName"
+        );
+        assert_eq!(
+            format!(
+                "{}.resource.vnet",
+                rooted_scope("bicep", "net/vnet.bicep", &ids, base)
+            ),
+            "bicep.net/vnet.bicep.resource.vnet"
+        );
+        assert_eq!(
+            root_edge_endpoint("bicep", "net/vnet.bicep.resource.vnet", &ids, base),
+            "bicep.net/vnet.bicep.resource.vnet"
+        );
+        assert_eq!(root_edge_endpoint("bicep", "bp3", &ids, base), "bp3");
+        assert_eq!(
+            root_stream_edge_endpoint("bicep", "bp3", |_| false, &ids, base),
+            "bp3"
+        );
+    }
+
     /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
     /// `repo_relative_identity` renders a scanner path relative to the
     /// git-toplevel base (the scan root is the non-git fallback),
