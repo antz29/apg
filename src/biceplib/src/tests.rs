@@ -3,12 +3,140 @@
 //! shared fixtures and helpers at this root. e2e tests live outside this
 //! tree in `tests/biceplib_e2e.rs`, under `mod e2e`.
 
-use crate::{diag, parse, resolve, source, units};
-use std::path::Path;
+use crate::{diag, parse, resolve, scan, source, units};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 fn parse_text(text: &str) -> parse::File {
     parse::parse(&source::decode_mapped(text.as_bytes()))
 }
+
+/// One resolved fact as `kind from -> to`, naming units by their keyword names.
+fn render(sources: &[resolve::Source], file: usize, fact: &resolve::Fact) -> String {
+    let here = |i: usize| sources[file].units.units[i].name.as_str();
+    let target =
+        |f: usize, i: usize| format!("{}::{}", sources[f].path, sources[f].units.units[i].name);
+    match fact {
+        resolve::Fact::Uses {
+            from,
+            file: target_file,
+            to,
+        } => format!("uses {} -> {}", here(*from), target(*target_file, *to)),
+        resolve::Fact::Calls { from, to } => format!("calls {} -> {}", here(*from), here(*to)),
+        resolve::Fact::FileUses { from, path, kind } => {
+            format!("file {kind} {} -> {path}", here(*from))
+        }
+        resolve::Fact::Unresolved {
+            from,
+            name,
+            category,
+        } => format!("unresolved {category} {} -> {name}", here(*from)),
+    }
+}
+
+/// Parses every `(repo-relative path, text)` file, then resolves them together.
+fn resolved(files: &[(&str, &str)]) -> Vec<Vec<String>> {
+    let parsed: Vec<parse::File> = files.iter().map(|(_, text)| parse_text(text)).collect();
+    let sources: Vec<resolve::Source> = files
+        .iter()
+        .zip(&parsed)
+        .map(|((path, _), file)| resolve::Source {
+            path,
+            units: units::file_units(file),
+        })
+        .collect();
+    resolve::resolve(&sources)
+        .iter()
+        .enumerate()
+        .map(|(file, facts)| facts.iter().map(|f| render(&sources, file, f)).collect())
+        .collect()
+}
+
+/// The facts core over `(repo-relative path, text)` files under the root `/repo`.
+fn records(files: &[(&str, &str)]) -> (Vec<scan::Rec>, usize, String) {
+    let owned: Vec<(PathBuf, Vec<u8>)> = files
+        .iter()
+        .map(|(p, t)| (Path::new("/repo").join(p), t.as_bytes().to_vec()))
+        .collect();
+    let mut err = Vec::new();
+    let (recs, failed) = scan::facts(Path::new("/repo"), &owned, "bp", &mut err).unwrap();
+    (recs, failed, String::from_utf8(err).unwrap())
+}
+
+const MAIN: &str = "param location string
+import { skuName as sku, defaultSku, nope } from '../shared/store.bicep'
+import * as ts from 'ts:spec/ref:1.0.0'
+module net './net/vnet.bicep' = {
+  name: 'net'
+}
+module arm './arm/template.json' = {
+  name: 'arm'
+}
+module reg 'br:mcr.microsoft.com/bicep/avm/res/storage:1.0.0' = {
+  name: 'reg'
+}
+module gone './gone.bicep' = {
+  name: 'gone'
+}
+module esc '../../outside.bicep' = {
+  name: 'esc'
+}
+module comp './${name}.bicep' = {
+  name: 'comp'
+}
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'stg1'
+  location: location
+  sku: {
+    name: sku
+  }
+}
+resource web 'Microsoft.Web/sites@2023-01-01' = {
+  name: 'web'
+  properties: {
+    serverFarmId: plan::slot
+  }
+}
+resource plan 'Microsoft.Web/serverfarms@2023-01-01' = {
+  name: 'plan'
+  resource slot 'Microsoft.Web/sites/slots@2023-01-01' = {
+    name: 'slot'
+  }
+}
+func double(n int) int => n * 2
+func quad(n int) int => double(double(n))
+var answer = double(21)
+";
+
+const VNET: &str = "param addressPrefix string
+resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
+  name: 'vnet1'
+  properties: {
+    prefix: addressPrefix
+  }
+}
+output vnetId string = vnet.id
+";
+
+const VNET_RES: &str = "resource vnet 'Microsoft.Network/virtualNetworks@2023-04-01' = {
+  name: 'vnet1'
+  resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-04-01' = {
+    name: 'default'
+  }
+}
+";
+
+const STORE: &str = "type skuName = string
+@export()
+var defaultSku = 'Standard_LRS'
+func mk() string => 'x'
+resource stgAcc 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'sa'
+  sku: {
+    name: defaultSku
+  }
+}
+";
 
 mod unit {
     use super::*;
@@ -365,4 +493,172 @@ mod unit {
     }
 }
 
-mod int {}
+mod int {
+    use super::*;
+
+    #[test]
+    fn resolves_imports_modules_registry_and_unknown_paths_across_files() {
+        let got = resolved(&[
+            ("app/main.bicep", MAIN),
+            ("app/net/vnet.bicep", VNET),
+            ("app/arm/template.json", ""),
+            ("shared/store.bicep", STORE),
+        ]);
+        let nameless = format!(
+            "unresolved unknown module.comp -> <nameless@app/main.bicep:{}>",
+            MAIN.find("'./${").unwrap()
+        );
+        assert_eq!(
+            got[0],
+            [
+                "file import import.sku -> shared/store.bicep",
+                "uses import.sku -> shared/store.bicep::type.skuName",
+                "file import import.defaultSku -> shared/store.bicep",
+                "uses import.defaultSku -> shared/store.bicep::var.defaultSku",
+                "file import import.nope -> shared/store.bicep",
+                "unresolved external import.ts -> ts:spec/ref:1.0.0",
+                "file module module.net -> app/net/vnet.bicep",
+                "file module module.arm -> app/arm/template.json",
+                "unresolved external module.reg -> br:mcr.microsoft.com/bicep/avm/res/storage:1.0.0",
+                "unresolved unknown module.gone -> app/gone.bicep",
+                "unresolved unknown module.esc -> ../outside.bicep",
+                nameless.as_str(),
+                "uses resource.stg -> app/main.bicep::param.location",
+                "uses resource.stg -> app/main.bicep::import.sku",
+                "uses resource.web -> app/main.bicep::slot",
+                "calls func.quad -> func.double",
+            ]
+        );
+        assert!(got[2].is_empty());
+        assert_eq!(
+            got[3],
+            ["uses resource.stgAcc -> shared/store.bicep::var.defaultSku"]
+        );
+    }
+
+    #[test]
+    fn a_resource_links_to_its_param_and_an_output_to_its_resource() {
+        let got = resolved(&[("app/net/vnet.bicep", VNET)]);
+        assert_eq!(
+            got[0],
+            [
+                "uses resource.vnet -> app/net/vnet.bicep::param.addressPrefix",
+                "uses output.vnetId -> app/net/vnet.bicep::resource.vnet",
+            ]
+        );
+    }
+
+    #[test]
+    fn bicepparam_using_and_extends_draw_file_edges_to_their_targets() {
+        let got = resolved(&[
+            (
+                "app/dev.bicepparam",
+                "using './main.bicep'\nextends './base.bicepparam'\nparam location = 'westeurope'\n",
+            ),
+            ("app/base.bicepparam", "param sku = 'Standard_LRS'\n"),
+            ("app/main.bicep", "param location string\n"),
+        ]);
+        assert_eq!(
+            got[0],
+            [
+                "file using using -> app/main.bicep",
+                "file extends extends -> app/base.bicepparam",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_module_may_not_name_a_bicepparam_file() {
+        let got = resolved(&[
+            (
+                "app/p.bicep",
+                "module m './base.bicepparam' = {\n  name: 'x'\n}\n",
+            ),
+            ("app/base.bicepparam", ""),
+        ]);
+        assert_eq!(
+            got[0],
+            ["unresolved unknown module.m -> app/base.bicepparam"]
+        );
+    }
+
+    #[test]
+    fn facts_emit_module_file_struct_contains_and_struct_to_file_uses() {
+        let main = "param location string\nmodule net './net/vnet.bicep' = {\n  name: 'net'\n}\n";
+        let (recs, failed, err) =
+            records(&[("app/main.bicep", main), ("app/net/vnet.bicep", VNET_RES)]);
+        assert_eq!((failed, err.as_str()), (0, ""));
+        assert_eq!(
+            serde_json::to_value(&recs).unwrap(),
+            serde_json::json!([
+                {"type": "module", "fqn": "app/main.bicep"},
+                {"type": "file", "path": "/repo/app/main.bicep", "parent": "app/main.bicep", "start_line": 1, "end_line": 4},
+                {"type": "struct", "id": "bp1", "parent": "app/main.bicep", "name": "param.location", "path": "/repo/app/main.bicep", "start": 0, "end": 21, "start_line": 1, "end_line": 1},
+                {"type": "struct", "id": "bp2", "parent": "app/main.bicep", "name": "module.net", "path": "/repo/app/main.bicep", "start": main.find("module net").unwrap(), "end": main.rfind('}').unwrap() + 1, "start_line": 2, "end_line": 4},
+                {"type": "uses", "from": "bp2", "to": "/repo/app/net/vnet.bicep", "properties": {"kind": "module"}},
+                {"type": "module", "fqn": "app/net/vnet.bicep"},
+                {"type": "file", "path": "/repo/app/net/vnet.bicep", "parent": "app/net/vnet.bicep", "start_line": 1, "end_line": 6},
+                {"type": "struct", "id": "bp3", "parent": "app/net/vnet.bicep", "name": "resource.vnet", "path": "/repo/app/net/vnet.bicep", "start": 0, "end": VNET_RES.trim_end().len(), "start_line": 1, "end_line": 6},
+                {"type": "struct", "id": "bp4", "parent": "app/net/vnet.bicep.resource.vnet", "name": "subnet", "path": "/repo/app/net/vnet.bicep", "start": VNET_RES.find("resource subnet").unwrap(), "end": VNET_RES.find("  }\n}").unwrap() + 3, "start_line": 3, "end_line": 5},
+                {"type": "contains", "from": "bp3", "to": "bp4"},
+            ])
+        );
+    }
+
+    #[test]
+    fn syntax_errors_and_duplicates_are_diagnosed_and_the_scan_continues() {
+        let (recs, failed, err) = records(&[(
+            "app/dup.bicep",
+            "param p string\nparam p int\nresource bad\n",
+        )]);
+        assert_eq!(failed, 1);
+        assert_eq!(
+            err,
+            "bicep: /repo/app/dup.bicep:3:13: expected a string\n\
+             bicep: /repo/app/dup.bicep:2: duplicate declaration param.p\n"
+        );
+        assert_eq!(
+            serde_json::to_value(&recs).unwrap(),
+            serde_json::json!([
+                {"type": "module", "fqn": "app/dup.bicep"},
+                {"type": "file", "path": "/repo/app/dup.bicep", "parent": "app/dup.bicep", "start_line": 1, "end_line": 3},
+                {"type": "struct", "id": "bp1", "parent": "app/dup.bicep", "name": "param.p", "path": "/repo/app/dup.bicep", "start": 0, "end": 14, "start_line": 1, "end_line": 1},
+            ])
+        );
+    }
+
+    #[test]
+    fn targets_retain_drops_other_files_and_keeps_file_paths_unrewritten() {
+        let main = "param location string\nmodule net './net/vnet.bicep' = {\n  name: 'net'\n}\n";
+        let (recs, _, _) = records(&[("app/main.bicep", main), ("app/net/vnet.bicep", VNET_RES)]);
+        let targets = HashSet::from(["/repo/app/main.bicep".to_string()]);
+        assert_eq!(
+            serde_json::to_value(scan::retain(recs, &targets)).unwrap(),
+            serde_json::json!([
+                {"type": "module", "fqn": "app/main.bicep"},
+                {"type": "file", "path": "/repo/app/main.bicep", "parent": "app/main.bicep", "start_line": 1, "end_line": 4},
+                {"type": "struct", "id": "bp1", "parent": "app/main.bicep", "name": "param.location", "path": "/repo/app/main.bicep", "start": 0, "end": 21, "start_line": 1, "end_line": 1},
+                {"type": "struct", "id": "bp2", "parent": "app/main.bicep", "name": "module.net", "path": "/repo/app/main.bicep", "start": main.find("module net").unwrap(), "end": main.rfind('}').unwrap() + 1, "start_line": 2, "end_line": 4},
+                {"type": "uses", "from": "bp2", "to": "/repo/app/net/vnet.bicep", "properties": {"kind": "module"}},
+            ])
+        );
+    }
+
+    #[test]
+    fn retain_retargets_a_uses_into_a_dropped_file_to_its_struct_key() {
+        let import = "import { skuName } from '../shared/store.bicep'\n";
+        let store = "type skuName = string\n";
+        let (recs, _, _) = records(&[("app/main.bicep", import), ("shared/store.bicep", store)]);
+        let targets = HashSet::from(["/repo/app/main.bicep".to_string()]);
+        assert_eq!(
+            serde_json::to_value(scan::retain(recs, &targets)).unwrap(),
+            serde_json::json!([
+                {"type": "module", "fqn": "app/main.bicep"},
+                {"type": "file", "path": "/repo/app/main.bicep", "parent": "app/main.bicep", "start_line": 1, "end_line": 1},
+                {"type": "struct", "id": "bp1", "parent": "app/main.bicep", "name": "import.skuName", "path": "/repo/app/main.bicep", "start": 0, "end": import.trim_end().len(), "start_line": 1, "end_line": 1},
+                {"type": "uses", "from": "bp1", "to": "/repo/shared/store.bicep", "properties": {"kind": "import"}},
+                {"type": "uses", "from": "bp1", "to": "shared/store.bicep.type.skuName"},
+            ])
+        );
+    }
+}

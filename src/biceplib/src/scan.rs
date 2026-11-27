@@ -109,7 +109,7 @@ fn json_targets(root: &Path, parsed: &[Parsed]) -> Vec<String> {
 
 /// The records of the claimed `files` (absolute path and bytes, sorted) before any `--targets`
 /// filter, with the count of files with syntax errors. Each diagnostic goes to `err`.
-fn facts(
+pub(crate) fn facts(
     root: &Path,
     files: &[(PathBuf, Vec<u8>)],
     prefix: &str,
@@ -281,7 +281,7 @@ fn facts(
 /// Module a kept File sits in, a Contains or Calls when both ends are kept, a Uses/UnresolvedUse
 /// when its source is kept (a Uses into a dropped Struct retargeted to that Struct's key; a File
 /// target is a path, never rewritten), an Unresolved when a kept UnresolvedUse names it.
-fn retain(recs: Vec<Rec>, targets: &HashSet<String>) -> Vec<Rec> {
+pub(crate) fn retain(recs: Vec<Rec>, targets: &HashSet<String>) -> Vec<Rec> {
     let keys: HashMap<String, String> = recs
         .iter()
         .filter_map(|r| match r {
