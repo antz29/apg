@@ -4,8 +4,6 @@ use std::process::Command;
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
 /// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
 /// `struct`, `py`, `agent`, `cobol`, `sql`, `ps`, `terraform`, `bicep`); `0`/`none`/empty skips all.
-/// `bicep` is a reserved id: no stage arm exists until its crate lands, so
-/// naming it stages nothing.
 /// `struct` is the bundled structural scanner — ONE `structfrontend` binary
 /// serving the `md` stream plus every per-format structural stream and the
 /// residual `misc` — replacing the retired standalone `md` frontend.
@@ -33,6 +31,7 @@ fn build_frontends() -> Vec<String> {
             "sql".into(),
             "ps".into(),
             "terraform".into(),
+            "bicep".into(),
         ],
     }
 }
@@ -221,6 +220,9 @@ fn main() {
     }
     if enabled(&frontends, "terraform") {
         languages.extend(stage_terraform(&stage_dir));
+    }
+    if enabled(&frontends, "bicep") {
+        languages.extend(stage_bicep(&stage_dir));
     }
     if enabled(&frontends, "agent") {
         // Agent frontend (standalone Rust crate, compiled in isolation). Fail-closed
@@ -611,6 +613,35 @@ fn stage_terraform(stage_dir: &Path) -> Vec<String> {
         );
         let _ = std::fs::copy(&terraformfrontend, stage_dir.join("terraformfrontend"));
         return vec!["terraform".into()];
+    }
+
+    Vec::new()
+}
+
+/// Bicep frontend (standalone Rust crate, compiled in isolation, zero C deps).
+fn stage_bicep(stage_dir: &Path) -> Vec<String> {
+    // Same shape as stage_terraform: always `--release` into src/biceplib/target,
+    // staged into the active profile's frontends dir; skip on failure.
+    let bicepfrontend = frontend_artifact("biceplib", "bicepfrontend");
+    if frontend_rebuild_requested() {
+        let _ = std::fs::remove_file(&bicepfrontend);
+        let _ = std::fs::remove_file(stage_dir.join("bicepfrontend"));
+    }
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--manifest-path")
+        .arg("src/biceplib/Cargo.toml")
+        .arg("--release")
+        .arg("--bin")
+        .arg("bicepfrontend");
+    let bicep_ok = cmd.status().is_ok_and(|s| s.success()) && bicepfrontend.exists();
+    if bicep_ok {
+        println!(
+            "cargo:rustc-env=APG_FRONTEND_BICEP={}",
+            bicepfrontend.display()
+        );
+        let _ = std::fs::copy(&bicepfrontend, stage_dir.join("bicepfrontend"));
+        return vec!["bicep".into()];
     }
 
     Vec::new()
