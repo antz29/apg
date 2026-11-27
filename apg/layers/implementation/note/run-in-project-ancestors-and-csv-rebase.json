@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "run-in-project-ancestors-and-csv-rebase",
+  "body": "The project-bound spawn sets APG_CALLER_ANCESTORS only when ToolContext.ancestors carries a session-id chain, and the opencode 2.x executor context supplies none, so the variable is omitted and the binary treats an absent chain like an empty one; the spawn also rebases only the CSV columns named in opts.rebaseColumns against the resolved worktree, so a non-CSV rendered identity passes through verbatim. Upgrade when the plugin context exposes the session parentID chain, or when a project-bound tool needs a non-CSV identity rebase.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.runInProject",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
