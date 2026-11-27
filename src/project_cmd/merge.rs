@@ -34,8 +34,9 @@ pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
 /// Core of `project merge` (split for tests). The default `rebuild` is a real
 /// unguarded `apg scan` of the main checkout; tests override it. After the
 /// verify gate → merge-strength validation → merge → rebuild succeed, the
-/// merged project cleans up after itself: its worktree is removed and its
-/// branch deleted (self-cleanup; never the default branch). Every refusal
+/// merged project cleans up after itself: its worktree is removed, its branch
+/// deleted and its registry row removed (self-cleanup; never the default
+/// branch). Every refusal
 /// before the merge leaves the checkout, worktree and branch untouched. A
 /// rebuild failure after the merge is NOT left landed: the default branch is
 /// reset to the pre-merge commit and a main derived graph that no longer
@@ -229,6 +230,20 @@ pub fn project_merge_at(
     }
     git::remove_worktree(&identity.main_root, name)?;
     git::delete_branch(&identity.main_root, name)?;
+    // The project is gone, so its registry row goes too — after the merge and
+    // self-cleanup succeeded, never before. Best-effort by design: the merge has
+    // landed and the worktree/branch are already removed, so a failure on this
+    // disposable index must not turn a landed merge red. An absent row is a
+    // no-op (`Registry::remove`); anything else gets one repair warning.
+    let registry_path = crate::registry::registry_path(&identity.main_root);
+    if let Err(err) =
+        crate::registry::Registry::open(&registry_path).and_then(|registry| registry.remove(name))
+    {
+        eprintln!(
+            "apg: warning: project `{name}` was merged but its registry row could not be removed from {} ({err:#}); run `apg project reconstruct` to rebuild the registry from the worktree list.",
+            registry_path.display()
+        );
+    }
     Ok(())
 }
 
