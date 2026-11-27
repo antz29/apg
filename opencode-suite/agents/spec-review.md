@@ -142,6 +142,8 @@ winning. Patterns match a resource's whole value (`*` spans `/`, `?` matches one
 stand between a call and its effect: a tool action is reachable only when granted by its rule and
 passes `Tool.Options.permission`; the plugin's `fsScopeDecision` also asserts the `edit` action over the same
 main-anchored paths — an edit needs both gates, and yours denies at gate 1.
+
+**Project binding.** Every apg suite tool takes a **required registered project name** (`project`) and has **no `directory` or other path selector**. The name resolves to that project's worktree through the binary's `apg project resolve`, and an unregistered name is refused naming the registry and the registered projects. An **ownerless** registered project refuses every use until a session claims it with `apg project claim <name>` (the `apg_project` tool's `claim` action).
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local
   and every `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell

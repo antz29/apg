@@ -3913,6 +3913,47 @@ mod e2e {
         }
     }
 
+    /// Phase-03 (e2e): every distributed agent template states the suite's
+    /// project binding — a required registered project name, no `directory` or
+    /// other path selector, and the `apg project claim` verb for an ownerless
+    /// project. The nine template names are asserted present in the embedded
+    /// `AGENTS` set, and the three needles are pinned as literals per prompt.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn agent_prompts_state_the_required_project_binding() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+
+        for name in [
+            "codebase-navigator.md",
+            "spec-writer.md",
+            "plan-writer.md",
+            "spec-review.md",
+            "plan-review.md",
+            "implementation-phase-reviewer.md",
+            "agent-builder.md",
+            "migration-agent.md",
+            "researcher.md",
+        ] {
+            let prompt = agent(name);
+            for needle in [
+                "required registered project name",
+                "no `directory` or other path selector",
+                "apg project claim",
+            ] {
+                assert!(
+                    prompt.contains(needle),
+                    "{name} must carry the project-binding prose {needle:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scaffold_gitignore_adds_layout_entries_once() {

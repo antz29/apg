@@ -145,6 +145,8 @@ match a resource's whole value (`*` spans `/`, `?` matches one character). Two g
 its effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`;
 the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
 and yours denies at gate 1 (your writes go through `apg_node`/`apg_edge`, never a file edit).
+
+**Project binding.** Every apg suite tool takes a **required registered project name** (`project`) and has **no `directory` or other path selector**. The name resolves to that project's worktree through the binary's `apg project resolve`, and an unregistered name is refused naming the registry and the registered projects. An **ownerless** registered project refuses every use until a session claims it with `apg project claim <name>` (the `apg_project` tool's `claim` action).
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local and every
   `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *` —
@@ -172,7 +174,7 @@ You cannot:
 ### Project context
 Operate **inside the project worktree** — cwd inside it, so the suite tools' walk-up discovery
 finds the worktree's own branch DB. Mutations are guarded: they run only inside a project
-worktree, on the project branch — main is never a mutation place. Pass the worktree as `directory`.
+worktree, on the project branch — main is never a mutation place. Pass the **required registered project name**; the tool resolves that project's worktree.
 A durable `apg node`/`apg edge` mutation needs a live session and lands in the worktree database at
 admission (projected, so routed reads see it) but is not durable until `apg session save`; you never commit.
 **A blocked step is a stop, never a workaround** — never route it through another allowed command (a shell wrapper, `-exec`); report the refusal.
