@@ -164,7 +164,10 @@ pub(crate) fn planned_modify_licensing_gaps(records: &[Record]) -> Vec<String> {
 /// `Satisfies`-less added-or-changed requirements). Guarded: refuses outside
 /// the project context and, from one freshness snapshot, against a stale branch
 /// DB (a verdict is only meaningful against the branch's graph — R5) or a
-/// persistently contended freshness read (named as contention, never staleness).
+/// branch-database read failure: a retried transient lock/busy read is named
+/// contention with its waited/budget pair, a terminal first read names the
+/// database and cause with no contention claim, and neither is the stale-graph
+/// case, so a stale-graph `apg scan` is not the fix.
 /// The coherence handle is opened in the read-only class — a verdict never takes
 /// the exclusive read-write class a concurrent reader or writer needs.
 pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
@@ -175,10 +178,12 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     // Readers never take this flock.
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
     // One snapshot decides the gate and names every differing input: a `Stale`
-    // verdict always carries a non-empty `differing`, a persistently unreadable
-    // database is named contention (never staleness, and a stale-graph `apg
-    // scan` is not the fix), while `Fresh` and `NotApplicable` (no DB or no git
-    // repo) proceed as before.
+    // verdict always carries a non-empty `differing`, a database read failure is
+    // contention only when a transient lock/busy read retried (named with its
+    // waited/budget pair), while a terminal first read names the database and
+    // cause with no contention claim. Neither is staleness — a stale-graph `apg
+    // scan` is not the fix — and `Fresh`/`NotApplicable` (no DB or no git repo)
+    // proceed as before.
     match crate::git::freshness_snapshot(apg_root) {
         crate::git::FreshnessSnapshot::Stale { differing, .. } => {
             anyhow::bail!(
