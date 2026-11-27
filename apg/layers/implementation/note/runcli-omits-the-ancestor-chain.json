@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "runcli-omits-the-ancestor-chain",
+  "body": "runCli copies only APG_CALLER_SESSION onto its child environment, so a start or merge it spawns records an owner with no parentID chain; upgrade by carrying APG_CALLER_ANCESTORS as callerEnv does if a spawned child session ever needs to inherit through a delegated chain.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.callerEnv",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
