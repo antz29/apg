@@ -896,11 +896,14 @@ pub fn is_fresh_with_state(
 /// with `None`, so `refusal_message` and `plan_verify_at` keep their existing
 /// calls and are unaffected by the module selection.
 ///
-/// The first four are precondition failures — without them the remaining inputs
-/// cannot be evaluated, so each is reported alone. The rest are collected
-/// together. The live-session read skip is preserved exactly: pending state,
-/// schema and authored digest are evaluated only when no live session owns
-/// `db.lbug`; the recorded/git content comparison runs either way.
+/// The `NotApplicable` preconditions are `"database"` and `"git sha"` only:
+/// without them the remaining inputs cannot be evaluated, so each is reported
+/// alone. `"socket"` and `"recorded scan"` each short-circuit the gather as one
+/// differing input — reaching `Stale` while a HEAD sha is present, and
+/// `NotApplicable`'s `differing` only when there is none. The remaining labels
+/// are collected together. The live-session read skip is preserved exactly:
+/// pending state, schema and authored digest are evaluated only when no live
+/// session owns `db.lbug`; the recorded/git content comparison runs either way.
 pub fn freshness_differences(apg_root: &Path, state: &GitState) -> FreshnessSnapshot {
     freshness_differences_with(apg_root, state, None)
 }
@@ -934,8 +937,10 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
 /// by [`freshness_snapshot`]) folded by the pure [`classify_freshness`] with the
 /// caller's already-captured `state` and `requested` selection.
 /// [`NotApplicable`](FreshnessSnapshot::NotApplicable) is NOT short-circuited:
-/// it carries its precondition label (`"database"`, `"socket"` or `"git sha"`)
-/// exactly as the collect-all form always has, so the label set and the `Fresh`
+/// it carries its precondition label (`"database"` or `"git sha"`) exactly as
+/// the collect-all form always has. `"socket"` is never a precondition label: it
+/// is a differing input that reaches `Stale` (or lands in `NotApplicable`'s
+/// `differing` when there is no HEAD sha). The label set and the `Fresh`
 /// partition match the shared snapshot.
 ///
 /// A gather `Err` (a database unreadable through the bounded retry) is the
