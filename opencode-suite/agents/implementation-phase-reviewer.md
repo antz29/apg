@@ -272,7 +272,15 @@ durable targets need `--project <p>`, routing into the branch's transient mirror
   `creates` (the *planned* destination only); `modifies` (existing scanned code, or a planned
   node licensed by a `creates` of the same FQN in an earlier plan phase); `deletes` (code that
   must already resolve in the scanned graph); `renames`/`moves` (the live source plus the
-  `target` destination) — and an empty edge set is a target-less activity.
+  `target` destination) — and an empty edge set is a target-less activity. The Agent's declared
+  `permissions:` grant (its `.opencode/agents/**` definition) must cover every operation-edge
+  target's file path: compare its worktree-rooted grant glob (`apg/.worktrees/*/<path>`) against
+  the repo-relative target path (`requirements.constraint.code-writer-scope-worktree-only`) and
+  cite the deciding permission line as evidence. Ownership follows the path glob, not the
+  language label — suite TypeScript under `opencode-suite/**` belongs to the core implementer,
+  not the TS frontend Agent; `AGENTS.md`/`scripts/**` belong to the build implementer. A grant
+  excluding any target path is a blocking finding (the assignment must change), even though the
+  binary accepts any roster Agent.
 - **Gate ownership**: the repo gate belongs to the **gate-owning Agent**; a gate task is done
   only on that Agent's observed green run, never asserted from a retired gate kind.
 - **Planned nodes** live at their real code FQN with `status: planned`; a **branch scan**
