@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "reconstruct-skips-stale-admin-entries",
+  "body": "Reconstruct enumerates libgit2's administrative worktree entries and skips a stale or prunable one with a warning instead of pruning it; add an explicit prune-style repair once projects can be abandoned outside apg.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.project_reconstruct",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
