@@ -40,8 +40,8 @@ pub(crate) fn project_delete(args: &[String]) -> anyhow::Result<()> {
 /// owns the branch DB (save and end it first, mirroring merge). The branch may
 /// be unmerged —
 /// delete is the abandon path. On success `git::remove_worktree` +
-/// `git::delete_branch` remove the project; the default branch and the main
-/// checkout are never touched.
+/// `git::delete_branch` remove the project and its registry row is removed
+/// best-effort; the default branch and the main checkout are never touched.
 pub fn project_delete_at(main_apg_root: &Path, name: &str) -> anyhow::Result<()> {
     let identity = git::repo_identity(main_apg_root)?;
     if identity.is_worktree {
@@ -138,5 +138,19 @@ pub fn project_delete_at(main_apg_root: &Path, name: &str) -> anyhow::Result<()>
     // default branch again (the safety law's last line of defense).
     git::remove_worktree(&identity.main_root, name)?;
     git::delete_branch(&identity.main_root, name)?;
+    // The project is gone, so its registry row goes too — after the worktree
+    // and branch were removed, never before. Best-effort by design: the delete
+    // has completed, so a failure on this disposable index must not turn a
+    // completed delete red. An absent row is a no-op (`Registry::remove`);
+    // anything else gets one repair warning.
+    let registry_path = crate::registry::registry_path(&identity.main_root);
+    if let Err(err) =
+        crate::registry::Registry::open(&registry_path).and_then(|registry| registry.remove(name))
+    {
+        eprintln!(
+            "apg: warning: project `{name}` was deleted but its registry row could not be removed from {} ({err:#}); run `apg project reconstruct` to rebuild the registry from the worktree list.",
+            registry_path.display()
+        );
+    }
     Ok(())
 }
