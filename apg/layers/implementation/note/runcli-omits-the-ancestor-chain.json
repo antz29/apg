@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "runcli-omits-the-ancestor-chain",
-  "body": "runCli copies only APG_CALLER_SESSION onto its child environment, so a start or merge it spawns records an owner with no parentID chain; upgrade by carrying APG_CALLER_ANCESTORS as callerEnv does if a spawned child session ever needs to inherit through a delegated chain.",
+  "body": "runCli copies only APG_CALLER_SESSION onto its child environment and sends no ancestor chain; this is inert for its start and merge spawns, because APG_PROJECT is deliberately absent there so the registry's caller lookup returns before the chain is read, and the chain is consulted only on the caller side of authorisation. Upgrade by carrying APG_CALLER_ANCESTORS as callerEnv does only if a start or merge spawn ever gains a binary-side consumer of the chain.",
   "properties": {},
   "out": [
     {
