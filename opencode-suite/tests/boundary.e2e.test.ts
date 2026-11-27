@@ -45,6 +45,7 @@ import {
 // registration-shape e2e below can assert the returned plugin object directly.
 import apgQuery from "../tools/apg_query.ts"
 import apgScan from "../tools/apg_scan.ts"
+import apgProject from "../tools/apg_project.ts"
 
 /// A faked opencode 2.x tool-executor context — the V2 shape
 /// `{ agent, sessionID, messageID, id }` (no V1 `directory`/`worktree`) — plus
@@ -295,6 +296,117 @@ test.skipIf(!enabled || !binary)(
       fs.rmSync(home, { recursive: true, force: true })
     }
   },
+)
+
+// suite-root-plumbing phase-03.task-3: `apg_project`'s `start` is a main-checkout
+// operation whose registry row is owned by the session `runCli` puts on its
+// child env. The DISCRIMINATION PIN: this process starts with NO
+// `APG_CALLER_SESSION` (deleted below, restored in finally), so no inherited
+// `s1` can own the row — without runCli's own injection the row stays ownerless
+// and the project-bound call below is refused. The POSITIVE half proves the
+// opposite: the same session then makes a bound call with no claim round-trip.
+// The NEGATIVE half, after the positive, rebuilds the live rows ownerless
+// (`apg project reconstruct`) and the SAME bound call is refused with the
+// binary's claim-required message. Real I/O (scratch /tmp repo, a real scan, a
+// project worktree and registry), so opt-in suite e2e against a candidate
+// binary (`global.constraint.no-real-project-test`).
+test.skipIf(!enabled || !binary)(
+  "e2e: apg_project start records runCli's injected caller session as the registry owner",
+  async () => {
+    const bin = binary as string
+    const previousBinary = process.env.APG_BINARY
+    const previousSession = process.env.APG_CALLER_SESSION
+    process.env.APG_BINARY = bin
+    // Discrimination pin: no ambient session may own the registry row — only
+    // the env `runCli` injects on the start child may.
+    delete process.env.APG_CALLER_SESSION
+
+    const repo = scratchRepo()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-project-home-"))
+    // Keep `apg init` hermetic: pre-create the plugin dir so it never shells
+    // out to `bun install`.
+    fs.mkdirSync(path.join(home, ".config", "opencode", "node_modules", "@opencode", "plugin"), {
+      recursive: true,
+    })
+    const env = { ...process.env, HOME: home }
+    const project = "suite-root-plumbing"
+    try {
+      const run = (args: string[], cwd: string = repo) =>
+        Bun.spawnSync({ cmd: [bin, ...args], cwd, env, stdout: "pipe", stderr: "pipe" })
+      const git = (args: string[]) =>
+        Bun.spawnSync({ cmd: ["git", ...args], cwd: repo, stdout: "pipe", stderr: "pipe" })
+
+      expect(run(["init", "."]).exitCode).toBe(0)
+      // Commit the scaffold so the recorded scan matches the checkout state and
+      // `project start`'s clean-default gate passes.
+      git(["add", "-A"])
+      git(["commit", "-q", "-m", "apg init"])
+      const scan = run(["scan", "."])
+      if (scan.exitCode !== 0) throw new Error(`scan failed: ${scan.stderr.toString()}`)
+
+      // A faked plugin context: capture the tool added through `editor.add`.
+      type AddedTool = {
+        name?: string
+        execute?: (input: unknown, context: ToolContext) => Promise<{ content: string }>
+      }
+      const added: AddedTool[] = []
+      const editor = { add: (tool: AddedTool) => added.push(tool) }
+      await apgProject.setup({
+        location: { directory: repo },
+        permission: { assert: async () => {} },
+        tool: { transform: async (fn: (e: typeof editor) => void) => void fn(editor) },
+      } as never)
+      expect(added).toHaveLength(1)
+      expect(added[0].name).toBe("apg_project")
+
+      // The tool's `start` action runs from the main checkout and spawns through
+      // `runCli`, whose child env names the caller session — the ONLY owner
+      // source on this spawn (the ambient variable was deleted above).
+      const started = await added[0].execute!({ project, action: "start" }, v2Context(repo))
+      expect(started.content).toContain(`Project \`${project}\` started at`)
+      expect(started.content).not.toContain("refused")
+
+      const worktree = fs.realpathSync(path.join(repo, "apg", ".worktrees", project))
+      const bound: ToolContext = {
+        ...v2Context(repo, { sessionID: "s1" }),
+        projectName: project,
+        worktree,
+      }
+
+      // POSITIVE: the row is owned by `s1`, so the same session's project-bound
+      // query succeeds — no claim round-trip. Without runCli's injection the row
+      // would be ownerless and this would already be the claim-required
+      // refusal.
+      const owned = await runInProject(bound, ["query", "MATCH (n) RETURN count(*)"])
+      expect(owned).not.toContain("failed (exit")
+      expect(owned).not.toContain("registered with no owner")
+      expect(owned).not.toContain("apg project claim")
+      const ownedLines = owned.split("\n").filter((line) => line.length > 0)
+      expect(ownedLines.length).toBeGreaterThanOrEqual(2)
+      expect(Number(ownedLines[1])).toBeGreaterThan(0)
+
+      // NEGATIVE (after the positive): reconstruct rebuilds every live row with
+      // no owner, so the SAME session's bound call is refused with the binary's
+      // claim-required message — the no-claim claim is demonstrable.
+      const rebuilt = run(["project", "reconstruct"])
+      if (rebuilt.exitCode !== 0) {
+        throw new Error(`project reconstruct failed: ${rebuilt.stderr.toString()}`)
+      }
+      const refused = await runInProject(bound, ["query", "MATCH (n) RETURN count(*)"])
+      expect(refused).toContain(`project \`${project}\``)
+      expect(refused).toContain("registered with no owner")
+      expect(refused).toContain("until it is claimed")
+      expect(refused).toContain(`Fix: take ownership with \`apg project claim ${project}\``)
+    } finally {
+      if (previousBinary === undefined) delete process.env.APG_BINARY
+      else process.env.APG_BINARY = previousBinary
+      if (previousSession === undefined) delete process.env.APG_CALLER_SESSION
+      else process.env.APG_CALLER_SESSION = previousSession
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  },
+  60000,
 )
 
 // apg-plan-phases-scoping phase-03: the git branch-delta WRAPPER is real I/O
