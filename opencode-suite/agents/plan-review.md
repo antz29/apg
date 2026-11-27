@@ -232,7 +232,15 @@ pair is structural — the linter reports it, the write refuses
   gate rejects it; flag it early.
 - **Assignment** — exactly one `assigned-to` Agent per task, named against the branch graph's
   Agent roster (an absent Agent is drift); the `implements` Component, when present, is real.
-  "Implement + unit-test X" is two tasks, each assigned to its owning Agent.
+  "Implement + unit-test X" is two tasks, each assigned to its owning Agent. The Agent's declared
+  `permissions:` grant (its `.opencode/agents/**` definition) must cover every operation-edge
+  target's file path: compare its worktree-rooted grant glob (`apg/.worktrees/*/<path>`) against
+  the repo-relative target path (`requirements.constraint.code-writer-scope-worktree-only`) and
+  cite the deciding permission line as evidence. Ownership follows the path glob, not the
+  language label — suite TypeScript under `opencode-suite/**` belongs to the core implementer,
+  not the TS frontend Agent; `AGENTS.md`/`scripts/**` belong to the build implementer. A grant
+  excluding any target path is a blocking finding (the assignment must change), even though the
+  binary accepts any roster Agent.
 - **Phase scale** — around 15 tasks per phase is the rough expected average, not a rule; a
   phase running into the dozens or hundreds is a decomposition finding (too coarse a
   deliverable, or one-task-per-file busywork) — attach to the phase and name the split, never a
