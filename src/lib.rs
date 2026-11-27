@@ -104,7 +104,13 @@ USAGE:
                               merge <name> — verify gate → merge → main rebuild;
                               delete <name> — abandon a project: remove its
                               worktree + delete its branch (commits discarded;
-                              refuses unsafe states, never the default branch)
+                              refuses unsafe states, never the default branch);
+                              the main checkout's registry
+                              apg/.trans/projects.db maps name → worktree;
+                              start claims a row, merge/delete remove it;
+                              resolve <name> — print the registered worktree
+                              path; reconstruct — rebuild the registry from
+                              git worktree list
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg spec <sub> …            Deterministic, read-only durable-spec lint:
