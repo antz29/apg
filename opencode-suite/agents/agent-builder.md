@@ -157,6 +157,8 @@ a resource's whole value (`*` spans `/`, `?` matches one character). **Gate 1**:
 its own grant admits it and the call passes `Tool.Options.permission`. **Gate 2**: the plugin's `fsScopeDecision` also
 asserts the `edit` action over the SAME main-anchored paths (the main checkout root), so a write needs both gates —
 which is why every code-writer grant is worktree-rooted `apg/.worktrees/*/<glob>` and main-root paths are denied.
+
+**Project binding.** Every apg suite tool takes a **required registered project name** (`project`) and has **no `directory` or other path selector**. The name resolves to that project's worktree through the binary's `apg project resolve`, and an unregistered name is refused naming the registry and the registered projects. An **ownerless** registered project refuses every use until a session claims it with `apg project claim <name>` (the `apg_project` tool's `claim` action).
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` — repo-local and every
   `apg/.worktrees/*/` mirror; `external_directory` `/tmp/**` only.
@@ -214,7 +216,7 @@ decides when to persist, and releases it; it never outlives the call chain that 
   carries pending state** (save or abort first).
 - **abort** — `apg_session` `action: abort` discards the pending set and releases the session.
 
-The whole lifecycle runs through the `apg_session` tool (worktree as `directory`), never through `shell`.
+The whole lifecycle runs through the `apg_session` tool with the required project name, never through `shell`.
 `apg_query` routes through the live session (seeing unsaved pending changes); `apg scan` and `apg project merge`
 refuse while a session is live — save and end first. This is the session side of the guarded-mutation scoping
 above: a durable node/edge mutation is a session act.
@@ -314,7 +316,7 @@ above: a durable node/edge mutation is a session act.
     path; the agents `cd` into the worktree): the fs-tool glob grants are NOT exempt — the tools self-enforce
     scope from the acting agent's **effective allow+deny** rule list (an ALLOW grants, a DENY revokes, the **last
     matching entry wins**, an unmatched path is refused — deny-by-default), resolved in one main-anchored frame,
-    so a main-resolving path is refused whatever `directory` the caller passes and sibling cross-denial is
+    so a main-resolving path is refused whatever project the caller names and sibling cross-denial is
     honoured by the fs tools too. The only main writers are you and the optional `release-agent`;
     every code-writer — the core `implementer`, every `<name>-implementer`, every `test-implementer` — is
     worktree-only.
@@ -377,7 +379,7 @@ above: a durable node/edge mutation is a session act.
   main-root paths are explicitly denied (allow `apg/.worktrees/*/src/**`, deny `src/**`, deny a sibling's
   `apg/.worktrees/*/src/golib/**`). The fs tools self-enforce scope from the **effective allow+deny** rule list —
   an ALLOW grants, a DENY revokes, the **last matching entry wins**, an unmatched path is refused — resolved in
-  one main-anchored frame, so any main-checkout path is refused whatever `directory` the caller passes, and
+  one main-anchored frame, so any main-checkout path is refused whatever project the caller names, and
   sibling cross-denial is honoured by the fs tools too. An agent whose grants include a root path would permit a
   main-checkout write: broken scaffold. The fs tools are worktree-only for **every** agent, the `release-agent`
   included.

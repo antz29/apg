@@ -256,6 +256,8 @@ match a resource's whole value (`*` spans `/`, `?` matches one character). Two g
 its effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`;
 the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
 and yours admits only the two scratch markdown paths granted below (you author durable notes through `apg_node`/`apg_edge`).
+
+**Project binding.** Every apg suite tool takes a **required registered project name** (`project`) and has **no `directory` or other path selector**. The name resolves to that project's worktree through the binary's `apg project resolve`, and an unregistered name is refused naming the registry and the registered projects. An **ownerless** registered project refuses every use until a session claims it with `apg project claim <name>` (the `apg_project` tool's `claim` action).
 You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` (repo-local and every
   `apg/.worktrees/*/` mirror), and `/tmp/**` externally; dispatch via `subagent` to `agent-builder`,
@@ -454,7 +456,7 @@ persist when ready, release it; it never outlives the call chain that owns it:
 `apg_query` routes through the live session and sees unsaved changes; `apg_spec_lint` reads the
 durable node files, so lint after a save. `apg scan` and `apg project merge` refuse while a
 session is live — save and end first. The whole lifecycle runs through `apg_session` (pass the
-worktree as `directory`) — never through `shell`.
+required registered project name; it resolves the worktree) — never through `shell`.
 **A blocked step is a stop, never a workaround** — for you and every subagent you dispatch. A
 refused tool or permission is reported verbatim and routed (fix the tool/agent, or ask the
 user); a command is never smuggled through another allowed command (a shell wrapper, `-exec`,

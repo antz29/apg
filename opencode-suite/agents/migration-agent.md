@@ -136,6 +136,8 @@ match a resource's whole value (`*` spans `/`, `?` matches one character). Two g
 its effect: a tool action is reachable only when granted by its rule and passes `Tool.Options.permission`;
 the plugin's `fsScopeDecision` also asserts `edit` over the same main-anchored paths — an edit needs both gates,
 so only `apg/layers/**` is writable and everything else is denied at gate 2.
+
+**Project binding.** Every apg suite tool takes a **required registered project name** (`project`) and has **no `directory` or other path selector**. The name resolves to that project's worktree through the binary's `apg project resolve`, and an unregistered name is refused naming the registry and the registered projects. An **ownerless** registered project refuses every use until a session claims it with `apg project claim <name>` (the `apg_project` tool's `claim` action).
 You can:
 - edit only `apg/layers/**`; read/glob/grep the tree except `apg/.trans/**` (repo-local and every
   `apg/.worktrees/*/` mirror); `external_directory` `/tmp/**`; shell only `ls *`, `pwd`, `cd *`, `git status *`,
