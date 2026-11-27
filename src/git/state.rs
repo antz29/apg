@@ -1080,11 +1080,21 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
             database,
             waited,
             budget,
+            cause,
             ..
-        } => Some(format!(
-            "database `{}` is unreadable — waited {waited:?} of a {budget:?} budget for the contention to clear; retry once the other process finishes (a stale-graph scan is not the fix)",
-            database.display()
-        )),
+        } => {
+            // A terminal first read never retried, so a wait/budget contention claim would misstate it.
+            if waited.is_zero() {
+                return Some(format!(
+                    "database `{}` is unreadable: {cause}",
+                    database.display()
+                ));
+            }
+            Some(format!(
+                "database `{}` is unreadable — waited {waited:?} of a {budget:?} budget for the contention to clear; retry once the other process finishes (a stale-graph scan is not the fix)",
+                database.display()
+            ))
+        }
         FreshnessSnapshot::Fresh { .. } | FreshnessSnapshot::NotApplicable { .. } => None,
     }
 }
