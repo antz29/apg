@@ -521,6 +521,31 @@ mod unit {
             );
         }
     }
+
+    /// bicep file-edge kinds: exactly `module` / `using` / `extends` /
+    /// `import`, case- and whitespace-exact; the terraform `override` is not one.
+    #[test]
+    fn bicep_file_edge_kinds_are_module_using_extends_import() {
+        for kind in ["module", "using", "extends", "import"] {
+            assert!(bicep::is_file_edge_kind(kind), "{kind:?}");
+        }
+        for kind in [
+            "",
+            "Module",
+            "IMPORT",
+            "module ",
+            "modules",
+            "module-source",
+            "override",
+            "dot-source",
+            "copy",
+        ] {
+            assert!(
+                !bicep::is_file_edge_kind(kind),
+                "{kind:?} is not a file-edge kind"
+            );
+        }
+    }
 }
 
 /// An in-memory manifest holding `paths` (OIDs irrelevant to widening).
@@ -559,6 +584,19 @@ const TF_MANIFEST: &[&str] = &[
     "tests/x.tftest.hcl",
     "main.tofu",
     "net/x.hcl",
+    "build.ps1",
+    "a.go",
+    "README.md",
+];
+
+/// The manifest the `bicep::widen_targets` int tests share.
+const BICEP_MANIFEST: &[&str] = &[
+    "main.bicep",
+    "net/vnet.bicep",
+    "prod.bicepparam",
+    "X.BICEP",
+    "app.json",
+    "main.tf",
     "build.ps1",
     "a.go",
     "README.md",
@@ -681,6 +719,82 @@ mod int {
             "prod.tfvars",
             "tests/x.tftest.hcl",
             "main.tofu",
+        ]);
+        assert_eq!(targets, want);
+    }
+
+    /// `bicep::widen_targets` leaves a set holding no bicep file exactly as
+    /// given, the empty set included; a plain `.json` is not a bicep file.
+    #[test]
+    fn bicep_widen_targets_leaves_a_bicep_free_set_unchanged() {
+        let manifest = ps_manifest(BICEP_MANIFEST);
+        for given in [set_of(&["a.go", "app.json", "main.tf"]), set_of(&[])] {
+            let mut targets = given.clone();
+            bicep::widen_targets(&mut targets, &manifest);
+            assert_eq!(targets, given);
+        }
+    }
+
+    /// One bicep target widens to every manifest bicep file (`.bicep` and
+    /// `.bicepparam` in any letter case); non-bicep targets and a deleted bicep
+    /// path absent from the manifest are kept, and `app.json` is not added.
+    #[test]
+    fn bicep_widen_targets_widens_one_bicep_file_to_every_manifest_bicep_file() {
+        let manifest = ps_manifest(BICEP_MANIFEST);
+        let bicep_files = ["main.bicep", "net/vnet.bicep", "prod.bicepparam", "X.BICEP"];
+
+        let mut targets = set_of(&["a.go", "net/vnet.bicep"]);
+        bicep::widen_targets(&mut targets, &manifest);
+        let mut want = set_of(&bicep_files);
+        want.insert("a.go".to_string());
+        assert_eq!(targets, want);
+
+        let mut targets = set_of(&["gone.bicep"]);
+        bicep::widen_targets(&mut targets, &manifest);
+        let mut want = set_of(&bicep_files);
+        want.insert("gone.bicep".to_string());
+        assert_eq!(targets, want);
+    }
+
+    /// Widening does not cross languages: a bicep target leaves a terraform or
+    /// ps set alone, and a terraform or ps target does not widen bicep.
+    #[test]
+    fn bicep_and_other_widening_do_not_cross_languages() {
+        let manifest = ps_manifest(&[BICEP_MANIFEST, TF_MANIFEST, PS_MANIFEST].concat());
+        let mut targets = set_of(&["main.tf"]);
+        bicep::widen_targets(&mut targets, &manifest);
+        assert_eq!(targets, set_of(&["main.tf"]));
+
+        let mut targets = set_of(&["main.bicep"]);
+        terraform::widen_targets(&mut targets, &manifest);
+        ps::widen_targets(&mut targets, &manifest);
+        assert_eq!(targets, set_of(&["main.bicep"]));
+    }
+
+    /// A mixed set holding a ps, a terraform and a bicep target widens for each
+    /// stream when passed through all three widenings in turn.
+    #[test]
+    fn mixed_ps_terraform_and_bicep_targets_widen_for_each() {
+        let manifest = ps_manifest(&[PS_MANIFEST, TF_MANIFEST, BICEP_MANIFEST].concat());
+        let mut targets = set_of(&["main.tf", "sub/Util.Psm1", "net/vnet.bicep"]);
+        ps::widen_targets(&mut targets, &manifest);
+        terraform::widen_targets(&mut targets, &manifest);
+        bicep::widen_targets(&mut targets, &manifest);
+        let want = set_of(&[
+            "build.ps1",
+            "LEGACY.PS1",
+            "sub/Util.Psm1",
+            "data/Settings.psd1",
+            "main.tf",
+            "net/main.tf",
+            "net/vars.tf.json",
+            "prod.tfvars",
+            "tests/x.tftest.hcl",
+            "main.tofu",
+            "main.bicep",
+            "net/vnet.bicep",
+            "prod.bicepparam",
+            "X.BICEP",
         ]);
         assert_eq!(targets, want);
     }

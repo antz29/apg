@@ -8,6 +8,7 @@
 //! harness and compiles unconditionally as a public module.
 
 pub mod artifacts;
+pub mod bicep;
 pub mod cache;
 pub mod classify;
 pub mod cleanup;
@@ -137,7 +138,7 @@ USAGE:
 
 SCAN OPTIONS:
   --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
-                               csharp, py, cobol, sql, ps, terraform (comma-separated or
+                               csharp, py, cobol, sql, ps, terraform, bicep (comma-separated or
                                repeated; auto-detected for every language
                                present if omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
