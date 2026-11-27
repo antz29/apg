@@ -253,7 +253,19 @@ pub fn require_project_context(apg_root: &Path) -> anyhow::Result<()> {
         && (identity.checkout_root != canonical(&row.worktree)
             || identity.branch.as_deref() != row.branch.as_deref())
     {
-        return Err(membership_refusal(&identity, &row.name));
+        // A bound caller refused because it stands outside the row's worktree
+        // or branch: name the row's own worktree and branch (not the fixed
+        // `<main>/apg/.worktrees/<name>` path) beside the caller's current
+        // branch and checkout, so the one repair is to stand in that worktree.
+        let current = identity.branch.as_deref().unwrap_or("<detached>");
+        let row_branch = row.branch.as_deref().unwrap_or("<detached>");
+        return Err(anyhow::anyhow!(
+            "mutation refused — project `{}` is registered at {} on branch `{row_branch}`, but you are on branch `{current}` at {}. Fix: run `apg project start {}` from the main checkout, then work inside its worktree.",
+            row.name,
+            row.worktree.display(),
+            identity.checkout_root.display(),
+            row.name
+        ));
     }
     let Some(branch) = identity.branch.clone() else {
         anyhow::bail!(
