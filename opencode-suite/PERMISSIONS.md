@@ -48,13 +48,53 @@ root — no leading `/`, matching the spelling an agent's globs use (for example
 outside it, or escaping it stays **absolute**, so a genuinely external path is
 asserted against the absolute rules. The mapping runs only after the path is
 canonicalised, and the frame root is the main checkout, so every candidate and
-root are compared in one symlink-resolved frame.
+root are compared in one symlink-resolved frame. The frame root is **not** the
+path base: the base a tool resolves its relative inputs against is the
+registered project's resolved worktree (see *The project binding* below), while
+every asserted resource is still spelled relative to the main checkout.
 
 An operation asserts **all** of its resources in **one** `permission.assert`
 call: source and destination together for a move/copy, every path at once for a
 removal. A write whose source is allowed but whose destination is denied is
 refused as a whole. Refusals are fail-closed: a missing permission surface or
 an unresolvable frame root refuses before any filesystem work.
+
+## The project binding
+
+Every suite tool takes a **required registered project name**, `project`, and
+has **no `directory` or other path selector**. The tool resolves that name to
+its registered worktree through the binary's `apg project resolve` verb
+(`resolveProjectWorktree`); the lookup runs from the caller's context directory
+chain, so it adds no new selector. An unregistered name is refused with the
+binary's own message, which names the main checkout's registry
+(`apg/.trans/projects.db`) and the registered project names — never a fallback
+to the caller's cwd or to another checkout.
+
+The resolved worktree is the **path base** for the filesystem tools: `apg_rm`,
+`apg_mv` and `apg_cp` resolve every input path against it before asserting. The
+**permission frame stays main-anchored**: `mainCheckoutRoot` anchors the
+fs-scope frame on `context.worktree` alone once a project is resolved, so the
+frame root is the main checkout the worktree belongs to and the asserted
+resource stays the bare main-checkout-relative path (`src/a.rs` or
+`apg/.worktrees/<project>/x.txt`) an agent's globs are written against.
+
+Project-bound spawns run in the resolved worktree with the caller's project
+environment set once per child (`runInProject`, through `callerEnv`):
+`APG_PROJECT` (the required name), `APG_CALLER_SESSION` (the caller's session
+id), and — only when the context carries one — the comma-separated
+outermost→innermost `APG_CALLER_ANCESTORS`. The caller's own cwd is never
+changed.
+
+An **ownerless** registered project — a row recorded by `apg project
+reconstruct`, which carries no owner — refuses every use until a session claims
+it. The claim verb is `apg project claim <name>`, exposed as the `apg_project`
+tool's `claim` action: it replaces the row's single owner with the calling
+session and reports the previous owner, and it refuses the built-in `main` row
+and an unregistered name.
+
+`apg_project`'s `start` and `merge` are the exception: they are main-checkout
+operations and run from the main root (`runCli`'s `mainRoot`, resolved by
+`mainCheckoutRoot`), not a project-bound worktree.
 
 ## Gate 1 and gate 2
 
@@ -161,20 +201,31 @@ runtime instead of failing loudly.
 A gate-2 refusal carries the reason from the rejected `permission.assert`; when
 no reason is available, the repo-verifiable fallback literal is
 `permission denied`. Do not assume any other message format — the fallback is
-defined in `assertFailureReason` in `opencode-suite/lib/apg.ts` (line 446), and
-the filesystem tools throw `permission denied` when the decision has no reason.
+defined in `assertFailureReason` in `opencode-suite/lib/apg.ts`, and the
+filesystem tools throw `permission denied` when the decision has no reason.
 The assert precedes the filesystem operation, so a refused operation changes
 nothing.
 
 ## Where this lives in the code
 
-- `opencode-suite/lib/apg.ts` — `mainAnchoredResource` (the main-anchored
+- `opencode-suite/lib/apg.ts` — `resolveProjectWorktree` (a required
+  registered project name → its worktree through `apg project resolve`),
+  `mainCheckoutRoot` (the fs-scope frame root, anchored on `context.worktree`
+  once a project is resolved), `mainAnchoredResource` (the main-anchored
   mapping), `fsScopeDecision` (one-assert operation, frame resolution,
-  fail-closed reasons), and `assertFailureReason` (the refusal reason and the
-  `permission denied` fallback).
+  fail-closed reasons), `callerEnv` / `runInProject` (project-bound spawns
+  carrying `APG_PROJECT`, `APG_CALLER_SESSION` and `APG_CALLER_ANCESTORS`),
+  `runCli` (its `mainRoot` override for the main-checkout operations), and
+  `assertFailureReason` (the refusal reason and the `permission denied`
+  fallback).
+- `opencode-suite/tools/apg_project.ts` — the lifecycle tool: `start` and
+  `merge` run from the main root, `verify` and `claim` in the resolved
+  worktree, and `claim` performs the ownership handover on an ownerless
+  project.
 - `opencode-suite/tools/apg_rm.ts`, `apg_mv.ts`, `apg_cp.ts` — the filesystem
-  operations; each resolves its paths, calls `fsScopeDecision` once with all of
-  them, and throws before touching the filesystem when refused.
+  operations; each resolves its paths against the registered project's resolved
+  worktree, calls `fsScopeDecision` once with all of them, and throws before
+  touching the filesystem when refused.
 - `opencode-suite/agents/agent-builder.md` — the scaffold rules: ordered
   deny-first grants, the gate 1/gate 2 explanation, the read guard, the shell
   policy (including the env-prefix rule), and `external_directory`.
