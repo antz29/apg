@@ -401,6 +401,36 @@ pub fn system_config(read_only: bool) -> anyhow::Result<SystemConfig> {
     )
 }
 
+/// Opens the database of the registered project `project` at `worktree` — the
+/// only open path a project-bound caller may use. A missing database is that
+/// project's problem (refused, naming the project, its worktree and the
+/// database path), never a reason to read another checkout's database.
+pub fn open_project_db(
+    project: &str,
+    worktree: &Path,
+    read_only: bool,
+) -> anyhow::Result<Database> {
+    let db_path = worktree
+        .join(specs::LAYOUT)
+        .join(specs::TRANS)
+        .join("db.lbug");
+    if !db_path.exists() {
+        anyhow::bail!(
+            "refused: project `{project}` at worktree `{}` has no database `{}`. Fix: run `apg scan` inside `{}`.",
+            worktree.display(),
+            db_path.display(),
+            worktree.display()
+        );
+    }
+    Database::new(&db_path, system_config(read_only)?).map_err(|err| {
+        anyhow::anyhow!(
+            "project `{project}` at worktree `{}`: opening `{}`: {err}",
+            worktree.display(),
+            db_path.display()
+        )
+    })
+}
+
 impl ArtifactDb {
     pub fn open(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");

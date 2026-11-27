@@ -10,8 +10,10 @@ use crate::find_apg_root;
 use crate::session;
 use crate::specs;
 
-/// `apg query "<cypher>"`: open `apg/.trans/db.lbug` (found by walking up from
-/// cwd) read-only and print the result as CSV with a header row.
+/// `apg query "<cypher>"`: open `apg/.trans/db.lbug` read-only and print the
+/// result as CSV with a header row. When `APG_PROJECT` binds a registry row the
+/// read targets that project's worktree database; otherwise it is the database
+/// found by walking up from cwd.
 pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let json = args.first().is_some_and(|a| a == "--json");
     let query = if json {
@@ -26,6 +28,17 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let apg_root = find_apg_root(&start)
         .ok_or_else(|| anyhow::anyhow!("no apg/ directory found from {}", start.display()))?;
 
+    // The env-gated registry binding (phase-02): with `APG_PROJECT` present the
+    // read targets the registered project's own worktree and nothing else, so a
+    // missing database there is refused rather than served from another
+    // checkout; the seam's refusals (lost registry, unregistered, stale,
+    // unauthorised) propagate unchanged.
+    let bound = crate::registry::require_project(&apg_root)?;
+    let read_apg = match &bound {
+        Some(row) => row.worktree.join(specs::LAYOUT),
+        None => apg_root,
+    };
+
     let query = if query.trim_end().ends_with(';') {
         query
     } else {
@@ -37,8 +50,8 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     // and without waiting for the session to end. With no live session the DB
     // file is not held and a normal (read-only) direct open serves the read —
     // that is the read-your-writes guarantee.
-    if session::live_session(&apg_root) {
-        let output = session::forward_query(&apg_root, &query, json)?;
+    if session::live_session(&read_apg) {
+        let output = session::forward_query(&read_apg, &query, json)?;
         println!("{output}");
         return Ok(());
     }
@@ -53,16 +66,21 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     // database falls through to the direct read below with no scan, and an
     // absent database is still refused there. A session that appears after the
     // routing check makes the reclaim refuse — the fail-closed outcome.
-    session::Coordinator::reclaim_stale_socket(&apg_root)?;
+    session::Coordinator::reclaim_stale_socket(&read_apg)?;
 
-    let db_path = apg_root.join(specs::TRANS).join("db.lbug");
-    if !db_path.exists() {
-        anyhow::bail!(
-            "{} does not exist — run `apg scan` first",
-            db_path.display()
-        );
-    }
-    let db = Database::new(&db_path, crate::artifacts::db::system_config(true)?)?;
+    let db = match &bound {
+        Some(row) => crate::artifacts::db::open_project_db(&row.name, &row.worktree, true)?,
+        None => {
+            let db_path = read_apg.join(specs::TRANS).join("db.lbug");
+            if !db_path.exists() {
+                anyhow::bail!(
+                    "{} does not exist — run `apg scan` first",
+                    db_path.display()
+                );
+            }
+            Database::new(&db_path, crate::artifacts::db::system_config(true)?)?
+        }
+    };
     println!("{}", render_query(&db, &query, json)?);
     Ok(())
 }
