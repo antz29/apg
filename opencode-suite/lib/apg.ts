@@ -54,6 +54,18 @@ export interface ToolContext {
    *  `setup` — the source of the project root (`ctx.location.directory` /
    *  `ctx.location.project`). */
   location?: { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
+  /** The required registered project name a project-bound call names (the
+   *  binary's `APG_PROJECT`). Absent for the current directory-driven
+   *  behaviour. */
+  projectName?: string
+  /** The resolved worktree path `resolveProjectWorktree` returned for
+   *  `projectName` — the working directory every project-bound spawn runs in.
+   *  Absent for the current directory-driven behaviour. */
+  worktree?: string
+  /** The caller's session-id ancestor chain, outermost→innermost, when the
+   *  context carries one (the binary's `APG_CALLER_ANCESTORS`). The current
+   *  opencode 2.x executor context does not, so the variable is omitted. */
+  ancestors?: readonly string[]
 }
 
 /** The `directory` description every bookkeeping mutation tool gives its input:
@@ -65,6 +77,39 @@ export const PROJECT_WORKTREE_DIRECTORY_DESCRIPTION =
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
 export function apgBinary(): string {
   return process.env.APG_BINARY || "apg"
+}
+
+/**
+ * Resolves a required registered project's worktree through the binary's
+ * `apg project resolve <projectName>` verb, returning exactly the path it
+ * prints (trimmed). The binary reads the main checkout's registry and refuses
+ * an unregistered name naming the registry path and the registered project
+ * names; that refusal is surfaced as a thrown `Error` carrying the binary's
+ * stderr verbatim — never a fabricated path and never a fallback to the
+ * caller's cwd.
+ *
+ * The lookup runs from the caller's context directory chain
+ * (`context.location` / `process.cwd()`), so no new directory selector is
+ * added: `apg project resolve` walks up to the checkout's `apg/` from there.
+ *
+ * Real I/O (a subprocess), so it is covered by the opt-in suite e2e, never the
+ * side-effect-free unit tier.
+ */
+export async function resolveProjectWorktree(context: ToolContext, projectName: string): Promise<string> {
+  const cwd =
+    context.location?.directory ||
+    context.location?.project?.directory ||
+    context.location?.project?.canonical ||
+    process.cwd()
+  const result = await Bun.$`${apgBinary()} project resolve ${projectName}`.cwd(cwd).quiet().nothrow()
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.toString().trim())
+  }
+  const worktree = result.stdout.toString().trim()
+  if (!worktree) {
+    throw new Error(`apg project resolve ${projectName}: no worktree path on stdout`)
+  }
+  return worktree
 }
 
 /** Walks up looking for the project's `apg/.trans/db.lbug`. In a project
@@ -123,9 +168,11 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * (`context.location`, captured from `ctx.location` at `setup`):
  * `location.directory`, then `location.project.directory`, then
  * `location.project.canonical` when present, then `process.cwd()` — the only
- * context source read. An explicit `directory` arg (the tools' optional
- * project dir) is AUTHORITATIVE: when given, the start is that path and only
- * that path.
+ * context source read. A resolved project worktree (`context.worktree`, from
+ * `resolveProjectWorktree`) is AUTHORITATIVE: when present it is the sole
+ * start. Otherwise an explicit `directory` arg (the tools' optional project
+ * dir) is AUTHORITATIVE: when given, the start is that path and only that path.
+ * With neither, the location/cwd chain above is unchanged.
  *
  * Resolution is canonical-first and path-first: the caller's directory is made
  * absolute and symlink-resolved, then the documented
@@ -147,14 +194,16 @@ export async function mainCheckoutRoot(
   context: ToolContext,
   directory?: string,
 ): Promise<{ root: string; project: string | null } | null> {
-  const starts = directory
-    ? [directory]
-    : [
-        context.location?.directory,
-        context.location?.project?.directory,
-        context.location?.project?.canonical,
-        process.cwd(),
-      ]
+  const starts = context.worktree
+    ? [context.worktree]
+    : directory
+      ? [directory]
+      : [
+          context.location?.directory,
+          context.location?.project?.directory,
+          context.location?.project?.canonical,
+          process.cwd(),
+        ]
   for (const s of starts) {
     if (!s) continue
     // Canonicalise so relative/trailing-slash/symlinked spellings of the same
@@ -585,6 +634,67 @@ export async function runCli(context: ToolContext, args: string[], directory?: s
     return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
   return result.stdout.toString().trim()
+}
+
+/**
+ * Runs an `apg` command in a resolved project worktree, with the caller's
+ * project environment set for that one child process: `APG_PROJECT` (the
+ * required `context.projectName`), `APG_CALLER_SESSION` (`context.sessionID`)
+ * and — only when the context carries a session-id chain —
+ * `APG_CALLER_ANCESTORS` (outermost→innermost, trimmed, empties dropped). The
+ * child's cwd is `context.worktree`; the caller's own cwd is never changed
+ * (`process.chdir` is never called).
+ *
+ * A resolved project is required: without `context.worktree` /
+ * `context.projectName` (from `resolveProjectWorktree`) this throws rather
+ * than falling back to the caller's cwd — an unresolved project never
+ * silently runs somewhere else.
+ *
+ * Returns stdout on success and, like `runCli`, the command's error string on
+ * a non-zero exit. When `opts.rebaseColumns` names the CSV columns carrying a
+ * stored repo-relative identity (the same option `runCypher` takes), those
+ * cells are resolved against the RESOLVED WORKTREE through
+ * `resolveProjectPath`, never against the caller's cwd.
+ *
+ * Real I/O (a subprocess), so it is covered by the opt-in suite e2e, never the
+ * side-effect-free unit tier.
+ */
+export async function runInProject(
+  context: ToolContext,
+  args: string[],
+  opts?: { rebaseColumns?: number[] | ((row: string[]) => number[]) },
+): Promise<string> {
+  const { worktree, projectName } = context
+  if (!worktree || !projectName) {
+    throw new Error("runInProject requires a resolved project (call resolveProjectWorktree first)")
+  }
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    APG_PROJECT: projectName,
+    APG_CALLER_SESSION: context.sessionID,
+  }
+  const ancestors = (context.ancestors ?? []).map((id) => id.trim()).filter((id) => id.length > 0)
+  if (ancestors.length > 0) env.APG_CALLER_ANCESTORS = ancestors.join(",")
+  const result = await Bun.$`${apgBinary()} ${args}`.cwd(worktree).env(env).quiet().nothrow()
+  if (result.exitCode !== 0) {
+    const cmd = [apgBinary(), ...args].join(" ")
+    return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
+  }
+  const out = result.stdout.toString().trim()
+  const colsOpt = opts?.rebaseColumns
+  if (!colsOpt || (Array.isArray(colsOpt) && colsOpt.length === 0)) return out
+  const rebased = csvToRows(out).map((row, i) => {
+    if (i === 0) return row
+    const cols = typeof colsOpt === "function" ? colsOpt(row) : colsOpt
+    return row.map((cell, j) => (cols.includes(j) ? resolveProjectPath(worktree, cell) : cell))
+  })
+  return rebased
+    .map((row) =>
+      row
+        .map((cell) => (/[",\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell))
+        .join(","),
+    )
+    .join("\n")
 }
 
 /** Extracts the project name from a project-scoped plan/review FQN
