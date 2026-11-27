@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "project-context-guard",
-  "body": "The project-context guard: the shared project-context check and refusal wording that the bookkeeping dispatchers and the central write funnel apply, plus the plan dispatcher's positional guard.",
+  "body": "The project-context guard is the shared project check and refusal wording its dispatchers apply, the registry store with its validation and owner-authorisation seam, and the claim/reconstruct verbs over the project-aware database open.",
   "properties": {},
   "out": [
     {
