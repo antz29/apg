@@ -1,26 +1,8 @@
 import { Plugin } from "@opencode/plugin"
-import { existsSync } from "node:fs"
-import path from "node:path"
-import { apgBinary, type ToolContext } from "../lib/apg.ts"
-
-function findProjectRoot(context: ToolContext): string | null {
-  const candidates = [
-    context.location?.directory,
-    context.location?.project?.directory,
-    context.location?.project?.canonical,
-    process.cwd(),
-  ]
-  for (const c of candidates) {
-    if (!c) continue
-    if (existsSync(path.join(c, "apg", ".trans")) || existsSync(path.join(c, "apg", "config.json"))) {
-      return c
-    }
-  }
-  return null
-}
+import { apgBinary, resolveProjectWorktree, type ToolContext } from "../lib/apg.ts"
 
 type ApgScanInput = {
-  directory?: string
+  project: string
   language?: string
   dialect?: string
   blacklist?: string
@@ -37,13 +19,13 @@ export default Plugin.define({
         name: "apg_scan",
         options: { codemode: false },
         description:
-          "Rebuild the project's LadybugDB graph database (apg/.trans/db.lbug, derived from the durable apg/layers/** node files and the scanned code) by running the apg scanner + ingestor pipeline; the scan also writes apg/.trans/apg-frontend.log. Run this when source files have changed and the graph is stale. Pass `force` for a from-scratch rebuild: it discards the derived database and re-runs every frontend instead of reusing the shared fact store, leaving apg/layers and source files untouched.",
+          "Rebuild the registered project's LadybugDB graph database (its worktree's apg/.trans/db.lbug, derived from the durable apg/layers/** node files and the scanned code) by running the apg scanner + ingestor pipeline in that worktree; the scan also writes apg/.trans/apg-frontend.log. Run this when source files have changed and the graph is stale. Pass `force` for a from-scratch rebuild: it discards the derived database and re-runs every frontend instead of reusing the shared fact store, leaving apg/layers and source files untouched.",
         input: {
           type: "object",
           properties: {
-            directory: {
+            project: {
               type: "string",
-              description: "Project root directory to scan. Defaults to the workspace root.",
+              description: "The registered project name (as recorded by `apg project start` / `apg init`). The tool resolves it to that project's worktree and scans there.",
             },
             language: {
               type: "string",
@@ -72,7 +54,7 @@ export default Plugin.define({
                 "Force a from-scratch rebuild: discard apg/.trans/db.lbug (with its .wal/.shm sidecars), and re-run every frontend rather than reusing the shared fact store. apg/layers and source files are left untouched.",
             },
           },
-          required: [],
+          required: ["project"],
           additionalProperties: false,
         },
         async execute(raw, context) {
@@ -84,10 +66,11 @@ export default Plugin.define({
             id: context.id,
             location: ctx.location,
           }
-          const root = findProjectRoot(merged) ?? input.directory
-          const dir = input.directory ?? root
+          merged.projectName = input.project
+          const worktree = await resolveProjectWorktree(merged, input.project)
+          merged.worktree = worktree
 
-          const spawnArgs: string[] = [apgBinary(), "scan", dir as string]
+          const spawnArgs: string[] = [apgBinary(), "scan", worktree]
 
           if (input.force) {
             spawnArgs.push("--force")
@@ -111,7 +94,7 @@ export default Plugin.define({
           const proc = Bun.spawn(spawnArgs, {
             stdout: "pipe",
             stderr: "pipe",
-            cwd: root,
+            cwd: worktree,
           })
           const [output, stderr] = await Promise.all([
             new Response(proc.stdout).text(),
