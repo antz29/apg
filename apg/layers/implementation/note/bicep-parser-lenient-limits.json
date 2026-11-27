@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "bicep-parser-lenient-limits",
-  "body": "The parser is lenient: error columns are byte offsets; var, using and extends accept more than the Bicep compiler; metadata, targetScope, extension, assert and test lines are skipped unchecked; a nullable type before an operator may be misread. Tighten when diagnostics must match the compiler.",
+  "body": "The parser is lenient and unbounded: error columns are byte offsets; var, using and extends accept more than the Bicep compiler; metadata, targetScope, extension, assert and test lines are skipped unchecked; a nullable type before an operator may be misread; @export() is discarded, so an import matches any top-level type or var by name; an unclosed bracket skips to end of file, hiding later declarations; expression nesting has no depth bound. Tighten when diagnostics must match the compiler.",
   "properties": {},
   "out": [
     {
