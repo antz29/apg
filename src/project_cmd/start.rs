@@ -53,9 +53,11 @@ pub fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> 
 /// running scan is waited out rather than mis-read as stale.
 ///
 /// The freshness gate has three outcomes, from **one** snapshot: `Fresh`
-/// proceeds; `Contended` (the main database stayed unreadable through the
-/// bounded retry) is refused as named contention — the scan is not stale or
-/// missing and a stale-graph `apg scan` is not the fix; `Stale` and
+/// proceeds; `Contended` — a main-database read failure, refused naming the
+/// database and its underlying cause — claims contention (`waited`/`budget`,
+/// another process holds it) only when the read retried to the budget, never
+/// for a terminal first-read error such as EACCES; either way the scan is not
+/// stale or missing and a stale-graph `apg scan` is not the fix; `Stale` and
 /// `NotApplicable` (a differing input, or no database/HEAD at all) keep the
 /// stale-or-missing refusal asking for `apg scan` in the main checkout. The
 /// refusals and the version gate run first, then the spec lock, then this
