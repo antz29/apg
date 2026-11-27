@@ -551,6 +551,22 @@ deletes its branch, discarding that branch's commits. It refuses unsafe states
 `apg/.worktrees/<name>`, the main checkout's current branch) and never touches
 the default branch.
 
+The main checkout also keeps a **project registry** at
+`<main>/apg/.trans/projects.db` — a binary-owned, local, disposable index
+(outside version control) mapping a project name to its worktree path, branch,
+owning session and creation time; one worktree belongs to at most one name.
+`apg init` registers the built-in `main` row (a re-init refreshes it in place —
+one row, the original creation time preserved), and `apg project start <name>`
+records the new project's row with the calling `APG_CALLER_SESSION` as owner
+(none for a raw CLI call); a name that already has a row is refused, naming the
+worktree it resolves to. `apg project merge <name>` and `apg project delete
+<name>` remove the row on their success paths (an absent row is a no-op). `apg
+project resolve <name>` prints exactly the registered worktree path — the
+name → worktree lookup — and `apg project reconstruct` rebuilds every row from
+`git worktree list` (the main checkout as `main` plus each linked worktree,
+owner cleared, fresh creation time), the repair path for a stale row; nothing
+durable lives only in the registry.
+
 The durable spec is a **node-file store** under `apg/layers/` — one JSON file
 per node, authored with `apg node add|rm <layer> <type> <name>` and
 `apg edge add|rm <kind> <from> <to>` from a live session (see
