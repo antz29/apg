@@ -1606,9 +1606,8 @@ mod int {
     /// renders checkout-independent module/File/symbol identities end to end.
     ///
     /// The spooling `ingest`/`ingest_records` entry point is e2e (it opens a
-    /// `std::env::temp_dir()` spool file), so the assembly contract this
-    /// task owns is exercised here on the pure renderer units it is built
-    /// from.
+    /// `std::env::temp_dir()` spool file), so the assembly contract is
+    /// exercised here on the pure renderer units it is built from.
     #[test]
     fn repo_relative_identity_flows_through_the_render_chain() {
         let base = Path::new("/repo");
