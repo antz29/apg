@@ -1,6 +1,3 @@
-//! Unit/int tests for the agent frontend: the tiers live in `tests::unit` and
-//! `tests::int` beside the walk and stream units they exercise.
-
 use crate::{collect_definitions, emit_stream, parse_args};
 
 mod unit {
