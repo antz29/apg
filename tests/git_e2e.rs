@@ -605,9 +605,10 @@ mod e2e {
         assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
 
-        // A pending-removal ledger identity with no socket: PendingRemoval is
-        // outside the authored-digest tables, so the ledger entry alone is the
-        // cause (the Scan row and the tree digest still agree).
+        // A pending-removal ledger identity, with no other input flipped:
+        // PendingRemoval is outside the authored-digest tables, so the ledger
+        // entry alone is the cause (the Scan row and the tree digest still
+        // agree).
         let repo = fixture_repo("fresh-ledger");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
@@ -758,10 +759,13 @@ mod e2e {
     /// single refusal message names both. The two inputs that instead make
     /// `refusal_message` return `None` (no `db.lbug` at all, and no git HEAD
     /// sha) stay covered by `no_db_is_never_stale` and
-    /// `non_git_repo_is_never_stale`.
+    /// `non_git_repo_is_never_stale`. The retired daemon's socket input has no
+    /// per-invocation counterpart, so its arm asserts the replacement
+    /// guarantee instead: a stray socket artifact is not a freshness input, and
+    /// the read-only session's committed database facts decide the verdict.
     #[cfg(unix)]
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug/socket); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug); run via cargo test-e2e"]
     fn refusal_message_names_each_differing_freshness_input() {
         // One flipped input ⇒ exactly that label in the refusal's `differing:`
         // list, and the verdict never reads fresh.
@@ -796,17 +800,28 @@ mod e2e {
             assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
         };
 
-        // `socket`: a present-but-dead session socket (row and tree agree).
-        let repo = fixture_repo("refuse-socket");
+        // Per-invocation freshness: a leftover socket path from the retired
+        // daemon is not a freshness input at all. The verdict comes from the
+        // read-only session's **committed** database facts (here the `Scan` row,
+        // the content key and the tree all agree), so the graph still reads
+        // FRESH and no refusal is issued — the socket arm this replaces has no
+        // per-invocation counterpart.
+        let repo = fixture_repo("refuse-socket-artifact");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
         testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
-        assert!(refusal_message(&apg).is_none(), "the baseline is fresh");
-        let socket = apg::session::socket_path(&apg);
+        let socket = apg.join(specs::TRANS).join("session.sock");
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
-        assert_names(&apg, "socket");
+        std::fs::write(&socket, b"retired daemon artifact").unwrap();
+        assert!(
+            is_fresh(&apg),
+            "a stray socket artifact is not a freshness input: the committed facts decide"
+        );
+        assert!(
+            refusal_message(&apg).is_none(),
+            "a fresh committed state must never refuse"
+        );
         testutil::remove(&repo);
 
         // `recorded scan`: a DB whose own `Scan` row records no scan.
@@ -817,9 +832,9 @@ mod e2e {
         assert_names(&apg, "recorded scan");
         testutil::remove(&repo);
 
-        // `pending state`: a pending-removal identity with no socket. The
-        // ledger is outside the authored-digest tables, so the mark is the only
-        // cause.
+        // `pending state`: a pending-removal identity, with no other input
+        // flipped. The ledger is outside the authored-digest tables, so the mark
+        // is the only cause.
         let repo = fixture_repo("refuse-pending");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
@@ -1066,9 +1081,12 @@ mod e2e {
     /// inputs are named together. The `database` and `git sha` inputs never reach
     /// the STALE arm (`staleness_line` prints `no scan yet` / `N/A` instead) and
     /// stay covered by `no_db_is_never_stale` and `non_git_repo_is_never_stale`.
+    /// The retired daemon's socket input has no per-invocation counterpart, so
+    /// its arm pins the replacement guarantee: a stray socket artifact adds no
+    /// differing label, because the committed database facts decide.
     #[cfg(unix)]
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug/socket); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/git/db.lbug); run via cargo test-e2e"]
     fn staleness_line_names_each_differing_freshness_input() {
         // The printed STALE line's `differing:` list is exactly the predicate's
         // list: the same inputs, in the same order, joined by `, `. The
@@ -1124,16 +1142,22 @@ mod e2e {
         );
         testutil::remove(&repo);
 
-        // `socket`: a present-but-dead session socket (row and tree agree).
-        let repo = fixture_repo("stale-line-socket");
+        // Per-invocation freshness: a leftover socket path from the retired
+        // daemon adds no differing label — the committed database facts decide,
+        // so the printed line stays the bare FRESH line (no parenthetical).
+        let repo = fixture_repo("stale-line-socket-artifact");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
         testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
-        let socket = apg::session::socket_path(&apg);
+        let socket = apg.join(specs::TRANS).join("session.sock");
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
-        assert_line_names(&apg, &["socket"]);
+        std::fs::write(&socket, b"retired daemon artifact").unwrap();
+        assert_eq!(
+            staleness_line(&apg, &git_state(&apg), None),
+            format!("Git state: recorded {sha}@true vs current {sha}@true → FRESH"),
+            "a stray socket artifact must not add a differing label"
+        );
         testutil::remove(&repo);
 
         // `recorded scan`: a DB whose own `Scan` row records no scan (printed
@@ -1145,9 +1169,9 @@ mod e2e {
         assert_line_names(&apg, &["recorded scan"]);
         testutil::remove(&repo);
 
-        // `pending state`: a pending-removal identity with no socket. The
-        // ledger is outside the authored-digest tables, so the mark is the only
-        // cause.
+        // `pending state`: a pending-removal identity, with no other input
+        // flipped. The ledger is outside the authored-digest tables, so the mark
+        // is the only cause.
         let repo = fixture_repo("stale-line-pending");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
@@ -1887,16 +1911,19 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// With a live session, a run of durable node/edge mutations is STAGED into
-    /// the session's write-back buffer with NO commit — `apg/layers/**` stays at
-    /// the last saved state and git history is untouched. Exactly ONE
-    /// `apg session save` then produces exactly ONE durable commit for the whole
-    /// buffered set, and that commit stages durable files only — never
-    /// `apg/.trans` (the gitignored transient store).
+    /// Under the per-invocation session contract a run of durable node/edge
+    /// mutations is a run of separate `apg` invocations: each one takes the
+    /// blocking worktree lock, writes its node files, makes exactly ONE durable
+    /// commit and projects into the worktree database inside that critical
+    /// section, then releases. Nothing is buffered ahead of its commit — there
+    /// is no session to start, save or end and no pending set — and every commit
+    /// stages durable files only, never `apg/.trans` (the gitignored transient
+    /// store). A fresh read-only invocation observes each committed write.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn acceptance_one_logical_mutation_is_exactly_one_durable_commit() {
         use apg::layers::{self, Layer};
+        use apg::specs;
 
         let (repo, wt, wt_apg) = testutil::project_with_db("accept-one-commit");
         let home = repo.root.join("home");
@@ -1911,6 +1938,7 @@ mod e2e {
                 "{args:?}: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
+            out
         };
         // The paths the HEAD commit's tree diff touched.
         let head_diff_paths = || -> Vec<String> {
@@ -1929,31 +1957,73 @@ mod e2e {
                 .collect()
         };
 
-        // A live session owns the durable mutation surface.
-        let session = testutil::start_session_process(&wt, &home);
-        let base = testutil::commit_count(&wt);
+        // One logical mutation = one invocation = exactly ONE durable commit,
+        // staging durable files only. The commit lands before the next
+        // invocation starts, so a later failure can never be masked by a
+        // buffered set.
+        let mut expected = testutil::commit_count(&wt);
+        let mut mutate = |args: &[&str]| -> Vec<String> {
+            run(args);
+            expected += 1;
+            assert_eq!(
+                testutil::commit_count(&wt),
+                expected,
+                "{args:?} must make exactly one durable commit"
+            );
+            let paths = head_diff_paths();
+            assert!(
+                !paths.is_empty(),
+                "the commit must stage the durable files: {args:?}"
+            );
+            for p in &paths {
+                assert!(p.starts_with("apg/layers/"), "durable only: {p}");
+                assert!(!p.starts_with("apg/.trans/"), "never .trans: {p}");
+            }
+            paths
+        };
 
-        // Logical mutations 1 + 2: each routed `apg node add` is admitted into
-        // the buffer — nothing durable lands. A Stakeholder `requires` a
-        // Requirement is the minimal whole-model-valid pair/edge (SPEC §8.1).
-        run(&["node", "add", "requirements", "stakeholder", "one-a"]);
-        run(&["node", "add", "requirements", "requirement", "one-b"]);
-        // Logical mutation 3: the edge add rewrites BOTH endpoint files in the
-        // buffer.
-        run(&[
+        // Logical mutations 1 + 2: each is its own committed write. A
+        // Stakeholder `requires` a Requirement is the minimal whole-model-valid
+        // pair/edge (SPEC §8.1).
+        let paths = mutate(&["node", "add", "requirements", "stakeholder", "one-a"]);
+        assert!(
+            paths
+                .iter()
+                .any(|p| p == "apg/layers/requirements/stakeholder/one-a.json"),
+            "the first write's commit must stage one-a: {paths:?}"
+        );
+        let paths = mutate(&["node", "add", "requirements", "requirement", "one-b"]);
+        assert!(
+            paths
+                .iter()
+                .any(|p| p == "apg/layers/requirements/requirement/one-b.json"),
+            "the second write's commit must stage one-b: {paths:?}"
+        );
+        // Logical mutation 3: the edge add rewrites BOTH endpoint files in its
+        // one commit.
+        let paths = mutate(&[
             "edge",
             "add",
             "requires",
             "requirements.stakeholder.one-a",
             "requirements.requirement.one-b",
         ]);
+        for needle in [
+            "apg/layers/requirements/stakeholder/one-a.json",
+            "apg/layers/requirements/requirement/one-b.json",
+        ] {
+            assert!(
+                paths.iter().any(|p| p == needle),
+                "the edge write's commit must stage {needle}: {paths:?}"
+            );
+        }
         // Complete the whole-model minimums the new §3.4/§6 coverage rules
         // require (SPEC §8.1): the Requirement needs a driving Service, the
         // Service a leaf Group + realising Component, the Component a Role.
-        run(&["node", "add", "domain", "service", "one-c"]);
-        run(&["node", "add", "domain", "group", "one-d"]);
-        run(&["node", "add", "solution", "component", "one-e"]);
-        run(&[
+        mutate(&["node", "add", "domain", "service", "one-c"]);
+        mutate(&["node", "add", "domain", "group", "one-d"]);
+        mutate(&["node", "add", "solution", "component", "one-e"]);
+        mutate(&[
             "node",
             "add",
             "solution",
@@ -1962,28 +2032,28 @@ mod e2e {
             "--property",
             "applies-to=component",
         ]);
-        run(&[
+        mutate(&[
             "edge",
             "add",
             "driven-by",
             "domain.service.one-c",
             "requirements.requirement.one-b",
         ]);
-        run(&[
+        mutate(&[
             "edge",
             "add",
             "contains",
             "domain.group.one-d",
             "domain.service.one-c",
         ]);
-        run(&[
+        mutate(&[
             "edge",
             "add",
             "realises",
             "solution.component.one-e",
             "domain.service.one-c",
         ]);
-        run(&[
+        mutate(&[
             "edge",
             "add",
             "is-role",
@@ -1991,73 +2061,40 @@ mod e2e {
             "solution.role.one-f",
         ]);
 
-        // NO commit (and no node file) lands while the mutations are buffered:
-        // `apg/layers/**` and git stay at the last saved state.
-        assert_eq!(
-            testutil::commit_count(&wt),
-            base,
-            "a live session's buffered mutations must make no commit before save"
-        );
+        // Each committed add wrote its node file in its own invocation; no
+        // pending set survives that a later save would have to flush.
         for (layer, node_type, name) in [
             (Layer::Requirements, "stakeholder", "one-a"),
             (Layer::Requirements, "requirement", "one-b"),
         ] {
             assert!(
-                !layers::node_file_path(&wt_apg, layer, node_type, name).exists(),
-                "a buffered add must not write the `{name}` node file before save"
+                layers::node_file_path(&wt_apg, layer, node_type, name).exists(),
+                "each committed add writes the `{name}` node file in its own invocation"
             );
         }
 
-        // The single durability point: ONE save flushes the whole buffered set
-        // in exactly ONE durable commit.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
+        // A fresh read-only invocation observes the committed state (read-your-
+        // writes) with no save and no scan.
+        let read = run(&[
+            "query",
+            "MATCH (n:Stakeholder {fqn: 'requirements.stakeholder.one-a'}) RETURN count(n)",
+        ]);
         assert_eq!(
-            testutil::commit_count(&wt),
-            base + 1,
-            "one save must produce exactly one durable commit for the whole buffered set"
+            String::from_utf8_lossy(&read.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a read-only invocation must see the committed write"
         );
-        let save_paths = head_diff_paths();
         assert!(
-            !save_paths.is_empty(),
-            "the save commit must stage the durable files"
+            apg::artifacts::ArtifactDb::open_read_only(&wt_apg).is_ok(),
+            "the database must open in the read-only class after the writes"
         );
-        for p in &save_paths {
-            assert!(p.starts_with("apg/layers/"), "durable only: {p}");
-            assert!(!p.starts_with("apg/.trans/"), "never .trans: {p}");
-        }
-        // Both buffered node files — the two halves of the edge — land in the
-        // one save commit.
-        for needle in [
-            "apg/layers/requirements/stakeholder/one-a.json",
-            "apg/layers/requirements/requirement/one-b.json",
-        ] {
-            assert!(
-                save_paths.iter().any(|p| p.as_str() == needle),
-                "the save commit must stage {needle}: {save_paths:?}"
-            );
-        }
-
-        // The session stayed live through save and ends cleanly.
+        // No daemon, socket or pending set is left behind.
         assert!(
-            apg::session::live_session(&wt_apg),
-            "session save must not end the live session"
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
@@ -2229,11 +2266,13 @@ mod e2e {
     }
 
     // ------------------------------------------------------------------
-    // Phase-09 task-4: both fail-closed freshness arms are present and cited
-    // here — `dead_session_socket_makes_the_graph_unfresh` (a
-    // present-but-dead `session.sock`) and
+    // Phase-09 task-4, converted to the per-invocation session contract: the
+    // two fail-closed freshness arms cited here are
+    // `retired_session_socket_artifact_is_not_a_freshness_input` (the
+    // replacement for the retired dead-socket arm: the read-only session's
+    // committed database facts decide, never a socket) and
     // `db_scan_row_diverging_from_the_worktree_git_state_is_unfresh` (the DB
-    // `Scan` row against the worktree git state) — neither authored anew.
+    // `Scan` row against the worktree git state).
     // Retained coverage (NOT duplicated here):
     //   * `dirty_tree_at_same_sha_is_stale` — the dirty-tree arm;
     //   * `content_identity_byte_edit_invalidates` — the changed-bytes arm;
@@ -2243,15 +2282,18 @@ mod e2e {
     //     the DB↔tree authored-digest arm.
     // ------------------------------------------------------------------
 
-    /// A present-but-dead `session.sock` is a fail-closed freshness arm: the
-    /// on-disk DB reflects only the last saved state while a phantom
-    /// projection may exist, so `is_fresh` is false and `is_stale` true.
-    /// Removing the dead socket restores freshness — which discriminates this
-    /// arm from the recorded `Scan` row (the row and the tree agree throughout).
+    /// Freshness is judged from the per-invocation read-only session's
+    /// **committed** database facts — its own `Scan` row against the worktree's
+    /// git state — and never from a socket: those facts agree throughout, so a
+    /// leftover `session.sock` artifact path under `apg/.trans` (the shape the
+    /// retired daemon's unclean exit used to leave) is not a freshness input at
+    /// all. The graph stays FRESH, and removing the artifact changes nothing.
+    /// This is the per-invocation replacement for the retired dead-socket arm,
+    /// which has no counterpart now that no socket precondition exists.
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug/socket); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug); run via cargo test-e2e"]
     #[cfg(unix)]
-    fn dead_session_socket_makes_the_graph_unfresh() {
+    fn retired_session_socket_artifact_is_not_a_freshness_input() {
         let repo = fixture_repo("fresh-dead-socket");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
@@ -2259,26 +2301,29 @@ mod e2e {
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
         assert!(is_fresh(&apg), "the agreeing row starts fresh");
 
-        // Bind then drop the listener: the socket PATH survives with no
-        // process behind it — exactly the unclean-exit shape.
-        let socket = apg::session::socket_path(&apg);
+        // A leftover artifact path from the retired daemon — a plain file under
+        // `apg/.trans`, with no process behind it — is not a freshness input.
+        let socket = apg.join(specs::TRANS).join("session.sock");
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
-        assert!(socket.exists(), "the dead socket must persist");
+        std::fs::write(&socket, b"retired daemon artifact").unwrap();
         assert!(
-            !apg::session::live_session_at(&socket),
-            "nothing answers the probe"
+            socket.exists(),
+            "the stray daemon artifact path must persist"
         );
         assert!(
-            !is_fresh(&apg),
-            "a present-but-dead session socket must fail closed"
+            is_fresh(&apg),
+            "a stray socket artifact is not a freshness input: the committed facts decide"
         );
-        assert!(is_stale(&apg), "the gate must refuse on a dead socket");
+        assert!(
+            !is_stale(&apg),
+            "the gate must not refuse on a stray socket path"
+        );
+        assert!(refusal_message(&apg).is_none());
 
         std::fs::remove_file(&socket).unwrap();
         assert!(
             is_fresh(&apg),
-            "removing the dead socket restores freshness (the socket arm fired)"
+            "removing the artifact changes nothing (it was never an input)"
         );
         assert!(!is_stale(&apg));
         testutil::remove(&repo);
@@ -2385,8 +2430,9 @@ mod e2e {
             "a corrupt database fails terminally on the first read (no retry)"
         );
         assert_eq!(
-            budget, FRESHNESS_READ_BUDGET,
-            "the terminal read still carries the configured retry budget"
+            budget,
+            std::time::Duration::ZERO,
+            "the read-only session fails on the open, before any retried read — no retry budget is spent"
         );
         assert!(
             !cause.is_empty(),
@@ -2681,11 +2727,11 @@ mod e2e {
     }
 
     /// A held **read-write** database handle produces no contention claim: the
-    /// read-only freshness read opens the database beside the writer (the
-    /// engine admits the read), so an agreeing scan still reads `Fresh` and the
-    /// refusal projection is `None`. A writer — an `apg query`-style handle, a
-    /// session's own database — must never turn the freshness read into a
-    /// contended or stale refusal.
+    /// per-invocation read-only freshness session opens the database beside the
+    /// writer (the engine admits the read), so an agreeing scan still reads
+    /// `Fresh` and the refusal projection is `None`. A concurrent writer — a
+    /// per-invocation durable write's own write-capable handle — must never turn
+    /// the freshness read into a contended or stale refusal.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/db.lbug); run via cargo test-e2e"]
     fn locked_database_read_stays_fresh_beside_a_held_writer() {
