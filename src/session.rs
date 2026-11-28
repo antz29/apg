@@ -139,6 +139,13 @@ impl Session {
         })
     }
 
+    /// The held database handle, read-only between writes — the seam a
+    /// per-invocation read ([`crate::cmd_query`], the freshness and scan-row
+    /// readers) runs its queries on, without a daemon round trip.
+    pub fn db(&self) -> &lbug::Database {
+        &self.db.db
+    }
+
     /// Upgrades the read-only handle to the write-capable class under the
     /// **blocking** extended worktree lock.
     ///
