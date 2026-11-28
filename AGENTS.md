@@ -285,16 +285,10 @@ The project builds a single `apg` binary (package `apg`):
   endpoint files as one mutation (the out half in the source's file, the
   matching in half in the target's; `add` refuses a duplicate, `update` is
   properties-only). Guarded — requires a project context (a project worktree on
-  its branch) and never runs on the repo's default branch. **Durable
-  `node`/`edge` mutations require a live session and are not committed until
-  `apg session save`** — see *Sessions: caller-owned durable mutation* below.
-- `apg session <sub> …` — the session-scoped single-writer coordinator that owns
-  the worktree's `apg/.trans/db.lbug`: `start` launches it (foreground; it
-  requires a project context and refuses on the default branch),
-  `save` — commit the database's dirty rows and pending-deletion identities
-  (one atomic write + commit); `abort` — discard them and release the session;
-  `end` — release the DB/socket and exit (refuses while the database carries
-  pending state).
+  its branch) and never runs on the repo's default branch. A durable mutation
+  writes its node file, makes exactly one git commit and projects into the
+  worktree database inside the blocking critical section of that one invocation
+  — see *Sessions: per-invocation, read-only by default* below.
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
   `apg/.trans/plans/<project>.jsonl`, branch-local): `add`
   (`add <project>` creates the plan, refusing when it exists; then
@@ -373,8 +367,7 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the project/spec/plan/review suite:
 `apg_project` (start/verify/merge/claim), `apg_node` / `apg_edge` (durable
-node-file add/update/rm mutations), `apg_session` (start a detached live
-session for the mandatory-session durable-mutation workflow), `apg_plan_add`
+node-file add/update/rm mutations), `apg_plan_add`
 (the plan add/update/rm
 authoring surface), `apg_plan` (+ phases/tasks/verify/done/undone/note/complete/
 render), `apg_review` (+ add/action/resolve/reject), and the path-scoped
@@ -383,7 +376,7 @@ self-enforce the acting agent's granted path scope and the project/worktree
 boundary).
 Shared plumbing
 lives in `~/.config/opencode/lib/apg.ts`
-(project resolution, `apg query`/`apg project`/`apg node`/`apg edge`/`apg session`/`apg plan`/`apg review` subprocess,
+(project resolution, `apg query`/`apg project`/`apg node`/`apg edge`/`apg plan`/`apg review` subprocess,
 Cypher literal escaping). The suite's plugin dependency is `@opencode/plugin`
 (opencode 2.x), installed with `bun install` (the suite's lockfile is
 `bun.lock`); `apg init` writes the plugin's `package.json` naming that
@@ -445,52 +438,30 @@ row's owning session or a session in that session's parentID chain; the
 built-in `main` row is readable by every session, and an ownerless row refuses
 project-bound use until `apg project claim`.
 
-#### Sessions: caller-owned durable mutation
+#### Sessions: per-invocation, read-only by default
 
-Durable `apg node` / `apg edge` mutations are **mandatory-session**: there is no
-direct write path. With no live session the command refuses (*a live session is
-required for durable mutations — run `apg session start` first*). A session is
-**caller-owned** — the caller starts it, saves it, and ends (or aborts) it;
-nothing auto-manages its lifecycle, and a failed forward is a hard error (the
-client never silently falls back to a direct write mid-flight, which could
-double-apply a mutation that already landed).
+Every database access goes through a **per-invocation session**: each `apg`
+invocation opens the worktree `apg/.trans/db.lbug` **read-only**, does its work
+and exits. There is no daemon, no socket and no `apg session` subcommand — the
+invocation itself is the session, and it is the only opener.
 
-- **`apg session start`** — launch the session-scoped single-writer coordinator.
-  It runs in the **foreground** and owns the worktree's `apg/.trans/db.lbug`
-  **exclusively** (holding the extended `specs.lock` flock) for its whole life,
-  serving routed mutations and routed `apg query` reads over a Unix socket
-  (`apg/.trans/session.sock`, or a deterministic short `/tmp` path when the
-  worktree path exceeds the platform's Unix-socket `SUN_LEN`). Exactly one
-  session may own a worktree DB — a second `start` is refused — and `apg scan` /
-  `apg project merge` are refused while a session is live.
-- **The database is the working state.** A routed mutation is applied to the
-  worktree `apg/.trans/db.lbug` **at admission** — the row is written, both
-  halves of an edge are projected, exactly the changed node files are marked
-  dirty, and a delete's row is gone with its identity recorded in the
-  pending-removal ledger — so a routed read (`apg query` through the session)
-  sees it immediately, while `apg/layers/**` and git stay at the last saved
-  state. Forwarded mutations carry an at-most-once client id, so a replay never
-  double-applies.
-- **`apg session save`** — the **single durability point**: write exactly the
-  dirty rows at their node-file paths and delete each pending-deletion
-  identity's node file in **one atomic `apg/layers/**` write plus exactly one
-  git commit**, then clear the marks. Nothing the session admitted is committed
-  until `save`, and a session whose database carries no pending state writes
-  nothing and commits nothing.
-- **`apg session end`** — signal the live session to release the DB/socket and
-  exit. It **refuses while the database carries pending state** (dirty rows or
-  pending-deletion identities, which it lists; run `apg session save` to make
-  them durable, or `apg session abort` to discard them); admission already
-  applied every projection, so `end` performs no flush.
-- **`apg session abort`** — discard the database's pending state — the dirty
-  rows and the pending-deletion identities — and release the session; nothing
-  pending becomes durable.
-
-The **`apg_session`** suite tool wraps `start`: because `apg session start` is a
-blocking foreground process, the tool spawns it **detached**, waits until its
-socket answers live, and returns the session's root/socket/pid while it keeps
-running; the caller then drives `apg session save` and `apg session end` (or
-`abort`).
+- **A durable write upgrades the same invocation.** `apg node add|update|rm` /
+  `apg edge add|update|rm` reopens the database for writing under the
+  **blocking** worktree flock: if another writer holds it the command **waits**
+  (never `EAGAIN`/fail-fast), so concurrent writers queue instead of failing.
+- **One critical section.** Inside the lock the invocation performs the
+  node-file write, then **exactly one git commit**, then the database
+  projection — in that order — and releases the lock, dropping back to
+  read-only (or exiting). Nothing is written to `apg/layers/**` or the database
+  outside that critical section, and there is no save/pending state to flush
+  later.
+- **No lifecycle.** There is no `apg session start|save|end|abort`, no
+  `apg_session` suite tool, and `apg session save` is removed (not a no-op):
+  the commit is part of the write. A write with no "started session" is
+  impossible by construction, because the session is the only opener.
+- **Scan and merge run between writes.** `apg scan` and `apg project merge`
+  need no save+end — they simply run between writes, and the branch graph's
+  freshness check is against the last commit.
 
 ## Test tiers & the tier-separable harness
 
@@ -1169,8 +1140,9 @@ Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are ro
 The **durable spec** is a node-file store, not a JSONL: one file per node under
 `apg/layers/`, authored via `apg node add|rm` / `apg edge add|rm` (never by
 editing files by hand — the binary validates the schema, the pairings, and the
-references; each mutation is applied to the worktree database at admission and
-is not committed until `apg session save`). FQN = **`<layer>.<type>.<name>`**,
+references; each durable mutation writes its node file, makes exactly one git
+commit and projects into the worktree database inside the blocking critical
+section of the one invocation). FQN = **`<layer>.<type>.<name>`**,
 no project prefix, no `spec.<id>` vocabulary; the **file name IS the identity**
 and the node-file's `layer`/`type`/`name` fields must match the path. Both
 halves of every edge live in the node files (out in the source's file, the
