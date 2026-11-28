@@ -1,6 +1,3 @@
-//! Unit tests for the dialect table. The table is a single unit, so the tests live in
-//! `tests::unit` alone (no `int` tier: nothing here wires two units together).
-
 use crate::ast::{CallTarget, DataDivision, DataEntry, ProcedureDivision, Transfer};
 use crate::dialect::{Dialect, Feature, FeatureLevel, Limits, SourceFormat, OO_WORDS};
 use crate::lexer::{lex, Token, TokenKind};
