@@ -1,0 +1,15 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "session-access-mode",
+  "body": "The access mode of a per-invocation session: read-only by default, upgraded to write under the blocking worktree lock.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.entity.cli-session-coordinator",
+      "properties": {}
+    }
+  ]
+}

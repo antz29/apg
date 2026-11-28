@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-caller-controlled-durability",
-  "body": "A durable mutation is immediately durable: it writes its node files, makes exactly one commit, and projects the change into the database before it returns, with no later durability step.",
+  "body": "A durable mutation writes its node files, makes exactly one commit, and projects the change into the database before it returns, so its durability is complete at return.",
   "properties": {
     "feature": "cli-session-substrate"
   },

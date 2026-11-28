@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "project-delete-refuses-a-live-session",
-  "body": "`apg project delete` takes the worktree's blocking lock before removing it, so it waits for an in-flight durable write's critical section to close and never deletes a worktree mid-write.",
+  "body": "`apg project delete` takes the worktree's blocking lock before removing it, so it waits for an in-flight durable write's critical section to close and removes the worktree between writes.",
   "properties": {
     "feature": "cli-session-substrate"
   },

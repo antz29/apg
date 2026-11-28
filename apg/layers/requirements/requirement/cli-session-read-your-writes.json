@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-read-your-writes",
-  "body": "A read observes the committed database, taking the lock as needed, so a read after a write returns sees that write and a read during a write never sees an empty or partial database.",
+  "body": "A read observes the committed database, taking the lock as needed, so a read after a write returns sees that write and a read during a write observes a complete committed state.",
   "properties": {
     "feature": "cli-session-substrate"
   },

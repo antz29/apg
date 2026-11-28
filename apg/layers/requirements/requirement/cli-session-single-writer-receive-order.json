@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-single-writer-receive-order",
-  "body": "Durable writers serialise on the blocking worktree lock, so concurrent mutations queue and each is applied whole, never interleaved or lost.",
+  "body": "Durable writers serialise on the blocking worktree lock, so concurrent mutations queue and each is applied whole in turn.",
   "properties": {
     "feature": "cli-session-substrate"
   },

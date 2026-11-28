@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-required-for-durable-mutations",
-  "body": "A durable mutation has no sessionless path: it opens its own per-invocation session, which is the only way to reach the worktree database.",
+  "body": "A durable mutation reaches the worktree database only by opening its own per-invocation session, which is the sole opener.",
   "properties": {
     "feature": "cli-session-substrate"
   },

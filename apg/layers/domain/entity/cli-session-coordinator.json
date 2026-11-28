@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.session-access-mode",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

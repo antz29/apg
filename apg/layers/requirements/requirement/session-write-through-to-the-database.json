@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "session-write-through-to-the-database",
-  "body": "Each durable mutation writes its files, commits, and projects into the worktree database inside one critical section, so a later read observes it and no file, index, or commit lags.",
+  "body": "Each durable mutation writes its files, commits, and projects into the worktree database inside one critical section, so a later read observes it and the file, index, and commit all agree.",
   "properties": {},
   "out": [],
   "in": [
