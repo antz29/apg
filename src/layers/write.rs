@@ -22,9 +22,7 @@ use super::catalog::{LAYERS_DIR, LAYERS_TREE, Layer, StoragePolicy, TRANS_DIR};
 use super::code_refs::validate_code_refs;
 use super::node_file::{NodeFile, fqn};
 use super::tree::ingest_nodes;
-use super::validate::{
-    check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges, validate_node,
-};
+use super::validate::{eval_constraint, parse_fqn, valid_name, validate_edges, validate_node};
 use super::{layer_of, validate_assembled_rules};
 
 // ---------------------------------------------------------------------------
@@ -50,7 +48,8 @@ use super::{layer_of, validate_assembled_rules};
 /// - two `writes` entries colliding on the same path/FQN are refused.
 ///
 /// The FULL semantic validation — [`validate_node`] uniqueness against the
-/// whole store, [`check_edge_pairing`], the edge matrix ([`validate_edges`]) —
+/// whole store, [`check_edge_pairing`](super::validate::check_edge_pairing),
+/// the edge matrix ([`validate_edges`]) —
 /// is the caller's job: `write_project` runs validate_node/
 /// validate_edges before this, and `ingest_tree` runs pairing.
 ///
@@ -102,7 +101,8 @@ fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
 ///
 /// Public so the e2e integration crates reach it as
 /// `apg::layers::read_existing_nodes` (e.g. the `testutil` crash-durability
-/// test pairs the read store with [`check_edge_pairing`]).
+/// test pairs the read store with
+/// [`check_edge_pairing`](super::validate::check_edge_pairing)).
 pub fn read_existing_nodes(apg_root: &Path) -> anyhow::Result<Vec<NodeFile>> {
     let mut nodes: Vec<NodeFile> = Vec::new();
     for (layer_dir, types) in LAYERS_TREE {
@@ -159,7 +159,8 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// (existing nodes minus deleted/overwritten, plus the writes) satisfies the
 /// property-aware §4 rules ([`validate_assembled_rules`]: acyclic
 /// contains trees; `Entity (kind: event)` publishes/subscribes
-/// targets) and [`check_edge_pairing`], every written constraint passes
+/// targets) and [`check_edge_pairing`](super::validate::check_edge_pairing),
+/// every written constraint passes
 /// [`eval_constraint`]'s structure rules (a constraint's scope is its layer,
 /// and an implementation-layer constraint may narrow tier 4 with one
 /// `applies-to` edge per Language it binds), and every assembled
@@ -207,8 +208,9 @@ pub fn validate_change(
 /// ([`eval_constraint`]) — so a change validates against the state an earlier
 /// unsaved mutation produced: an edge to a node added earlier in the same run
 /// is accepted rather than rejected because it is absent on disk. Edge pairing
-/// is NOT checked here: it is enforced at the save boundary alone
-/// ([`validate_save_model`]), so an edge whose matching half lands in a later
+/// is NOT checked here: it is enforced over the whole node store at ingest
+/// ([`check_edge_pairing`](super::validate::check_edge_pairing)), so an edge
+/// whose matching half lands in a later
 /// mutation is admitted. Pure read — no write.
 pub fn validate_change_over(
     apg_root: &Path,
@@ -311,73 +313,6 @@ pub fn validate_change_over(
     }
 
     Ok(())
-}
-
-/// The **save boundary**: validate the dirty rows' structure and the held
-/// model's edge pairing — never the whole model. `dirty_rows` is the marked
-/// write set the save serialises, and the per-node structure rules (name
-/// allowlist, type-in-layer, uniqueness with `held_rows` supplying the existing
-/// universe, the out-edge matrix and the assembled §4 property rules) run over
-/// it alone: an unchanged row's pre-existing violation never refuses an
-/// unrelated save, and a save never re-judges rows it does not write.
-///
-/// `held_rows` is the held database's full row set — the effective post-save
-/// model, whose reconstruction already omits every ledger-held identity — and
-/// [`check_edge_pairing`] runs over it, so the common cross-endpoint write (a
-/// dirty source pointing at an unchanged durable target) pairs instead of
-/// false-refusing while a residual half pointing at a pending deletion still
-/// refuses. The cardinality pass over the whole model is not here: it belongs
-/// to lint and merge. Returns one refusal message naming the failing structure
-/// or pairing.
-pub fn validate_save_model(dirty_rows: &[NodeFile], held_rows: &[NodeFile]) -> anyhow::Result<()> {
-    let written_fqns: BTreeSet<String> = dirty_rows
-        .iter()
-        .map(|n| fqn(layer_of(&n.layer), &n.node_type, &n.name))
-        .collect();
-
-    // The held model's identity universe minus the rows this save (re)writes,
-    // so an overwrite does not trip its own uniqueness.
-    let mut universe: BTreeSet<(Layer, String, String)> = held_rows
-        .iter()
-        .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
-        .filter(|(layer, node_type, name)| !written_fqns.contains(&fqn(*layer, node_type, name)))
-        .collect();
-
-    let result = (|| {
-        // Per-node structure and the out-edge matrix over the dirty rows alone.
-        for n in dirty_rows {
-            let layer = layer_of(&n.layer);
-            validate_node(layer, &n.node_type, &n.name, &n.properties, &universe)?;
-            universe.insert((layer, n.node_type.clone(), n.name.clone()));
-        }
-        for n in dirty_rows {
-            let from = fqn(layer_of(&n.layer), &n.node_type, &n.name);
-            let edges: Vec<(&str, &str, &str)> = n
-                .out
-                .iter()
-                .map(|oe| (oe.kind.as_str(), from.as_str(), oe.target.as_str()))
-                .collect();
-            validate_edges(&edges)?;
-        }
-
-        // The assembled §4 property rules over the dirty rows, resolved against
-        // the held universe (an endpoint this save does not write still exists).
-        let assembled: BTreeMap<String, &NodeFile> = dirty_rows
-            .iter()
-            .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
-            .collect();
-        validate_assembled_rules(&assembled, &universe)?;
-
-        // Pairing over the held model's full row set — the effective post-save
-        // model, with the ledger-held identities already omitted.
-        check_edge_pairing(held_rows)
-    })();
-    match result {
-        Ok(()) => Ok(()),
-        Err(err) => anyhow::bail!(
-            "session save refused: the dirty rows are structurally invalid or the held model's edges do not pair: {err:#}"
-        ),
-    }
 }
 
 /// The shared atomic write step: write a SET of node files, delete a SET of

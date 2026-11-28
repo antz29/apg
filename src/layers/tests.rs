@@ -2397,49 +2397,6 @@ mod unit {
         );
     }
 
-    /// SPEC §8.1: the save boundary enforces edge pairing over the held model
-    /// while the structure rules cover the dirty rows alone — the whole-model
-    /// cardinalities belong to lint and merge, so no cardinality verdict is
-    /// expected. A dirty source whose halves pair against unchanged held rows
-    /// is accepted; a residual half that no held file supplies is refused.
-    #[test]
-    fn save_boundary_refuses_a_pair_invalid_set_and_accepts_a_pair_valid_one() {
-        // Pair-valid cross-endpoint write: the dirty rows are the Service
-        // (whose `driven-by`/`reads`/`writes` halves pair against unchanged
-        // held targets) and a leaf Group with no Service — deliberately a
-        // whole-model cardinality violation this boundary no longer judges.
-        let mut held = valid_model();
-        held.push(node("domain", "group", "standalone"));
-        let dirty: Vec<NodeFile> = held
-            .iter()
-            .filter(|n| n.node_type == "service" || n.name == "standalone")
-            .cloned()
-            .collect();
-        if let Err(err) = validate_save_model(&dirty, &held) {
-            panic!("a pair-valid set is accepted with no cardinality verdict: {err:#}");
-        }
-
-        // Pair-invalid: the Group keeps no `contains` out half for the Service
-        // that still carries the matching in half, so the held model has a
-        // residual half the save refuses.
-        let mut pair_invalid = valid_model();
-        remove_out(
-            &mut pair_invalid,
-            "domain",
-            "group",
-            "ordering",
-            "contains",
-            "domain.service.place-order",
-        );
-        let err = validate_save_model(&pair_invalid, &pair_invalid)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("has no matching out edge"),
-            "the save boundary refuses an unmatched half: {err}"
-        );
-    }
-
     /// Cardinality scope (SPEC §9.2): a scope is cumulative — the selected
     /// tier plus every tier above it in the catalog ladder — so the tiers above
     /// a scope stay fully checked while a tier below it is never judged. The
