@@ -1,7 +1,7 @@
 //! Per-dialect table for the COBOL frontend (`cobol.dialect`, `-std=<dialect>`).
 //! Written from the GnuCOBOL manual (SPEC §19), never copied from GnuCOBOL's GPL config.
 
-/// A COBOL dialect. `cobol2023` is refused by [`Dialect::from_name`] until P7.
+/// A COBOL dialect. `cobol2023` is refused by [`Dialect::from_name`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialect {
     Cobol85,
@@ -50,8 +50,6 @@ impl FeatureLevel {
     }
 }
 
-/// Constructs with a starting feature level (SPEC §19.5). Further constructs join as
-/// the parser needs them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feature {
     Alter,
@@ -128,9 +126,6 @@ impl Dialect {
         Limits { word, literal, pic }
     }
 
-    /// Reserved words (case-insensitive). Only the words SPEC §19.4 names are encoded:
-    /// `cobol85` reserves CLASS and ALTER, `ibm` reserves ENTRY and ALTER. No full
-    /// per-dialect list is sourced yet, so `cobol2002`/`cobol2014` reserve nothing here.
     pub fn is_reserved(self, word: &str) -> bool {
         let set: &[&str] = match self {
             Dialect::Cobol85 => &["CLASS", "ALTER"],
@@ -140,8 +135,6 @@ impl Dialect {
         set.iter().any(|w| w.eq_ignore_ascii_case(word))
     }
 
-    /// Feature level of a construct. The starting entries of SPEC §19.5 apply under every
-    /// dialect until per-dialect data is sourced.
     pub fn feature_level(self, feature: Feature) -> FeatureLevel {
         match feature {
             Feature::Alter | Feature::GoToWithoutName => FeatureLevel::Obsolete,
