@@ -14,8 +14,8 @@ class ApgSql < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.31.0"
-    rebuild 4
-    sha256 cellar: :any_skip_relocation, arm64_sequoia: "ff80ec654fb81bbbf5928e912c20d9cad47536ad6efd4a2d80717678efb8d069"
+    rebuild 5
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "f6d1c7d0222815e5e6812f10a52627c9b3beeb12ff83edd45b9603ba50c144d8"
   end
 
   # A bottle block is merged here by the bottle workflow once this formula is
