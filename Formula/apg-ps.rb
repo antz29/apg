@@ -11,14 +11,14 @@ class ApgPs < Formula
   desc "PowerShell scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.30.0",
-      revision: "85b275f1707de9f9b8a93b741db20a2c0fd53e5b"
+      tag:      "v0.31.0",
+      revision: "9c1c45aea62d5d26f4d13ec8931b2358906134f8"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.30.0"
-    rebuild 3
+    root_url "https://github.com/antz29/apg/releases/download/v0.31.0"
+    rebuild 4
     sha256 cellar: :any_skip_relocation, arm64_sequoia: "969161179bc69ae456b45c07a084893ef95ab2d9d0338ed25119e5ed5460465b"
   end
 

@@ -8,14 +8,14 @@ class ApgCobol < Formula
   desc "COBOL scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.30.0",
-      revision: "85b275f1707de9f9b8a93b741db20a2c0fd53e5b"
+      tag:      "v0.31.0",
+      revision: "9c1c45aea62d5d26f4d13ec8931b2358906134f8"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.30.0"
-    rebuild 7
+    root_url "https://github.com/antz29/apg/releases/download/v0.31.0"
+    rebuild 8
     sha256 cellar: :any_skip_relocation, arm64_sequoia: "dd87405bcf0086ef96f610a8dcb9b862dd309f21524f629625248b9f019b9fb2"
   end
 
