@@ -1,4 +1,4 @@
-//! Phase-02 task-27 (e2e): `apg scan` over a COBOL scratch repo, driven
+//! `apg scan` runs over a COBOL scratch repo, driven
 //! through the CANDIDATE binary (`testutil::apg_bin`) — never the apg repo.
 //! Every test is `#[ignore]`d and runs through `cargo test-e2e`.
 
@@ -390,7 +390,7 @@ mod e2e {
         assert_eq!(second, expected, "copybook-only re-scan keeps both rows");
     }
 
-    /// Phase-03 task-23 (e2e): a root-level CLASS-ID renders `cobol..ACCT` with
+    /// A root-level CLASS-ID renders `cobol..ACCT` with
     /// its METHOD-IDs as `cobol..ACCT.<method>`; a factory and an instance
     /// method sharing a name render `(factory)`/`(instance)`; an INTERFACE-ID
     /// renders its prototype; a subdirectory class renders `cobol.geo.POINT`.

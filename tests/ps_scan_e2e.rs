@@ -1,4 +1,4 @@
-//! Phase-07 task-20 (e2e): `apg scan` over a PowerShell scratch repo, driven
+//! `apg scan` runs over a PowerShell scratch repo, driven
 //! through the CANDIDATE binary (`testutil::apg_bin`) — never the apg repo.
 //! Only the File/Module facts are asserted, so the tests stay valid as the
 //! declaration/edge phases land. Every test is `#[ignore]`d and runs through

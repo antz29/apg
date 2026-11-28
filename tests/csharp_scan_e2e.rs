@@ -1,4 +1,4 @@
-//! csharp-projects (e2e): the C# frontend's project-aware and Razor scan
+//! `apg scan` runs the C# frontend's project-aware and Razor scan
 //! tier, driving the staged `csharpfrontend` / the CANDIDATE binary
 //! (`testutil::apg_bin`) against scratch `/tmp` trees only — never the apg
 //! repo. Every test is `#[ignore]`d and runs through `cargo test-e2e`.
@@ -186,7 +186,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase 6 task 22: global-namespace types render without a leading
+    /// Global-namespace types render without a leading
     /// `.`; a same-named global type in two projects (or in a project and the
     /// projectless set) is qualified by its project's repo-relative `.csproj`
     /// path; top-level-statements entry points stay per-project unique; and a
