@@ -1708,9 +1708,9 @@ mod unit {
     /// record per node plus one edge record per **out**-edge (out is canonical;
     /// the paired in-edge emits nothing). A pairing-inconsistent set (an
     /// out-edge whose other half is absent) is refused, the same
-    /// [`check_edge_pairing`] gate `ingest_tree` runs. Pure in-memory — the
-    /// scanned/planned universes are empty and no `implemented-by` target is
-    /// present, so no code-ref validation fires.
+    /// [`check_edge_pairing`] gate `ingest_tree` runs. The scanned/planned
+    /// universes are empty and no `implemented-by` target is present, so no
+    /// code-ref validation fires.
     #[test]
     fn ingest_nodes_emits_records_for_an_in_memory_node_set() {
         // A paired authored edge: `a` contains `b` (out in a's file, the
@@ -1776,9 +1776,9 @@ mod unit {
     /// record followed by exactly one record per out-edge (out is canonical).
     /// The validating full path ([`ingest_nodes`]) run on the SAME partial set
     /// still refuses it, pinning the difference between the validating full
-    /// path and the non-validating partial seam. Pure in-memory — the
-    /// scanned/planned universes are empty and no `implemented-by` target is
-    /// present, so no code-ref validation fires.
+    /// path and the non-validating partial seam. The scanned/planned universes
+    /// are empty and no `implemented-by` target is present, so no code-ref
+    /// validation fires.
     #[test]
     fn records_for_nodes_emits_a_partial_delta_without_full_set_validation() {
         // Node `a` carries two out-edges to `b` and `c`, both deliberately
@@ -1836,7 +1836,7 @@ mod unit {
     /// [`records_for_nodes`] carries the authored node's full `properties` map
     /// into the emitted `Record` unchanged: a known key, an
     /// arbitrary key, and an empty-valued key all survive the partial builder
-    /// verbatim. Pure in-memory.
+    /// verbatim.
     #[test]
     fn records_for_nodes_round_trips_authored_properties() {
         let mut entity = node("domain", "entity", "order");
@@ -1874,7 +1874,7 @@ mod unit {
     /// [`properties_json`] / [`properties_from_json`] are exact inverses over
     /// the full properties map: unknown keys and keys carrying an **empty
     /// value** survive the round-trip verbatim, and the canonical encoding is
-    /// the sorted-key JSON object. Pure in-memory.
+    /// the sorted-key JSON object.
     #[test]
     fn properties_json_round_trips_unknown_and_empty_valued_keys() {
         let mut properties = NodeProperties::new();
@@ -1898,7 +1898,6 @@ mod unit {
     /// Equal maps encode to byte-identical canonical strings regardless of
     /// insertion order — [`NodeProperties`] is a [`BTreeMap`], whose iteration
     /// order is sorted, so the encoding is deterministic.
-    /// Pure in-memory.
     #[test]
     fn properties_json_is_deterministic_for_equal_maps() {
         let mut a = NodeProperties::new();
@@ -1920,7 +1919,6 @@ mod unit {
     /// The empty map encodes as the canonical `"{}"`, and both `"{}"` and the
     /// empty (or whitespace-only) column value decode back to the empty map —
     /// the projection's representation of an absent/unset property set.
-    /// Pure in-memory.
     #[test]
     fn properties_json_and_from_json_agree_on_the_empty_map() {
         assert_eq!(properties_json(&NodeProperties::new()), "{}");
@@ -1941,7 +1939,7 @@ mod unit {
     /// [`properties_from_json`] refuses malformed input rather than silently
     /// dropping keys: invalid JSON and valid JSON that is **not** a
     /// `string -> string` object (array, number, `null`, string, non-string
-    /// value) are each an `Err`. Pure in-memory.
+    /// value) are each an `Err`.
     #[test]
     fn properties_from_json_rejects_malformed_and_non_string_maps() {
         for raw in [

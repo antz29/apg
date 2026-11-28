@@ -718,10 +718,8 @@ mod unit {
         assert_eq!(seen.len(), 13);
     }
 
-    /// The edge spool round-trips through an IN-MEMORY `Vec<u8>`/`Cursor`, not a
-    /// file: the evidence listed it as "writes and re-reads a spool file", but
-    /// its body performs no filesystem I/O, so by the law it is unit (the body
-    /// wins over the evidence).
+    /// The edge spool round-trips through an in-memory `Vec<u8>`/`Cursor`, never
+    /// touching a file.
     #[test]
     fn edge_spool_roundtrip() {
         let mut edges = vec![
@@ -982,8 +980,8 @@ mod unit {
     /// (`previous.planned` or a delta `status: planned` placeholder) and a
     /// target absent from both universes stay unresolved, and only the
     /// `UnresolvedTarget` rows no surviving unresolved edge names are GC'd.
-    /// Pure in-memory: the graph and the previous-scan snapshot are built by
-    /// hand, and the finalizer is the one unit under test.
+    /// The graph and the previous-scan snapshot are built by hand, and the
+    /// finalizer is the one unit under test.
     #[test]
     fn finalize_delta_graph_converts_universe_references() {
         let caller = "rust.apg.caller";
@@ -1138,8 +1136,8 @@ mod unit {
     /// [`PreviousScan::kinds`]; an edge whose target is in neither universe is
     /// still dropped.
     ///
-    /// Pure in-memory: the graph and the previous-scan snapshot are built by
-    /// hand, and the finalizer is the one unit under test.
+    /// The graph and the previous-scan snapshot are built by hand, and the
+    /// finalizer is the one unit under test.
     #[test]
     fn finalize_delta_graph_retains_seed_only_authored_code_edges() {
         let note = "implementation.note.seed-details";
@@ -1267,8 +1265,8 @@ mod unit {
     /// target stay unresolved (the planned call keeps its `target_type`), a
     /// call onto a real `Struct` and a use onto a real `Function` never flip
     /// (wrong endpoint kind), and only the `UnresolvedTarget` rows no surviving
-    /// unresolved edge names are GC'd. Pure in-memory: the assembled graph is
-    /// built by hand and the partition is the one unit under test.
+    /// unresolved edge names are GC'd. The assembled graph is built by hand and
+    /// the partition is the one unit under test.
     #[test]
     fn resolve_unresolved_edges_partition_is_linear() {
         let caller = "rust.apg.caller";
@@ -1463,8 +1461,8 @@ mod unit {
     /// recycled into a fabricated `UnresolvedTarget` — while an
     /// `unresolved_call`/`unresolved_use` whose target **is** a live
     /// `UnresolvedTarget` placeholder survives, because that placeholder's FQN
-    /// is in the live set. Pure in-memory: the graph is built by hand and the
-    /// finalizer is the one unit under test.
+    /// is in the live set. The graph is built by hand and the finalizer is the
+    /// one unit under test.
     #[test]
     fn finalize_graph_drops_vanished_targets_and_keeps_live_unresolved_edges() {
         let caller_fn = "rust.apg.caller";
@@ -1681,7 +1679,7 @@ mod int {
     /// the repo root; `yaml.sub/dir` for a subdirectory), a declaration
     /// renders `parent.name` off the rooted parent, the code_type is
     /// `config` (`md` keeps `docs`), and an empty repo-root identity renders
-    /// the bare `md.` root. Pure in-memory: two-plus units wired, no I/O.
+    /// the bare `md.` root.
     #[test]
     fn structural_streams_root_render_and_classify() {
         let base = Path::new("/repo");
@@ -1770,9 +1768,9 @@ mod int {
 
     /// [`insert_node`] streams exactly one progress symbol and
     /// one summary tally per admitted code node, and nothing for a non-code
-    /// kind or a `None` emitter. Pure in-memory: the emitter writes to a
-    /// `Vec<u8>`, and `insert_node` is wired directly (the spooling
-    /// `ingest`/`ingest_records` entry points would make this e2e).
+    /// kind or a `None` emitter. The emitter writes to a `Vec<u8>`, and
+    /// `insert_node` is wired directly (the spooling `ingest`/`ingest_records`
+    /// entry points spool through a real file).
     #[test]
     fn insert_node_streams_one_symbol_and_tally_per_code_kind() {
         let mut graph = Graph::default();
