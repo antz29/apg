@@ -48,7 +48,7 @@ pub(crate) fn canonical_struct_fqn(parent: &str, name: &str) -> String {
 }
 
 /// Maps an impact-set of absolute target paths to their module identities
-/// (pure seam for task-7's package/module-granularity emission filter).
+/// (pure seam for the package/module-granularity emission filter).
 pub(crate) fn identities_from_targets<F>(targets: &[PathBuf], identity_of: F) -> HashSet<String>
 where
     F: Fn(&Path) -> String,

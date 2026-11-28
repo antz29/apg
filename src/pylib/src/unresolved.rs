@@ -1,11 +1,11 @@
-//! Unresolved-target origin classification (task-6).
+//! Unresolved-target origin classification.
 
 use std::path::{Component, Path, PathBuf};
 
 use ruff_db::files::{File, FilePath};
 use ty_project::ProjectDatabase;
 
-/// Dependency-environment directory names (task-6): a resolved reference
+/// Dependency-environment directory names: a resolved reference
 /// landing under one of these is dependency code → `external`, never
 /// `unknown`. `*.egg-info` is matched by suffix.
 pub(crate) const DEPENDENCY_DIR_NAMES: &[&str] = &[
@@ -22,7 +22,7 @@ pub(crate) const DEPENDENCY_DIR_NAMES: &[&str] = &[
 ];
 
 /// Which kind of file a `ty`-resolved reference landed in. Drives the
-/// unresolved category (task-6).
+/// unresolved category.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PathOrigin {
     /// The tool-bundled vendored typeshed → `stdlib`.
@@ -45,7 +45,7 @@ pub(crate) fn under_dependency_tree(path: &Path) -> bool {
 }
 
 /// The unresolved category for a `ty`-resolved reference outside our own
-/// declaration set (task-6, first match wins). `Vendored` (bundled typeshed)
+/// declaration set (first match wins). `Vendored` (bundled typeshed)
 /// is `stdlib`; a virtual installed environment is `external`; a real file
 /// under a dependency tree (project `vendor`/`third_party` or a `.venv`
 /// site-packages) is `external`; elsewhere under the scan root is in-root

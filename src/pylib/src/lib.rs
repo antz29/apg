@@ -37,29 +37,29 @@
 // start/end are 0-based UTF-8 byte offsets (Ruff's native `TextSize`);
 // start_line/end_line are 1-based inclusive line numbers.
 //
-// Discovery (task-3): `.py`/`.pyi` are accepted under the `py` language id
+// Discovery: `.py`/`.pyi` are accepted under the `py` language id
 // (`.pyx` is NOT accepted). The frontend's own walk never descends into a
 // non-project tree — `__pycache__`, `.venv`, `venv`, `.tox`, `.mypy_cache`,
 // `.pytest_cache`, `.ruff_cache`, `site-packages`, `.eggs`, `*.egg-info`,
 // `node_modules`, and every hidden dot entry (`.git`/`.hg`/…) — so no file
 // under a venv/site-packages tree ever becomes a code node. That same tree is
-// still READ as a ty resolution input (task-4).
+// still READ as a ty resolution input.
 //
-// Environment (task-4): the ty project context is built from FILESYSTEM
+// Environment: the ty project context is built from FILESYSTEM
 // MARKERS only — a uv project (`pyproject.toml`/`uv.lock`), a virtualenv
 // (`pyvenv.cfg`), or a bare src root. Detection never probes for a Python
 // interpreter and never shells out to `python`/`uv`, so a scan works with NO
 // Python runtime present. The excluded site-packages/venv tree is a
 // RESOLUTION INPUT ONLY, never a scan root.
 //
-// Unresolved category precedence (task-6, first match wins): a project symbol
+// Unresolved category precedence (first match wins): a project symbol
 // resolves to a real Calls/Uses edge; a `ty` tool-bundled vendored typeshed
 // file is `stdlib`; dependency code (a project `vendor`/`third_party` tree or
 // an installed `System`/`SystemVirtual` environment such as a `.venv`
 // site-packages) is `external`; in-root unbound/dynamic residue is `unknown`.
 // A reference is never guessed into a fabricated FQN or edge.
 //
-// Incremental contract (task-7, the pinned phase-02 task-9 hand-off):
+// Incremental contract:
 // `--targets <file>` is a UTF-8 newline-delimited list of absolute source
 // paths. It is an EMISSION filter at package/module granularity: every target
 // is resolved against the FULL ty project context, but only the target
@@ -94,7 +94,7 @@ use crate::environment::detect_project_kind;
 use crate::identity::identities_from_targets;
 use crate::scanner::Scanner;
 
-/// Reads the pinned `--targets` list (phase-02 task-9): absolute source paths,
+/// Reads the `--targets` list: absolute source paths,
 /// one per line, blanks ignored. `None` — an absent flag, an unreadable file or
 /// an empty list — means NO emission filter (the byte-identical full scan).
 fn read_target_set(path: Option<&str>) -> Option<HashSet<PathBuf>> {
@@ -115,8 +115,8 @@ fn read_target_set(path: Option<&str>) -> Option<HashSet<PathBuf>> {
     if set.is_empty() { None } else { Some(set) }
 }
 
-/// The pinned per-language native-artifact location for the Python frontend,
-/// `<cache-dir>/py/<cache-key>/` (phase-02 task-9 NATIVE-ARTIFACT RULE). ty
+/// The per-language native-artifact location for the Python frontend,
+/// `<cache-dir>/py/<cache-key>/`. ty
 /// resolves through an in-process salsa database, so (exactly as the Rust
 /// frontend does for rust-analyzer) the directory carries no separate on-disk
 /// compiler cache; creating it makes the shared store's Python location exist
@@ -269,7 +269,7 @@ pub fn run(args: Args) -> io::Result<()> {
     let mut out = io::BufWriter::new(stdout.lock());
 
     // Resolve the target paths to module identities with the same rule the
-    // discovery walk uses (package/module granularity, task-7).
+    // discovery walk uses (package/module granularity).
     let mut scanner = Scanner::new(
         root.clone(),
         module_dirs,

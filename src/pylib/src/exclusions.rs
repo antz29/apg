@@ -1,11 +1,11 @@
-//! The frontend's own discovery-walk exclusion policy (task-3).
+//! The frontend's own discovery-walk exclusion policy.
 
 /// Directory names never descended into by the frontend's own discovery walk
-/// (`domain.constraint.python-exclusions`, task-3). Hidden dot entries
+/// (`domain.constraint.python-exclusions`). Hidden dot entries
 /// (`.venv`, `.tox`, `.git`, `.hg`, `.mypy_cache`, `.pytest_cache`,
 /// `.ruff_cache`, `.eggs`, …) are covered by the general hidden-name rule;
 /// `*.egg-info` by the suffix rule. The same trees are still ty resolution
-/// inputs (task-4) — this is a discovery exclusion, not a resolution one.
+/// inputs — this is a discovery exclusion, not a resolution one.
 pub(crate) const EXCLUDED_DIR_NAMES: &[&str] = &[
     "__pycache__",
     ".venv",

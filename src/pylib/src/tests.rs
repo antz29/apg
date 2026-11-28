@@ -1,7 +1,6 @@
 //! Unit tests for the `pyfrontend` library (`rust.pyfrontend`).
 //!
-//! Relocated verbatim from `src/lib.rs`'s inline `#[cfg(test)] mod tests`:
-//! the pure in-memory `unit` tier lives here and keeps the `tests::unit::…`
+//! The pure in-memory `unit` tier lives here and keeps the `tests::unit::…`
 //! libtest path filter. Non-test helpers stay at this module's root (never
 //! inside a tier); this tier needs none.
 

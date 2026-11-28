@@ -1,5 +1,4 @@
-//! Relocated e2e tests for the `pyfrontend` frontend crate (from
-//! `src/lib.rs`'s inline `#[cfg(test)] mod tests`). Real I/O only; every test
+//! e2e tests for the `pyfrontend` frontend crate. Real I/O only; every test
 //! is `#[ignore]`d and runs through `cargo test-e2e`
 //! (= `cargo test e2e:: -- --ignored`).
 

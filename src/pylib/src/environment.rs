@@ -1,8 +1,8 @@
-//! Filesystem-marker environment detection (task-4).
+//! Filesystem-marker environment detection.
 
 use std::path::Path;
 
-/// The environment shape auto-detected from FILESYSTEM MARKERS only (task-4):
+/// The environment shape auto-detected from FILESYSTEM MARKERS only:
 /// a uv project (`pyproject.toml`/`uv.lock`), a virtualenv (`pyvenv.cfg`), or
 /// a bare src root. No interpreter probe, no `python`/`uv` shell-out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,7 +12,7 @@ pub(crate) enum ProjectKind {
     BareSrc,
 }
 
-/// The environment shape from the marker booleans (pure seam for task-4).
+/// The environment shape from the marker booleans (pure seam).
 pub(crate) fn classify_project_markers(
     pyproject: bool,
     uv_lock: bool,
@@ -27,7 +27,7 @@ pub(crate) fn classify_project_markers(
     }
 }
 
-/// Filesystem-marker environment detection (task-4). No interpreter probe.
+/// Filesystem-marker environment detection. No interpreter probe.
 pub(crate) fn detect_project_kind(root: &Path) -> ProjectKind {
     let has_pyproject = root.join("pyproject.toml").is_file();
     let has_uv_lock = root.join("uv.lock").is_file();

@@ -125,7 +125,7 @@ impl Scanner {
     pub(crate) fn run(&mut self, out: &mut impl Write) {
         let files = self.discover_files();
 
-        // ── ty project context (task-4). Markers only; no interpreter probe.
+        // ── ty project context. Markers only; no interpreter probe.
         let root_system = SystemPathBuf::from_path_buf_lossy(self.root.clone());
         let system = OsSystem::new(root_system.clone());
         let project_name = self

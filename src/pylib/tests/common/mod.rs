@@ -1,7 +1,6 @@
 //! The `pyfrontend` crate-local shared e2e harness.
 //!
-//! Relocated verbatim from `src/lib.rs`'s inline `#[cfg(test)] mod tests`
-//! root: the scratch-`/tmp` fixtures and JSONL record helpers every e2e test
+//! The scratch-`/tmp` fixtures and JSONL record helpers every e2e test
 //! in `tests/pylib_e2e.rs` reaches via `mod common;`. Each integration-test
 //! binary includes this module separately, so items unused by a given binary
 //! are expected.
