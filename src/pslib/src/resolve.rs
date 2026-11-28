@@ -223,9 +223,9 @@ impl ManifestStems {
 
 /// The PowerShell 7.6 LTS in-box modules named `Microsoft.PowerShell.*`, from
 /// the PowerShell v7.6.0 sources: the `src/Modules/{Windows,Unix,Shared}`
-/// module manifests, `PSGalleryModules.csproj` and `InitialSessionState.cs`
-/// (re-verified 2026-11-19). This is the crate's single in-box module list: the builtins
-/// command table names its modules from it and never redefines it.
+/// module manifests, `PSGalleryModules.csproj` and `InitialSessionState.cs`.
+/// This is the crate's single in-box module list: the builtins command table
+/// names its modules from it and never redefines it.
 pub const INBOX_MODULES: &[&str] = &[
     "Microsoft.PowerShell.Core",
     "Microsoft.PowerShell.Management",

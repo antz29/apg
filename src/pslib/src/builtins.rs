@@ -22,36 +22,6 @@
 //! `System`/`System.*` is not a System type. Because the tables are the
 //! all-platform union, a Windows-only alias such as `ls` classes stdlib on
 //! every platform.
-//!
-//! Limits of the snapshot:
-//! - v7.6.0 is not diffed against the 7.6.6 servicing release.
-//! - The module-declared alias targets were read from the `[Alias(...)]`
-//!   attributes: `gcb`, `gin`, `gtz`, `scb`, `stz` and `fhx` in the PowerShell
-//!   v7.6.0 cmdlet sources, and the PSResourceGet aliases in the PSResourceGet
-//!   repository at tag `v1.2.0`; the Gallery 1.2.0 package is assumed, not
-//!   verified, to be built from that tag.
-//! - Core cmdlets are not audited for `[Alias]` attributes outside
-//!   `BuiltInAliases`.
-//! - The Unix and Windows module manifests are compared only for Management,
-//!   Utility and Security; Host's Shared and Diagnostics' Windows-only
-//!   placement rest on the source directory layout, not a manifest comparison.
-//! - At v7.6.0 the `Get-PSSubsystem` registration carries no conditional, so
-//!   COMMANDS includes it; its guard in earlier releases is not read.
-//! - The PSResourceGet Learn page is labelled v1.2.0-preview5 and lists the
-//!   function `Import-PSGetRepository` as a cmdlet, so the PSResourceGet
-//!   entries rest on the v1.2.0 GA manifest.
-//! - The accelerator source was read at tags v7.4.6, v7.5.4 and v7.6.0 and
-//!   compared by eye, not by a mechanical diff; the Learn 7.6 table matches it.
-//! - No table is checked against a live `pwsh` (no `Get-Command` or
-//!   `TypeAccelerators::Get` dump).
-//! - Accelerator full names that the source writes as a short name (not a C#
-//!   keyword or a qualified `typeof`) are taken from Learn, not from each
-//!   type's declaring source file. Among them:
-//!   `NoRunspaceAffinity` → `System.Management.Automation.Language.NoRunspaceAffinityAttribute`
-//!   (this makes it a System type), and `cimconverter` →
-//!   `Microsoft.Management.Infrastructure.CimConverter` and
-//!   `pspropertyexpression` → `Microsoft.PowerShell.Commands.PSPropertyExpression`
-//!   (the last makes `pspropertyexpression` not a System type).
 
 use crate::resolve::INBOX_MODULES;
 
