@@ -1,7 +1,5 @@
-//! Relocated e2e tests for the `structfrontend` crate (from `src/lib.rs`'s
-//! inline `#[cfg(test)] mod tests`). Real I/O only; every test is
-//! `#[ignore]`d and runs through the crate-local
-//! `cargo test e2e:: -- --ignored`.
+//! E2e tests for the `structfrontend` crate. Real I/O only; every test is
+//! `#[ignore]`d and runs through the crate-local `cargo test e2e:: -- --ignored`.
 
 mod common;
 

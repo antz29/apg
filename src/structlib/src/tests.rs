@@ -605,10 +605,10 @@ mod unit {
         assert!(!glob_match("*.md", "a.txt"));
     }
 
-    /// schema-alignment phase-03 task-9: the structural scope predicate declines
-    /// the repo-relative `.opencode/agents/` tree — each definition there is the
-    /// agent frontend's sole claim — while the rest of `.opencode` (its Markdown
-    /// included) stays claimed.
+    /// The structural scope predicate declines the repo-relative
+    /// `.opencode/agents/` tree — each definition there is the agent frontend's
+    /// sole claim — while the rest of `.opencode` (its Markdown included) stays
+    /// claimed.
     #[test]
     fn scope_rejects_agent_definitions_but_claims_other_opencode_markdown() {
         let root = Path::new("/repo");
