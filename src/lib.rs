@@ -59,7 +59,7 @@ pub use warm::*;
 // `crate::<name>`, never by an integration crate).
 pub(crate) use install::cmd_init;
 pub(crate) use pipeline::run_pipeline;
-pub(crate) use query::{cmd_query, render_query};
+pub(crate) use query::cmd_query;
 pub(crate) use scan::cmd_scan;
 
 use std::path::{Path, PathBuf};
