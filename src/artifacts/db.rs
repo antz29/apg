@@ -109,6 +109,8 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
     let f = File::create(&lock_path)?;
     #[cfg(unix)]
     {
+        // SAFETY: `f` is a just-created live file whose fd is valid for the call and kept in
+        // `state.held` for its lifetime.
         let rc = unsafe { libc::flock(std::os::unix::io::AsRawFd::as_raw_fd(&f), libc::LOCK_EX) };
         if rc != 0 {
             anyhow::bail!("could not acquire write lock {}", lock_path.display());

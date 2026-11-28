@@ -197,6 +197,8 @@ fn cow_clone(src: &Path, dst: &Path) -> io::Result<()> {
     let dst = std::ffi::CString::new(dst.as_os_str().as_bytes())
         .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
     // `clonefile` clones a directory recursively.
+    // SAFETY: both pointers come from live, non-null, NUL-terminated `CString`s, and `dst` must
+    // not exist (see the function's doc above).
     let rc = unsafe { libc::clonefile(src.as_ptr(), dst.as_ptr(), 0) };
     if rc == 0 {
         Ok(())
@@ -237,6 +239,7 @@ fn clone_file(src: &Path, dst: &Path) -> io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .open(dst)?;
+    // SAFETY: `to` and `from` are two live, owned `File` fds for the duration of the call.
     let rc = unsafe { libc::ioctl(to.as_raw_fd(), libc::FICLONE, from.as_raw_fd()) };
     if rc != 0 {
         return Err(io::Error::last_os_error());
