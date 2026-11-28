@@ -54,7 +54,6 @@ fn json_top_level_keys(text: &str) -> Vec<(String, usize)> {
 
 /// Reads the JSON string whose opening quote is at `start`, returning the
 /// decoded text and the index just past its closing quote.
-#[allow(clippy::while_let_on_iterator)]
 fn json_read_string(text: &str, start: usize) -> (String, usize) {
     let mut s = String::new();
     let mut escaped = false;
