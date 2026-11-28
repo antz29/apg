@@ -175,6 +175,36 @@ fn hub_out_edges(wt_apg: &Path) -> usize {
         .len()
 }
 
+/// The complete `Constraint` FQN set, in a deterministic order, read through a
+/// **real** `apg query` child with an isolated HOME.
+///
+/// Asserts the query exits 0 and printed its CSV header — the header appears
+/// only after its own database open succeeds — so a caller that runs this from
+/// inside a writer's blocking critical section gets the read-only/lock-free
+/// proof for free: a read-write open would be refused by the held writer and a
+/// `specs.lock` acquisition would wait behind it. Returns the observed
+/// identities, i.e. one whole database snapshot (never a partial row set).
+fn read_constraints(wt: &Path, home: &Path) -> Vec<String> {
+    let out =
+        testutil::ApgCommand::new(&["query", "MATCH (n:Constraint) RETURN n.fqn ORDER BY n.fqn"])
+            .cwd(wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+    assert!(
+        out.status.success(),
+        "a read-only query must complete during a durable write: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next(),
+        Some("n.fqn"),
+        "the read must print its CSV header only after opening the database: {text}"
+    );
+    lines.map(str::to_string).collect()
+}
+
 /// Asserts a mutation refusal is the unified project-context one: the
 /// `mutation refused — ` prefix, naming branch `main` (the repo's default
 /// branch) and the `apg project start` fix, and NEVER any of `preempted` — the
@@ -1879,6 +1909,175 @@ mod e2e {
             scan_after.status.success(),
             "scan must run after the between-write burst: {}",
             String::from_utf8_lossy(&scan_after.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The Model C acceptance for a READ overlapping a durable WRITE, made
+    /// deterministic rather than a lucky race: the real durable-write sequence
+    /// ([`layers::write_project`]) is paused at its one-shot
+    /// `MutationBoundary::BeforeCommit` / `BeforeProject` seams while its
+    /// **blocking** `specs.lock` critical section and write-capable database
+    /// handle are held, and a real `apg query` child runs inside each window.
+    ///
+    /// The read must, at every observed checkpoint:
+    /// 1. succeed — it opens the worktree database **read-only** and takes no
+    ///    `specs.lock` (a read-write open would be refused by the held writer, a
+    ///    flock acquisition would wait behind it, so exit 0 is the read-only,
+    ///    lock-free proof);
+    /// 2. observe a **complete committed state** — either the prior projection or
+    ///    the write's complete committed projection, never a partial, mixed or
+    ///    empty result and never an error;
+    /// 3. agree with the durable `apg/layers` store and the git HEAD: before the
+    ///    commit's node file, commit and projection are all absent; after the
+    ///    write's invocation returns all three are present.
+    ///
+    /// The commit→project window is observed too: the durable node file and its
+    /// one commit have landed while the projection stays prior, and the read
+    /// still returns the whole prior projection — commit-then-project never
+    /// exposes a half-applied one.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn acceptance_model_c_read_during_write_observes_a_complete_committed_state() {
+        let (wt_apg, repo, wt) = mutation_fixture("model-c-read-during-write");
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let spec_lock = wt_apg.join(specs::TRANS).join("specs.lock");
+        let constraint = |name: &str| format!("global.constraint.{name}");
+
+        // A committed prior state: one node landed by its own invocation, so
+        // there is a complete state for a concurrent read to observe while the
+        // write under test runs.
+        let prior = testutil::ApgCommand::new(&["node", "add", "global", "constraint", "prior"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            prior.status.success(),
+            "the prior state must land: {}",
+            String::from_utf8_lossy(&prior.stderr)
+        );
+        let prior_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "prior");
+        let during_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "during");
+        let after_path = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "after");
+        assert!(prior_path.exists(), "the prior node file must exist");
+        assert_eq!(
+            read_constraints(&wt, &home),
+            vec![constraint("prior")],
+            "the prior state must be the whole committed projection"
+        );
+        let commits_before_write = testutil::commit_count(&wt);
+
+        // --- Checkpoint 1: the write paused BEFORE its commit ----------------
+        // The hook runs inside `write_project`'s blocking flock section, with
+        // its write-capable handle held; the child read runs in that window.
+        layers::install_mutation_hook(layers::MutationBoundary::BeforeCommit, {
+            let (wt, home) = (wt.clone(), home.clone());
+            let (prior_path, during_path) = (prior_path.clone(), during_path.clone());
+            let spec_lock = spec_lock.clone();
+            move || {
+                assert!(
+                    spec_lock.exists(),
+                    "the hook must run inside the writer's blocking specs.lock critical section"
+                );
+                assert!(
+                    prior_path.exists(),
+                    "the prior committed node file must be intact"
+                );
+                assert!(
+                    !during_path.exists(),
+                    "before the commit this write's node file must not exist"
+                );
+                assert_eq!(
+                    testutil::commit_count(&wt),
+                    commits_before_write,
+                    "before the commit this write must not have committed"
+                );
+                // The read-only query completes beside the held writer and sees
+                // the prior complete state (no partial/mixed/empty result).
+                assert_eq!(
+                    read_constraints(&wt, &home),
+                    vec![constraint("prior")],
+                    "a read in the pre-commit window must observe the prior complete state"
+                );
+                Ok(())
+            }
+        });
+        layers::write_project(&wt_apg, &[node("global", "constraint", "during")], &[]).unwrap();
+
+        // --- Checkpoint 2: the write's invocation returned -------------------
+        // Its node file, its one commit and its projection now all agree.
+        assert!(during_path.exists(), "the write must land its node file");
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before_write + 1,
+            "the write must land exactly one commit"
+        );
+        assert_eq!(
+            read_constraints(&wt, &home),
+            vec![constraint("during"), constraint("prior")],
+            "the read must observe the write's complete committed state"
+        );
+
+        // --- Checkpoint 3: the next write paused between commit and project --
+        // The durable node file and its one commit HAVE landed; the projection
+        // has not. The read still observes the whole prior projection, never a
+        // half-applied one.
+        let commits_before_second = commits_before_write + 1;
+        layers::install_mutation_hook(layers::MutationBoundary::BeforeProject, {
+            let (wt, home) = (wt.clone(), home.clone());
+            let (after_path, spec_lock) = (after_path.clone(), spec_lock.clone());
+            move || {
+                assert!(
+                    spec_lock.exists(),
+                    "the hook must run inside the writer's blocking specs.lock critical section"
+                );
+                assert!(
+                    after_path.exists(),
+                    "the committed node file must exist before the projection apply"
+                );
+                assert_eq!(
+                    testutil::commit_count(&wt),
+                    commits_before_second + 1,
+                    "the durable write must have committed before the projection apply"
+                );
+                // Commit-then-project: a complete committed projection, not a
+                // partial node-file/commit/projection mix served to the reader.
+                assert_eq!(
+                    read_constraints(&wt, &home),
+                    vec![constraint("during"), constraint("prior")],
+                    "a read in the commit→project window must observe a complete committed projection"
+                );
+                Ok(())
+            }
+        });
+        layers::write_project(&wt_apg, &[node("global", "constraint", "after")], &[]).unwrap();
+
+        // --- Checkpoint 4: the second write's invocation returned ------------
+        // Durable store, git HEAD and the projection agree on the whole new
+        // state.
+        assert!(
+            after_path.exists(),
+            "the second write must land its node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before_second + 1,
+            "the second write must land exactly one commit"
+        );
+        assert_eq!(
+            read_constraints(&wt, &home),
+            vec![
+                constraint("after"),
+                constraint("during"),
+                constraint("prior")
+            ],
+            "the read must observe the second write's complete committed state"
+        );
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "no session daemon/socket may exist under per-invocation sessions"
         );
 
         testutil::remove(&repo);
