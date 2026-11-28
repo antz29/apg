@@ -174,32 +174,6 @@ fn print_help() {
     println!("{}", help_text());
 }
 
-/// `apg session <start|save|abort|end>`: `start` launches the
-/// session-scoped single-writer coordinator (bind socket, own `db.lbug`, serve
-/// routed mutations/reads) and blocks in the foreground; `save` signals the
-/// running session to make the database's marked node files and pending
-/// deletions durable; `abort` signals the running session to discard the
-/// database's pending state and release the session; `end` signals the running
-/// session — the server-side shutdown releases the DB/socket and `serve` exits.
-/// Admission already applied every projection, so `end` performs no flush.
-#[expect(
-    dead_code,
-    reason = "retired dispatcher kept compiled until Phase 4 task 15 deletes it"
-)]
-fn session_cmd(args: &[String]) -> anyhow::Result<()> {
-    let apg_root = session::require_apg_root()?;
-    match args.first().map(|s| s.as_str()) {
-        Some("start") => session::Coordinator::start(&apg_root),
-        Some("save") => session::Coordinator::signal_save(&apg_root),
-        Some("abort") => session::Coordinator::signal_abort(&apg_root),
-        Some("end") => session::Coordinator::signal_end(&apg_root),
-        other => anyhow::bail!(
-            "usage: apg session <start|save|abort|end> (got `{}`)",
-            other.unwrap_or("<none>")
-        ),
-    }
-}
-
 /// The `apg` entry point: dispatches the CLI subcommands (`init`, `query`,
 /// `scan`, `plan`, `review`, `spec`, `project`, `node`, `edge`), prints help
 /// for `--help`/no args, and turns a returned error into a non-zero exit. The
