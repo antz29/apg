@@ -268,13 +268,21 @@ fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
 
 /// `apg node add <layer> <type> <name> [--body B] [--property k=v]*` — refuses
 /// when the FQN already exists (existence is never an implicit upsert; a
-/// re-add full-replaces the file and drops its edges). Existence resolves
-/// against the caller-supplied `base` node set alone (the session's
-/// `ArtifactDb::node_files_from_db`-reconstructed database working state, or the
-/// direct path's on-disk node set): an identity is present exactly when the base
-/// carries it. Pure list logic — it never reads `apg/layers/**` and never probes
-/// `node_file_path`, so it cannot observe a node file the caller's base does not
-/// carry.
+/// re-add full-replaces the file and drops its edges).
+///
+/// Admission checks the candidate against the supplied **committed model** — the
+/// node set a per-invocation write reads from `apg/layers/**` (the system of
+/// record) inside its write critical section — never against a live session's
+/// database working state or an earlier admission's pending rows
+/// (`requirements.requirement.admission-checks-the-model-not-persistence`). The
+/// identity must be absent from the model ([`layers::refuse_if_present`]), and
+/// the candidate itself must pass the same per-node structural rules the write
+/// funnel applies ([`layers::validate_node`]: name allowlist, type-in-layer,
+/// kind attributes, uniqueness). The whole-model minimums stay with
+/// `apg spec lint` and the merge gate
+/// (`domain.constraint.admission-holds-no-persistence-invariant`). Pure list
+/// logic — it never reads `apg/layers/**` and never probes `node_file_path`, so
+/// it cannot observe a node file the model does not carry.
 fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
@@ -283,15 +291,29 @@ fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
     }
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
-    // Existence check + write are inside the whole-durable-sequence flock held
-    // by `cmd_node` (the single acquisition site) — no internal acquire, so the
-    // read-modify-write is serialized and `node add` never double-locks.
+    // Identity admission against the committed model alone: the whole
+    // read-modify-write runs inside the caller's write critical section, so the
+    // model cannot move between this check and the write (no internal lock
+    // acquire — `cmd_node` is the single acquisition site).
     layers::refuse_if_present(
         base_node(base, layer, &pos[1], &pos[2]).is_some(),
         &f,
         "apg node update",
         "apg node rm",
     )?;
+    // The model's identity universe the shared node rules resolve uniqueness
+    // over — the candidate's identity is absent by the gate above, so this is
+    // exactly the committed model.
+    let universe: BTreeSet<(Layer, String, String)> = base
+        .iter()
+        .map(|n| {
+            Ok((
+                resolve_layer(&n.layer)?,
+                n.node_type.clone(),
+                n.name.clone(),
+            ))
+        })
+        .collect::<anyhow::Result<_>>()?;
     let node = NodeFile {
         layer: layer.layer_dir().to_string(),
         node_type: pos[1].clone(),
@@ -301,6 +323,10 @@ fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
         out: Vec::new(),
         in_edges: Vec::new(),
     };
+    // Structural admission against that same model — the identical rule set and
+    // wording the write funnel's `validate_change_over` applies, so an invalid
+    // candidate is refused before anything is written.
+    layers::validate_node(layer, &pos[1], &pos[2], &node.properties, &universe)?;
     // Advisory-only wording warning (R1/R5): a proposed tier-1-3 body carrying
     // likely-flagged wording rides in the returned [`Change`], but the write
     // proceeds unchanged — the author decides. The selection mirrors
