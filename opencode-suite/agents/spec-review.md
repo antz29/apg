@@ -156,8 +156,10 @@ You can:
   `apg_review_reject`.
 
 You cannot:
-- edit any file, node, or plan; hold no `apg_node`/`apg_edge`, no `apg_session`,
-  no `apg_plan*`; call `apg_review_action` (coordinator-only), `apg_scan`, or any shell.
+- edit any file, node, or plan; hold no `apg_node`/`apg_edge`, no `apg_plan*`;
+  call `apg_review_action` (coordinator-only), `apg_scan`, or any shell. A durable
+  `apg_node`/`apg_edge` write takes the blocking worktree lock per invocation; you
+  hold neither of those, nor any session tool, because `apg_session` no longer exists.
 ## Process
 You are the reviewer side; neither side closes this cycle alone:
 ```
