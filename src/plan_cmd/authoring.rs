@@ -811,7 +811,7 @@ fn task_operations_supplied(p: &artifacts::ParsedArgs) -> bool {
 
 /// `apg plan add <project>` (the plan itself — no second positional) /
 /// `apg plan add <project> phase <n> …` / `task <phase> <k> …` /
-/// `planned <kind> <fqn> …` (R23, PHASE_02). The create arm refuses when the
+/// `planned <kind> <fqn> …` (R23). The create arm refuses when the
 /// plan already exists and warns when the requirement tier is empty.
 pub(crate) fn plan_add(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
@@ -822,8 +822,8 @@ pub(crate) fn plan_add(args: &[String]) -> anyhow::Result<()> {
     let _lock = artifacts::acquire_spec_lock(&apg_root)?;
     let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
         // The plan-record create arm: `apg plan add <project>` (no second
-        // positional) creates the plan itself — the surface formerly spelled
-        // `apg plan init`. It refuses when the plan already exists.
+        // positional) creates the plan itself. It refuses when the plan
+        // already exists.
         let has_requirements = plan_init_at(
             &apg_root,
             project,
@@ -928,7 +928,7 @@ pub(crate) fn plan_add(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Core of the `phase` add arm (extracted for tests): refuses an existing
+/// Core of the `phase` add arm: refuses an existing
 /// phase (no implicit upsert — the strict surface is add/update/rm), then
 /// appends the PlanPhase + Contains + Satisfies records and every prereq
 /// `Gates` edge — each gated through the same cycle check `apg plan update
@@ -992,7 +992,7 @@ pub fn plan_add_phase_at(
     Ok(())
 }
 
-/// Core of the `task` add arm (extracted for tests): verifies the target
+/// Core of the `task` add arm: verifies the target
 /// phase exists (a task under a nonexistent `plan.phase-NN` is rejected
 /// before any write), refuses an existing task (no implicit upsert), validates
 /// the task's assignment and its operation edge set, and appends the Task +
@@ -1068,7 +1068,7 @@ pub fn plan_add_task_at(
     Ok(())
 }
 
-/// Core of the `planned` add arm (extracted for tests): validates the node
+/// Core of the `planned` add arm: validates the node
 /// kind, refuses a FQN that is **real scanned code** and a FQN the plan
 /// already declares (no implicit upsert — the strict surface is add/update/rm),
 /// then appends the `Record::PlannedNode` + its parent `Contains` edge.

@@ -95,7 +95,7 @@ fn review_add(args: &[String]) -> anyhow::Result<()> {
 /// engine (`LocalNodeTable::isVisible`). Every DB handle here is scoped to a
 /// block and dropped before `write_jsonl_and_reingest`.
 ///
-/// Public so the relocated e2e crates reach it as
+/// Public so the e2e crates reach it as
 /// `apg::review_cmd::apply_review_add`.
 pub fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
     let target = p.positional.first().expect("review add requires a target");
@@ -223,11 +223,11 @@ fn feedback_tier(target: &str, project: &str) -> Layer {
 /// transient, so the mirror write never commits — `apg session save` flushes
 /// only `apg/layers/**`, never review state). Returns the mirror path written.
 ///
-/// **Commit-then-project** (phase-05 task-15): the mirror write lands FIRST
+/// **Commit-then-project**: the mirror write lands FIRST
 /// (via `write_jsonl_and_reingest`) and the exact projection delta is applied
 /// only after it, so the newly attached Feedback is immediately queryable by a
 /// separate `apg query` process with no scan. The delta is computed inside the
-/// funnel (task-3) — this caller never threads a delete set.
+/// funnel — this caller never threads a delete set.
 fn write_transient_feedback(
     apg_root: &Path,
     project: &str,
@@ -325,13 +325,13 @@ fn set_feedback(
 /// transient file that carries it (the plan store or one of the five tier
 /// mirrors), write-through.
 ///
-/// **Commit-then-project** (phase-05 task-16): the mutated mirror lands FIRST
+/// **Commit-then-project**: the mutated mirror lands FIRST
 /// (via `write_jsonl_and_reingest`) and the exact projection delta — including
 /// the changed Feedback FQN — is applied only after it, so an
 /// actioned/resolved status is immediately queryable by a separate `apg query`
-/// process with no scan. The delta is computed inside the funnel (task-3).
+/// process with no scan. The delta is computed inside the funnel.
 ///
-/// Public so the relocated e2e crates reach it as
+/// Public so the e2e crates reach it as
 /// `apg::review_cmd::set_feedback_at`.
 pub fn set_feedback_at(
     apg_root: &Path,
@@ -426,7 +426,7 @@ pub fn set_feedback_at(
 fn review_list(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let apg_root = require_apg_root()?;
-    // The env-gated project binding (phase-02): a bound read lists the
+    // The env-gated project binding: a bound read lists the
     // registered project's own review state, so `APG_PROJECT` present
     // redirects the store root, the project key and the DB open to the row's
     // worktree. With the binding absent the cwd-resolved checkout is unchanged.

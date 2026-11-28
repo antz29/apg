@@ -17,7 +17,7 @@ pub(crate) fn plan_render(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan render <project> [--out <path>|-]");
     };
     let apg_root = require_apg_root()?;
-    // The env-gated project binding (phase-02): a bound read renders the
+    // The env-gated project binding: a bound read renders the
     // registered project's own plan store, so `APG_PROJECT` present redirects
     // the store root (and the default `--out` path) to the row's worktree.
     // With the binding absent the cwd-resolved checkout is unchanged.

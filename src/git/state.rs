@@ -17,7 +17,7 @@ pub struct GitState {
     /// True when `git status --porcelain` is empty. Meaningful only when
     /// `sha` is `Some`.
     pub clean: bool,
-    /// The content-identity key of the tree (win A): a digest over the HEAD
+    /// The content-identity key of the tree: a digest over the HEAD
     /// sha plus the working-tree + index + untracked file **content**, never
     /// mtime. `None` when there is no sha (not a git repo / unborn HEAD).
     pub content_key: Option<String>,
@@ -804,7 +804,7 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
     }
 }
 
-/// The content-identity freshness predicate (win A): the live DB is reusable
+/// The content-identity freshness predicate: the live DB is reusable
 /// as-is iff it exists AND the current tree's content identity matches the git
 /// state recorded in the DB's **own** `Scan` row exactly — recorded HEAD sha,
 /// cleanliness and content-identity key all equal the current values. mtime is

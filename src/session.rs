@@ -1,4 +1,4 @@
-//! Session-scoped single-writer coordinator (phase-03).
+//! Session-scoped single-writer coordinator.
 //!
 //! `apg session start` launches a process that owns the worktree's
 //! `apg/.trans/db.lbug` **exclusively** and serves routed mutations and reads
@@ -131,7 +131,7 @@ pub(crate) enum Request {
     Save,
     /// Client-initiated abort: discard the database's pending state and abandon
     /// the session without making it durable — the protocol counterpart of the
-    /// phase-02 abort lifecycle (discard the pending set, release the session,
+    /// abort lifecycle (discard the pending set, release the session,
     /// force a full scan when the run was dirty). Declared here so the wire
     /// protocol carries the request; the server arm is wired with that lifecycle.
     Abort,
@@ -235,10 +235,10 @@ pub fn live_session(apg_root: &Path) -> bool {
 /// [`Coordinator::force_full_scan`], and `run_pipeline`'s stale-socket guard and
 /// full-load branch. No caller keeps a second deletion list.
 ///
-/// The `graph.jsonl` export no longer exists (its deletion landed with the
-/// publish cut in phase 10), so there is no export to discard. The node files
-/// under `apg/layers/**` and every source file are never touched here; the
-/// caller rebuilds the database from them.
+/// There is no `graph.jsonl` export to discard: the derived index is
+/// `db.lbug` and its sidecars alone. The node files under `apg/layers/**` and
+/// every source file are never touched here; the caller rebuilds the database
+/// from them.
 pub(crate) fn discard_derived_index(trans_dir: &Path) {
     for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm"] {
         let _ = std::fs::remove_file(trans_dir.join(name));
@@ -490,7 +490,7 @@ impl Coordinator {
     /// remedy — naming the bound project and its worktree when `APG_PROJECT`
     /// binds one — and the returned handle is the non-optional owned DB.
     fn open_owned_db(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
-        // The env-gated registry binding (phase-02): a bound session owns the
+        // The env-gated registry binding: a bound session owns the
         // registered project's own database, so its absence and any open failure
         // are refused naming the project and its worktree, never a bare path.
         // The pre-check mirrors the shared `open_project_db` wording because that
@@ -1067,7 +1067,7 @@ impl Coordinator {
     }
 
     /// Admit one routed durable mutation and project it into the live DB
-    /// (phase-01 task-4, phase-02 task-1: DB-only admission).
+    /// (DB-only admission).
     ///
     /// The sequence runs ENTIRELY over the session's ONE owned DB handle: it
     /// reads NO `apg/layers/**` node file and NO `apg/.trans/graph.jsonl`.

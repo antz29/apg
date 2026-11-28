@@ -5,7 +5,7 @@ use super::*;
 const BIN: &str = "0.10.4";
 
 // ------------------------------------------------------------------
-// task-2/task-5 rules: same major.minor proceeds (patch diff fine);
+// same major.minor proceeds (patch diff fine);
 // missing blocks; major/minor mismatch in EITHER direction blocks.
 // ------------------------------------------------------------------
 

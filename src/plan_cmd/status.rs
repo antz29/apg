@@ -9,7 +9,7 @@ use crate::schema::Record;
 
 use super::{load_plan, require_apg_root, write_through};
 
-/// `apg plan done <project> <task-fqn>` (PHASE_03) — the implementer's
+/// `apg plan done <project> <task-fqn>` — the implementer's
 /// assertion. Marks a task done with NO promotion and NO code-graph
 /// verification: the plan's planned nodes stay declared until the
 /// apply act (PlanCompletion-SPEC.md), whose coherence gate verifies every
@@ -80,7 +80,7 @@ pub fn plan_undone_at(apg_root: &Path, project: &str, task_fqn: &str) -> anyhow:
     Ok(())
 }
 
-/// `apg plan note <project> <task-fqn> --body … [--kind …]` (PHASE_03) — an
+/// `apg plan note <project> <task-fqn> --body … [--kind …]` — an
 /// implementer attaches a note to a task for a concern or deviation that arose
 /// during execution (PlanExecution-SPEC.md). `Task` is an allowable `Details`
 /// target. The note serializes into the transient plan JSONL (branch-local,
@@ -150,7 +150,7 @@ pub fn plan_note_at(
     Ok(())
 }
 
-/// `apg plan complete <project> <phase-n>` (PHASE_03) — a milestone only.
+/// `apg plan complete <project> <phase-n>` — a milestone only.
 /// Requires every phase task `done` and no unresolved feedback on the phase or
 /// its tasks; then marks the phase complete. NO `Implements` materialization
 /// and NO plan retirement: the plan survives until the apply act

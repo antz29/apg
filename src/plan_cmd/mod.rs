@@ -1,5 +1,5 @@
 //! `apg plan` — the phased execution plan that bridges the spec to present
-//! code (PHASE_03 execution + apply model). The plan is transient by design
+//! code (the execution + apply model). The plan is transient by design
 //! (R22): it lives in the gitignored `apg/.trans/plans/<project>.jsonl` and is
 //! branch-local. The plan-writer authors the tier-4 additions as **planned
 //! Implementation nodes** (`apg plan add <project> planned <kind> <fqn>` —
@@ -39,7 +39,7 @@ pub use verify::*;
 
 // The crate-internal CLI wrappers and cross-module helpers cannot travel
 // through a `pub use …::*` glob (their visibility is narrower than `pub`);
-// re-export them explicitly so `cmd_plan` and the relocated unit tests reach
+// re-export them explicitly so `cmd_plan` and the unit tests reach
 // them through `crate::plan_cmd::<name>` / `super::*`.
 pub(crate) use authoring::{plan_add, plan_rm, plan_update};
 pub(crate) use envelope::{plan_project, require_apg_root};
@@ -54,10 +54,9 @@ pub(crate) use render::render_phase_tasks;
 #[cfg(test)]
 pub(crate) use verify::realization_candidates;
 
-// The relocated unit/int tests reach the schema/collections names through
-// `use super::*` (they were declared in this module before the split); keep
-// them reachable in test builds only, so a non-test build carries no unused
-// import.
+// The unit/int tests reach the schema/collections names through
+// `use super::*`; keep them reachable in test builds only, so a non-test build
+// carries no unused import.
 #[cfg(test)]
 use crate::schema::Record;
 #[cfg(test)]

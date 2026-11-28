@@ -132,7 +132,6 @@ pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String
 /// True when `apg_root` is inside a git repository (discoverable via git2).
 /// [`layers::write_through`] uses it to skip the commit outside a repo — no
 /// repo → no commit; the mutation still lands on disk.
-// (Unused until write_project, phase-3 task-16, wires write_through.)
 #[allow(dead_code)]
 pub fn in_repo(apg_root: &Path) -> bool {
     discover_repo(apg_root).is_ok()

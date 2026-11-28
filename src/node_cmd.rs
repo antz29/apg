@@ -70,7 +70,7 @@ fn edit_properties(
 }
 
 /// Resolve a layer dir name to its [`Layer`] (closed catalog). Public so the
-/// relocated `tests/node_cmd_e2e.rs` integration crate reaches it as
+/// `tests/node_cmd_e2e.rs` integration crate reaches it as
 /// `apg::node_cmd::resolve_layer`.
 pub fn resolve_layer(dir: &str) -> anyhow::Result<Layer> {
     Layer::ALL
@@ -170,7 +170,7 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
 /// A complete logical mutation: the node files to write, the paths to delete,
 /// the write-time advisories to surface to the caller, and the human message the
 /// command prints. Building the change only READS the store (existence checks +
-/// RMW); applying it is the durable sequence. The phase-03 session coordinator
+/// RMW); applying it is the durable sequence. The session coordinator
 /// builds a change and applies it itself (single writer), so this one builder
 /// serves both the direct and the routed path.
 pub struct Change {
@@ -678,13 +678,12 @@ fn edge_rm_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> 
 }
 
 // ---------------------------------------------------------------------------
-// Test-facing direct-path wrappers: the pre-refactor `node_add`/`edge_add`
-// command shapes (build the change, persist it through `write_project`, print).
-// The production dispatch uses `build_change` + `apply_change` directly so the
-// session coordinator can inject its own (already-held) DB handle; these keep
-// the existing direct-path tests unchanged and are compiled unconditionally
-// (`pub`) so the relocated `tests/node_cmd_e2e.rs` integration crate reaches
-// them.
+// Test-facing direct-path wrappers: the `node_add`/`edge_add` command shapes
+// (build the change, persist it through `write_project`, print). The production
+// dispatch uses `build_change` + `apply_change` directly so the session
+// coordinator can inject its own (already-held) DB handle; these keep the
+// direct-path tests unchanged and are compiled unconditionally (`pub`) so the
+// `tests/node_cmd_e2e.rs` integration crate reaches them.
 // ---------------------------------------------------------------------------
 
 pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
