@@ -573,6 +573,10 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 ///   `content_key: None`);
 /// - `Ok(Some(_))` — one usable row, the module selection being the routed
 ///   `modules` field.
+#[expect(
+    dead_code,
+    reason = "the per-invocation freshness read no longer calls the daemon's routed scan reader; phase-01 task-14 reworks it onto a read-only session"
+)]
 fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedScan>> {
     let out = crate::session::forward_query(
         apg_root,
@@ -634,37 +638,40 @@ pub fn db_presence(apg_root: &Path) -> Result<bool, FreshnessReadFailure> {
         })
 }
 
-/// Collects the freshness facts from **one** capture of the database and the
-/// caller's already-captured [`GitState`]: whether `db.lbug` exists, its own
+/// Collects the freshness facts from **one** read-only per-invocation
+/// [`session::Session`] on `<apg_root>/.trans/db.lbug` and the caller's
+/// already-captured [`GitState`]: whether `db.lbug` exists, its own
 /// [`RecordedScan`] row (when readable) and the other DB facts (pending state,
-/// schema, authored digest, session socket), folded into the list of inputs
-/// that differ (empty = fresh).
+/// schema, authored digest), folded into the list of inputs that differ
+/// (empty = fresh).
 ///
 /// The presence precondition is [`db_presence`]: `NotFound` alone is the
 /// `"database"` absence; any other metadata error is the facts' `Err`, a named
 /// read failure rather than a silent absence.
 ///
 /// The precondition failures short-circuit exactly as the collect-all form
-/// always has — `"database"`, `"socket"`, `"git sha"` and `"recorded scan"`
-/// each reported alone. [`freshness_snapshot`] shares this gather, so the labels
-/// and the verdict come from one evaluation and cannot drift.
+/// always has — `"database"`, `"git sha"` and `"recorded scan"` each reported
+/// alone. [`freshness_snapshot`] shares this gather, so the labels and the
+/// verdict come from one evaluation and cannot drift.
 ///
-/// The two **opening data reads** — the recorded `Scan` row and the
-/// pending-state probe — run through the bounded retry ([`freshness_read`] over
+/// The recorded `Scan` row is read on the session's held **read-only** handle
+/// ([`session::Session::db`]), with no daemon round trip and no socket liveness
+/// probe, so a read cannot report a socket-only divergence. The pending-state
+/// probe runs through the bounded retry ([`freshness_read`] over
 /// [`freshness_read_retry`], with `std::thread::sleep` as the production
-/// sleeper), each against the same `db.lbug` path. A terminal or
-/// budget-exhausted read failure is the facts' `Err`, which
-/// [`freshness_snapshot`] renders as
+/// sleeper) against the same `db.lbug` path. A terminal or budget-exhausted
+/// read failure is the facts' `Err`, which [`freshness_snapshot`] renders as
 /// [`Contended`](FreshnessSnapshot::Contended) — carrying the failure's cause
 /// and, only when the read retried, its waited/budget pair — never a
-/// differing-input label.
+/// differing-input label. An open failure of the session is likewise that
+/// terminal `Err`.
 ///
 /// The schema-shape ([`crate::splice::seed::validate_compatible`]) and authored
 /// digest ([`crate::splice::seed::seed_authored_identity`] against
 /// [`crate::splice::seed::tree_authored_identity`]) checks stay **verdicts**
 /// (`"schema"`, `"authored digest"`): each conflates a mismatch on a *readable*
 /// database — a genuine difference — with a read failure, and an unreadable
-/// database has already failed the opening reads above, so turning either
+/// database has already failed the opening read above, so turning either
 /// verdict into a read failure would drop a genuinely differing input's label.
 fn freshness_facts(
     apg_root: &Path,
@@ -674,44 +681,68 @@ fn freshness_facts(
     if !db_presence(apg_root)? {
         return Ok((false, None, vec!["database"]));
     }
-    let socket = crate::session::socket_path(apg_root);
-    let live_session = socket.exists() && crate::session::live_session_at(&socket);
-    if socket.exists() && !live_session {
-        return Ok((true, None, vec!["socket"]));
-    }
     let Some(cur_sha) = state.sha.as_deref() else {
         return Ok((true, None, vec!["git sha"]));
     };
     let database = db_path(apg_root);
-    let Some(rec) = freshness_read(&database, || {
-        if live_session {
-            db_recorded_scan_routed(apg_root)
-        } else {
-            db_recorded_scan_result(apg_root)
+    let session =
+        crate::session::Session::open(apg_root).map_err(|source| FreshnessReadFailure {
+            database: database.clone(),
+            waited: Duration::ZERO,
+            budget: Duration::ZERO,
+            source,
+        })?;
+    let conn = Connection::new(session.db()).map_err(|source| FreshnessReadFailure {
+        database: database.clone(),
+        waited: Duration::ZERO,
+        budget: Duration::ZERO,
+        source: source.into(),
+    })?;
+    let Some(rec) = freshness_read(&database, || -> anyhow::Result<Option<RecordedScan>> {
+        let (_, rows) = query_rows(
+            &conn,
+            "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key, s.modules AS modules",
+        )?;
+        let Some(row) = rows.first() else {
+            return Ok(None);
+        };
+        let sha = cell(row, 0);
+        if sha.is_empty() {
+            return Ok(None);
         }
+        let clean = match cell(row, 1).as_str() {
+            "true" => true,
+            "false" => false,
+            _ => return Ok(None),
+        };
+        let key = cell(row, 2);
+        Ok(Some(RecordedScan {
+            sha,
+            clean,
+            content_key: (!key.is_empty()).then_some(key),
+            modules: cell(row, 3),
+        }))
     })?
     else {
         return Ok((true, None, vec!["recorded scan"]));
     };
     let mut differing: Vec<&'static str> = Vec::new();
-    if !live_session {
-        if freshness_read(&database, || {
-            crate::artifacts::db::db_has_pending_state_result(apg_root)
-        })? {
-            differing.push("pending state");
+    if freshness_read(&database, || {
+        crate::artifacts::db::db_has_pending_state_result(apg_root)
+    })? {
+        differing.push("pending state");
+    }
+    if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
+        differing.push("schema");
+    }
+    let authored_ok = match crate::splice::seed::seed_authored_identity(&db_path(apg_root)) {
+        Ok(db) => {
+            crate::splice::seed::tree_authored_identity(apg_root).is_ok_and(|tree| tree == db)
         }
-        if crate::splice::seed::validate_compatible(&db_path(apg_root)).is_err() {
-            differing.push("schema");
-        }
-        let authored_ok = match crate::splice::seed::seed_authored_identity(&db_path(apg_root)) {
-            Ok(db) => {
-                crate::splice::seed::tree_authored_identity(apg_root).is_ok_and(|tree| tree == db)
-            }
-            Err(_) => false,
-        };
-        if !authored_ok {
-            differing.push("authored digest");
-        }
+        Err(_) => false,
+    };
+    if !authored_ok {
+        differing.push("authored digest");
     }
     match rec.content_key.as_deref() {
         // Pre-hardening: freshness cannot be verified.
@@ -830,14 +861,12 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
 /// ([`db_recorded_scan`]); the DB↔export agreement half has retired, so
 /// `graph.jsonl` plays no part in the verdict.
 ///
-/// **Live session**: while a live session owns `db.lbug`, the same `Scan` row
-/// is taken through the session's routed read ([`db_recorded_scan_routed`])
-/// instead of opening a second handle on the session-owned DB, so a live
-/// session never makes the on-disk fast path unfresh. The pending-state, table
-/// shape and authored/transient checks below are SHORT-CIRCUITED then; the
-/// recorded/git content comparison runs for both cases.
+/// **Per-invocation session**: the same `Scan` row is read on the held
+/// read-only handle of one [`session::Session`] ([`freshness_facts`]), not
+/// through a daemon or a socket liveness probe, so a live daemon or a stale
+/// socket cannot make the on-disk fast path unfresh.
 ///
-/// **Authored/transient reconciliation** (no-live-session branch only): the
+/// **Authored/transient reconciliation**: the
 /// DB's own authored/transient digest ([`crate::splice::seed::seed_authored_identity`])
 /// must also equal the on-disk tree's ([`crate::splice::seed::tree_authored_identity`])
 /// — the independent source of truth. This is the recovery safety net: a
@@ -846,20 +875,14 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
 /// compared to the tree, never to a value refreshed from the DB. An error
 /// computing either digest is NOT fresh (fail closed).
 ///
-/// **Pending state and table shape** (no-live-session branch only): the DB must
+/// **Pending state and table shape**: the DB must
 /// carry no pending state — no dirty row and no pending-removal identity
 /// ([`crate::artifacts::db::db_has_pending_state`]) — because an admitted but
 /// unsaved mutation leaves the derived DB ahead of the last saved state, which
 /// the on-disk fast path must not serve; and its tables must match this
 /// binary's schema ([`crate::splice::seed::validate_compatible`]), because a
 /// database another binary wrote cannot be reasoned about. Either verdict is
-/// NOT fresh (fail closed). Both reads sit in the no-live-session branch, so a
-/// live session short-circuits them.
-///
-/// A session socket that is present but fails a connect/`Ping` is also NOT
-/// fresh: an unclean session exit leaves the socket behind while the derived
-/// DB reflects only the last saved state, so a phantom projection exists and
-/// the on-disk DB cannot be trusted until a rebuild.
+/// NOT fresh (fail closed).
 ///
 /// Every failure **fails closed** (never panics): a missing/unopenable/locked
 /// DB, a DB with no readable `Scan` row, or a mismatch all mean "not fresh".
@@ -898,7 +921,6 @@ pub fn is_fresh_with_state(
 /// The label strings (stable — pinned by tests):
 ///
 /// - `"database"` — no `db.lbug` under `apg_root`;
-/// - `"socket"` — a session socket exists but fails its connect/`Ping`;
 /// - `"git sha"` — the checkout has no HEAD sha (not a git repo / unborn HEAD);
 /// - `"recorded scan"` — the DB has no readable, hardening-era `Scan` row;
 /// - `"pending state"` — the DB carries an admitted-but-unsaved mutation;
@@ -920,12 +942,11 @@ pub fn is_fresh_with_state(
 ///
 /// The `NotApplicable` preconditions are `"database"` and `"git sha"` only:
 /// without them the remaining inputs cannot be evaluated, so each is reported
-/// alone. `"socket"` and `"recorded scan"` each short-circuit the gather as one
+/// alone. `"recorded scan"` short-circuits the gather as one
 /// differing input — reaching `Stale` while a HEAD sha is present, and
 /// `NotApplicable`'s `differing` only when there is none. The remaining labels
-/// are collected together. The live-session read skip is preserved exactly:
-/// pending state, schema and authored digest are evaluated only when no live
-/// session owns `db.lbug`; the recorded/git content comparison runs either way.
+/// are collected together, each read from one read-only per-invocation session;
+/// there is no live-session read skip.
 pub fn freshness_differences(apg_root: &Path, state: &GitState) -> FreshnessSnapshot {
     freshness_differences_with(apg_root, state, None)
 }
@@ -960,9 +981,7 @@ fn modules_differ(recorded: &str, requested: &[String]) -> bool {
 /// caller's already-captured `state` and `requested` selection.
 /// [`NotApplicable`](FreshnessSnapshot::NotApplicable) is NOT short-circuited:
 /// it carries its precondition label (`"database"` or `"git sha"`) exactly as
-/// the collect-all form always has. `"socket"` is never a precondition label: it
-/// is a differing input that reaches `Stale` (or lands in `NotApplicable`'s
-/// `differing` when there is no HEAD sha). The label set and the `Fresh`
+/// the collect-all form always has. The label set and the `Fresh`
 /// partition match the shared snapshot.
 ///
 /// A gather `Err` (a database read failure — a transient lock/busy read that
@@ -1060,9 +1079,9 @@ fn state_str(sha: Option<&str>, clean: bool) -> String {
 ///
 /// `<rec>`/`<cur>` are [`state_str`] (`<sha>@<clean>`, or `-@-` when there is
 /// no sha to display) and `<labels>` is the snapshot's differing labels joined
-/// by `, `: `database`, `socket`, `git sha`, `recorded scan`, `pending state`,
+/// by `, `: `database`, `git sha`, `recorded scan`, `pending state`,
 /// `schema`, `authored digest`, `content key`, `sha`, `cleanliness`. A snapshot
-/// with no recorded row (the `socket`/`recorded scan` stales) records `-@-`.
+/// with no recorded row (the `recorded scan` stale) records `-@-`.
 ///
 /// A [`Contended`](FreshnessSnapshot::Contended) verdict renders the read
 /// failure instead, retry-conditionally. When the read retried a transient
