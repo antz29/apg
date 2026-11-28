@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-merge-branch-lock-spans-main-rebuild",
+  "body": "The project merge holds the branch worktree lock across the entire main rebuild, so a durable write to that worktree waits out the whole merge; narrow the guard to verify and merge if merge latency ever matters.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.merge.project_merge_at",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

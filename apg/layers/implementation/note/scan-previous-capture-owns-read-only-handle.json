@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "scan-previous-capture-owns-read-only-handle",
+  "body": "The scan's previous-database read stays on the capture helper's own read-only handle rather than a per-invocation session; add a session-backed capture seam if the literal session handle is required for that read.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.PreviousScan.capture",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

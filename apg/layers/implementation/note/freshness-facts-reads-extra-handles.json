@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "freshness-facts-reads-extra-handles",
+  "body": "Only the recorded scan row is read on the per-invocation session handle; the pending-state probe, the schema-shape diff and the seed identity still take their own read-only database opens, so consolidate them onto the one session handle when that consolidation is planned.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.state.freshness_facts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

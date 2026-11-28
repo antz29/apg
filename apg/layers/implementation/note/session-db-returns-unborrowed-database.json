@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "session-db-returns-unborrowed-database",
+  "body": "The session read seam returns the shared database reference with no borrow guard, so it covers only reads made while the caller holds the session; add a guard-based accessor rather than widening it when a write path needs an exclusive-while-writing handle.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Session.db",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
