@@ -1,7 +1,7 @@
 //! The `apg query` surface: open `db.lbug` read-only, render CSV/JSON rows.
 //!
-//! A cohesive single-responsibility module: byte-identical output for both the
-//! direct path and the session coordinator's routed-read branch.
+//! A cohesive single-responsibility module: one rendering used by the CLI read
+//! path.
 
 use lbug::{Connection, Database};
 
@@ -78,9 +78,9 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Render a query result exactly as `apg query` prints it: JSON rows for
-/// `--json`, otherwise CSV with a header row (no trailing newline). Shared by
-/// the direct path and the session coordinator's routed-read branch, so both
-/// produce byte-identical output.
+/// `--json`, otherwise CSV with a header row (no trailing newline). The one
+/// rendering `apg query` and any in-process caller share, so output is
+/// byte-identical.
 pub(crate) fn render_query(db: &Database, query: &str, json: bool) -> anyhow::Result<String> {
     let conn = Connection::new(db)?;
     let result = conn.query(query)?;

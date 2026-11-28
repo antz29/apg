@@ -895,7 +895,7 @@ pub fn commit_count(dir: &Path) -> usize {
 /// A real project worktree carrying a code graph: main repo + worktree `foo` on
 /// branch `foo` with a committed source payload scanned into
 /// `<wt>/apg/.trans/db.lbug`. Returns `(repo, wt, wt_apg)` — the state a
-/// session coordinator owns.
+/// per-invocation write operates on.
 pub fn project_with_db(tag: &str) -> (Repo, PathBuf, PathBuf) {
     let repo = Repo::new(tag);
     let wt = repo.start_project("foo");

@@ -278,7 +278,7 @@ pub(crate) fn run_pipeline_with(
     // with its `.wal`/`.shm` sidecars, the one artifact — is discarded through
     // the ONE shared `discard_derived_index(".")` below and the full load
     // rebuilds it from the assembled graph (`apg/layers/**` + the scanned code)
-    // rather than seeding the splice from the unsaved rows.
+    // rather than seeding the splice from a database ahead of the durable state.
     //
     // Equivalently, this verdict IS the `db.lbug`-reuse (splice-seed) fast path
     // being disabled: `force_full_load` short-circuits the `try_splice_build`

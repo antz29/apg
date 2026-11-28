@@ -249,8 +249,8 @@ impl ArtifactDb {
     /// incident in-edges a changed node's DETACH would otherwise drop are read
     /// back from the DB and appended to `records` by the caller; this seam
     /// gives them no special path. That is what makes it reusable beyond
-    /// authoring mutations: the session's admission path projects each
-    /// buffered mutation through it, and a future core-scan-into-session apply
+    /// authoring mutations: the write-through critical section projects each
+    /// mutation's delta through it, and a future core-scan-into-database apply
     /// reuses this same partial-delta entry point — it is **not** an
     /// authoring-mutation-specific path.
     ///
@@ -258,10 +258,10 @@ impl ArtifactDb {
     /// prior committed state (never a half-applied delta).
     ///
     /// Split from the free [`reingest_layers`](crate::artifacts::reingest_layers)
-    /// so the session coordinator can amortize ONE DB open across N
-    /// routed mutations: the coordinator owns the handle for the session's life
-    /// and applies every mutation's projection delta synchronously through it —
-    /// the open is amortized, visibility never is.
+    /// so a caller is not forced to re-open the database: the write-through
+    /// critical section already holds the handle and applies its single
+    /// projection delta through it, which is an amortized open, never delayed
+    /// visibility.
     pub fn reingest_layers_on(
         &self,
         deletes: &BTreeSet<String>,

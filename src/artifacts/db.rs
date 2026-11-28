@@ -157,9 +157,8 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
 /// gitignored `apg/.trans/`) is committed on the project branch via git2,
 /// single-file diffs, and the database's own `Scan` row is re-anchored to the
 /// new state through that commit (DB and tree in sync by construction;
-/// consecutive mutations do not each demand a rescan). A live session owns the
-/// database and refreshes the row through the handle it already holds, so this
-/// never opens a second one. Transient `.trans` writes never commit:
+/// consecutive mutations do not each demand a rescan). Transient `.trans`
+/// writes never commit:
 /// `apg/.trans` is gitignored and transient by design.
 /// An auto-commit failure degrades to a warning on stderr: the mutation already
 /// landed, and the staleness gate will demand a scan before the next one (the
@@ -219,10 +218,8 @@ pub fn write_jsonl_and_reingest(
     std::fs::rename(&tmp, path)?;
 
     // 2. Auto-commit durable targets, then re-anchor the database's own `Scan`
-    //    row. The re-anchor itself lands the post-commit git state on that row
-    //    (a live session makes it a no-op: the session's save owns the DB and
-    //    refreshes the row through its held handle), so the projection below is
-    //    database-only — no export step follows.
+    //    row. The re-anchor itself lands the post-commit git state on that row,
+    //    so the projection below is database-only — no export step follows.
     if !path.starts_with(apg_root.join(specs::TRANS)) {
         match git::auto_commit(apg_root, path) {
             Ok(Some(_)) => {
@@ -256,10 +253,11 @@ pub struct ArtifactDb {
     pub db: Database,
 }
 
-/// One **removed durable identity** on the pending-removal ledger: the FQN of an
-/// `apg/layers/**` node whose row a session admission detached and whose node
-/// file the save after it must delete. The DB table is `PendingRemoval`, keyed
-/// on `fqn` alone; it is a node table but deliberately NOT a node label
+/// One **removed durable identity** on the pending-removal ledger: the daemon-era
+/// record of a removed `apg/layers/**` node. The table is retained so a database
+/// left pending by the retired save model is detected rather than trusted; a
+/// per-invocation write never inserts here. The DB table is `PendingRemoval`,
+/// keyed on `fqn` alone; it is a node table but deliberately NOT a node label
 /// (`load::tables::node_labels` omits it), so a detach delete never drops a
 /// pending identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -586,8 +584,8 @@ impl ArtifactDb {
     /// The two code-reference universes `layers::validate_change_over` (and the
     /// direct `validate_change`) validate `implemented-by` targets against, read
     /// from the **live database this handle already holds** — the borrowed-handle
-    /// twin of [`crate::artifacts::code_universes`], so session admission
-    /// never opens a second `db.lbug` handle nor reads `apg/.trans/graph.jsonl`:
+    /// twin of [`crate::artifacts::code_universes`], so the write-through never
+    /// opens a second `db.lbug` handle nor reads `apg/.trans/graph.jsonl`:
     ///
     /// - `scanned` — the real code FQNs of the four Implementation labels
     ///   (`Module`/`File`/`Struct`/`Function`) whose `status` is not `planned`.
@@ -599,8 +597,8 @@ impl ArtifactDb {
     ///   transient plan files.
     ///
     /// Unlike the free [`crate::artifacts::code_universes`] (which opens its own
-    /// read-only handle), this borrows the caller's held handle, so the session
-    /// amortizes ONE open across its whole life. `UnresolvedTarget` is
+    /// read-only handle), this borrows the caller's held handle, so the
+    /// write-through reuses ONE open. `UnresolvedTarget` is
     /// deliberately excluded — an unresolved reference is not code.
     pub fn code_universes_from_db(&self) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
         let conn = self.conn()?;
@@ -673,14 +671,15 @@ impl ArtifactDb {
         Ok(())
     }
 
-    /// Insert-or-replace one removed durable identity on the **held handle**'s
-    /// pending-removal ledger: `MERGE (n:PendingRemoval {fqn})`, keyed on the
+    /// Insert-or-replace one identity on the **held handle**'s pending-removal
+    /// ledger: `MERGE (n:PendingRemoval {fqn})`, keyed on the
     /// table's primary key, so recording the same identity twice is idempotent
-    /// and never duplicates a row. The ledger row outlives the detached node row
-    /// until the save that deletes that identity's node file drains it.
+    /// and never duplicates a row. Retained with the ledger for the retired save
+    /// model — a per-invocation write never records here — and a database left
+    /// pending by it is detected rather than trusted.
     ///
-    /// Runs on a fresh connection over the caller's handle (the session
-    /// amortizes ONE `db.lbug` open) and touches no `apg/layers/**` file.
+    /// Runs on a fresh connection over the caller's handle and touches no
+    /// `apg/layers/**` file.
     pub fn record_pending_removal(&self, fqn: &str) -> anyhow::Result<()> {
         self.conn()?
             .query(&format!("MERGE (n:PendingRemoval {{fqn: {}}})", lit(fqn)))?;
@@ -759,7 +758,8 @@ impl PreviousScan {
     ///
     /// **Fails closed.** An absent database, an unopenable or unreadable one, a
     /// database carrying pending state (a dirty row or a pending-removal
-    /// identity — an admitted but unsaved mutation never seeds a rebuild), or
+    /// identity — a database left that way by the retired save model never seeds
+    /// a rebuild), or
     /// any failed read yields `None`: never a partial snapshot and never a hard
     /// error, so the incremental/splice path cannot seed from an untrustworthy
     /// previous database.
@@ -972,13 +972,15 @@ const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
 
 /// Decide whether a database carries **pending state** from pure inputs: one
 /// per-table row answer over the durable node tables ([`DURABLE_NODE_TABLES`],
-/// the `apg/layers/**` roster a session marks `updated = 1`, walked in its
-/// declared order so a table added to that roster is governed here by
+/// the `apg/layers/**` roster the retired save model marks `updated = 1`, walked
+/// in its declared order so a table added to that roster is governed here by
 /// construction) plus the pending-removal ledger.
 ///
 /// Pending state is present iff the ledger holds at least one identity or at
-/// least one durable node table reports a dirty row — so a save has something
-/// to write or delete exactly when this is true. The ledger is consulted
+/// least one durable node table reports a dirty row — the shape a database left
+/// by the retired save model has exactly when it still owes a write or delete.
+/// A per-invocation write never produces this state, so a current database is
+/// always clean. The ledger is consulted
 /// first: a pending deletion is pending state even when every durable row is
 /// clean, and an empty ledger leaves the decision to the roster alone.
 ///
@@ -1008,7 +1010,7 @@ where
 /// rather than as pending state. Three outcomes:
 ///
 /// - `Ok(false)` — an **absent** `db.lbug`: there is nothing to discard, so
-///   this is not an error and not a reason to refuse a scan or a session start;
+///   this is not an error and not a reason to refuse a scan;
 /// - `Err` — the database cannot be read at all: a refused
 ///   [`system_config(true)`], a failed open, a refused connection, or a refused
 ///   pending-removal ledger read;
@@ -1055,8 +1057,8 @@ pub fn db_has_pending_state_result(apg_root: &Path) -> anyhow::Result<bool> {
 /// The fail-closed legacy projection of [`db_has_pending_state_result`]:
 /// `true` for a pending database **and** for an unreadable one (`Err`), `false`
 /// only for an absent one. Every reader that must never treat an unreadable
-/// database as clean — `is_fresh`'s freshness evaluation, the scan, the
-/// pipeline and `session start` — keeps this answer; a caller that must
+/// database as clean — `is_fresh`'s freshness evaluation, the scan and the
+/// pipeline — keeps this answer; a caller that must
 /// distinguish "unreadable now" from "pending" uses
 /// [`db_has_pending_state_result`].
 pub fn db_has_pending_state(apg_root: &Path) -> bool {

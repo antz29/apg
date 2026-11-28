@@ -3852,8 +3852,9 @@ mod e2e {
     /// `apg plan add` surface (which projects them into the branch DB exactly as
     /// an agent authoring the plan would); the durable Component/Note rows are
     /// written under `apg/layers/` and projected through the same
-    /// `artifacts::reingest_layers` seam the session's admission path uses — a
-    /// whole-model `session save` is out of scope here, and the fixture's
+    /// `artifacts::reingest_layers` seam the write-through path uses — this
+    /// fixture applies the whole model directly rather than through a node
+    /// invocation, and the fixture's
     /// authored rows are byte-identical to the scan's own `ingest_tree`
     /// records.
     ///
@@ -4033,7 +4034,8 @@ mod e2e {
 
         // --- Author the durable incident families against the same planned
         // FQNs: a Component `implemented-by` each kind and a Note `details`
-        // each kind, projected through the session's own reingest seam.
+        // each kind, projected through the same reingest seam the write-through
+        // path uses.
         let solution = apg::layers::NodeFile {
             layer: "solution".into(),
             node_type: "component".into(),
@@ -4510,7 +4512,7 @@ mod e2e {
 
         // --- Author the durable incident families against the same FQN: a
         // Component `implemented-by` and a Note `details`, projected through
-        // the session's own reingest seam.
+        // the same reingest seam the write-through path uses.
         let solution = apg::layers::NodeFile {
             layer: "solution".into(),
             node_type: "component".into(),

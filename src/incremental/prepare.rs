@@ -564,7 +564,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     // task body pins "no usable previous database ⇒ full scan". An absent
     // `db.lbug`, an unreadable one, or one carrying pending state (a dirty row
     // or a pending-removal identity, `db_has_pending_state`'s fail-closed
-    // answer) therefore full-scans: no unsaved or stale row may seed a splice.
+    // answer) therefore full-scans: no legacy-pending or stale row may seed a splice.
     // An EMPTY target set emits every fact (no filter), so the full spool is
     // already the universe and reuse stays available.
     let previous_db = apg_root.join(crate::specs::TRANS).join("db.lbug");

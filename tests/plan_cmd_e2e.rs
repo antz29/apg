@@ -820,8 +820,8 @@ mod e2e {
         );
 
         // The committed state is whole: the database's authored digest equals
-        // the saved tree's, so the write's own commit left nothing for a later
-        // session save to reconcile.
+        // the saved tree's, so the write's own commit left nothing to reconcile
+        // later.
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
         assert_eq!(
             apg::splice::seed::seed_authored_identity(&db_path).unwrap(),

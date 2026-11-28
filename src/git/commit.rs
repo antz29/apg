@@ -6,10 +6,11 @@ use super::state::{GitState, canonical_allow_missing, discover_repo};
 // ---------------------------------------------------------------------------
 // Durable-commit helpers (R8): stage a caller-supplied change set and make
 // exactly one commit — the shared one-commit primitive underlying the JSONL
-// funnel's single-file `auto_commit` and the session save flush — then
-// re-anchor the stale gate's recorded scan_meta so DB and tree stay in sync by
-// construction. Durable `apg node`/`apg edge` mutations are NOT committed per
-// mutation: they are buffered and commit ONCE at `apg session save`.
+// funnel's single-file `auto_commit` and a per-invocation durable mutation's
+// write-through — then re-anchor the stale gate's recorded scan_meta so DB and
+// tree stay in sync by construction. A durable `apg node`/`apg edge` mutation
+// commits exactly once, inside the same blocking critical section that writes
+// its node files and projects the delta into the worktree database.
 // ---------------------------------------------------------------------------
 
 /// The shared one-commit primitive: commits all `writes` (created/modified
@@ -19,8 +20,8 @@ use super::state::{GitState, canonical_allow_missing, discover_repo};
 /// [`commit_file`]: writes are staged with `index.add_path` and deletes with
 /// `index.remove_path` (`add_path` stats the file and cannot stage a deletion —
 /// a removed path fails with a libgit2 `NotFound`), the trees are compared, and
-/// a single commit is created when anything changed. The session save flush
-/// reaches it through `layers::write::write_through_with_deletes`; the JSONL
+/// a single commit is created when anything changed. The per-invocation
+/// write-through reaches it through `layers::write::write_set`; the JSONL
 /// funnel reaches the single-file path through [`auto_commit`].
 ///
 /// The index write (`repo.index()` / `index.write()`, i.e. `.git/index.lock`)
@@ -123,8 +124,10 @@ pub fn graph_mutation_message(apg_root: &Path, paths: &[&Path]) -> String {
 /// `commit_file` with the standard graph-mutation message — the JSONL
 /// funnel's commit for a durable (non-`.trans`) write
 /// ([`write_jsonl_and_reingest`](crate::artifacts::write_jsonl_and_reingest)).
-/// This is not the durable node/edge mutation path: a durable `apg node`/
-/// `apg edge` mutation is buffered and commits once at `apg session save`.
+/// This is not the durable node/edge mutation path: that path writes its node
+/// files and makes its single commit through
+/// [`write_set`](crate::layers::write::write_set), inside the mutation's own
+/// blocking critical section.
 pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String>> {
     commit_file(apg_root, path, &graph_mutation_message(apg_root, &[path]))
 }
@@ -149,8 +152,8 @@ pub fn in_repo(apg_root: &Path) -> bool {
 /// refreshes the same row on the write handle it already holds
 /// ([`ArtifactDb::refresh_scan_row`], `layers::write::write_project_with` step
 /// 7), so it never opens a second handle and nothing here probes a session
-/// socket or liveness. This path-based helper remains for the non-session
-/// callers that own no held handle. An absent database has nothing to
+/// socket or liveness. This path-based helper remains for the callers that own
+/// no held handle. An absent database has nothing to
 /// re-anchor and is a no-op.
 pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<()> {
     let db_path = apg_root.join(crate::specs::TRANS).join("db.lbug");

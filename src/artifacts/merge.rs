@@ -19,7 +19,7 @@ impl ArtifactDb {
     /// The delete set a metadata mutation passes is its removed ∪ changed FQNs
     /// (see [`transient_delta`] and `layers::projection_deletes`), never a
     /// `<project>/` prefix: a planned code FQN carries no project prefix
-    /// (`apg.session.Coordinator.start`), so a prefix delete leaves it behind.
+    /// (`apg.cmd_scan`), so a prefix delete leaves it behind.
     ///
     /// For the four Implementation labels the delete is guarded by
     /// `status = 'planned'`: after a branch scan realizes a planned FQN as real
@@ -66,7 +66,7 @@ impl ArtifactDb {
     /// When `properties` is `Some` (a durable authored node record), the
     /// canonical JSON of its full properties map is written to the
     /// serialized-properties column — the same column the full-scan
-    /// `build_load_files` writes — so the session's incremental reingest is as
+    /// `build_load_files` writes — so the write-through merge is as
     /// lossless as a fresh scan. Code and transient plan/feedback node records
     /// have no such column and pass `None`.
     /// Runs on `conn` so the write shares the caller's transaction.
@@ -109,7 +109,7 @@ impl ArtifactDb {
     /// When `properties` is `Some` (a durable authored edge record), the
     /// canonical JSON of its full properties map is written to the rel table's
     /// serialized-properties column — both halves, since the pairing invariant
-    /// stores one rel row — so the session's incremental reingest preserves
+    /// stores one rel row — so the write-through merge preserves
     /// edge properties exactly like a fresh scan's `build_load_files`. The
     /// transient `Reviews`/`Gates`/`Satisfies` rels have no such column and
     /// pass `None`.
@@ -217,7 +217,7 @@ impl ArtifactDb {
     ///
     /// This is the general partial-set apply seam, not an authoring-mutation
     /// special case: `reingest_layers_on` and `reingest_project_with` both drive
-    /// it with a delta, and the session's admission path reuses it.
+    /// it with a delta, and the per-invocation write-through reuses it.
     pub fn merge_records(&self, conn: &Connection, records: &[Record]) -> anyhow::Result<()> {
         // A PlannedNode record must never overwrite a **present** (realized)
         // Implementation node: the plan JSONL keeps its planned records until

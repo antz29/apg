@@ -748,7 +748,7 @@ pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
 /// invalidation. No temp file is created on this path.
 ///
 /// This is the shared schema-shape question: the splice seed asks it for
-/// eligibility, and scan freshness and session recovery ask the same one
+/// eligibility, and scan freshness and crash recovery ask the same one
 /// comparison rather than probing the previous database a second time.
 pub(crate) fn validate_compatible(previous: &Path) -> Result<(), SeedFallback> {
     let config = system_config(true).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;

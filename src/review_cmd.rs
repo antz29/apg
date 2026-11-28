@@ -220,8 +220,9 @@ fn feedback_tier(target: &str, project: &str) -> Layer {
 /// tier mirrors. Both halves of the relationship — the `Feedback` record AND
 /// the `Reviews` edge — live in `.trans`; never in committed node files,
 /// never in `apg/specs/` or `apg/notes/` (and `.trans` is gitignored and
-/// transient, so the mirror write never commits — `apg session save` flushes
-/// only `apg/layers/**`, never review state). Returns the mirror path written.
+/// transient, so the mirror write never commits — the durable-commit path
+/// handles only `apg/layers/**`, never review state). Returns the mirror path
+/// written.
 ///
 /// **Commit-then-project**: the mirror write lands FIRST
 /// (via `write_jsonl_and_reingest`) and the exact projection delta is applied
@@ -452,7 +453,7 @@ fn review_list(args: &[String]) -> anyhow::Result<()> {
     }
 
     // `review list` is a verdict read; the read-only class keeps a concurrent
-    // `apg query`/`plan verify`/session reader unblocked.
+    // `apg query`/`plan verify` read unblocked.
     let db = artifacts::ArtifactDb::open_read_only(&apg_root)?;
     println!("f.fqn,f.status,f.disposition,n.fqn");
     for r in &records {

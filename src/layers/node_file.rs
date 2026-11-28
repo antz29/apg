@@ -21,7 +21,7 @@ pub type NodeProperties = BTreeMap<String, String>;
 /// This is the single source of truth for that column on every durable
 /// authored node table and every rel table a durable authored edge can
 /// occupy, shared by both the full-scan path (create_schema /
-/// `build_load_files`) and the session's incremental reingest path
+/// `build_load_files`) and the write-through merge path
 /// (`merge_node` / `merge_edge`), and mirrored by `properties_from_json`'s
 /// decode.
 ///
@@ -42,8 +42,8 @@ pub fn properties_json(properties: &NodeProperties) -> String {
 
 /// Decode the **canonical JSON string** stored in the layers projection's
 /// serialized-properties column back into the full [`NodeProperties`] map —
-/// the exact inverse of [`properties_json`], used by
-/// `ArtifactDb::node_files_from_db`.
+/// the exact inverse of [`properties_json`], used by the ingest edge spool
+/// (`ingest::edges`) to recover each edge's map.
 ///
 /// Round-trip fidelity mirrors the encoder: every key is preserved, unknown
 /// keys and keys carrying an empty value alike, and equal strings decode to

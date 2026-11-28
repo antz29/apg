@@ -1,7 +1,7 @@
 //! The atomic multi-file write-through and the durable-mutation orchestrator
 //! (SPEC §2.2/§4.1/§4.2): validate the complete change, write every affected
 //! node file (and delete the removed ones) in one logical mutation, commit
-//! once, and re-merge the exact delta into the live DB.
+//! once, and re-merge the exact delta into the worktree database.
 //!
 //! Durable `apg node` / `apg edge` mutations run as one critical section: the
 //! per-invocation [`crate::session::Session`] holds the blocking worktree lock,
@@ -176,13 +176,12 @@ pub fn validate_change(
     writes: &[NodeFile],
     deletes: &[PathBuf],
 ) -> anyhow::Result<()> {
-    // The direct path's effective base is the on-disk store; the validation
-    // body is shared with the overlay path via [`validate_change_over`].
+    // The effective base is the on-disk store; the validation body is shared
+    // with the base-supplied variant via [`validate_change_over`].
     let base = read_existing_nodes(apg_root)?;
 
-    // The direct path's code-identity source is the worktree database
-    // ([`artifacts::code_universes`]); the session's admission supplies the
-    // held database's universes instead.
+    // The code-identity source is the worktree database
+    // ([`artifacts::code_universes`]).
     let (scanned, planned) = artifacts::code_universes(apg_root)?;
 
     validate_change_over(apg_root, &base, writes, deletes, &scanned, &planned)
@@ -190,23 +189,20 @@ pub fn validate_change(
 
 /// Validate a complete proposed mutation against a caller-supplied **effective
 /// base node set** instead of re-reading `apg/layers/**`. `base` is the
-/// cumulative state the proposed `writes`/`deletes` apply over: the direct path
-/// ([`validate_change`]) passes `read_existing_nodes(apg_root)`, while the
-/// session passes the effective base it reconstructs from the held database.
+/// cumulative state the proposed `writes`/`deletes` apply over: the on-disk node
+/// set (`read_existing_nodes(apg_root)`).
 /// `scanned`/`planned` are the two code-FQN universes the `implemented-by`
 /// drift check resolves against, supplied by the caller so this entry point
-/// performs no file I/O: the direct path ([`validate_change`]) passes the
+/// performs no file I/O: the caller resolves them from the
 /// worktree database's
-/// [`code_universes`](crate::artifacts::code_universes), while the session's
-/// admission passes the held database's
-/// [`code_universes_from_db`](crate::artifacts::ArtifactDb::code_universes_from_db)
-/// — neither opens a second handle nor reads `apg/.trans/graph.jsonl`. Every
+/// [`code_universes`](crate::artifacts::code_universes)
+/// — no second handle is opened and `apg/.trans/graph.jsonl` is never read. Every
 /// check is otherwise identical to [`validate_change`] — per-node uniqueness,
 /// the out-edge matrix ([`validate_edges`]), the assembled §4 rules
 /// ([`validate_assembled_rules`]), the `implemented-by` code-ref drift check
 /// ([`validate_code_refs`]), and the constraint structure rules
-/// ([`eval_constraint`]) — so a change validates against the state an earlier
-/// unsaved mutation produced: an edge to a node added earlier in the same run
+/// ([`eval_constraint`]) — so a change validates against the base the caller
+/// supplies: an edge to a node the same change adds
 /// is accepted rather than rejected because it is absent on disk. Edge pairing
 /// is NOT checked here: it is enforced over the whole node store at ingest
 /// ([`check_edge_pairing`](super::validate::check_edge_pairing)), so an edge
@@ -284,8 +280,8 @@ pub fn validate_change_over(
     // scanned graph must abort BEFORE anything is written — otherwise the
     // file lands and commits and only the step-5 re-merge fails (a committed
     // partial mutation). The code-identity source is the caller-supplied
-    // `scanned`/`planned` universes — the direct path resolves them from the
-    // worktree database, the session from the `db.lbug` it already holds — so
+    // `scanned`/`planned` universes — resolved from the worktree database's
+    // handle, which the write-through critical section already holds — so
     // this admission check performs NO file I/O and never opens `db.lbug`.
     let refs: Vec<&str> = assembled
         .values()
@@ -533,7 +529,7 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 /// returns. The membership guard runs here BEFORE the session opens the
 /// database, so a write from the default branch keeps its project-context
 /// refusal even on a checkout with no `db.lbug` (a project-context write with
-/// no database then refuses naming `apg scan`, the direct path's scan-first
+/// no database then refuses naming `apg scan`, the scan-first
 /// error). Mirrors `artifacts::write_jsonl_and_reingest`'s envelope for node
 /// files:
 ///
@@ -545,7 +541,7 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 ///    system-of-record durability point, and the ONLY step that controls the
 ///    flock-guaranteed single commit: this invocation's one logical mutation
 ///    (its writes plus its deletes). Nothing durable exists before that
-///    commit: the files hit disk (and git) here, not at admission.
+///    commit: the files hit disk (and git) here, inside the critical section.
 /// 5. **Capture the post-commit git state** — no `graph.jsonl` lead is
 ///    re-anchored; step 7 is the one row refresh, reconciling the database's
 ///    own `Scan` row to this state.
@@ -666,20 +662,19 @@ pub fn write_project_with(
     Ok(())
 }
 
-/// The projection-only half of [`write_project_with`]'s step 6 — the seam
-/// [`Coordinator::apply_mutation`](crate::session::Coordinator::apply_mutation)
-/// projects each admitted mutation's delta through.
+/// The projection-only half of [`write_project_with`]'s step 6 — the seam the
+/// write-through critical section projects each mutation's exact delta through.
 ///
 /// Callers supply `records` — a **partial** record set: the changed identities'
 /// node+out-edge records (via
 /// [`records_for_nodes`](crate::layers::tree::records_for_nodes)), extended with
 /// the incident in-edge records read from the held database — and `delete_fqns`
-/// — exactly the identities **THIS** mutation touched (never the whole
-/// pending set). It applies that delta through the caller-supplied projection
-/// closure — with NO atomic node-file write, NO git commit, and NO
-/// guard/staleness re-check (the session owns the DB and its lifetime lock).
+/// — exactly the identities **THIS** mutation touched. It applies that delta
+/// through the caller-supplied projection closure — with NO atomic node-file
+/// write, NO git commit, and NO staleness re-check (the write-through
+/// orchestration has already validated and committed).
 ///
-/// It performs NO admission file I/O of its own: it never reads `.trans`
+/// It performs NO file I/O of its own: it never reads `.trans`
 /// (the [`append_transient_records`] append it used to do is no longer called
 /// here), never probes `db.lbug`, never reads `apg/.trans/graph.jsonl`, and
 /// never re-reads `apg/layers/**`. Validation over the full base and the record
@@ -688,11 +683,9 @@ pub fn write_project_with(
 /// [`records_for_nodes`](crate::layers::tree::records_for_nodes).
 ///
 /// The caller owns the code-identity source and the projection closure:
-/// [`write_project_with`] is the direct path (the on-disk store and the branch
-/// database's code universe), while the session's admission
-/// ([`Coordinator::apply_mutation`](crate::session::Coordinator::apply_mutation))
-/// projects the held database. It is the general partial-delta projection seam,
-/// not authoring-mutation-specific.
+/// [`write_project_with`] passes the worktree database's code universe and the
+/// handle its critical section already holds. It is the general partial-delta
+/// projection seam, not authoring-mutation-specific.
 ///
 /// `delete_fqns` carries the same FQN semantics as [`projection_deletes`]: every
 /// identity this mutation touched (a DETACH drops its vanished incident edges)
@@ -720,12 +713,10 @@ pub fn project_only(
 /// only after this returns `Ok` gets all-or-nothing (nothing applied on any
 /// malformed file).
 ///
-/// Two callers: the **direct path** [`write_project_with`]'s assembly (it
-/// re-merges the transient set so a changed-FQN DETACH cannot drop a
-/// `Feedback -[:Reviews]-> <node>` pairing), and the **session-start seed**
-/// (it projects the transient set into the held DB once at `session start`).
-/// It is deliberately **NOT** part of the per-mutation admission path:
-/// admission reads the held DB, never `.trans`.
+/// One caller: [`write_project_with`]'s projection assembly (it re-merges the
+/// transient set so a changed-FQN DETACH cannot drop a
+/// `Feedback -[:Reviews]-> <node>` pairing). It runs inside the write's blocking
+/// critical section and never seeds a standalone session.
 pub(crate) fn append_transient_records(
     apg_root: &Path,
     records: &mut Vec<Record>,

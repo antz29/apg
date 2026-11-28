@@ -79,8 +79,8 @@ pub struct Graph {
     /// entry (an absent entry is the empty map), exactly like the shared
     /// `Contains`/`Calls`/`Uses` tables' code rows. The transient
     /// `gates`/`satisfies`/`reviews` sets carry no such column and never appear
-    /// here. `build_load_files` emits the column from this map and the session's
-    /// incremental reingest re-merges it, so both paths stay lossless.
+    /// here. `build_load_files` emits the column from this map and the
+    /// write-through merge re-merges it, so both paths stay lossless.
     #[serde(skip)]
     pub edge_properties: HashMap<(&'static str, String, String), NodeProperties>,
 }

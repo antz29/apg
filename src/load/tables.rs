@@ -5,10 +5,12 @@
 //! merge guard share.
 //!
 //! Every durable node table (the `apg/layers/**` set) carries the `updated`
-//! dirty flag a session admission sets, and the `PendingRemoval` ledger holds a
-//! removed identity until a save. The ledger label is deliberately kept **out**
-//! of [`node_labels`], whose roster the detach delete walks: deleting every
-//! label's row for an FQN must never drop a pending identity.
+//! flag and the `PendingRemoval` ledger exists, both retained so a database
+//! left with pending state by the retired session-save model is still detected
+//! rather than trusted; a per-invocation write never sets either. The ledger
+//! label is deliberately kept **out** of [`node_labels`], whose roster the
+//! detach delete walks: deleting every label's row for an FQN must never drop a
+//! pending identity.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -25,7 +27,7 @@ use super::parquet::{Col, lines, loc, write_parquet};
 /// pair into `dir`. Columns match the LadybugDB table schema exactly.
 ///
 /// A durable node table's load rows are the clean durable base — `updated` is
-/// 0, and only a session admission marks a row dirty — while the
+/// 0, and a per-invocation write never marks a row dirty — while the
 /// `pending_removal` ledger file loads with zero rows (no identity is pending
 /// in a freshly loaded database).
 pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
@@ -340,8 +342,8 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         }
     }
 
-    // A durable node table's load file carries the session's `updated` dirty
-    // flag: a load writes the clean base (0), only an admission sets a row.
+    // A durable node table's load file carries the `updated` flag: a load writes
+    // the clean base (0), and a per-invocation write never sets a row.
     let clean = |rows: usize| Col::I64(vec![0; rows]);
 
     write_parquet(
@@ -626,7 +628,8 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     )?;
     // The pending-removal ledger: no identity is pending in a freshly loaded
     // database, so its load file is emitted with zero rows (and the COPY skips
-    // it) — the table still has to exist so a session can insert into it.
+    // it) — the table still has to exist because the schema carries it and a
+    // legacy pending database is read through it.
     write_parquet(
         &dir.join("pending_removal.parquet"),
         &[("fqn", Col::Str(Vec::new()))],
@@ -1259,7 +1262,7 @@ pub fn rel_table_pairs() -> &'static [(&'static str, &'static str, &'static str)
 ///
 /// `PendingRemoval` is **deliberately absent**: the detach delete walks this
 /// roster to remove every row of an FQN, and dropping a pending identity there
-/// would lose the removal a save still owes.
+/// would lose the removal a legacy pending database still records.
 pub fn node_labels() -> &'static [&'static str] {
     &[
         "Module",
@@ -1344,9 +1347,10 @@ pub fn label_of(k: NodeKind) -> &'static str {
 /// tables, the spec/plan node tables, and the rel tables (Contains extended
 /// with spec/plan pairs, plus the per-kind spec/plan rel tables).
 ///
-/// Every durable (`apg/layers/**`) node table carries the `updated` dirty flag
-/// a session admission sets, and the `PendingRemoval` ledger node table holds a
-/// removed identity until the save deletes its node file.
+/// Every durable (`apg/layers/**`) node table carries the `updated` flag and
+/// the `PendingRemoval` ledger node table exists, both retained so a database
+/// left pending by the retired save model is detected rather than trusted; a
+/// per-invocation write never sets either.
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
     conn.query("CREATE NODE TABLE Language(fqn STRING PRIMARY KEY)")?;
@@ -1424,11 +1428,12 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING, updated INT64)",
     )?;
-    // The pending-removal ledger: one removed durable identity, held from the
-    // admission that detached its row until the save that deletes its node
-    // file. It is a node table (so `MERGE` insert-or-replaces an identity) but
-    // it is **not** a node label ([`node_labels`] omits it) — a detach delete
-    // must never drop a pending identity.
+    // The pending-removal ledger: retained so a database left pending by the
+    // retired save model is detected (and never seeded from) rather than
+    // trusted; a per-invocation write never inserts here. It is a node table
+    // (so `MERGE` insert-or-replaces an identity) but it is **not** a node
+    // label ([`node_labels`] omits it) — a detach delete must never drop a
+    // pending identity.
     conn.query("CREATE NODE TABLE PendingRemoval(fqn STRING PRIMARY KEY)")?;
     // The durable authored rel tables gain the serialized-properties column.
     // `Contains`/`Calls`/`Uses` are shared with scanned code rows; those carry

@@ -173,10 +173,10 @@ pub fn ingest_nodes(
 /// validate_change_over`), and a subset's edges may legitimately have their
 /// counterpart outside the supplied set.
 ///
-/// This is not an authoring-mutation-specific path: it is reused by the
-/// session's admission path and by future core-scan-into-session work, both of
-/// which build only the delta they changed rather than re-projecting the whole
-/// node set. [`ingest_nodes`] calls it after its full-set validation, so the
+/// This is not an authoring-mutation-specific path: the write-through
+/// projection builds only the delta it changed rather than re-projecting the
+/// whole node set, and future core-scan-into-database work can reuse it the same
+/// way. [`ingest_nodes`] calls it after its full-set validation, so the
 /// full path's record output stays byte-identical.
 pub fn records_for_nodes(nodes: &[NodeFile]) -> anyhow::Result<Vec<Record>> {
     // Deterministic record order (one file per node, so paths are unique). A

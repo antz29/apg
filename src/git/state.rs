@@ -561,8 +561,8 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 }
 
 /// The same `Scan` row [`db_recorded_scan_result`] reads, taken through a
-/// read-only per-invocation [`crate::session::Session`] handle instead of a
-/// daemon's routed read, with the same three outcomes:
+/// read-only per-invocation [`crate::session::Session`] handle, with the same
+/// three outcomes:
 ///
 /// - `Err` — the read-only session could not be opened or the read failed: the
 ///   recorded state is "unreadable now", never an absent row;
@@ -859,9 +859,9 @@ pub fn freshness_snapshot(apg_root: &Path) -> FreshnessSnapshot {
 ///
 /// **Pending state and table shape**: the DB must
 /// carry no pending state — no dirty row and no pending-removal identity
-/// ([`crate::artifacts::db::db_has_pending_state`]) — because an admitted but
-/// unsaved mutation leaves the derived DB ahead of the last saved state, which
-/// the on-disk fast path must not serve; and its tables must match this
+/// ([`crate::artifacts::db::db_has_pending_state`]) — because a database left
+/// ahead of the last durable state by the retired save model must not be served
+/// by the on-disk fast path; and its tables must match this
 /// binary's schema ([`crate::splice::seed::validate_compatible`]), because a
 /// database another binary wrote cannot be reasoned about. Either verdict is
 /// NOT fresh (fail closed).
@@ -905,7 +905,8 @@ pub fn is_fresh_with_state(
 /// - `"database"` — no `db.lbug` under `apg_root`;
 /// - `"git sha"` — the checkout has no HEAD sha (not a git repo / unborn HEAD);
 /// - `"recorded scan"` — the DB has no readable, hardening-era `Scan` row;
-/// - `"pending state"` — the DB carries an admitted-but-unsaved mutation;
+/// - `"pending state"` — the DB carries pending state left by the retired save
+///   model;
 /// - `"schema"` — the DB's table shape is not this binary's;
 /// - `"authored digest"` — the DB's authored/transient digest differs from the
 ///   tree's (or either digest could not be computed);

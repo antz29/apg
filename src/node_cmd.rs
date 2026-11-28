@@ -81,8 +81,8 @@ pub fn resolve_layer(dir: &str) -> anyhow::Result<Layer> {
 }
 
 /// The supplied base's node for one identity. The caller's node set is the only
-/// source (the session's `ArtifactDb::node_files_from_db`-reconstructed database
-/// working state, or the direct path's on-disk node set) — pure list logic with
+/// source (the on-disk `apg/layers/**` node set this invocation read inside its
+/// write critical section) — pure list logic with
 /// no `apg/layers/**` read and no `node_file_path` probe.
 fn base_node(base: &[NodeFile], layer: Layer, node_type: &str, name: &str) -> Option<NodeFile> {
     base.iter()
@@ -181,37 +181,34 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
 /// A complete logical mutation: the node files to write, the paths to delete,
 /// the write-time advisories to surface to the caller, and the human message the
 /// command prints. Building the change only READS the store (existence checks +
-/// RMW); applying it is the durable sequence. The session coordinator
-/// builds a change and applies it itself (single writer), so this one builder
-/// serves both the direct and the routed path.
+/// RMW); applying it is the durable sequence. The command builds a change and
+/// applies it itself in the same invocation.
 pub struct Change {
     pub writes: Vec<NodeFile>,
     pub deletes: Vec<PathBuf>,
     /// Write-time advisories built beside the write (e.g. the node-add/update
     /// wording advisory and the node-rm outstanding-feedback notice). They ride
-    /// in the change so a routed mutation can return them to the caller, who
-    /// prints them on stderr at the mutation — they never block the write.
+    /// in the change so the command that built it prints them on its own stderr
+    /// at the mutation — they never block the write.
     pub warnings: Vec<String>,
     pub message: String,
 }
 
 /// Build the complete change for one `node`/`edge` mutation (the shared
-/// read-modify-write the direct command and the session coordinator both run).
-/// The direct path supplies `build_change_over` the on-disk node set as its base
-/// ([`layers::read_existing_nodes`]), preserving the direct path's existence
-/// checks and read-modify-write over `apg/layers/**`.
+/// read-modify-write). It supplies `build_change_over` the on-disk node set as
+/// its base ([`layers::read_existing_nodes`]), preserving the existence checks
+/// and read-modify-write over `apg/layers/**`.
 ///
-/// The direct path's `node rm` outstanding-feedback warning sources its records
-/// from the worktree's `.trans` feedback mirrors (the git branch names the
-/// project); every other subcommand passes an empty set, so the direct path
-/// reads `.trans` exactly when it did before. A malformed `.trans` record still
+/// The `node rm` outstanding-feedback warning sources its records from the
+/// worktree's `.trans` feedback mirrors (the git branch names the
+/// project); every other subcommand passes an empty set, so `.trans` is read
+/// only for `node rm`. A malformed `.trans` record still
 /// fails loudly through [`specs::read_jsonl`].
 pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
     let base = layers::read_existing_nodes(apg_root)?;
-    // The direct path's own `.trans` source for the node-rm outstanding-feedback
-    // warning (moved out of `node_rm_change`). Read ONLY for `node rm`, so the
-    // direct path reads `.trans` exactly when it did before; the loud-on-malformed
-    // `read_jsonl` error still propagates.
+    // The command's own `.trans` source for the node-rm outstanding-feedback
+    // warning (moved out of `node_rm_change`). Read ONLY for `node rm`; the
+    // loud-on-malformed `read_jsonl` error still propagates.
     let feedback: Vec<Record> = if kind == "node" && args.first().map(String::as_str) == Some("rm")
     {
         let mut records: Vec<Record> = Vec::new();
@@ -232,19 +229,16 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
 }
 
 /// Base-supplied twin of [`build_change`]: the same dispatch, but every arm
-/// threads the caller-supplied `base` node set — the session's
-/// `ArtifactDb::node_files_from_db`-reconstructed database working state — to
-/// its change builder, so a mutation's existence checks and read-modify-write
-/// resolve against that base directly, with no overlay folded in, rather than
-/// against `apg/layers/**` on disk. The session coordinator calls this with the
-/// base it reconstructs from the held database; the direct path
-/// ([`build_change`]) passes the on-disk node set.
+/// threads the caller-supplied `base` node set — the on-disk `apg/layers/**`
+/// node set this invocation read inside its write critical section — to its
+/// change builder, so a mutation's existence checks and read-modify-write
+/// resolve against that base directly rather than re-reading `apg/layers/**` on
+/// disk.
 ///
 /// The caller-supplied `feedback` record set is threaded only to the `node rm`
 /// arm (its outstanding-feedback warning); every other arm ignores it. The
-/// builder itself performs no `.trans` read — each caller supplies its own
-/// source: [`build_change`] from `.trans`, the session's
-/// `Coordinator::apply_mutation` from the held DB.
+/// builder itself performs no `.trans` read — [`build_change`] supplies the
+/// `.trans` records.
 pub fn build_change_over(
     base: &[NodeFile],
     feedback: &[Record],
@@ -267,7 +261,7 @@ pub fn build_change_over(
     }
 }
 
-/// Persist a built change through the direct path and print its message.
+/// Persist a built change through the write-through path and print its message.
 fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
     layers::write_project(apg_root, &change.writes, &change.deletes)?;
     println!("{}", change.message);
@@ -280,8 +274,8 @@ fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
 ///
 /// Admission checks the candidate against the supplied **committed model** — the
 /// node set a per-invocation write reads from `apg/layers/**` (the system of
-/// record) inside its write critical section — never against a live session's
-/// database working state or an earlier admission's pending rows
+/// record) inside its write critical section — never a database row or another
+/// invocation's in-flight state
 /// (`requirements.requirement.admission-checks-the-model-not-persistence`). The
 /// identity must be absent from the model ([`layers::refuse_if_present`]), and
 /// the candidate itself must pass the same per-node structural rules the write
@@ -341,8 +335,8 @@ fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
     // `apg spec lint` ([`crate::spec_lint::tier_body_warning`]), so a
     // constraint is exempt (a negative rule lives legitimately in a
     // layer-scoped constraint, R2). Carrying it (rather than printing here)
-    // lets a routed mutation return it in the session reply, and the caller
-    // (cmd_node) prints it on its own stderr while the add completes.
+    // keeps the warning in the returned [`Change`], which `cmd_node` prints on
+    // its own stderr while the add completes.
     let mut warnings = Vec::new();
     if let Some(msg) = crate::spec_lint::tier_body_warning(layer.layer_dir(), &pos[1], &node.body) {
         warnings.push(format!("apg: warning: {f}: {msg}"));
@@ -363,8 +357,7 @@ fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
 /// The node's existence and base content resolve against the supplied
 /// **committed model** — the node set a per-invocation write reads from
 /// `apg/layers/**` (the system of record) inside its write critical section —
-/// never a live session's database working state or an earlier admission's
-/// pending rows
+/// never a database row or another invocation's in-flight state
 /// (`requirements.requirement.admission-checks-the-model-not-persistence`): an
 /// identity is present exactly when the model carries it, and the refusal and
 /// the edge-preserving body/properties merge are applied over that node rather
@@ -423,9 +416,9 @@ fn node_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Chan
     // [`Change`] but let the update proceed unchanged — the author decides. Only
     // `--body` carries wording, so an update with no body is silent; the
     // selection mirrors `apg spec lint` ([`crate::spec_lint::tier_body_warning`]).
-    // Carrying it (rather than printing here) lets a routed mutation return it in
-    // the session reply, and the caller (cmd_node) prints it on its own stderr
-    // while the update completes.
+    // Carrying it (rather than printing here) keeps the warning in the returned
+    // [`Change`], which `cmd_node` prints on its own stderr while the update
+    // completes.
     let mut warnings = Vec::new();
     if let Some(b) = body.as_deref()
         && let Some(msg) = crate::spec_lint::tier_body_warning(layer.layer_dir(), &pos[1], b)
@@ -444,17 +437,17 @@ fn node_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Chan
 /// file that references it (drop the incident edges), one atomic mutation.
 ///
 /// The node's existence resolves against the caller-supplied `base` node set
-/// alone (the session's `ArtifactDb::node_files_from_db`-reconstructed database
-/// working state, or the direct path's on-disk node set): an identity is present
+/// alone (the on-disk `apg/layers/**` node set this invocation read inside its
+/// write critical section): an identity is present
 /// exactly when the base carries it. The incident-edge rewrite iterates that same
 /// base, so the removal drops every edge half the base records. The builder never
 /// reads `apg/layers/**` and never probes `node_file_path`, so it cannot observe
 /// a node file the caller's base does not carry.
 ///
 /// The outstanding-feedback warning sources its records from the caller-supplied
-/// `feedback` set — the caller supplies its own source (the direct path from
-/// `.trans`, the session from the held DB) — so this builder performs no
-/// disk/git I/O. `apg_root` is still needed to compute the deleted file's path.
+/// `feedback` set — [`build_change`] supplies the `.trans` records — so this
+/// builder performs no disk/git I/O. `apg_root` is still needed to compute the
+/// deleted file's path.
 fn node_rm_change(
     base: &[NodeFile],
     feedback: &[Record],
@@ -552,8 +545,8 @@ fn node_rm_change(
 /// Read an edge endpoint: an authored node (`<layer>.<type>.<name>`) or, when it
 /// does not parse, a code FQN (`implemented-by`/`details` targets). An authored
 /// endpoint resolves against the caller-supplied `base` node set alone (the
-/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
-/// state, or the direct path's on-disk node set): an identity is present exactly
+/// on-disk `apg/layers/**` node set this invocation read inside its write
+/// critical section): an identity is present exactly
 /// when the base carries it. This is pure list logic — it never reads
 /// `apg/layers/**` and never probes `node_file_path`, so it cannot observe a node
 /// file the caller's base does not carry. A code FQN resolves to no node file.
@@ -571,8 +564,8 @@ fn read_endpoint(base: &[NodeFile], f: &str) -> Option<NodeFile> {
 /// identified by that triple; re-adding duplicates both halves).
 ///
 /// Both endpoints resolve against the caller-supplied `base` node set alone (the
-/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
-/// state, or the direct path's on-disk node set) via [`read_endpoint`]: an
+/// on-disk `apg/layers/**` node set this invocation read inside its write
+/// critical section) via [`read_endpoint`]: an
 /// identity is present exactly when the base carries it. Pure list logic — it
 /// never reads `apg/layers/**` and never probes `node_file_path`, so it cannot
 /// observe a node file the caller's base does not carry. The duplicate-triple
@@ -590,7 +583,7 @@ fn edge_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
     // This source-file read-push-write RMW (and the target in-half write below)
-    // runs inside the session's serialization of the whole durable sequence, so
+    // runs inside the write's blocking critical section, so
     // the shared endpoint file is never read outside that scope. The read
     // resolves against the caller-supplied `base`; an identity the base does not
     // carry refuses.
@@ -636,8 +629,8 @@ fn edge_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
 /// one atomic mutation. Refuses an absent edge.
 ///
 /// Both endpoints resolve against the caller-supplied `base` node set alone (the
-/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
-/// state, or the direct path's on-disk node set) via [`read_endpoint`]: the
+/// on-disk `apg/layers/**` node set this invocation read inside its write
+/// critical section) via [`read_endpoint`]: the
 /// source out-half is read from that base (so an edge the base records is found
 /// and its properties merge there), and an identity the base does not carry
 /// yields nothing. Pure list logic — it never reads `apg/layers/**` and never
@@ -700,8 +693,8 @@ fn edge_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Chan
 /// in-edge from the target, one atomic mutation.
 ///
 /// Both endpoints resolve against the caller-supplied `base` node set alone (the
-/// session's `ArtifactDb::node_files_from_db`-reconstructed database working
-/// state, or the direct path's on-disk node set) via [`read_endpoint`]: the
+/// on-disk `apg/layers/**` node set this invocation read inside its write
+/// critical section) via [`read_endpoint`]: the
 /// source out-half is read from that base (so an edge the base records is found
 /// and dropped from it), and an identity the base does not carry yields nothing.
 /// Pure list logic — it never reads `apg/layers/**` and never probes
@@ -742,12 +735,10 @@ fn edge_rm_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> 
 }
 
 // ---------------------------------------------------------------------------
-// Test-facing direct-path wrappers: the `node_add`/`edge_add` command shapes
-// (build the change, persist it through `write_project`, print). The production
-// dispatch uses `build_change` + `apply_change` directly so the session
-// coordinator can inject its own (already-held) DB handle; these keep the
-// direct-path tests unchanged and are compiled unconditionally (`pub`) so the
-// `tests/node_cmd_e2e.rs` integration crate reaches them.
+// Test-facing command wrappers: the `node_add`/`edge_add` command shapes
+// (build the change, persist it through `write_project`, print). They keep the
+// integration tests' command shape unchanged and are compiled unconditionally
+// (`pub`) so the `tests/node_cmd_e2e.rs` integration crate reaches them.
 // ---------------------------------------------------------------------------
 
 pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
