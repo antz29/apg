@@ -5,52 +5,53 @@ mod unit {
     /// The `apg --help` text documents the strict
     /// `add|update|rm` surface for node/edge/plan, no longer names the retired
     /// `plan init`/`plan link` verbs, and leaves the `apg review` line
-    /// unchanged. It also pins the buffer-free session lifecycle entries and
-    /// the `--force` rebuild text against the database-only artifact.
+    /// unchanged. It also pins the per-invocation session model — a read-only
+    /// session by default, a durable write that upgrades under the blocking
+    /// worktree lock to write, commit and project, then releases — and the
+    /// `--force` rebuild text against the database-only artifact.
     #[test]
     fn help_text_documents_strict_surface_and_preserves_review() {
         let help = help_text();
         // node/edge/plan all document add|update|rm.
         assert!(help.contains("apg node <sub>"), "node block present");
         assert!(help.contains("apg edge <sub>"), "edge block present");
-        assert!(help.contains("apg session <sub>"), "session block present");
-        assert!(
-            help.contains("single-writer coordinator"),
-            "the session block documents the coordinator"
-        );
-        // phase-04 task-11: the session block pins all four lifecycle entries —
-        // start, save, abort, end — against the buffer-free database model:
-        // admitted writes mark node files dirty, deleted identities go to a
-        // pending-deletion ledger, and `save` is the one atomic write + commit.
+        // per-invocation sessions (Model C): the help no longer documents an
+        // `apg session start|save|end|abort` lifecycle; it describes a
+        // read-only session per invocation and a durable write that upgrades
+        // under the worktree's blocking lock to write, commit and project in
+        // one critical section, then releases back to read-only.
         let session_block = help
             .lines()
-            .skip_while(|l| !l.contains("apg session <sub>"))
+            .skip_while(|l| !l.contains("Each invocation opens a read-only session"))
             .take_while(|l| !l.contains("apg --version"))
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            session_block.contains("start — own db.lbug exclusively"),
-            "the session block documents `start`: {session_block}"
+            session_block.contains("Each invocation opens a read-only session"),
+            "the help documents the read-only session per invocation: {session_block}"
         );
         assert!(
-            session_block.contains("save — write the database's marked node files"),
-            "the session block documents `save`: {session_block}"
+            session_block.contains("blocking lock"),
+            "the help documents the durable write's blocking-lock upgrade: {session_block}"
         );
         assert!(
-            session_block.contains("abort — discard the database's pending state"),
-            "the session block documents `abort`: {session_block}"
+            session_block.contains("writes its node files")
+                && session_block.contains("commits")
+                && session_block.contains("projects into db.lbug")
+                && session_block.contains("then releases"),
+            "the help documents write → commit → project → release: {session_block}"
         );
-        let end_line = session_block
-            .lines()
-            .skip_while(|l| !l.contains("end — release the DB/socket and exit"))
-            .take(3)
-            .collect::<Vec<_>>()
-            .join("\n");
+        // The retired daemon lifecycle wording is gone.
         assert!(
-            end_line.contains("end — release the DB/socket and exit")
-                && end_line.contains("pending state"),
-            "the session block documents `end` and its refusal reason: {end_line}"
+            !help.contains("apg session <sub>"),
+            "the retired apg session subcommand is gone: {help}"
         );
+        for retired in ["single-writer coordinator", "session.sock", "pending state"] {
+            assert!(
+                !help.contains(retired),
+                "the help carries no {retired:?} wording: {help}"
+            );
+        }
         assert!(help.contains("apg plan <sub>"), "plan block present");
         assert!(
             help.contains("add/update/rm/done/undone/note/complete/render/verify"),

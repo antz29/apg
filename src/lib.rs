@@ -123,21 +123,12 @@ USAGE:
   apg edge <sub> …            Durable node-file model edge mutations:
                               add/update/rm (kind/from/to; update is
                               properties-only)
-  apg session <sub> …         Session-scoped single-writer coordinator
-                              (apg/.trans/session.sock); a durable apg
-                              node/edge mutation requires a live session:
-                              start — own db.lbug exclusively, serve routed
-                              node/edge mutations and routed reads in receive
-                              order, applying each mutation to the worktree
-                              database at admission;
-                              save — write the database's marked node files
-                              and remove its pending-deletion files in one
-                              atomic write + commit, then clear the marks;
-                              abort — discard the database's pending state and
-                              release the session;
-                              end — release the DB/socket and exit, refusing
-                              while the database carries pending state (save
-                              or abort first)
+                              Each invocation opens a read-only session; a
+                              durable apg node/edge write upgrades under the
+                              worktree's blocking lock for one critical
+                              section — it writes its node files, commits
+                              once and projects into db.lbug — then releases
+                              back to read-only. Reads never take the lock.
   apg --version               Print version
   apg --help                  Show this help
 
