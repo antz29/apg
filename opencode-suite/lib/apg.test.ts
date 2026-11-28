@@ -45,7 +45,6 @@ import apgHunk from "../tools/apg_hunk.ts"
 import apgProject from "../tools/apg_project.ts"
 import apgNode from "../tools/apg_node.ts"
 import apgEdge from "../tools/apg_edge.ts"
-import apgSession from "../tools/apg_session.ts"
 import apgPlanAdd from "../tools/apg_plan_add.ts"
 import apgPlan from "../tools/apg_plan.ts"
 import apgPlanPhases from "../tools/apg_plan_phases.ts"
@@ -869,7 +868,6 @@ const SUITE_TOOLS: Record<string, RegisteredPlugin> = {
   apg_project: apgProject,
   apg_node: apgNode,
   apg_edge: apgEdge,
-  apg_session: apgSession,
   apg_plan_add: apgPlanAdd,
   apg_plan: apgPlan,
   apg_plan_phases: apgPlanPhases,
@@ -892,11 +890,11 @@ const SUITE_TOOLS: Record<string, RegisteredPlugin> = {
 }
 
 // The whole registered roster — the code-graph reads, the durable mutations,
-// the session/plan/review/project tools and the fs/scan tools — takes a
+// the plan/review/project tools and the fs/scan tools — takes a
 // REQUIRED registered `project` name, resolves it to that project's worktree,
 // and exposes no `directory` input at all.
 test("every registered suite tool declares a required project and no directory selector", async () => {
-  expect(Object.keys(SUITE_TOOLS)).toHaveLength(38)
+  expect(Object.keys(SUITE_TOOLS)).toHaveLength(37)
   for (const [name, plugin] of Object.entries(SUITE_TOOLS)) {
     const tool = await registeredTool(plugin)
     expect(tool.name).toBe(name)
