@@ -560,60 +560,42 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
     db_recorded_scan_result(apg_root).ok().flatten()
 }
 
-/// The same `Scan` row [`db_recorded_scan_result`] reads, taken through the
-/// live session's routed read instead of opening a second handle on the
-/// session-owned DB, with the same three outcomes:
+/// The same `Scan` row [`db_recorded_scan_result`] reads, taken through a
+/// read-only per-invocation [`crate::session::Session`] handle instead of a
+/// daemon's routed read, with the same three outcomes:
 ///
-/// - `Err` — the routed read failed or its protocol response is malformed (a
-///   forward failure, a JSON parse failure, a non-array value or a non-object
-///   first row): the recorded state is "unreadable now", never an absent row;
-/// - `Ok(None)` — a readable, well-formed response carrying no usable recorded
-///   scan: an empty row list, an empty `git_sha`, or a `git_clean` that is
-///   neither `"true"` nor `"false"` (an empty `content_key` parses to
-///   `content_key: None`);
-/// - `Ok(Some(_))` — one usable row, the module selection being the routed
-///   `modules` field.
-#[expect(
-    dead_code,
-    reason = "the per-invocation freshness read no longer calls the daemon's routed scan reader; phase-01 task-14 reworks it onto a read-only session"
-)]
-fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedScan>> {
-    let out = crate::session::forward_query(
-        apg_root,
+/// - `Err` — the read-only session could not be opened or the read failed: the
+///   recorded state is "unreadable now", never an absent row;
+/// - `Ok(None)` — a readable database carrying no usable recorded scan: no
+///   `Scan` row, an empty `git_sha`, or a `git_clean` that is neither `"true"`
+///   nor `"false"` (an empty `content_key` parses to `content_key: None`);
+/// - `Ok(Some(_))` — one usable row, the module selection being the recorded
+///   `modules` column verbatim.
+pub fn db_recorded_scan_routed(apg_root: &Path) -> anyhow::Result<Option<RecordedScan>> {
+    let session = crate::session::Session::open(apg_root)?;
+    let conn = Connection::new(session.db())?;
+    let (_, rows) = query_rows(
+        &conn,
         "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key, s.modules AS modules",
-        true,
     )?;
-    let rows: serde_json::Value = serde_json::from_str(&out)?;
-    let rows = rows
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("routed scan read returned a non-array response"))?;
     let Some(row) = rows.first() else {
         return Ok(None);
     };
-    let row = row
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("routed scan read returned a non-object row"))?;
-    let field = |name: &str| {
-        row.get(name)
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string()
-    };
-    let sha = field("git_sha");
+    let sha = cell(row, 0);
     if sha.is_empty() {
         return Ok(None);
     }
-    let clean = match field("git_clean").as_str() {
+    let clean = match cell(row, 1).as_str() {
         "true" => true,
         "false" => false,
         _ => return Ok(None),
     };
-    let key = field("content_key");
+    let key = cell(row, 2);
     Ok(Some(RecordedScan {
         sha,
         clean,
         content_key: (!key.is_empty()).then_some(key),
-        modules: field("modules"),
+        modules: cell(row, 3),
     }))
 }
 
