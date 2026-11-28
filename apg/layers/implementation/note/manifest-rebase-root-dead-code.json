@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "manifest-rebase-root-dead-code",
-  "body": "Manifest::rebase_root has no caller — the manifest is re-based by assigning Manifest.root and by manifest.worktree_id, not through this accessor — and it is kept alive only by the cache module's #![allow(dead_code)]; remove it, and consider narrowing that allow, when the dead-code allowance is cleaned up.",
+  "body": "Manifest::rebase_root has no caller — the manifest is re-based by assigning Manifest.root and by manifest.worktree_id, not through this accessor. Upgrade — Remove the accessor.",
   "properties": {},
   "out": [
     {
