@@ -10,7 +10,7 @@ namespace Apg.SqlFrontend
     // Pure reference resolution over SchemaEmitter's declaration index: Collect gathers one unit's edges, Flush writes them.
     public sealed class ReferenceResolver
     {
-        // The finer declaration kind Declaration.IsFunction cannot tell; Emit (task 5.2) supplies it per emitted id.
+        // The finer declaration kind Declaration.IsFunction cannot tell; Emit supplies it per emitted id.
         public enum Kind { Table, View, Sequence, Synonym, Type, TableType, Procedure, Function, Trigger }
 
         static readonly Kind[] ObjectKinds = { Kind.Table, Kind.View, Kind.Sequence, Kind.Synonym };
