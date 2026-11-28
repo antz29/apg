@@ -1,9 +1,3 @@
-//! Unit tests for the `pyfrontend` library (`rust.pyfrontend`).
-//!
-//! The pure in-memory `unit` tier lives here and keeps the `tests::unit::…`
-//! libtest path filter. Non-test helpers stay at this module's root (never
-//! inside a tier); this tier needs none.
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
