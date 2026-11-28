@@ -1,5 +1,5 @@
-//! Relocated e2e tests for `apg project` (from `src/project_cmd.rs`'s inline
-//! `#[cfg(test)] mod tests`). The `project_cmd` module is e2e-only — every test
+//! Relocated e2e tests for `apg project`.
+//! The `project_cmd` module is e2e-only — every test
 //! does real I/O — so there is no sibling `src/project_cmd/tests.rs` and this
 //! crate holds both the tests and their `mod tests`-root support helpers.
 
