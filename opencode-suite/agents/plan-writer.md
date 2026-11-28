@@ -162,7 +162,12 @@ You can:
   feedback with `apg_review`, lint with `apg_spec_lint`.
 You cannot:
 - edit or commit anything; hold no `apg_plan_done`/`undone`/`note`/`complete`, no `apg_review_add`/
-  `resolve`/`reject`, no `apg_node`/`apg_edge`/`apg_session`; never run `apg_scan`; no shell beyond the allowlist.
+  `resolve`/`reject`, no `apg_node`/`apg_edge`; never run `apg_scan`; no shell beyond the allowlist.
+
+Every write you do make (`apg_plan_add`) is a **per-invocation write**: the invocation opens the
+worktree database read-only and upgrades that same invocation for writing under the **blocking**
+worktree lock — it waits if another writer holds it, never fails fast — completes one critical
+section, then releases. No session is started, saved or ended, and `apg_session` no longer exists.
 ## Process
 ### Non-negotiable rules
 1. **Never guess from memory.** Every claim comes from a query you actually ran.
