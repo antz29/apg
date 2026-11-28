@@ -169,8 +169,11 @@ You can:
   `apg_review_add`, `apg_review_resolve`, `apg_review_reject`.
 You cannot:
 - edit any file, node, or plan; hold no `apg_plan_add`, `apg_plan_done`/`undone`/`note`/`complete`,
-  no `apg_node`/`apg_edge`, no `apg_session`, no `apg_scan`; call `apg_review_action` (coordinator-only),
-  or any shell but `ls *`/`pwd`/`cd *`.
+  no `apg_node`/`apg_edge`, no `apg_scan`; call `apg_review_action` (coordinator-only),
+  or any shell but `ls *`/`pwd`/`cd *`. Every invocation opens the worktree database
+  read-only, and a durable write upgrades that same invocation under the **blocking**
+  worktree lock; there is no session lifecycle to start, save, end or abort — `apg_session`
+  no longer exists, and you hold neither a write tool nor any session tool.
 ## Process
 Neither side closes this cycle alone:
 ```
