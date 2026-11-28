@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "source-comments-state-only-api-or-directive",
+  "body": "In first-party source a comment restates only the public API documentation or a tool-required directive, while limits and provenance live in the graph.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

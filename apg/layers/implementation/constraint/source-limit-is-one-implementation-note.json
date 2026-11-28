@@ -1,0 +1,40 @@
+{
+  "layer": "implementation",
+  "type": "constraint",
+  "name": "source-limit-is-one-implementation-note",
+  "body": "A source limit that must live in the graph is borne by one implementation note whose details edge names the code identity it explains; a second note on that identity is refused, and the shortcut-reporting convention has the implementer return a NOTE line for the navigator to author as that note.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "applies-to",
+      "target": "cpp",
+      "properties": {}
+    },
+    {
+      "kind": "applies-to",
+      "target": "csharp",
+      "properties": {}
+    },
+    {
+      "kind": "applies-to",
+      "target": "go",
+      "properties": {}
+    },
+    {
+      "kind": "applies-to",
+      "target": "java",
+      "properties": {}
+    },
+    {
+      "kind": "applies-to",
+      "target": "rust",
+      "properties": {}
+    },
+    {
+      "kind": "applies-to",
+      "target": "ts",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
