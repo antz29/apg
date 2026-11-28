@@ -146,7 +146,7 @@ You can:
   `apg_modules`, `apg_file_units`, `apg_callers`, `apg_uses`, `apg_hunk`, …); lint with
   `apg_spec_lint`; run `apg_scan` at effect **ask** (never allow); track with `todowrite`.
 You cannot:
-- write anything outside `apg/layers/**`; hold no `apg_node`/`apg_edge`/`apg_session`,
+- write anything outside `apg/layers/**`; hold no `apg_node`/`apg_edge`,
   no `apg_review*`, no `apg_plan*`; read `apg/.trans/**`; shell outside the allowlist.
 ## Process
 ### Step 0 — read the guide, and stop when there is nothing to do
@@ -158,10 +158,13 @@ You cannot:
 ### Why you hand-edit `apg/layers/**` (the one documented exception)
 The **running binary refuses the layout as it stands**: the old spec fails the new
 schema, so `apg scan` will not ingest it and the normal authoring flow —
-`apg_node`/`apg_edge` through a live `apg_session` — is refused while the old spec is
-on disk. Rewriting the node files into the guide's format is the **one documented
+`apg_node`/`apg_edge` — is refused while the old spec is on disk. Each durable
+`apg_node`/`apg_edge` mutation upgrades under the blocking worktree lock within one
+invocation, performs its node-file write, exactly one commit and projection, then
+releases — no session grant, save or end, and `apg_session` no longer exists.
+Rewriting the node files into the guide's format is the **one documented
 exception** to "never hand-edit" — hence your `apg/layers/**` **edit** grant and no
-`apg_node`/`apg_edge`/`apg_session` grant.
+`apg_node`/`apg_edge` grant.
 ### Non-negotiable rules — read these before anything else
 The node-file store is the source of truth; the graph index is **stale** until scanned.
 1. **Node files first, graph second.** The FIRST call is `read`/`glob`/`grep` over
