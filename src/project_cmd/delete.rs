@@ -36,9 +36,10 @@ pub(crate) fn project_delete(args: &[String]) -> anyhow::Result<()> {
 /// worktree at the fixed location `<main>/apg/.worktrees/<name>` (leftover
 /// branch / mismatched worktree states are refused with a manual fix, never
 /// guessed); the worktree has no tracked uncommitted changes (commit or
-/// stash first, mirroring merge's dirty refusal); and no live `apg session`
-/// owns the branch DB (save and end it first, mirroring merge). The branch may
-/// be unmerged —
+/// stash first, mirroring merge's dirty refusal); and the worktree's blocking
+/// lock is taken before anything is removed, so an in-flight durable write's
+/// critical section (node files, commit, projection) closes first and the
+/// worktree is removed between writes. The branch may be unmerged —
 /// delete is the abandon path. On success `git::remove_worktree` +
 /// `git::delete_branch` remove the project and its registry row is removed
 /// best-effort; the default branch and the main checkout are never touched.
@@ -109,17 +110,13 @@ pub fn project_delete_at(main_apg_root: &Path, name: &str) -> anyhow::Result<()>
         );
     }
 
-    // Lifecycle exclusivity: a live session owns the branch DB, so deleting
-    // (which removes the worktree/branch) must not race it. Refuse before any
-    // removal — the caller must save the buffered state (`apg session save`)
-    // and end the session (`apg session end`) first.
+    // Lifecycle exclusivity: a durable write holds the worktree's blocking
+    // lock for its whole critical section (the node-file write, the one commit
+    // and the database projection), so take the same lock here before removing
+    // anything. Delete queues behind an in-flight write and removes the
+    // worktree between writes instead of racing one.
     let wt_apg = wt_dir.join(specs::LAYOUT);
-    if crate::session::live_session(&wt_apg) {
-        anyhow::bail!(
-            "refused: a live `apg session` owns the branch DB at {} — save its buffered changes and end it first (`apg session save`, then `apg session end`, inside the project worktree) before deleting",
-            wt_apg.join(specs::TRANS).join("db.lbug").display()
-        );
-    }
+    let _lock = crate::artifacts::acquire_spec_lock(&wt_apg)?;
 
     // The worktree must have no tracked uncommitted changes: delete discards
     // the branch's commits, and uncommitted work in the worktree would be
