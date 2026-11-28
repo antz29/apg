@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "session-upgrade-write-queue-untested-until-acceptance",
+  "body": "The per-invocation write upgrade and its write guard carry no dedicated test in the implementation phases: proving the blocking writer queue and the read-only to read-write handle swap needs a real database and an exclusive lock, so the Phase 4 Model C acceptance proves both on a scratch repository.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Session.upgrade_to_write",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
