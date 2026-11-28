@@ -1926,13 +1926,15 @@ mod e2e {
     ///
     /// 1. A scratch project worktree carries an authored `Requirement` under
     ///    `apg/layers/**`; a hermetic scan builds `db.lbug` in sync with it.
-    /// 2. A durable commit through a live-session save re-anchors the DB's own
-    ///    `Scan` row to the current state — the trap the guard must catch.
+    /// 2. A durable write completes inside its own invocation — under the
+    ///    blocking worktree lock it writes the node file, makes exactly one
+    ///    commit and projects into `db.lbug` — re-anchoring the DB's own `Scan`
+    ///    row to the current state: the trap the guard must catch.
     /// 3. Re-anchoring done, the authored row is dropped from `db.lbug` ONLY
     ///    (the tree still carries it), producing a DB the tree contradicts while
     ///    the re-anchored Scan row still names the current git state. The drop must
-    ///    FOLLOW the save: a routed session mutation re-projects the whole
-    ///    effective node set at admission, so an earlier drop would be healed.
+    ///    FOLLOW that write: each write re-projects the whole effective node set,
+    ///    so an earlier drop would be healed.
     /// 4. `is_fresh(apg_root)` is FALSE — the DB's ACTUAL authored digest is
     ///    compared to the on-disk tree, never to the refreshed Scan row — so the
     ///    next scan does NOT fast-path: it rebuilds and restores the row.
@@ -1941,7 +1943,7 @@ mod e2e {
     /// assertion fails: the re-anchored, agreeing Scan-row pair would make the
     /// diverged DB look fresh and it would be reused.
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch repo/db.lbug/git/live-session process); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch repo/db.lbug/git); run via cargo test-e2e"]
     fn diverged_authored_rows_are_not_fast_pathed() {
         use apg::artifacts::ArtifactDb;
         use apg::testutil::{self, Repo};
@@ -2028,23 +2030,23 @@ mod e2e {
             "a scan carrying an authored row must be fresh"
         );
 
-        // 2. A durable commit through a live-session save re-anchors the DB's
-        //    own `Scan` row to the current (post-commit) state.
-        let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
+        // 2. A durable write completes inside its own invocation: under the
+        //    blocking worktree lock it writes the node file, makes exactly one
+        //    commit and projects into `db.lbug`, then exits — re-anchoring the
+        //    DB's own `Scan` row to the current (post-commit) state. There is no
+        //    session to start, save or end.
         let add =
             testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "req2"])
                 .cwd(&wt)
-                .env("HOME", home.to_str().unwrap())
                 .output();
         assert!(
             add.status.success(),
-            "routed node add: {}",
+            "node add: {}",
             String::from_utf8_lossy(&add.stderr)
         );
         // Root `req2` under `req` (via `contains` decomposition) and drive it
-        // from the seeded Service, keeping the buffered model whole-model-valid
-        // at save (SPEC §8.1/§3.4).
+        // from the seeded Service, keeping the committed model whole-model-valid
+        // at every write (SPEC §8.1/§3.4).
         for edge in [
             &[
                 "edge",
@@ -2061,38 +2063,13 @@ mod e2e {
                 "requirements.requirement.req2",
             ][..],
         ] {
-            let out = testutil::ApgCommand::new(edge)
-                .cwd(&wt)
-                .env("HOME", home.to_str().unwrap())
-                .output();
+            let out = testutil::ApgCommand::new(edge).cwd(&wt).output();
             assert!(
                 out.status.success(),
-                "routed edge add {edge:?}: {}",
+                "edge add {edge:?}: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
         }
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "session save: {}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "session end: {}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let coord = session.child.wait_with_output().unwrap();
-        assert!(
-            coord.status.success(),
-            "session process: {}",
-            String::from_utf8_lossy(&coord.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&apg_root),
-            "the session must have released the DB"
-        );
 
         // The re-anchor landed: the DB's own Scan row names the post-commit
         // state — the pre-fix trap's fresh-looking recorded state.
@@ -2105,7 +2082,7 @@ mod e2e {
                 db_scan.content_key.clone()
             ),
             (state.sha.clone(), state.clean, state.content_key.clone()),
-            "the durability commit must leave the DB Scan row re-anchored to the current state"
+            "the durability write must leave the DB Scan row re-anchored to the current state"
         );
 
         // 3. Drop the authored `req` row from `db.lbug` ONLY — the tree still
@@ -2121,7 +2098,7 @@ mod e2e {
             );
             assert!(
                 db.has_node("requirements.requirement.req2"),
-                "the durability commit's row must survive the drop"
+                "the durability write's row must survive the drop"
             );
         }
         assert!(req_path.exists(), "the tree must still carry the row");
