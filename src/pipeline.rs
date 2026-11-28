@@ -256,72 +256,44 @@ pub(crate) fn run_pipeline_with(
         .ok()
         .and_then(|cwd| cwd.parent().map(Path::to_path_buf));
 
-    // Defense in depth (lifecycle exclusivity): never unlink — or seed
-    // from — a DB a live session holds. `cmd_scan` refuses earlier; this guard
-    // catches a session that started mid-scan before the projected DB is
-    // replaced.
-    if let Some(apg_root) = &apg_root
-        && session::live_session(apg_root)
-    {
-        panic!(
-            "refused: a live apg session owns this db.lbug — run `apg session end` before scanning"
-        );
-    }
+    // A scan REPLACES `db.lbug`, so under the per-invocation session model it
+    // is a write: it takes the blocking worktree lock for its previous-database
+    // read and the whole rebuild, so a concurrent durable write runs whole
+    // before the replacement starts (the acquire waits, never `EAGAIN`) and a
+    // later reader, write, scan or merge waits for the rebuild. `cmd_scan`
+    // already holds this lock across the scan and the acquire is reentrant
+    // within the process; the hermetic harness, which calls the pipeline
+    // directly, takes it here. The previous-database facts themselves are read
+    // read-only.
+    let _lock = apg_root
+        .as_deref()
+        .map(crate::artifacts::acquire_spec_lock)
+        .transpose()?;
 
-    // Crash recovery: there are two UNCLEAN EXITS, and
-    // both disable the `db.lbug`-reuse (splice-seed) fast path.
+    // Crash recovery: a previous database carrying pending state — a dirty row
+    // or a pending-removal identity, which
+    // `artifacts::db::db_has_pending_state` answers from a fail-closed read-only
+    // open — is ahead of the last durable state and must never seed the
+    // `db.lbug`-reuse (splice-seed) fast path. The derived index — `db.lbug`
+    // with its `.wal`/`.shm` sidecars, the one artifact — is discarded through
+    // the ONE shared `discard_derived_index(".")` below and the full load
+    // rebuilds it from the assembled graph (`apg/layers/**` + the scanned code)
+    // rather than seeding the splice from the unsaved rows.
     //
-    // 1. A session socket that is present but fails a connect + `Ping`: the
-    //    killed process left the file behind while its own `db.lbug` handle
-    //    closed with its admitted-but-unsaved rows — the pending state — still
-    //    in the index. The on-disk `db.lbug` therefore reflects only the last
-    //    SAVED state plus that unsaved pending state, so it must never be
-    //    reused. Reclaim the stale socket.
-    //
-    // 2. With no live session holding the database (refused above), the
-    //    database itself still carries pending state — a dirty row or a
-    //    pending-removal identity (`artifacts::db::db_has_pending_state`). An
-    //    admitted but unsaved mutation likewise leaves the derived DB ahead of
-    //    the last saved state, so the same verdict applies whether or not a
-    //    socket survived.
-    //
-    // Either cause discards the derived index — `db.lbug` with its `.wal`/`.shm`
-    // sidecars, the one artifact — through the ONE shared
-    // `discard_derived_index(".")` below, and forces the full load to rebuild
-    // it from the assembled graph (`apg/layers/**` + the scanned code) rather
-    // than seeding the splice from the unsaved rows. A live session answers
-    // `Ping` (refused above) and a database with neither a stale socket nor
-    // pending state is the ordinary case — the reuse fast path is unchanged for
-    // both.
-    //
-    // Equivalently, either verdict IS the `db.lbug`-reuse (splice-seed) fast
-    // path being disabled: `force_full_load` short-circuits the
-    // `try_splice_build` reuse branch below (which would otherwise seed the new
-    // DB from the previous `db.lbug` via `input.reuse`) and the shared discard
-    // removes the index plus its `.wal`/`.shm` sidecars, so no stale seed
-    // survives to poison the rebuild.
-    let stale_socket = apg_root.as_ref().and_then(|root| {
-        let socket = session::socket_path(root);
-        (socket.exists() && !session::live_session_at(&socket)).then_some(socket)
-    });
-    // The second cause probes the database, so it also needs an `apg/` root —
-    // the hermetic harness has none and has nothing to probe.
+    // Equivalently, this verdict IS the `db.lbug`-reuse (splice-seed) fast path
+    // being disabled: `force_full_load` short-circuits the `try_splice_build`
+    // reuse branch below (which would otherwise seed the new DB from the
+    // previous `db.lbug` via `input.reuse`) and the shared discard removes the
+    // index plus its `.wal`/`.shm` sidecars, so no stale seed survives to poison
+    // the rebuild.
     let pending_state = apg_root
         .as_deref()
         .is_some_and(crate::artifacts::db::db_has_pending_state);
-    let force_full_load = stale_socket.is_some() || pending_state;
-    if let Some(socket) = &stale_socket {
-        log.ln(
-            "[load] session socket present but unreachable (unclean exit) — reclaiming it and rebuilding db.lbug from apg/layers/**",
-        );
-        let _ = std::fs::remove_file(socket);
-    }
+    let force_full_load = pending_state;
     if pending_state {
         log.ln(
             "[load] database carries pending state (an admitted but unsaved mutation) — discarding it and rebuilding db.lbug from apg/layers/**",
         );
-    }
-    if force_full_load {
         // cwd is `.trans`, so the derived index lives at ".".
         session::discard_derived_index(Path::new("."));
     }
