@@ -1694,6 +1694,196 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// The Model C acceptance, end to end on a scratch `/tmp` git repo: a
+    /// per-invocation session makes a durable write impossible to run without
+    /// one, so no invocation can be told to `save` or `end` — and under it
+    ///
+    /// 1. concurrent durable writes from separate invocations **queue** on the
+    ///    blocking worktree lock (they wait, never `EAGAIN`), so none reports a
+    ///    lock error;
+    /// 2. every write is **durable** — no lost update: the store carries all
+    ///    N edges, each invocation landed exactly one commit, and the branch
+    ///    database equals the serial store;
+    /// 3. a durable write with **no started session** succeeds (there is no
+    ///    session to start: the invocation is the session);
+    /// 4. `apg scan` and `apg project merge` run **between** writes, after
+    ///    which a further durable write still lands.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn acceptance_model_c_concurrent_writers_queue_without_lock_error_or_lost_update() {
+        const N: usize = 8;
+        let (wt_apg, repo, wt) = mutation_fixture("model-c-acceptance");
+        setup_hub_and_leaves(&wt, N);
+        let home = repo.root.join("home");
+        let spec_lock = wt_apg.join(specs::TRANS).join("specs.lock");
+        let before_commits = testutil::commit_count(&wt);
+
+        // (1) A parallel burst of N separate `apg edge add` processes: each
+        // upgrades under the blocking worktree flock and waits its turn, so a
+        // lock failure would surface as a failed child. Zero failures is the
+        // no-lock-error evidence.
+        let failures = run_edge_burst(&wt, &home, N);
+        assert!(
+            failures.is_empty(),
+            "the burst lost {} of {N} mutations on the blocking lock: {failures:?}",
+            failures.len()
+        );
+        // The burst actually took the blocking whole-durable-sequence flock.
+        assert!(
+            spec_lock.exists(),
+            "the writers must take the blocking specs.lock flock: {} missing",
+            spec_lock.display()
+        );
+
+        // (2) Durable, no lost update: exactly N distinct hub -> leaf-i edges,
+        // one commit per invocation, and the branch DB equals the serial store.
+        assert_eq!(hub_out_edges(&wt_apg), N, "the burst lost an edge");
+        let hub =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "hub").unwrap();
+        let mut targets: Vec<String> = hub
+            .out
+            .iter()
+            .filter(|e| e.kind == "contains")
+            .map(|e| e.target.clone())
+            .collect();
+        targets.sort();
+        let mut expected: Vec<String> = (0..N)
+            .map(|i| format!("requirements.requirement.leaf-{i}"))
+            .collect();
+        expected.sort();
+        assert_eq!(
+            targets, expected,
+            "the burst must carry exactly one durable edge to each leaf"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + N,
+            "each queued invocation must land exactly one commit"
+        );
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            let q = db
+                .q("MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:Contains]->(b) RETURN count(*)")
+                .unwrap();
+            assert_eq!(q.lines().last().map(str::trim), Some("8"), "{q}");
+        }
+
+        // (3) A durable write with NO started session succeeds: nothing is
+        // started, saved or ended — the invocation is the session. It takes the
+        // blocking lock, lands its node file, exactly one commit and projection,
+        // and leaves no daemon/socket behind.
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "model-c-no-session",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "a write with no started session must succeed: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&add.stdout).trim(),
+            "Added node global.constraint.model-c-no-session"
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "model-c-no-session")
+                .exists(),
+            "the session-less write must land its node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + N + 1,
+            "the session-less write must land exactly one commit"
+        );
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "no started session/daemon may exist"
+        );
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Constraint {fqn: 'global.constraint.model-c-no-session'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "read after the session-less write: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the session-less write must be projected into the branch DB"
+        );
+
+        // (4) `apg scan` and `apg project merge` run between writes — no save or
+        // end is needed. The scan takes its freshness fast path and commits
+        // nothing; the merge is never blocked by a session gate (it proceeds to
+        // the fixture's unrelated missing-plan refusal).
+        let scan = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            scan.status.success(),
+            "scan must run between writes: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + N + 1,
+            "a scan between writes must not create a commit"
+        );
+        let merge = testutil::ApgCommand::new(&["project", "merge", "foo"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        let merge_err = String::from_utf8_lossy(&merge.stderr);
+        assert!(
+            !merge_err.to_lowercase().contains("session"),
+            "merge must not be blocked by a session gate: {merge_err}"
+        );
+
+        // A further durable write after scan/merge still lands exactly one
+        // commit, proving the between-write runs leave the write path usable.
+        let after =
+            testutil::ApgCommand::new(&["node", "add", "global", "constraint", "model-c-after"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            after.status.success(),
+            "a write after scan/merge must succeed: {}",
+            String::from_utf8_lossy(&after.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + N + 2,
+            "the write after scan/merge must land exactly one commit"
+        );
+        let scan_after = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            scan_after.status.success(),
+            "scan must run after the between-write burst: {}",
+            String::from_utf8_lossy(&scan_after.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
     /// A durable `apg node add` prints its write-time wording advisory on the
     /// caller's OWN stderr at the write (`apg: warning: …`) while the write's
     /// result is left intact — the add succeeds and its node file is durable.
