@@ -938,23 +938,24 @@ mod e2e {
 
     /// The delete write-through removes the node file AND rewrites the
     /// referencing file (incident edge dropped), leaving a pairing-consistent
-    /// set — the §4.1 atomic delete. Runs in a REAL git repo, because the
-    /// commit path is the whole point: a removed path must be staged as a
-    /// deletion (`index.remove_path`), not `add_path`-ed, which stats the gone
-    /// file and fails with a libgit2 NotFound (the latent bug the repo-less
-    /// test could never see).
+    /// set — the §4.1 atomic delete, run as ONE per-invocation critical
+    /// section: the node-file write, exactly one commit and the projection.
+    /// Runs in a REAL git repo, because the commit path is the whole point: a
+    /// removed path must be staged as a deletion (`index.remove_path`), not
+    /// `add_path`-ed, which stats the gone file and fails with a libgit2
+    /// NotFound (the latent bug the repo-less test could never see).
     ///
     /// The second arm pins the tolerant delete: a delete path that is ALREADY
     /// ABSENT on disk is success, not a rollback — the removal is idempotent
-    /// (a replayed save, or an earlier partial write) — and the neighbour
-    /// written in the same set is still rewritten and committed.
+    /// (an earlier partial write, or a path removed between admission and the
+    /// write set) — and the neighbour written in the same set is still
+    /// rewritten and committed.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_through_with_deletes_removes_file_and_rewrites_referencing() {
-        // A real project worktree: `write_through` commits on the branch.
-        let repo = Repo::new("layers-delete-commit");
-        let wt = repo.start_project("foo");
-        let apg_root = wt.join(apg::specs::LAYOUT);
+        // A real project worktree carrying a scanned branch database: every
+        // write below is one per-invocation `write_project` critical section.
+        let (apg_root, repo, wt) = mutation_fixture("delete-commit");
         let wt_sha = |wt: &Path| {
             git2::Repository::open(wt)
                 .unwrap()
@@ -968,7 +969,7 @@ mod e2e {
 
         // Author A --contains--> B (both halves) and commit both files once.
         let (a, b) = authored_pair("a", "b");
-        write_through(&apg_root, &[a.clone(), b.clone()]).unwrap();
+        write_project(&apg_root, &[a.clone(), b.clone()], &[]).unwrap();
         let first = wt_sha(&wt);
 
         // The delete: A's out-edge is stripped and B's file is removed — one
@@ -976,7 +977,7 @@ mod e2e {
         let mut a2 = a.clone();
         a2.out.clear();
         let b_path = node_file_path(&apg_root, Layer::Requirements, "requirement", "b");
-        write_through_with_deletes(&apg_root, &[a2], std::slice::from_ref(&b_path)).unwrap();
+        write_project(&apg_root, &[a2], std::slice::from_ref(&b_path)).unwrap();
 
         assert!(!b_path.exists(), "the deleted node file must be gone");
         let a_read = read_node_file(&apg_root, "requirements", "requirement", "a");
@@ -1014,23 +1015,27 @@ mod e2e {
 
         // --- Tolerant delete: the delete path is ALREADY ABSENT ---
         // A fresh pair C --contains--> D, committed once, then D's file is
-        // removed out-of-band so the delete path is genuinely gone BEFORE the
-        // write set runs. The set that deletes the absent path and rewrites C
+        // removed after admission validation but BEFORE the write set runs —
+        // the per-invocation analogue of an earlier partial write leaving the
+        // path gone. The set that deletes the absent path and rewrites C
         // (dropping the dangling out edge) must succeed — no NotFound, no
         // rollback — and must still land C's rewrite.
         let (c, d) = authored_pair("c", "d");
-        write_through(&apg_root, &[c.clone(), d.clone()]).unwrap();
+        write_project(&apg_root, &[c.clone(), d.clone()], &[]).unwrap();
         let d_path = node_file_path(&apg_root, Layer::Requirements, "requirement", "d");
-        std::fs::remove_file(&d_path).unwrap();
-        assert!(
-            !d_path.exists(),
-            "the delete path must be absent before the write set runs"
-        );
+        install_mutation_hook(MutationBoundary::BeforeCommit, {
+            let d_path = d_path.clone();
+            move || {
+                std::fs::remove_file(&d_path)
+                    .expect("the tolerant-delete path must exist before the write set runs");
+                Ok(())
+            }
+        });
 
         let mut c2 = c.clone();
         c2.out.clear();
         let before_tolerant = wt_sha(&wt);
-        write_through_with_deletes(&apg_root, &[c2], std::slice::from_ref(&d_path))
+        write_project(&apg_root, &[c2], std::slice::from_ref(&d_path))
             .expect("an already-absent delete path is success, never a rollback");
 
         assert!(
@@ -2052,8 +2057,9 @@ mod e2e {
     // --- Tier-4 constraint language scope (phase-07 task-24) ---
 
     /// An implementation constraint's `applies-to` Language scope lands end to
-    /// end in the database. The write funnel (`write_project` — the path a live
-    /// session's save lands its dirty rows and pending-deletion files through)
+    /// end in the database. The write funnel (`write_project` — the one
+    /// node-file write + commit + projection critical section every durable
+    /// mutation runs per invocation)
     /// accepts an `implementation.constraint` plus an `applies-to` edge naming
     /// a `LANGUAGE_ROOTS` id and commits it in one mutation. The write-through's
     /// own projection must already carry the `AppliesTo` row (pre-scan, the
