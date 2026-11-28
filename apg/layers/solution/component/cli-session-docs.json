@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-docs",
-  "body": "The session documentation: the readme, the agent guide, and the session help text, stating the per-invocation session, its read-only default, and its blocking-lock write upgrade.",
+  "body": "The session documentation: the readme, the agent guide, and the help text, stating the per-invocation session, its read-only default, and its blocking-lock write upgrade.",
   "properties": {},
   "out": [
     {
