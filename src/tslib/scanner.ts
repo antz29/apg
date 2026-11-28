@@ -40,7 +40,7 @@
 //   --module restricts scanning to the given package dirs; remaining args are
 //   substring path excludes.
 //
-// Win-B full-context-targeted emission (the pinned phase-02 task-9 interface):
+// Full-context-targeted emission (`--targets`/`--cache-dir`):
 //   --targets <file>   UTF-8, newline-delimited absolute source-file paths;
 //                      absent/empty = no emission filter (the byte-identical
 //                      full scan). Every target is still resolved against the
