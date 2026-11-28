@@ -1,5 +1,4 @@
-//! Relocated e2e tests for the root crate (from `src/lib.rs`'s inline
-//! `#[cfg(test)] mod tests`). Real I/O only; every test is `#[ignore]`d
+//! E2E tests for the root crate. Real I/O only; every test is `#[ignore]`d
 //! and runs through `cargo test-e2e`.
 
 mod common;
@@ -478,8 +477,8 @@ fn under_component(root: &Path, path: &str, name: &str) -> bool {
         .any(|c| matches!(c, std::path::Component::Normal(s) if s == name))
 }
 
-/// P9 roots a module/symbol FQN under a `<lang>.` segment; strip that root
-/// so an assertion holds both pre-rooting (bare) and post-rooting. Module
+/// Module and symbol FQNs are rooted under a `<lang>.` segment; strip that
+/// root so an assertion holds on the bare identity as well. Module
 /// identities here are `apg` / `apg-rustfrontend` (no dot), their symbols
 /// `apg.X` / `apg-rustfrontend.X`.
 fn strip_lang_root(fqn: &str) -> String {
@@ -624,8 +623,8 @@ fn md_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) 
     (base, repo_dir, home)
 }
 
-/// The phase-07 Markdown acceptance fixture: a mixed Go + Markdown repo
-/// carrying every pinned AC shape — nested duplicate headings, a sibling
+/// The Markdown acceptance fixture: a mixed Go + Markdown repo carrying
+/// every pinned acceptance shape — nested duplicate headings, a sibling
 /// after a deeper heading (nearest preceding lower-level parent), a
 /// heading-less document, same-stem `README.md`/`README.markdown` in one
 /// directory, same-stem files in different directories, a subdirectory
@@ -720,8 +719,8 @@ fn win_c_fixture(abs_file: &str, scan_sha: &str) -> graph::Graph {
     g
 }
 
-/// The incremental `PipelineInput` the dispatch fixtures pass: the win-B
-/// reuse plan (the eligibility marker) plus the phase-2 target set. `warm`
+/// The incremental `PipelineInput` the dispatch fixtures pass: the reuse
+/// plan (the eligibility marker) plus the incremental target set. `warm`
 /// stays false (this drives the incremental splice path) and `previous` is the
 /// empty snapshot — the fixture carries no captured previous-scan universe.
 fn win_c_input(base: &Path, scan_root: &Path, targets_rel: &[&str]) -> incremental::PipelineInput {
@@ -822,7 +821,7 @@ fn java_store(repo_dir: &Path) -> PathBuf {
 }
 
 /// The enumerated per-rel-type oracle: rel type -> row count for the four Java
-/// rel types the task names (`Calls`/`Uses`/`UnresolvedCall`/`UnresolvedUse`,
+/// rel types the oracle enumerates (`Calls`/`Uses`/`UnresolvedCall`/`UnresolvedUse`,
 /// i.e. wire `calls`/`uses`/`unresolved_call`/`unresolved_use`). Every type is
 /// present with `0` when it has no rows, so a dropped rel type is a divergence
 /// rather than an absent key.
@@ -840,8 +839,8 @@ fn java_rel_counts(repo_dir: &Path) -> std::collections::BTreeMap<String, usize>
     counts
 }
 
-/// The `UnresolvedTarget` set by FQN -> category (the task's oracle: the set
-/// must be EQUAL by FQN *with* categories, not by FQN alone).
+/// The `UnresolvedTarget` set by FQN -> category (the oracle: the set must
+/// be EQUAL by FQN *with* categories, not by FQN alone).
 fn java_unresolved(repo_dir: &Path) -> std::collections::BTreeMap<String, String> {
     let mut out = std::collections::BTreeMap::new();
     for (fqn, cat) in db_unresolved(&db_records(repo_dir)) {
@@ -853,9 +852,9 @@ fn java_unresolved(repo_dir: &Path) -> std::collections::BTreeMap<String, String
 }
 
 /// The `(from, to)` endpoints of one edge kind in the database
-/// (`calls`/`uses`/…) — the positive half of the task-23 extension, where
-/// the re-emitted file's references into the TARGET package must appear as
-/// their real resolved FQNs (never a bare simple name or an error symbol).
+/// (`calls`/`uses`/…) — the positive half of the targeted-scan contract,
+/// where the re-emitted file's references into the TARGET package must appear
+/// as their real resolved FQNs (never a bare simple name or an error symbol).
 fn java_edges(repo_dir: &Path, kind: &str) -> std::collections::BTreeSet<(String, String)> {
     db_records(repo_dir)
         .iter()
@@ -896,9 +895,9 @@ fn java_class_cache_seeded(store: &Path) -> bool {
 }
 
 /// Recursively collects every Java class-cache artifact (`surface.tsv` file
-/// or `classes/` directory) under `root`. The task-25 no-hand-off control
-/// uses it to catch a fabricated/defaulted cache path ANYWHERE in the
-/// scratch tree, not merely under the per-worktree cache root.
+/// or `classes/` directory) under `root`. The no-hand-off control uses it to
+/// catch a fabricated/defaulted cache path ANYWHERE in the scratch tree, not
+/// merely under the per-worktree cache root.
 fn collect_class_cache_artifacts(root: &Path, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -931,8 +930,8 @@ fn java_unchanged_package_compiles(log: &str) -> Option<usize> {
 }
 
 /// The number of `.class` files under the per-worktree Java class cache
-/// (`<store>/java/classes`). The task-23 nested-root
-/// fixture carries a source javac cannot compile (`pkg.a.Broken`), so the
+/// (`<store>/java/classes`). The nested-root fixture carries a source javac
+/// cannot compile (`pkg.a.Broken`), so the
 /// compile batch cannot emit bytecode and the count is ZERO — the positive
 /// proof that the targeted scan's exact facts came from the corrected
 /// `-sourcepath` (the actual source roots), NOT from a bytecode cache. A
@@ -959,39 +958,37 @@ fn count_class_files(dir: &Path) -> usize {
     n
 }
 
-/// The task-23 Java fixture (EXTENDED, feedback-134; nested-root corrected
-/// per phase-04 task-23): a changed package (`pkg.b`) whose type is
+/// The Java targeted-scan fixture: a changed package (`pkg.b`) whose type is
 /// referenced from an unchanged package (`pkg.c`) and which itself calls
 /// into an unchanged package (`pkg.a`) — the cross-package resolution shape
-/// note-87's divergence class exercised on jgrapht (resolved -> unresolved
-/// when the context is incomplete).
+/// the divergence class exercised on jgrapht (resolved -> unresolved when
+/// the context is incomplete).
 ///
 /// FIXTURE ROOT (REQUIRED): every source sits under a MAVEN-LIKE NESTED
 /// SOURCE ROOT — `proj/src/main/java/pkg/...` under the scan root — so the
 /// scan root is NOT a valid package root, exactly like jgrapht's Maven
 /// multi-module layout (`<root>/jgrapht-core/src/main/java/org/jgrapht/…`).
-/// This is what makes the pre-fix `-sourcepath <scan root>` silently
-/// INEFFECTIVE: javac looks for `<scan root>/pkg/a/A.java`, which does not
-/// exist, so a reference into a non-target package degrades to a javac
-/// error symbol. A fixture with `pkg/a/A.java` DIRECTLY under the scan root
-/// does NOT reproduce the divergence (the scan root WAS a valid package
-/// root there) and is exactly the wrong assumption the committed frontend
-/// fixture encoded before task-15's smallest falsifiable experiment.
+/// This is what makes a `-sourcepath <scan root>` silently INEFFECTIVE:
+/// javac looks for `<scan root>/pkg/a/A.java`, which does not exist, so a
+/// reference into a non-target package degrades to a javac error symbol. A
+/// fixture with `pkg/a/A.java` DIRECTLY under the scan root does NOT
+/// reproduce the divergence (the scan root WAS a valid package root there)
+/// and is exactly the wrong assumption an earlier frontend fixture encoded.
 ///
 /// On top of the nested root, the fixture carries:
 ///
 /// (a) `pkg.b.Target` — a TARGET-package declaration, declared in the
 ///     re-emitted package and referenced from the re-emitted `pkg.b.B` — so
 ///     the complete project-class index must cover the TARGET declarations
-///     too, not the unchanged-package surface alone (task-15/-35);
+///     too, not the unchanged-package surface alone;
 /// (b) `pkg.a.Broken` — a source javac cannot compile (it names the absent
 ///     package `missing`), dropped by `compileAndCollect`'s single-file
 ///     catch; its declarations must still contribute to the surface/class
 ///     dir, and (with the batch unable to emit bytecode) the class dir it
 ///     leaves behind is incomplete — the degraded-context shape the
 ///     frontend-level fixture (`CallGraphBuilderTest
-///     .writeIncompleteContextFixture`) demonstrates as pre-fix FAIL /
-///     post-fix PASS; and
+///     .writeIncompleteContextFixture`) demonstrates as FAIL under an
+///     incomplete context and PASS with the corrected one; and
 /// (c) the NON-TARGET `pkg.a` (and `pkg.c`) packages the target package
 ///     references, in the nested-root layout, so the missing non-target
 ///     resolution context actually bites.
@@ -1032,10 +1029,10 @@ fn java_edge_exactness_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// The task-25 fixture: a small target package (`pkg.target`) with several
-/// UNCHANGED packages around it, so a first targeted scan that still has to
-/// rebuild the class cache compiles a large fraction of the fixture (the
-/// pre-fix `compiling N unchanged-package file(s)` failure).
+/// The first-targeted-scan fixture: a small target package (`pkg.target`)
+/// with several UNCHANGED packages around it, so a first targeted scan that
+/// still has to rebuild the class cache compiles a large fraction of the
+/// fixture (the `compiling N unchanged-package file(s)` failure it catches).
 fn java_seeding_fixture() -> Vec<(&'static str, &'static str)> {
     vec![
         (
@@ -1078,8 +1075,8 @@ fn java_seeding_fixture() -> Vec<(&'static str, &'static str)> {
 // -----------------------------------------------------------------------
 
 /// The staged unified JS/TS frontend artifact the candidate runs
-/// (`<profile>/frontends/tsfrontend/scanner.mjs` — the BUILT output staged
-/// by task-3). Fails loudly naming the build when absent.
+/// (`<profile>/frontends/tsfrontend/scanner.mjs` — the BUILT output).
+/// Fails loudly naming the build when absent.
 fn ts_frontend_artifact() -> PathBuf {
     let apg = apg::testutil::apg_bin();
     let p = apg
@@ -1253,8 +1250,8 @@ fn db_file_ending(records: &[serde_json::Value], suffix: &str) -> Option<String>
         .find(|f| f.ends_with(suffix) || f.ends_with(bare))
 }
 
-/// Phase-06 task-12 fixture: a JS-only package with all four accepted JS
-/// extensions plus a `node_modules` dependency tree that must be skipped.
+/// A JS-only fixture package: all four accepted JS extensions plus a
+/// `node_modules` dependency tree that must be skipped.
 fn js_only_fixture() -> Vec<(&'static str, &'static str)> {
     vec![
         (
@@ -1280,7 +1277,7 @@ fn js_only_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Phase-06 task-13 fixture: a mixed JS/TS package scanned ONCE under `ts`.
+/// A mixed JS/TS fixture package scanned ONCE under `ts`.
 /// Direction A: a `.js` file imports a `.ts` definition. Direction B: a
 /// `.ts` file imports a `.js` definition. Plus `package.json`
 /// `main`/`exports` self-name resolution, a JS workspace package resolved by
@@ -1327,8 +1324,8 @@ fn mixed_js_ts_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Phase-06 task-14 fixture: dynamic `require(expr)` and computed access
-/// only — the never-fabricate rule for untyped JavaScript.
+/// A dynamic-JS fixture: `require(expr)` and computed access only — the
+/// never-fabricate rule for untyped JavaScript.
 fn dynamic_js_fixture() -> Vec<(&'static str, &'static str)> {
     vec![(
         "dynamic.js",
@@ -1336,8 +1333,8 @@ fn dynamic_js_fixture() -> Vec<(&'static str, &'static str)> {
     )]
 }
 
-/// Phase-06 task-15 fixture: a COPY of the whole ported `src/tslib` source
-/// set — `scanner.ts` and its `.mjs` sidecars plus its `package.json`
+/// A self-scan fixture: a COPY of the whole ported `src/tslib` source set —
+/// `scanner.ts` and its `.mjs` sidecars plus its `package.json`
 /// (`name: apg-tsfrontend`), skipping `node_modules` and every non-source
 /// file — as the scan target. Reading the real repo source is why this is
 /// e2e.
@@ -1483,9 +1480,9 @@ fn py_incremental_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBu
     (base, repo_dir)
 }
 
-/// P9 roots a module/symbol FQN under a `<lang>.` segment; strip a leading
-/// Python root (`py.`/`python.`) so a module IDENTITY assertion holds both
-/// pre-rooting (bare `pkg`) and post-rooting (`py.pkg`). Only the Python
+/// Module and symbol FQNs are rooted under a `<lang>.` segment; strip a
+/// leading Python root (`py.`/`python.`) so a module IDENTITY assertion
+/// holds on the bare `pkg` and the rooted `py.pkg` alike. Only the Python
 /// fixtures (modules `pkg`/`pkg.sub`/`foo`/`bar`) are passed through it, so
 /// a real module named after a language token is never rewritten.
 fn strip_lang_prefix(fqn: &str) -> String {
@@ -1514,7 +1511,7 @@ fn write_py_config(repo_dir: &Path) {
         .unwrap();
 }
 
-/// Phase-08 task-17 fixture: a Python repo carrying the pinned acceptance
+/// A Python acceptance fixture: a repo carrying the pinned acceptance
 /// shapes — a package + sub-package, distinct-stem flat modules, a `.pyi`
 /// stub, a `*_test.py`, a `third_party/` file, a `site-packages/` tree
 /// (must yield NO code node) and a `.pyx` (never scanned).
@@ -1539,7 +1536,7 @@ fn py_acceptance_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Phase-08 task-18 fixture: cross-file calls/uses, a project-class
+/// A Python resolution fixture: cross-file calls/uses, a project-class
 /// constructor call, a stdlib reference (`os.getcwd`), a hand-built `.venv`
 /// dependency (markers + stub site-packages, no interpreter) and in-root
 /// dynamic/unbound references (a call through a module-level callable alias
@@ -1590,7 +1587,7 @@ fn py_resolution_fixture() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Phase-08 task-19 fixture: `pkg.a` calls `pkg.b.helper` — the unchanged,
+/// An incremental fixture: `pkg.a` calls `pkg.b.helper` — the unchanged,
 /// un-emitted target of the targeted re-scan scenario.
 fn py_incremental_fixture() -> Vec<(&'static str, &'static str)> {
     vec![
@@ -1605,7 +1602,7 @@ fn py_incremental_fixture() -> Vec<(&'static str, &'static str)> {
 
 /// True when the database carries a resolve-only edge `from --kind--> to`,
 /// ROOTING-AGNOSTICALLY (a leading `py.`/`python.` root is normalised away
-/// on both endpoints, so the assertion holds pre- and post-P9).
+/// on both endpoints, so the assertion holds with or without the root).
 fn has_edge_between(records: &[serde_json::Value], kind: &str, from: &str, to: &str) -> bool {
     records.iter().any(|r| {
         r.get("type").and_then(|t| t.as_str()) == Some(kind)
@@ -1626,14 +1623,12 @@ fn has_edge_between(records: &[serde_json::Value], kind: &str, from: &str, to: &
 mod e2e {
     use super::*;
 
-    /// Phase-09 task-41 (COORDINATOR RE-SCOPE: the scratch-repo / in-place
-    /// drift oracle is dropped). An in-process test asserts the
-    /// implemented-by migration invariant through the ACTUAL rooting code:
-    /// every bare migration source FQN the phase re-points renders as its
-    /// rooted destination, so no authored `implemented-by` target can remain
-    /// un-rooted. `ingest` spools to a temp file, so this is e2e by the tier
-    /// law and is `#[ignore]`d. It reads NO `apg/layers` node files and no
-    /// `db.lbug`.
+    /// The implemented-by migration invariant through the ACTUAL rooting
+    /// code: every bare migration source FQN the migration re-points renders
+    /// as its rooted destination, so no authored `implemented-by` target can
+    /// remain un-rooted. `ingest` spools to a temp file, so this is e2e by
+    /// the tier law and is `#[ignore]`d. It reads NO `apg/layers` node files
+    /// and no `db.lbug`.
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn rooting_renders_every_implemented_by_migration_target() {
@@ -1767,7 +1762,7 @@ mod e2e {
         }
     }
 
-    /// Phase-06 task-11: `auto_detect_languages` — a JS-only tree detects
+    /// `auto_detect_languages` — a JS-only tree detects
     /// `js`; a tree with `.ts` plus incidental `.js` detects `ts` ONCE (js
     /// suppressed, never js+ts as two frontends); a `node_modules`-only
     /// JavaScript tree never triggers `js` (the walk skips dependency dirs).
@@ -1873,8 +1868,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-05 task-10: the oracle for the schema-template routing. The
-    /// process template (`testutil::schema_template_db`) that every
+    /// The oracle for the schema-template routing. The process template
+    /// (`testutil::schema_template_db`) that every
     /// `touch_db`/`schema_db_at` fixture copies must carry exactly the schema a
     /// **freshly** `load::create_schema`d file-backed database does — the real
     /// init path — and so must a `touch_db` fixture built from it. Every table,
@@ -1949,13 +1944,13 @@ mod e2e {
         }
     }
 
-    /// Phase-05 task-4 (E2E): on the MAIN checkout `apg query` — plain CSV and
-    /// `--json` — serves the transient Plan/PlanPhase/Task/Feedback projections
-    /// the `apg_plan` / `apg_plan_phases` / `apg_plan_tasks` readers run (plus
-    /// the Satisfies/Reviews/Gates joins those readers use), so main's own
-    /// branch-local `.trans` store is readable, not refused. The task is the
-    /// edge model: a title+status record whose assignment and operation are
-    /// edges joining a real Agent and Struct node, never the retired
+    /// On the MAIN checkout `apg query` — plain CSV and `--json` — serves the
+    /// transient Plan/PlanPhase/Task/Feedback projections the `apg_plan` /
+    /// `apg_plan_phases` / `apg_plan_tasks` readers run (plus the
+    /// Satisfies/Reviews/Gates joins those readers use), so main's own
+    /// branch-local `.trans` store is readable, not refused. The contract is
+    /// the edge model: a title+status record whose assignment and operation
+    /// are edges joining a real Agent and Struct node, never the retired
     /// kind/tier/verb/target properties.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/spawned apg/db.lbug); run via cargo test-e2e"]
@@ -2427,12 +2422,12 @@ mod e2e {
     }
 
     /// The init success line reports each population's count against its OWN
-    /// total. The pre-fix `install_suite` folded the 40 suite files and the 7
-    /// agents into one counter, so a fresh `apg init` printed
-    /// `installed/updated 47 of 40 suite files + 7 agents`. A fresh install
-    /// writes every file, so each count equals its own population's total; a
-    /// re-run against the same isolated HOME writes nothing and reports both
-    /// populations already up to date.
+    /// total: the suite files and the agents are counted separately, never
+    /// folded into one counter, so a fresh `apg init` never prints a folded
+    /// `installed/updated 47 of 40 suite files + 7 agents` line. A fresh
+    /// install writes every file, so each count equals its own population's
+    /// total; a re-run against the same isolated HOME writes nothing and
+    /// reports both populations already up to date.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
     fn init_report_line_counts_suite_files_and_agents_separately() {
@@ -2865,9 +2860,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// The one NEW non-regression assertion for init's duplicate-install
-    /// warning with the guard in place: a project `.opencode/` file shadowing
-    /// an installed suite file is named on its own indented stderr line beside
+    /// The duplicate-install warning assertion: a project `.opencode/` file
+    /// shadowing an installed suite file is named on its own indented stderr
+    /// line beside
     /// the installed suite dir, and init still exits 0 and deletes nothing.
     ///
     /// Deliberately NOT re-asserted here — the retained harnesses own those
@@ -2938,9 +2933,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// The read-guard prose holds for exactly the six prompts this change
-    /// touches: the four distributed agents rewritten by read-guard-prose
-    /// (spec-review/spec-writer/plan-writer/plan-review), the newly distributed
+    /// The read-guard prose holds for exactly the six prompts:
+    /// the four distributed agents (spec-review/spec-writer/plan-writer/
+    /// plan-review), the distributed
     /// implementation-phase-reviewer.md, and agent-builder.md, whose
     /// common-shape and step-6 verify text make every generated agent inherit
     /// the rule. `codebase-navigator.md` is deliberately excluded (see below).
@@ -3009,7 +3004,7 @@ mod e2e {
     /// discovery and enumeration included — the first tool call is a graph
     /// query, and `read`/`grep`/`glob` confirm and anchor a graph result or
     /// read artifacts the graph does not model; they never discover a graph
-    /// fact. The navigator's rule names both artifact classes; 0.17.0 SHRINKS
+    /// fact. The navigator's rule names both artifact classes and shrinks
     /// the not-in-graph class to "no symbols, not no node" — Ruby sources
     /// (`apg-ruby` is pending) and binaries have no frontend, so they appear
     /// only as residual `misc` `File` nodes with no Module/Struct/Function
@@ -3137,8 +3132,8 @@ mod e2e {
     /// The navigator's permission grants and dispatch/isolation protocol are
     /// embedded in the shipped prose: the navigator holds the
     /// `apg_review_action` grant and the user-gated `ask`-effect `apg_scan`
-    /// grant (no agent grants `apg_scan` `allow`, and the removed in-prompt
-    /// scan-consent ritual must stay absent while the stale-graph refresh
+    /// grant (no agent grants `apg_scan` `allow`, and the in-prompt
+    /// scan-consent ritual stays absent while the stale-graph refresh
     /// intent remains), and carries the dispatch protocol (dispatch one open
     /// item to its owning writer → receive the single ACTIONED/WONT-FIX claim
     /// → shallow claim-vs-change check → action or re-dispatch); the two
@@ -3353,7 +3348,7 @@ mod e2e {
         );
     }
 
-    /// Phase-02 task-4: the shipped `researcher.md` template is a hidden
+    /// The shipped `researcher.md` template is a hidden
     /// read-only subagent whose COMPLETE `permissions:` array is pinned
     /// rule-for-rule (full-array equality, so an unlisted or reordered grant
     /// fails), whose skeleton is one H1 opening the body plus exactly the five
@@ -3364,8 +3359,8 @@ mod e2e {
     /// never whole-array equality — carrying the researcher's two scratch
     /// markdown allows spelled identically.
     ///
-    /// Both templates are read from disk through `env!("CARGO_MANIFEST_DIR")`:
-    /// the `AGENTS` embed of `researcher.md` lands only in phase 3.
+    /// Both templates are read from disk through `env!("CARGO_MANIFEST_DIR")`
+    /// rather than from the embedded `AGENTS` constant.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn researcher_agent_pins_its_grants_skeleton_and_result_file_prose() {
@@ -3715,7 +3710,7 @@ mod e2e {
 
     /// The coordinator-mediated cycle's writer side is read-only: the embedded
     /// spec-writer and plan-writer prompts hold the read-only `apg_review`
-    /// channel and no longer carry the `apg_review_action` literal anywhere
+    /// channel and do not carry the `apg_review_action` literal anywhere
     /// (they read the transient store and return an ACTIONED/WONT-FIX claim;
     /// the coordinator actions the item), and the agent-builder template
     /// re-points the implementer and every test-implementer it scaffolds to
@@ -3780,7 +3775,7 @@ mod e2e {
         }
     }
 
-    /// Phase-02 tasks 4/5 (e2e): the embedded `spec-writer.md` and
+    /// The embedded `spec-writer.md` and
     /// `spec-review.md` prompts state the note-confinement model — a note
     /// attaches only to implementation-layer code and its `details` edge names
     /// exactly one code FQN — naming both laws
@@ -3815,7 +3810,7 @@ mod e2e {
         }
     }
 
-    /// Phase-03 tasks 2/3 (e2e): the embedded `spec-writer.md` and
+    /// The embedded `spec-writer.md` and
     /// `spec-review.md` prompts state the structure-over-prose body budget — a
     /// tier-1–3 authored body is one present-tense sentence of at most 244
     /// characters, with the detail living in the structure (nodes and edges)
@@ -3851,8 +3846,8 @@ mod e2e {
         }
     }
 
-    /// Phase-04 (e2e): the embedded agent-prompt templates state the change-set's
-    /// three disciplines — the `agent-builder.md` implementer Ponytail discipline
+    /// The embedded agent-prompt templates state three disciplines — the
+    /// `agent-builder.md` implementer Ponytail discipline
     /// (fixed level `ultra`, and the `NOTE:`-line shortcut exception in place of
     /// an inline `shortcut:` comment), the `implementation-phase-reviewer.md`
     /// senior-review discipline (`What this change does:` summary + the
@@ -3913,7 +3908,7 @@ mod e2e {
         }
     }
 
-    /// Phase-03 (e2e): every distributed agent template states the suite's
+    /// Every distributed agent template states the suite's
     /// project binding — a required registered project name, no `directory` or
     /// other path selector, and the `apg project claim` verb for an ownerless
     /// project. The nine template names are asserted present in the embedded
@@ -3999,7 +3994,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    /// The upgrade guide (task-4) must cover the version field's meaning,
+    /// The upgrade guide must cover the version field's meaning,
     /// the mismatch detection, and the upgrade steps — the R10 block text
     /// points users at it.
     #[test]
@@ -4058,8 +4053,8 @@ mod e2e {
         assert!(!readme.contains("0.11"), "README must not reference 0.11");
     }
 
-    /// Phase-03 task-3: the committed `apg/config.json` must classify the
-    /// relocated test layout as `test` while production stays `src`. Reads the
+    /// The committed `apg/config.json` must classify the test layout as
+    /// `test` while production stays `src`. Reads the
     /// repo's own committed config from disk (the release-version guards'
     /// `env!("CARGO_MANIFEST_DIR")` mechanism), so it guards the config AS
     /// COMMITTED — never a branch scan, because the apg repo's own graph is
@@ -4136,7 +4131,7 @@ mod e2e {
         }
     }
 
-    /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
+    /// The strict-mutation surface's
     /// refusal sweep, under mandatory-session. Every create arm — `node add`,
     /// `edge add`, `plan add` (the plan itself), and `plan add
     /// phase|task|planned` — refuses an existing entity (non-zero, error naming
@@ -4149,8 +4144,7 @@ mod e2e {
     /// (projected at admission, NON-durable until `apg session save`). A refused
     /// re-add changes nothing; an accepted `rm` of an existing node proceeds
     /// into the buffer, while a `rm` of a never-existing node is refused (the
-    /// strict refusal restored by phase-01 task-40), not admitted as a buffered
-    /// no-op; `save` is the
+    /// strict refusal), not admitted as a buffered no-op; `save` is the
     /// single durability point (asserted), and the session ends cleanly before
     /// the transient `plan` arms (which take the same extended flock).
     #[test]
@@ -4564,10 +4558,10 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-4 (acceptance): the `apg node` / `apg edge` command
+    /// The `apg node` / `apg edge` command
     /// surface is transparent — the SAME literal forms the CLI documents appear
     /// in `help_text`, the node/edge suite tools, and the distributed agent
-    /// prompts. Phase-04 task-10 extends the same pinning to the session
+    /// prompts. The same pinning covers the session
     /// surface: `help_text` documents start|save|end|abort, the `apg_session`
     /// suite tool is embedded, and the navigator/agent-builder/spec-writer
     /// prompts carry the caller-owned-session guidance.
@@ -4731,7 +4725,7 @@ mod e2e {
         }
     }
 
-    /// Phase-03 task-23 / phase-02 task-14 (e2e): the full read-routing contract.
+    /// The full read-routing contract.
     /// With a session live, a separate routed `apg query` process returns the
     /// post-mutation state — including an UNSAVED buffered change (read-your-
     /// writes through the session's held projection) — with no lock error and
@@ -4842,7 +4836,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-11 / phase-01 mandatory-session rewrite (e2e): metadata
+    /// Under mandatory-session, metadata
     /// mutations require NO code re-scan. A live `apg session start` process
     /// owns the DB and the single-writer lock, so the durable `node add`/`node
     /// rm` and `edge add`/`edge rm` are admitted into its write-back buffer and
@@ -5259,7 +5253,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-26 (acceptance): real-CLI read-your-writes across the
+    /// Real-CLI read-your-writes across the
     /// mandatory-session + write-back contract, without a scan. A live
     /// `apg session start` process owns the DB and the single-writer lock, so
     /// the durable mutations (`apg node add` ×2 and `apg edge add`) are admitted
@@ -5505,7 +5499,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-20 (acceptance): the hermetic external-project scratch-repo
+    /// The hermetic external-project scratch-repo
     /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
     /// `apg scan` (the genuine added dimension; every other test uses the
     /// hermetic `scan_checkout` payload fixture) — under the mandatory-session +
@@ -5930,9 +5924,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Regression guard for the `apg query` failure-vs-data bug: a failed query
-    /// came back from `runCypher` as an error *string*, the line-based
-    /// `csvToRows` parsed it as data, and the plan tools then crashed with
+    /// Guard for the `apg query` failure-vs-data boundary: a failed query must
+    /// not come back from `runCypher` as an error *string* the line-based
+    /// `csvToRows` would parse as data, which crashed the plan tools with
     /// `undefined is not an object (evaluating 'fqn.replace')`.
     ///
     /// This is a STRUCTURAL check over the embedded suite consts (`APG_LIB` /
@@ -5942,8 +5936,8 @@ mod e2e {
     /// references the exported refusal signals it actually produces or tests
     /// (so the failure signals cannot drift apart), and that the three observed
     /// crash sites route their parse through the guarded boundary and return
-    /// the verbatim message. It fails on the pre-fix suite (where `csvToRows`
-    /// split `out` directly and the guard was dead code).
+    /// the verbatim message. A suite where `csvToRows` split `out` directly,
+    /// leaving the guard dead code, fails this check.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn suite_tools_query_error_guard_is_structural() {
@@ -6104,8 +6098,8 @@ mod e2e {
         }
     }
 
-    /// Phase-01 task-10 (int, scratch /tmp repo, CANDIDATE binary only —
-    /// `global.constraint.no-real-project-test`): a second real `apg scan` of
+    /// A scratch /tmp repo driven by the CANDIDATE binary only
+    /// (`global.constraint.no-real-project-test`): a second real `apg scan` of
     /// an unchanged repo takes the freshness fast-path — the verdict is
     /// printed, ZERO frontends run, and `db.lbug` is not rebuilt; a content
     /// edit falls back to a full re-scan. The printed `staleness_line` verdict
@@ -6229,8 +6223,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// scan-force phase-01 task-5 (acceptance, scratch /tmp repo, CANDIDATE
-    /// binary only): an unchanged tree still takes the FRESH fast path on a
+    /// An acceptance on a scratch /tmp repo driven by the CANDIDATE binary:
+    /// an unchanged tree still takes the FRESH fast path on a
     /// plain re-scan, while the SAME tree scanned with `--force` prints that
     /// same pre-force verdict, logs neither the warm-cache nor the
     /// frontend-skipped line, and rebuilds `db.lbug` from scratch.
@@ -6332,7 +6326,7 @@ mod e2e {
     // (`global.constraint.no-real-project-test`).
     // -------------------------------------------------------------------
 
-    /// Phase-02 task-9 (the pinned target-set hand-off contract, feedback-85):
+    /// The pinned target-set hand-off contract:
     /// the `--targets <file>` list is newline-delimited absolute paths (blank
     /// lines ignored), and the same list is written per language from the
     /// checkout-relative target set. The channel is argv — stdin stays null.
@@ -6402,7 +6396,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// Phase-02 task-17 (int): a targeted re-scan of each change class yields a
+    /// A targeted re-scan of each change class yields a
     /// graph exactly equal to a fresh full scan of the same tree — same node
     /// set, same edge set, same unresolved targets. The full-scan oracle runs
     /// with the shared fact store cleared (no reuse, no splice). Scratch /tmp
@@ -6528,12 +6522,12 @@ mod e2e {
         }
     }
 
-    /// Regression (reused-facts full-universe seam): a reused file whose
-    /// cached facts are newer than THIS checkout's local database must still be
-    /// in the code-FQN universe `ingest_tree` validates `implemented-by`
-    /// against. Reproduces the multi-worktree lag (a shared-store record
-    /// ahead of the local database) that made a merged code change look like
-    /// `spec drift` on main's rebuild.
+    /// Guard (reused-facts full-universe seam): a reused file whose cached
+    /// facts are newer than THIS checkout's local database must still be in the
+    /// code-FQN universe `ingest_tree` validates `implemented-by` against. A
+    /// shared-store record ahead of the local database (the multi-worktree lag)
+    /// must not make a merged code change look like `spec drift` on main's
+    /// rebuild.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/fact store); run via cargo test-e2e"]
     fn acceptance_incremental_universe_includes_reused_facts_newer_than_local_export() {
@@ -6606,7 +6600,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-02 task-19 (int): cross-worktree cache sharing — the reuse half AND
+    /// Cross-worktree cache sharing — the reuse half AND
     /// the exactness half. A cold full scan of a scratch repo records the
     /// reference graph; a SECOND clean near-identical worktree started from the
     /// same repo must (a) reuse the shared `.git/apg/facts.db` store
@@ -6715,7 +6709,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// fix-module-identity task-17: a scratch /tmp repo's scans are
+    /// A scratch /tmp repo's scans are
     /// checkout-independent — `apg scan <repo>` and `apg scan <repo>/subdir`
     /// mint the SAME repo-relative File identity for a shared file, main and
     /// its worktree agree at one commit, and raw `apg query` returns the
@@ -6819,7 +6813,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// fix-module-identity phase-03 task-7 (e2e): scan hygiene. A scratch
+    /// Scan hygiene. A scratch
     /// /tmp git repo carries a Go test package (whose compile writes a
     /// generated `_testmain` into the per-worktree Go build cache under
     /// `<checkout>/apg/.trans/cache/go`), a `target/**` build tree (a `.ts`
@@ -7193,7 +7187,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// feedback-101: the delta/manifest are shared across worktrees while the
+    /// The delta/manifest are shared across worktrees while the
     /// seed is the LOCAL `db.lbug`. When another worktree scans in between, the
     /// shared scan record advances past this worktree's DB; the dispatch must
     /// refuse the seed (falling back to the full load) rather than publish a DB
@@ -7249,7 +7243,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-03 task-3 (amended): every FULL-LOAD branch of an incremental scan
+    /// Every FULL-LOAD branch of an incremental scan
     /// re-assembles the FULL graph before the load — the target-only delta graph
     /// is never handed to `build_load_files`.
     ///
@@ -7559,16 +7553,16 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&pending_base);
     }
 
-    /// Phase-04 task-11 (e2e by body: a REAL scratch-repo `apg scan` — a
-    /// process spawn plus `db.lbug` I/O): the emitted per-phase timing report
-    /// is first-class and truthful on the real paths. A cold full scan emits
+    /// A real scratch-repo `apg scan` (a process spawn plus `db.lbug` I/O):
+    /// the emitted per-phase timing report is first-class and truthful on the
+    /// real paths. A cold full scan emits
     /// BOTH lines (human `[timing]` + machine `[timing-json]`) carrying all
     /// four phases with NO skip marker; a no-op re-scan of the unchanged repo
     /// takes the freshness fast-path and its report marks the frontend phase
     /// `frontend-skipped`; a content edit forces a normal scan whose report
     /// clears the marker. The in-process model/round-trip assertions stay in
-    /// `apg.timing::tests::unit` (task-6); this test supplies the real-scan
-    /// coverage the AC requires. Candidate binary only, against a scratch
+    /// `apg.timing::tests::unit`; this test supplies the real-scan
+    /// coverage the acceptance requires. Candidate binary only, against a scratch
     /// `/tmp` git repo (`global.constraint.no-real-project-test`).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
@@ -7671,11 +7665,11 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-04 task-23 (e2e): a Java TARGETED scan is edge-exact against a
+    /// A Java TARGETED scan is edge-exact against a
     /// forced from-scratch FULL scan of the same tree. The enumerated oracle
     /// is the per-rel-type counts (`Calls`/`Uses`/`UnresolvedCall`/
     /// `UnresolvedUse`) AND the `UnresolvedTarget` set by FQN-with-categories
-    /// — the exact divergence class note-87 measured on jgrapht (the recorded
+    /// — the exact divergence class measured on jgrapht (the recorded
     /// graph missing 1 914 / extra 2 145, all resolved -> unresolved), scaled
     /// down.
     /// It additionally rejects the javac error-symbol leak: no
@@ -7685,22 +7679,23 @@ mod e2e {
     /// FIXTURE ROOT (REQUIRED — reproduces the measured root cause): the
     /// sources sit under a MAVEN-LIKE NESTED SOURCE ROOT
     /// (`proj/src/main/java/pkg/...` under the scan root), so the scan root
-    /// is NOT a valid package root and the pre-fix `-sourcepath <scan root>`
+    /// is NOT a valid package root and a `-sourcepath <scan root>`
     /// is silently INEFFECTIVE — the jgrapht Maven multi-module shape. A
     /// fixture with `pkg/a/A.java` directly under the scan root does NOT
     /// reproduce the divergence and this test deliberately does not use it.
     ///
-    /// EXTENDED (feedback-134): the fixture also carries a TARGET-package
+    /// The fixture also carries a TARGET-package
     /// class (`pkg.b.Target`, referenced from the re-emitted `pkg.b.B`) and an
     /// un-attributable source (`pkg.a.Broken`), so the class dir is
     /// incomplete and the complete project-class index — not the incomplete
     /// class dir — is what must resolve the re-emitted file's references. It
     /// asserts the POSITIVE observable as well: the re-emitted file's calls
     /// and uses into the TARGET-package class appear as their real resolved
-    /// FQNs in BOTH scans. Pre-fix (no effective `-sourcepath` context) the
+    /// FQNs in BOTH scans. With no effective `-sourcepath` context the
     /// re-emitted package's attribution degrades and this test FAILS — the
     /// resolved edges vanish and a bare project-class simple name leaks — the
-    /// same pre-fix FAIL / post-fix PASS the frontend-level fixture
+    /// same FAIL-under-an-incomplete-context / PASS-with-the-corrected-one
+    /// shape the frontend-level fixture
     /// demonstrates (`CallGraphBuilderTest.writeIncompleteContextFixture` /
     /// `testIncompleteClassDirStillResolvesTargetPackage`).
     #[test]
@@ -7845,21 +7840,21 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-04 task-25 (e2e): the first targeted scan after a cold full scan
+    /// The first targeted scan after a cold full scan
     /// does not rebuild the Java class cache. With the candidate binary on a
     /// scratch /tmp Java repo and an isolated java-only frontend dir:
     /// (a) the first incremental frontend log reports ZERO
     /// `compiling … unchanged-package file(s)` — the cold full scan seeded
     /// the class cache (the full-scan branch carries the pinned `--cache-dir`
-    /// hand-off, with no cache key), and the pre-fix rebuild of every
+    /// hand-off, with no cache key), and a rebuild of every
     /// unchanged file fails this; (b) the
     /// incremental graph still equals a full scan of the same changed tree
     /// under the enumerated per-rel-type + UnresolvedTarget oracle; (c) the
-    /// control — RE-POINTED (feedback-131) at a SEPARATE invocation that
-    /// genuinely has no cache hand-off, NEVER the (a) cold scan: once tasks
-    /// 33/34 land, that cold scan always carries the cache flag on the
-    /// full-scan branch, so requiring it to write no artifact is
-    /// unsatisfiable. Invocation: a full scan in a NON-GIT scratch layout,
+    /// control — a SEPARATE invocation that
+    /// genuinely has no cache hand-off, NEVER the (a) cold scan: the cold scan
+    /// always carries the cache flag on the full-scan branch, so requiring it
+    /// to write no artifact is unsatisfiable. Invocation: a full scan in a
+    /// NON-GIT scratch layout,
     /// where `FactStore::resolve` fails and `incremental::prepare` returns an
     /// empty `store_root` with `FullScanReason::NotAGitRepo`, so
     /// `handoff.cache_dir` stays `None` (there is no cache key). It asserts
@@ -7869,7 +7864,7 @@ mod e2e {
     /// the (a) store, so a fabricated/defaulted cache path is caught — and
     /// (iii) the full scan itself SUCCEEDED (a real invocation, not a no-op).
     ///
-    /// (a) and (b) are asserted exactly as filed and are never weakened.
+    /// (a) and (b) are asserted exactly and are never weakened.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn java_first_targeted_scan_after_a_seeded_full_scan_compiles_no_unchanged_package() {
@@ -8056,7 +8051,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-04 task-3 (e2e): the candidate `apg` scan of a scratch /tmp
+    /// The candidate `apg` scan of a scratch /tmp
     /// DEFAULT-PACKAGE Java repo — no `package` declaration anywhere — must
     /// materialise a `java` Language root that Contains the non-empty
     /// `(default)` module, hang the package-less File under that module,
@@ -8214,7 +8209,7 @@ mod e2e {
     // `#[ignore]`-and-invoke (global.constraint.test-tier-boundaries).
     // -------------------------------------------------------------------
 
-    /// Phase-05 task-5 (e2e): fixture discovery acceptance — (a) a nested
+    /// Fixture discovery acceptance — (a) a nested
     /// non-workspace crate yields BOTH its Module node and its symbols;
     /// (b) a `[workspace]` yields each project exactly once; (c) a nested
     /// Cargo project under `.worktrees/` is NOT discovered; (d) a generated
@@ -8448,7 +8443,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-05 task-6 (e2e): nested-FQN acceptance on a scratch /tmp fixture
+    /// Nested-FQN acceptance on a scratch /tmp fixture
     /// reproducing the src/rustlib condition — ROOT package `apg` + NESTED
     /// non-workspace crate `apg-rustfrontend` (own manifest + lock, two
     /// differing package names). Candidate binary only; no real checkout.
@@ -8562,7 +8557,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-05 task-9 (e2e): Rust build-isolation acceptance, in-process
+    /// Rust build-isolation acceptance, in-process
     /// over the real repo — the same pattern as
     /// `cargo_manifest_and_lockfile_declare_release_version`. Reads the real
     /// `Cargo.toml`/`Cargo.lock`/`build.rs` and the real build artifacts
@@ -8675,7 +8670,7 @@ mod e2e {
         );
     }
 
-    /// Phase-06 task-12 (e2e): a JS-only scratch repo exercising ALL FOUR
+    /// A JS-only scratch repo exercising ALL FOUR
     /// accepted JS extensions (`.js`/`.jsx`/`.mjs`/`.cjs`) through the real
     /// candidate binary + the built unified frontend. Each extension is
     /// ACCEPTED and yields a File node, the module, its declared symbols, and
@@ -8748,7 +8743,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-06 task-13 (e2e): a mixed JS/TS scratch repo scanned ONCE under
+    /// A mixed JS/TS scratch repo scanned ONCE under
     /// the unified frontend (`ts` id). BOTH resolution directions resolve to
     /// the real declared project symbol (never Unresolved): a `.js` import of
     /// a `.ts` definition and a `.ts` import of a `.js` definition. Also
@@ -8876,7 +8871,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-06 task-14 (e2e): a scratch repo whose JavaScript uses dynamic
+    /// A scratch repo whose JavaScript uses dynamic
     /// `require(expr)` and computed member access. The never-fabricate rule
     /// holds: only `unresolved_call`/`unresolved_use` edges leave the
     /// fixture's functions, each unresolved target carries a category, and
@@ -8920,7 +8915,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-06 task-15 (e2e): the self-scan acceptance — the candidate's
+    /// The self-scan acceptance — the candidate's
     /// BUILT/STAGED unified frontend scans a scratch COPY of the whole ported
     /// `src/tslib` source set (`scanner.ts`, its `.mjs` sidecars and its
     /// `package.json`). The graph is not just an empty module node: the
@@ -8973,9 +8968,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-07 task-13 (e2e, scratch /tmp repo, CANDIDATE binary only —
+    /// The Markdown acceptance (scratch /tmp repo, CANDIDATE binary only —
     /// `global.constraint.no-real-project-test`): the Markdown frontend's
-    /// pinned AC through ONE REAL mixed Go+Markdown scan. Asserts one Module
+    /// pinned acceptance through ONE REAL mixed Go+Markdown scan. Asserts one Module
     /// per directory (FQN = `md.<repo-relative directory path>`), repo-relative
     /// path File nodes with the extension retained, nested section Structs
     /// with contains edges, injective duplicate-heading dedup, same-stem /
@@ -9341,11 +9336,11 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-08 task-17 (e2e, scratch /tmp repo, CANDIDATE binary only —
+    /// The Python acceptance (scratch /tmp repo, CANDIDATE binary only —
     /// `global.constraint.no-real-project-test`): the Python acceptance
     /// fixture suite through ONE real scan. Module IDENTITY is asserted
     /// ROOTING-AGNOSTICALLY (a leading `py.`/`python.` root is normalised
-    /// away, so the same assertions hold pre- and post-P9). `.py` and `.pyi`
+    /// away, so the same assertions hold with or without the root). `.py` and `.pyi`
     /// each yield a File node parented to their module; a `.pyx` and every
     /// `site-packages` file yield NO code node; `*_test.py` is `test` and a
     /// `third_party/` file is `external` (asserted on both the real scan's
@@ -9510,7 +9505,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-08 task-18 (e2e): py resolution + unresolved classification
+    /// Python resolution + unresolved classification
     /// through one real scan. A cross-file call is a `Calls` edge; a
     /// cross-file base class and a project-class constructor call are `Uses`
     /// to the base/class Struct; a stdlib reference is `stdlib` (never
@@ -9592,7 +9587,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-08 task-19 (e2e): the incremental contract (the environment
+    /// The Python incremental contract (the environment
     /// model is the sibling
     /// `acceptance_python_environment_model_and_external_resolution`). Each
     /// scenario runs on its OWN fresh scratch repo so the delta contains
@@ -9710,8 +9705,8 @@ mod e2e {
         }
     }
 
-    /// Phase-08 task-19 (e2e, FIXTURE MODEL feedback-83): the Python
-    /// environment model is HAND-BUILT inside a scratch dir — a `.venv`
+    /// The Python environment model is HAND-BUILT inside a scratch dir — a
+    /// `.venv`
     /// site-packages stub tree plus `pyproject.toml`/`uv.lock`/`pyvenv.cfg`
     /// markers — and every frontend run has an EMPTY `PATH`, so ty resolves
     /// it WITHOUT shelling out to `python`/`uv` and no interpreter is
@@ -9815,7 +9810,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-08 task-20 (e2e): py language plumbing detection.
+    /// Python language plumbing detection.
     /// `auto_detect_languages` selects `py` only for real `.py`/`.pyi`
     /// sources: a `.pyx`-only tree and a tree whose only Python lives under
     /// `site-packages`/`.venv`/`venv` never trigger it; and
@@ -9929,7 +9924,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-02 task-18 (e2e): the agent language registration's
+    /// The agent language registration's
     /// directory-bound facets. `available_languages` reports `agent` only when
     /// an `agentfrontend` artifact is installed (driven through the real CLI
     /// with an isolated `APG_FRONTEND_DIR`), an empty isolated frontends dir
@@ -10079,7 +10074,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// csharp-projects phase-02 task-7 (e2e): `auto_detect_languages` detects
+    /// `auto_detect_languages` detects
     /// `csharp` in a tree whose only C# file is a `.csx`, a `.cshtml` or a
     /// `.razor` (detection walks the filesystem; `available` is passed in, so
     /// no staged csharpfrontend is needed).
@@ -10102,7 +10097,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// powershell-frontend phase-07 task-7 (e2e): `auto_detect_languages`
+    /// `auto_detect_languages`
     /// detects `ps` from `.ps1`/`.psm1`/`.psd1` in any letter case and at
     /// depth, never from a bare `.ps` or a pruned `target/`, and only when
     /// `ps` is available (`available` is passed in, so no staged psfrontend).
@@ -10144,7 +10139,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// schema-alignment phase-03 task-12 (e2e, scratch /tmp repo, CANDIDATE
+    /// An agent-definition scan (scratch /tmp repo, CANDIDATE
     /// binary only — `global.constraint.no-real-project-test`): a REAL scan of
     /// a checkout carrying agent definitions yields one tier-4 Agent node per
     /// definition file — `agent.<file-stem>`, located at the definition's
@@ -10305,9 +10300,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-01 task-9 (e2e, scratch /tmp repo, real `apg init` + real
-    /// `apg scan`, CANDIDATE binary only — `global.constraint.no-real-project-test`):
-    /// a **zero-target** incremental scan keeps the Agent roster and the
+    /// A zero-target incremental scan on a scratch /tmp repo (real `apg init`
+    /// + real `apg scan`, CANDIDATE binary only —
+    /// `global.constraint.no-real-project-test`) keeps the Agent roster and the
     /// Task→Agent `AssignedTo` rows without double-emitting the roster. An
     /// empty commit moves HEAD with the tree untouched, so the recorded scan is
     /// an ancestor of HEAD with an empty delta: every frontend runs UNFILTERED
@@ -10443,7 +10438,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-08 task-17/20 (e2e): a mixed Go + Python repo scans BOTH
+    /// A mixed Go + Python repo scans BOTH
     /// frontends into ONE graph — py auto-detects alongside go, both
     /// frontends run, the merged graph carries a py symbol and its resolved
     /// call edge with zero `shadowed_modules`, and the py frontend honours
@@ -10523,7 +10518,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-03 task-6: the scan-time toolchain preflight on the spawn path.
+    /// The scan-time toolchain preflight on the spawn path.
     /// A scratch `/tmp` git repo with an isolated frontends dir carrying a
     /// stub `gofrontend` (so `go` is selectable) and a stripped `PATH` (so
     /// the `go` tool is absent) must fail `apg scan` with the named,
@@ -10600,7 +10595,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// apg-0.17.0 phase-03 task-10 (e2e, scratch /tmp repo, CANDIDATE binary
+    /// A structural-scan acceptance (scratch /tmp repo, CANDIDATE binary
     /// only — `global.constraint.no-real-project-test`): a REAL scan with the
     /// bundled structural scanner emits a File node for every tracked file it
     /// claims, while the code frontend keeps its own file.
@@ -10744,8 +10739,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// apg-0.17.0 phase-03 task-11 (e2e, scratch /tmp repo, CANDIDATE binary
-    /// only): a REAL scan with a root Markdown file renders the repo-root
+    /// A structural Markdown-root acceptance (scratch /tmp repo, CANDIDATE
+    /// binary only): a REAL scan with a root Markdown file renders the repo-root
     /// module repo-relative as `md.` (never the checkout basename), keeps
     /// the non-root `md.*` module and the heading Structs unchanged, and
     /// `md.` Contains the repo-root File. Drives the profile's staged
@@ -10845,14 +10840,14 @@ mod e2e {
     // committed default lib+bin fixture would panic the repo's own scan).
     // -------------------------------------------------------------------
 
-    /// libbin-fix (e2e): a scratch DEFAULT lib + bin Cargo package —
+    /// A scratch DEFAULT lib + bin Cargo package —
     /// `[package] name = "foo"` with an auto-discovered `src/lib.rs` (lib)
     /// and `src/main.rs` (bin), both rendering the same display name — must
     /// ingest without the duplicate-FQN panic, and its two crate roots must
     /// render DISTINCT module FQNs, each enumerable under its own prefix
     /// (the lib marker under one root, the bin marker under the other).
     ///
-    /// The post-fix disambiguating suffix is deliberately NOT pinned: the
+    /// The disambiguating suffix is deliberately NOT pinned: the
     /// frontend owns that spelling. Only the PRESERVATION of already-scanned
     /// FQNs is a contract — pinned by
     /// [`rust_multitarget_crate_fqns_are_stable`].
@@ -10924,7 +10919,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
     }
 
-    /// libbin-fix (e2e) regression: a DISTINCT-name multi-target Cargo
+    /// A DISTINCT-name multi-target Cargo
     /// package — `[package] name = "foo"`, `[lib] name = "foo"`,
     /// `[[bin]] name = "foo-cli"` — must keep EXACTLY its current crate-root
     /// module FQNs. The collision-only disambiguation must not leak into a
@@ -11003,8 +10998,8 @@ mod e2e {
     // never on a process-spawn race.
     // -------------------------------------------------------------------
 
-    /// Phase-09 task-1 (e2e, scratch /tmp repo, real `apg init` + real
-    /// `apg scan`): a successful scan of a checkout leaves that checkout's
+    /// A real `apg init` + real `apg scan` on a scratch /tmp repo: a
+    /// successful scan of a checkout leaves that checkout's
     /// graph fresh. Four arms in one test:
     ///
     /// - **A (sequential).** Every iteration commits a real source change in
@@ -11014,20 +11009,20 @@ mod e2e {
     ///   non-fast-path, the immediate `apg plan verify` never reports the stale
     ///   refusal and verifies green, and a second immediate verify with no scan
     ///   between agrees.
-    /// - **B (session teardown — the post-fix integration guard, not a
+    /// - **B (session teardown — the integration guard, not a
     ///   reproducer).** Ten times: a detached `apg session start`, one durable
     ///   `apg node add` admitted through it, `apg session save`, `apg session
     ///   end`, then IMMEDIATELY a real `apg scan` (exit 0 asserted) and
     ///   IMMEDIATELY `apg plan verify`, plus a second verify with no scan
     ///   between that agrees. With the bounded socket-gone wait in place, that
-    ///   teardown leaves the checkout fresh. GREEN BEFORE that fix is the
-    ///   EXPECTED outcome here — the raced window is microseconds wide and this
-    ///   arm's next readers are spawned long afterwards — so it is recorded as
-    ///   the expected pre-fix result, never a diagnosis finding and never a
+    ///   teardown leaves the checkout fresh. A green run is the EXPECTED outcome
+    ///   here — the raced window is microseconds wide and this arm's next
+    ///   readers are spawned long afterwards — so it is an integration guard,
+    ///   never a diagnosis finding and never a
     ///   reason to weaken the arm. The deterministic evidence for the teardown
     ///   mechanism is `git_e2e::dead_session_socket_makes_the_graph_unfresh`.
-    /// - **C1 (task 6 — the extended lock precedes the staleness check;
-    ///   deterministic inverse hold).** A committed-but-unscanned source change
+    /// - **C1 (the extended lock precedes the staleness check; deterministic
+    ///   inverse hold).** A committed-but-unscanned source change
     ///   leaves the branch graph genuinely stale; the TEST acquires the
     ///   extended `apg/.trans/specs.lock` via
     ///   `apg::artifacts::acquire_spec_lock` and holds it while spawning
@@ -11035,19 +11030,19 @@ mod e2e {
     ///   per-process-reentrant flock blocks it cross-process: by a bounded
     ///   deadline it has NOT exited, then the test drops the guard and the child
     ///   still exits non-zero carrying the stale refusal — the fail-closed
-    ///   predicate refuses after the wait, nothing weakened. Before task 6 the
-    ///   child refused immediately while the test held the lock, so this arm is
-    ///   red.
-    /// - **C2 (task 5 — the scan holds the lock across its whole rebuild;
-    ///   deterministic inverse hold).** The TEST acquires the same lock and
+    ///   predicate refuses after the wait, nothing weakened. A check that ran
+    ///   before acquiring the lock would refuse immediately while the test
+    ///   holds it, so this arm guards the ordering.
+    /// - **C2 (the scan holds the lock across its whole rebuild; deterministic
+    ///   inverse hold).** The TEST acquires the same lock and
     ///   holds it across a real non-fast-path `apg scan .` (pinned by the same
     ///   `fast-path` stderr assertion): by the same bounded deadline the scan has
     ///   NOT exited and `apg::git::is_stale` still reports the graph stale —
     ///   nothing was published under the hold, and `is_stale` is false on a
     ///   missing DB, so a rebuild that unlinked it fails this conjunct too.
     ///   Dropping the guard lets the scan exit 0 with its normal output and the
-    ///   graph then reads fresh. Before task 5 the scan completed and/or
-    ///   published while the test held the lock, so this arm is red.
+    ///   graph then reads fresh. A scan that completed and/or published while
+    ///   the test held the lock fails this arm.
     ///
     /// No spawn race: a verify spawned a few milliseconds after a scan can win
     /// the flock before the scan's preflight and legitimately refuse stale on
@@ -11364,8 +11359,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-09 task-3 (e2e, scratch /tmp repo, real `apg init` + real
-    /// `apg scan`): after a real scan, an immediate NON-SESSION bookkeeping
+    /// A real `apg init` + real `apg scan` on a scratch /tmp repo: after a
+    /// real scan, an immediate NON-SESSION bookkeeping
     /// mutation proceeds instead of refusing stale, a second non-session
     /// mutation agrees, and `apg review list` then shows the attached feedback.
     ///
@@ -11525,7 +11520,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-01 task-1 (e2e): the full-scan realization matrix for a ROOT
+    /// The full-scan realization matrix for a ROOT
     /// crate. A planned `Module`, `File`, `Struct` and `Function` each declared
     /// at its root-crate FQN must be REALIZED by the next full load — the
     /// placeholder replaced by the scanned declaration: `status` cleared, the
@@ -11546,7 +11541,7 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend/db.lbug); run via cargo test-e2e"]
     fn planned_node_of_every_kind_realizes_on_a_full_scan() {
         /// Asserts one kind's outcome and appends its observed row to the
-        /// evidence matrix, so a red run names every kind's pre-fix state.
+        /// evidence matrix, so a red run names every kind's realized state.
         fn check(
             recs: &[serde_json::Value],
             kind: &str,
@@ -11743,7 +11738,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-02 task-3 / phase-06 task-1 (e2e): a planned `Module`, `File`,
+    /// A planned `Module`, `File`,
     /// `Struct` and `Function` authored at a SEPARATE, non-root cargo
     /// package's identities realize exactly like a root-crate planned
     /// `Function` — status cleared, location filled (except the location-less
@@ -12171,7 +12166,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-07 task-3 (e2e): the CLI regression shape for the cached-fact
+    /// The CLI regression shape for the cached-fact
     /// assembly. A planned `Function` authored at its rooted FQN realizes on
     /// the scan that lands its code; a later UNRELATED commit (a different
     /// source file) leaves `src/lib.rs` byte-identical, so the follow-on scan
@@ -12479,7 +12474,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-04 task-11: the discard-and-rebuild oracle for BOTH recovery
+    /// The discard-and-rebuild oracle for BOTH recovery
     /// surfaces, over BOTH unclean-exit causes a live-session-free database can
     /// carry — PENDING STATE (an admitted-but-unsaved durable row and a
     /// pending-removal ledger identity) and an UNRECOGNISED TABLE SHAPE (a node
@@ -12771,9 +12766,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-07 task-1 — the netbeans-scale acceptance. The whole delta-splice
-    /// win is only worth its complexity if, on a repository of the scale the
-    /// win was designed for, ONE edited file rescans in bounded time while
+    /// The netbeans-scale acceptance. The whole delta-splice design is only
+    /// worth its complexity if, on a repository of the scale it was designed
+    /// for, ONE edited file rescans in bounded time while
     /// still publishing a database indistinguishable from a full rebuild and
     /// still refusing to splice a spec-only delta.
     ///
@@ -13119,7 +13114,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// phase-04 task-14: the cached (previous-scan) database carries the
+    /// The cached (previous-scan) database carries the
     /// caller's edge to a function the current tree RENAMED AWAY. The rescan
     /// must CLOSE the graph over the live FQNs: the vanished-target edge is
     /// dropped, no `UnresolvedTarget` is fabricated for the vanished FQN, a
