@@ -2,7 +2,6 @@ use super::*;
 use crate::layers::NodeProperties;
 use crate::testutil::{nf, task_recs};
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 /// These operate on in-memory `Record`/`NodeFile` values (validation,
 /// rendering, edge linking, coverage semantics).
 mod unit {

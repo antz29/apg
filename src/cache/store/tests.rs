@@ -1,13 +1,12 @@
-//! Unit-tier tests for the fact store's in-memory surface — pure in-memory, no
-//! database, filesystem, git or process.
+//! Unit-tier tests for the fact store's in-memory surface.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::*;
 
-/// unit tier — pure in-memory assertions over the declared schema, the format
-/// predicate and the writer-wait/contention reporting.
+/// Assertions over the declared schema, the format predicate and the
+/// writer-wait/contention reporting.
 mod unit {
     use super::*;
 

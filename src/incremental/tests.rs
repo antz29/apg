@@ -15,7 +15,6 @@ fn persisted_sig(fqn: &str, parent: &str) -> Signature {
     }
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 

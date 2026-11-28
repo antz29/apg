@@ -161,7 +161,6 @@ fn index_fixture() -> Graph {
     g
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 

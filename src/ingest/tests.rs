@@ -40,7 +40,6 @@ fn fqns(decls: &[FuncDecl]) -> HashMap<String, String> {
     render_function_fqns(decls).into_iter().collect()
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 
@@ -1599,8 +1598,6 @@ mod unit {
     }
 }
 
-/// int tier -- two or more units wired together, pure in-memory (no
-/// filesystem, database, git or process): the identity renderer chain.
 mod int {
     use super::*;
 

@@ -54,7 +54,6 @@ fn assert_error(nodes: &[NodeFile], fragment: &str) {
     );
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 

@@ -1,7 +1,6 @@
 use super::*;
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process. The
-/// changelog slicer is one pure function (`render_migration_guide`) over a
+/// The changelog slicer is one pure function (`render_migration_guide`) over a
 /// changelog string; the version comparisons and the section extraction are
 /// its private parts, tested through it.
 mod unit {

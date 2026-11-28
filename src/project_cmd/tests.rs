@@ -2,9 +2,8 @@ use std::path::Path;
 
 use super::*;
 
-/// unit tier — pure in-memory: exactly [`rebuild_catching_panic`] under test,
-/// the rebuild faked by an in-memory closure; no filesystem, database, git or
-/// process I/O. Likewise the cache-copy policy resolver and the CoW
+/// Exactly [`rebuild_catching_panic`] is under test, the rebuild faked by an
+/// in-memory closure, beside the cache-copy policy resolver and the CoW
 /// capability-error classifier ([`resolve_policy`], [`is_cow_unsupported`]):
 /// their inputs are plain `Option<&str>`s and `i32`s, so nothing here reads the
 /// environment, the config or the filesystem.

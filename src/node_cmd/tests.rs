@@ -1,7 +1,6 @@
 use super::*;
 use crate::testutil::av;
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 

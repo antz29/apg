@@ -9,7 +9,6 @@ const BIN: &str = "0.10.4";
 // missing blocks; major/minor mismatch in EITHER direction blocks.
 // ------------------------------------------------------------------
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 /// The rule/block-text tests take version VALUES (and `Path`s), not files.
 mod unit {
     use super::*;

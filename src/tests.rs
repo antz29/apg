@@ -1,5 +1,4 @@
 use super::*;
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 
@@ -527,7 +526,6 @@ const PS_MANIFEST: &[&str] = &[
     "x.ps1xml",
 ];
 
-/// int tier -- two or more units wired together, still pure in-memory.
 mod int {
     use super::*;
 

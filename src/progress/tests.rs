@@ -11,7 +11,6 @@ fn render(gate: bool, run: impl FnOnce(&mut Progress<'_>)) -> String {
     String::from_utf8(out).expect("progress output is UTF-8")
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 

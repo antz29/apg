@@ -1,8 +1,7 @@
 use super::*;
 
-/// unit tier -- pure in-memory: the only unit under test is the shared
-/// advisory wording classifier `wording_warning`; no filesystem, database,
-/// git or process (`global.constraint.test-tier-boundaries`).
+/// The only unit under test is the shared advisory wording classifier
+/// `wording_warning` (`global.constraint.test-tier-boundaries`).
 mod unit {
     use super::*;
     use crate::layers::{Context, Layer};

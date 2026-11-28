@@ -1,6 +1,5 @@
 use super::*;
 
-/// unit tier -- pure in-memory: the report model only, no scan.
 mod unit {
     use super::*;
 

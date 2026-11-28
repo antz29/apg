@@ -4,7 +4,6 @@ fn parse(line: &str) -> Record {
     serde_json::from_str(line).expect("fixture line must parse")
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 /// (This module has no e2e test: every test is serde parse/serialize over
 /// string literals, so no `e2e` submodule exists.)
 mod unit {

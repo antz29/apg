@@ -17,7 +17,6 @@ fn record(sha: &str, cache_key: CacheKey) -> ScanRecord {
 /// predicate never touches a repository).
 const VALID_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
-/// unit tier -- pure in-memory: no filesystem, git repository or process.
 /// The git-wrapper path (`full_scan_reason` discovery/ancestry over a real
 /// repo) stays e2e below; these drive the pure [`scan_verdict`].
 mod unit {

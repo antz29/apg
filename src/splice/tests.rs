@@ -14,11 +14,10 @@ fn fresh_schema_fingerprint() -> anyhow::Result<SchemaFingerprint> {
     extract_schema(&conn)
 }
 
-/// int tier -- pure in-memory: the seed-vs-full-load DECISION surface wired
-/// through the extracted equivalence predicate, plus the expected-schema cache
-/// driven against a test-local cell (its fresh derivation uses an in-memory
-/// engine only, never a `db.lbug`); no filesystem, git or process. The
-/// `db.lbug` copy/schema/DB-equality half stays e2e below.
+/// The seed-vs-full-load DECISION surface wired through the extracted
+/// equivalence predicate, plus the expected-schema cache driven against a
+/// test-local cell (its fresh derivation uses an in-memory engine only, never a
+/// `db.lbug`). The `db.lbug` copy/schema/DB-equality half stays e2e below.
 mod int {
     use super::*;
 
@@ -177,8 +176,7 @@ mod int {
     }
 }
 
-/// unit tier -- pure in-memory: the assembled authored/transient digest reads
-/// only an in-memory `Graph`; no filesystem, database, git or process.
+/// The assembled authored/transient digest reads only an in-memory `Graph`.
 mod unit {
     use super::*;
     use crate::graph::{Graph, Node, NodeKind};

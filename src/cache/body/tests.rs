@@ -1,5 +1,4 @@
-//! Unit tests for the canonical fact-body codec — pure in-memory, no
-//! filesystem, database, git or process.
+//! Unit tests for the canonical fact-body codec.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -144,7 +143,6 @@ where
     assert_eq!(encoded.id, reencoded.id);
 }
 
-/// unit tier — pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
 

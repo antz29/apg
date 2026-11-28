@@ -72,7 +72,6 @@ fn assert_ps_peers_sound(idx: &crate::impact::OverloadIndex, ps_files: &[&str]) 
     }
 }
 
-/// unit tier -- pure in-memory: no filesystem, database, git or process.
 /// (This module has no e2e test: every test operates on in-memory graphs, so
 /// no `e2e` submodule exists.)
 mod unit {
