@@ -103,8 +103,7 @@ mod unit {
     /// yields none, and a non-`note` node in any layer yields none.
     ///
     /// The helper is pure over in-memory `NodeFile`s — the only unit under test
-    /// (assembly of the error strings) — so the test is `unit`, never `e2e`,
-    /// even though the production caller [`lint`] is I/O-bound.
+    /// (assembly of the error strings).
     #[test]
     fn note_confinement_errors_confines_notes_to_implementation() {
         fn note_in(layer: &str) -> NodeFile {
@@ -166,8 +165,7 @@ mod unit {
     /// code-FQN requirement.
     ///
     /// The helper is pure over in-memory `NodeFile`s — the only unit under test
-    /// (assembly of the error strings) — so the test is `unit`, never `e2e`,
-    /// even though the production caller [`lint`] is I/O-bound.
+    /// (assembly of the error strings).
     #[test]
     fn details_shape_errors_requires_exactly_one_code_fqn_target() {
         use crate::testutil::{node, out_edge};
@@ -243,8 +241,7 @@ mod unit {
     /// never subject to the budget however long its body.
     ///
     /// The helper is pure over in-memory `NodeFile`s — the only unit under test
-    /// (assembly of the error strings) — so the test is `unit`, never `e2e`,
-    /// even though the production caller [`lint`] is I/O-bound.
+    /// (assembly of the error strings).
     #[test]
     fn body_budget_errors_caps_tier_1_3_bodies_at_244_chars() {
         use crate::testutil::node;

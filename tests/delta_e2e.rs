@@ -285,9 +285,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
     /// The content-identity key on the per-worktree scan record. Its body does
-    /// real filesystem I/O (`std::env::temp_dir()` plus the redb store), so by
-    /// `global.constraint.test-tier-boundaries` it is e2e (the law governs, the
-    /// body wins).
+    /// real filesystem I/O (`std::env::temp_dir()` plus the redb store).
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir + redb store); run via cargo test-e2e"]
     fn scan_record_content_key_round_trips_and_defaults_absent() {
