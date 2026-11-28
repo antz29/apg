@@ -4,7 +4,7 @@
 //! in `tests/pylib_e2e.rs` reaches via `mod common;`. Each integration-test
 //! binary includes this module separately, so items unused by a given binary
 //! are expected.
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
