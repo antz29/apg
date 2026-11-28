@@ -24,9 +24,8 @@ pub use tables::*;
 #[cfg(test)]
 pub(crate) use tables::spec_rel_pairs;
 
-// The relocated unit tests reach `NodeKind` through `use super::*` (it was
-// declared in this module before the split); keep it reachable in test builds
-// only, so a non-test build carries no unused import.
+// The unit tests reach `NodeKind` through `use super::*`; keep it reachable in
+// test builds only, so a non-test build carries no unused import.
 #[cfg(test)]
 use crate::graph::NodeKind;
 

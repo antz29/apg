@@ -44,10 +44,9 @@ pub use language::*;
 pub use prepare::*;
 pub use record::*;
 
-// The relocated unit tests reach `Graph`/`signatures_of_graph`/`Path` through
-// `use super::*` (they were declared in this module before the split); keep
-// them reachable in test builds only, so a non-test build carries no unused
-// import.
+// The unit tests reach `Graph`/`signatures_of_graph`/`Path` through
+// `use super::*`; keep them reachable in test builds only, so a non-test build
+// carries no unused import.
 #[cfg(test)]
 use crate::graph::Graph;
 #[cfg(test)]

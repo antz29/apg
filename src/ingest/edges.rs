@@ -166,7 +166,7 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
             to,
             properties,
         } => write_edge_fields(w, 20, &from, &to, "", &properties),
-        // Task edges (SCHEMA.md, phase 4), one tag per wire name in
+        // Task edges (SCHEMA.md), one tag per wire name in
         // `TASK_EDGE_TABLES` order; every task edge is property-less.
         Record::AssignedTo { from, to } => {
             write_edge_fields(w, 21, &from, &to, "", &NodeProperties::new())

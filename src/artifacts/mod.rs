@@ -29,9 +29,8 @@ pub use project::*;
 #[cfg(test)]
 pub(crate) use merge::rel_pair_allowed;
 
-// The relocated unit tests reach `Record` through `use super::*` (it was
-// imported in this module before the split); keep it reachable in test builds
-// only, so a non-test build carries no unused import.
+// The unit tests reach `Record` through `use super::*`; keep it reachable in
+// test builds only, so a non-test build carries no unused import.
 #[cfg(test)]
 use crate::schema::Record;
 

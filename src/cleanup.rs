@@ -85,7 +85,7 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     graph.unresolved_uses.retain(|(a, b)| keep(a) && keep(b));
     // Spec/plan edges reference code nodes (Details/Reviews on excluded
     // units, plan edges into excluded code); drop those that dangle. The task
-    // edges (SCHEMA.md, phase 4) point at code the operation touches, so they
+    // edges (SCHEMA.md) point at code the operation touches, so they
     // travel here too.
     for edges in [
         &mut graph.details,
