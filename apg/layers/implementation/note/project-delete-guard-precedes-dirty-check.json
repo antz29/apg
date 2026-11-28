@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "project-delete-guard-precedes-dirty-check",
-  "body": "The project-delete live-session refusal runs before the dirty-worktree refusal, so a worktree that is both session-held and dirty reports the session; move the guard below the checkout_clean check if a later requirement puts the dirty-tree refusal first.",
+  "body": "Project delete takes the worktree's blocking lock before the dirty-worktree refusal and the removal, so it queues behind an in-flight durable write and removes the worktree between writes; the project-context guard still precedes target resolution.",
   "properties": {},
   "out": [
     {

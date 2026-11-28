@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "routed-recorded-scan-selection-coverage",
-  "body": "The routed (live-session) read of the recorded selection is proven only by construction-parity with the direct read and indirectly by the session-save e2e; upgrade when a live-session fixture can compare the routed selection against the recorded row directly.",
+  "body": "The recorded-scan read runs on a read-only per-invocation session and selects the row by construction-parity with the sibling recorded-scan read; the phase-four e2e conversion exercises that read path.",
   "properties": {},
   "out": [
     {

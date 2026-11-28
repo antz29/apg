@@ -2,7 +2,7 @@
   "layer": "implementation",
   "type": "note",
   "name": "query-reclaim-read-cost",
-  "body": "Every direct `apg query` with no live session runs the shared reclaim classification before its own read, adding two read-only opens (the pending-state probe and the schema-shape diff) to every query; the classification is the gate that keeps an unsaved row from being served, so it stays until a direct-read latency budget says otherwise. Upgrade by sharing one read-only handle across the probes, or by skipping the shape probe when the scan row already agrees, only if direct-read latency becomes a measured concern.",
+  "body": "Each direct `apg query` is one read-only per-invocation session that runs its read on the held handle, with no reclaim classification and no extra open; recovering an unclean database belongs to a scan, and a query serves or refuses the last committed state at open.",
   "properties": {},
   "out": [
     {
