@@ -432,6 +432,18 @@ pub fn open_project_db(
     })
 }
 
+/// Whether an open failure names the transient checkpoint-recovery class a
+/// read-only open hits while a concurrent writer finishes its checkpoint — the
+/// only failures [`ArtifactDb::open_read_only`] retries. Pure: it scans only the
+/// error's whole message chain (`{err:#}`), so no I/O, clock or global state.
+fn is_checkpoint_recovery_error(err: &anyhow::Error) -> bool {
+    let text = format!("{err:#}").to_lowercase();
+    text.contains("checkpoint recovery is pending")
+        || text.contains("cannot recover checkpoint wal")
+        || (text.contains("checkpoint") && text.contains("shadow file"))
+        || (text.contains("wal.checkpoint") && text.contains("past the end"))
+}
+
 impl ArtifactDb {
     pub fn open(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
@@ -450,6 +462,12 @@ impl ArtifactDb {
     /// concurrent reader or writer needs. The exclusive read-write class is
     /// reserved for writers; otherwise identical to [`open`](Self::open),
     /// including the missing-database refusal.
+    ///
+    /// A concurrent writer's checkpoint recovery makes the engine refuse a
+    /// read-only open for the moment it runs, so the open is retried in small
+    /// steps for a bounded ~5 s. Only that transient recovery class is retried;
+    /// any other failure is returned at once, and the last recovery error is
+    /// returned after the bound.
     pub fn open_read_only(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
         if !db_path.exists() {
@@ -458,8 +476,20 @@ impl ArtifactDb {
                 db_path.display()
             );
         }
-        let db = Database::new(&db_path, system_config(true)?)?;
-        Ok(ArtifactDb { db })
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match Database::new(&db_path, system_config(true)?) {
+                Ok(db) => return Ok(ArtifactDb { db }),
+                Err(err) => {
+                    let err = anyhow::Error::from(err);
+                    if !is_checkpoint_recovery_error(&err) || std::time::Instant::now() >= deadline
+                    {
+                        return Err(err);
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
     }
 
     /// A fresh connection to the owned database (borrows `self`, so any
