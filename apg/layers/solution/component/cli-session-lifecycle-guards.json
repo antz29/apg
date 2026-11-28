@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-lifecycle-guards",
-  "body": "The blocking worktree lock is a write's critical section: a reader, scan, merge, or project delete waits while a write runs whole; a read opens the worktree database read-only with no exclusive lock; project-context checks precede the write.",
+  "body": "The blocking worktree lock is a write's critical section: a reader, scan, merge, or project delete waits while a write runs whole; a read opens the worktree database read-only, holding nothing exclusive; project-context checks precede a write.",
   "properties": {},
   "out": [
     {
