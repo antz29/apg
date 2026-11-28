@@ -6,9 +6,9 @@ use std::sync::{Mutex, OnceLock};
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::git;
+use crate::layers::NodeFile;
 #[cfg(test)]
 use crate::layers::NodeProperties;
-use crate::layers::{InEdge, NodeFile, OutEdge, parse_fqn, properties_from_json};
 use crate::load;
 use crate::schema::Record;
 use crate::specs;
@@ -776,7 +776,6 @@ impl ArtifactDb {
     /// dirty flag (`updated = 0`) on every marked durable node row and empty the
     /// pending-removal ledger, so a database a save has just drained carries no
     /// pending state any more — and the read of
-    /// [`dirty_node_files_from_db`](Self::dirty_node_files_from_db) and
     /// [`pending_removals`](Self::pending_removals) an immediately following
     /// save makes is empty, so that save writes nothing.
     ///
@@ -797,106 +796,6 @@ impl ArtifactDb {
         }
         conn.query("MATCH (n:PendingRemoval) DELETE n")?;
         Ok(())
-    }
-
-    /// Reconstruct exactly the durable `apg/layers/**` node files whose rows on
-    /// the **held handle** carry the session's dirty flag (`updated = 1`) — the
-    /// write set a save serialises.
-    ///
-    /// The node-file reconstruction, restricted to the marked rows: the same
-    /// lossless columns, both halves of every authored edge incident to a marked
-    /// node (a marked source's `out` half and a marked target's `in` half, even
-    /// from an unchanged source), and the same `(layer, node_type, name)` /
-    /// `(kind, endpoint)` deterministic order — so a save writes those files
-    /// alone and never rewrites an unchanged node file.
-    ///
-    /// Only `updated = 1` is dirty: a row the session's Cypher `MERGE` path
-    /// created carries NULL until [`mark_dirty`](Self::mark_dirty) sets it, so it
-    /// is absent here. The flag is session state and is never projected into a
-    /// node file. Every ledger-held identity
-    /// ([`pending_removals`](Self::pending_removals)) is omitted, so a dirty row
-    /// some path leaves behind for an identity a save owes a delete can never be
-    /// resurrected.
-    ///
-    /// A session that has admitted nothing since its last save carries no mark,
-    /// so this reads an empty vector and touches no `apg/layers/**` file.
-    pub fn dirty_node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
-        self.reconstruct_node_files(true)
-    }
-
-    /// The reconstruction behind
-    /// [`dirty_node_files_from_db`](Self::dirty_node_files_from_db):
-    /// `dirty_only` restricts the node-table read to rows carrying the session's
-    /// `updated = 1` flag.
-    fn reconstruct_node_files(&self, dirty_only: bool) -> anyhow::Result<Vec<NodeFile>> {
-        // Read the pending-removal ledger before the base: a ledger-held
-        // identity's node file is owed a delete, so it is absent from the base.
-        let held: BTreeSet<String> = self
-            .pending_removals()?
-            .into_iter()
-            .map(|pending| pending.fqn)
-            .collect();
-        let conn = self.conn()?;
-        let mut by_fqn: BTreeMap<String, NodeFile> = BTreeMap::new();
-
-        // One durable node table per node-file type the durable tree can hold.
-        for (table, columns, body_col, props) in DURABLE_NODE_TABLES {
-            collect_durable_nodes(
-                &conn,
-                table,
-                columns,
-                body_col,
-                props,
-                dirty_only,
-                &mut by_fqn,
-            )?;
-        }
-        by_fqn.retain(|fqn, _| !held.contains(fqn));
-
-        // Both halves of every authored edge, read back from the rel tables. A
-        // rel row whose source is not a durable node (a code pair of the shared
-        // Contains/Calls/Uses tables, or a transient Plan/Feedback source) is
-        // skipped; a row whose target is not a durable node contributes only the
-        // source's out half (a code endpoint has no node file). The rel row's
-        // serialized-properties column feeds both halves.
-        for (table, kind) in DURABLE_EDGE_TABLES {
-            let (_, rows) = query_rows(
-                &conn,
-                &format!("MATCH (a)-[r:{table}]->(b) RETURN a.fqn, b.fqn, r.properties"),
-            )?;
-            for row in rows {
-                let from = cell(&row, 0);
-                let to = cell(&row, 1);
-                let properties = properties_from_json(&cell(&row, 2))
-                    .map_err(|e| anyhow::anyhow!("{table} `{from}` -> `{to}`: {e}"))?;
-                if let Some(src) = by_fqn.get_mut(&from) {
-                    src.out.push(OutEdge {
-                        kind: kind.to_string(),
-                        target: to.clone(),
-                        properties: properties.clone(),
-                    });
-                }
-                if let Some(dst) = by_fqn.get_mut(&to) {
-                    dst.in_edges.push(InEdge {
-                        kind: kind.to_string(),
-                        source: from.clone(),
-                        properties,
-                    });
-                }
-            }
-        }
-
-        let mut nodes: Vec<NodeFile> = by_fqn.into_values().collect();
-        for node in &mut nodes {
-            node.out
-                .sort_by(|a, b| (&a.kind, &a.target).cmp(&(&b.kind, &b.target)));
-            node.in_edges
-                .sort_by(|a, b| (&a.kind, &a.source).cmp(&(&b.kind, &b.source)));
-        }
-        nodes.sort_by(|a, b| {
-            (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name))
-        });
-        Ok(nodes)
     }
 
     /// Read the held DB's **transient, project-scoped** `Feedback` rows and
@@ -1067,7 +966,7 @@ impl PreviousScan {
 /// Build the durable-authored edge [`Record`] for one `(a)-[r:TABLE]->(b)` row,
 /// keyed by its rel table. The inverse of
 /// [`edge_merge`](crate::artifacts::merge::edge_merge)'s table arm — every
-/// `table` here is an element of [`DURABLE_EDGE_TABLES`], so the fallback is
+/// `table` here is a durable authored edge kind, so the fallback is
 /// unreachable.
 #[cfg(test)]
 pub(crate) fn durable_edge_record(
@@ -1152,7 +1051,7 @@ pub(crate) fn durable_edge_record(
             to,
             properties,
         },
-        other => unreachable!("DURABLE_EDGE_TABLES carries no `{other}` table"),
+        other => unreachable!("no durable authored edge table `{other}`"),
     }
 }
 
@@ -1213,28 +1112,6 @@ const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
     ("Person", &["name", "body", "properties"], "body", &[]),
     ("Actor", &["name", "body", "properties"], "body", &[]),
     ("Role", &["name", "body", "properties"], "body", &[]),
-];
-
-/// Every durable authored edge rel table and the node-file edge kind it
-/// carries. The shared `Contains`/`Calls`/`Uses` tables also hold code rows; a
-/// row whose source is not a durable node is skipped, so only authored pairs
-/// are reconstructed.
-const DURABLE_EDGE_TABLES: [(&str, &str); 15] = [
-    ("Contains", "contains"),
-    ("DrivenBy", "driven-by"),
-    ("SpecImplementedBy", "implemented-by"),
-    ("AppliesTo", "applies-to"),
-    ("Calls", "calls"),
-    ("Publishes", "publishes"),
-    ("Subscribes", "subscribes"),
-    ("Requires", "requires"),
-    ("Reads", "reads"),
-    ("Writes", "writes"),
-    ("IsRole", "is-role"),
-    ("Realises", "realises"),
-    ("Uses", "uses"),
-    ("Represents", "represents"),
-    ("Details", "details"),
 ];
 
 /// Decide whether a database carries **pending state** from pure inputs: one
@@ -1328,79 +1205,4 @@ pub fn db_has_pending_state_result(apg_root: &Path) -> anyhow::Result<bool> {
 /// [`db_has_pending_state_result`].
 pub fn db_has_pending_state(apg_root: &Path) -> bool {
     db_has_pending_state_result(apg_root).unwrap_or(true)
-}
-
-/// Read one durable node table into `nodes`, keyed by its FQN: identity from
-/// the FQN segments, `body` from `body_col`, the serialized-properties column
-/// decoded into the full `properties` map, and each metadata column merged back
-/// over it when non-empty (an absent column projects to the empty string, which
-/// round-trips to absent). `dirty_only` reads the rows carrying the session's
-/// `updated = 1` flag alone. A malformed FQN or properties payload is a hard
-/// error — the projection never writes one.
-fn collect_durable_nodes(
-    conn: &Connection,
-    table: &str,
-    columns: &[&str],
-    body_col: &str,
-    props: &[(&str, &str)],
-    dirty_only: bool,
-    nodes: &mut BTreeMap<String, NodeFile>,
-) -> anyhow::Result<()> {
-    let projection = std::iter::once("n.fqn".to_string())
-        .chain(columns.iter().map(|c| format!("n.`{c}`")))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let query = if dirty_only {
-        format!("MATCH (n:{table}) WHERE n.updated = 1 RETURN {projection}")
-    } else {
-        format!("MATCH (n:{table}) RETURN {projection}")
-    };
-    let (_, rows) = query_rows(conn, &query)?;
-    // Positions are positional, never header-name based: the engine names a
-    // projected property `n.<col>`, so `fqn` is index 0 and `columns` follow in
-    // order.
-    let column_index = |column: &str| -> anyhow::Result<usize> {
-        columns
-            .iter()
-            .position(|c| *c == column)
-            .map(|i| i + 1)
-            .ok_or_else(|| anyhow::anyhow!("{table}: no `{column}` column in the projection"))
-    };
-    let body_i = column_index(body_col)?;
-    let properties_i = column_index("properties")?;
-    let prop_i: Vec<(usize, &str)> = props
-        .iter()
-        .map(|(column, key)| Ok((column_index(column)?, *key)))
-        .collect::<anyhow::Result<_>>()?;
-
-    for row in rows {
-        let f = cell(&row, 0);
-        let (layer, node_type, name) =
-            parse_fqn(&f).map_err(|e| anyhow::anyhow!("{table} `{f}`: {e}"))?;
-        // The serialized-properties column carries the full node-file map; the
-        // typed columns are merged back over it so a row whose column predates
-        // the enrichment (or is empty) still reconstructs its named keys, with
-        // no key duplicated or lost.
-        let mut properties = properties_from_json(&cell(&row, properties_i))
-            .map_err(|e| anyhow::anyhow!("{table} `{f}`: {e}"))?;
-        for (i, key) in &prop_i {
-            let value = cell(&row, *i);
-            if !value.is_empty() {
-                properties.insert((*key).to_string(), value);
-            }
-        }
-        nodes.insert(
-            f,
-            NodeFile {
-                layer: layer.layer_dir().to_string(),
-                node_type,
-                name,
-                body: cell(&row, body_i),
-                properties,
-                out: Vec::new(),
-                in_edges: Vec::new(),
-            },
-        );
-    }
-    Ok(())
 }
