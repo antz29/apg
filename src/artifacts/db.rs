@@ -799,66 +799,24 @@ impl ArtifactDb {
         Ok(())
     }
 
-    /// Reconstruct the durable `apg/layers/**` node-file set from the **live
-    /// database** — the inverse of the layers projection
-    /// ([`reingest_layers_on`](Self::reingest_layers_on) / `merge_records`).
-    ///
-    /// Every durable authored node is read back from its node table (identity
-    /// from the FQN segments `layer.type.name`, `body` from the `body` column,
-    /// and the projected metadata columns back into the node-file `properties`
-    /// map), and every authored edge is read back from its rel table into
-    /// **both** halves: the source node's `out` edge and the target node's `in`
-    /// edge. A code-endpoint edge (`implemented-by`, a code-targeted `details`)
-    /// has only the source's `out` half, exactly as a node file carries it — a
-    /// code node has no file to hold the in half.
-    ///
-    /// **Ledger-held identities are omitted.** Every identity on the
-    /// pending-removal ledger
-    /// ([`pending_removals`](Self::pending_removals)) is a node an admission
-    /// detached whose node file a save still owes deleting, so its row must
-    /// never be resurrected into this base even if some path leaves the row
-    /// behind. The omission drops the node file alone and leaves the edge
-    /// halves untouched, so a residual half still names the pending identity
-    /// and the save boundary's pairing check refuses it.
-    ///
-    /// Only the durable layers (requirements, domain, solution, implementation,
-    /// global) are reconstructed; the transient `.trans` node tables (`Plan`,
-    /// `PlanPhase`, `Task`, `Feedback`) are not node files and are skipped. The
-    /// result is ordered by `(layer, node_type, name)` and each node's edges by
-    /// `(kind, endpoint)`, matching [`crate::layers::read_existing_nodes`]'s
-    /// deterministic order.
-    ///
-    /// **Fidelity.** The projection is lossless for the durable authored set:
-    /// the serialized-properties column carries the full node/edge properties
-    /// map (arbitrary and empty-valued keys, and an `Entity`'s `kind`), and the
-    /// named typed columns (kind/feature/attribute/root/…) are merged back over
-    /// it — no key is duplicated or lost. Edge properties are read from the rel
-    /// row and attached to **both** halves, so a node file round-trips exactly.
-    /// The session's `updated` flag is session state, not node-file data, so it
-    /// is never projected.
-    pub fn node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
-        self.reconstruct_node_files(false)
-    }
-
     /// Reconstruct exactly the durable `apg/layers/**` node files whose rows on
     /// the **held handle** carry the session's dirty flag (`updated = 1`) — the
     /// write set a save serialises.
     ///
-    /// Same reconstruction as [`node_files_from_db`](Self::node_files_from_db),
-    /// restricted to the marked rows: the same lossless columns, both halves of
-    /// every authored edge incident to a marked node (a marked source's `out`
-    /// half and a marked target's `in` half, even from an unchanged source), and
-    /// the same `(layer, node_type, name)` / `(kind, endpoint)` deterministic
-    /// order — so a save writes those files alone and never rewrites an
-    /// unchanged node file.
+    /// The node-file reconstruction, restricted to the marked rows: the same
+    /// lossless columns, both halves of every authored edge incident to a marked
+    /// node (a marked source's `out` half and a marked target's `in` half, even
+    /// from an unchanged source), and the same `(layer, node_type, name)` /
+    /// `(kind, endpoint)` deterministic order — so a save writes those files
+    /// alone and never rewrites an unchanged node file.
     ///
     /// Only `updated = 1` is dirty: a row the session's Cypher `MERGE` path
     /// created carries NULL until [`mark_dirty`](Self::mark_dirty) sets it, so it
     /// is absent here. The flag is session state and is never projected into a
     /// node file. Every ledger-held identity
-    /// ([`pending_removals`](Self::pending_removals)) is omitted exactly as the
-    /// full base omits it, so a dirty row some path leaves behind for an identity
-    /// a save owes a delete can never be resurrected.
+    /// ([`pending_removals`](Self::pending_removals)) is omitted, so a dirty row
+    /// some path leaves behind for an identity a save owes a delete can never be
+    /// resurrected.
     ///
     /// A session that has admitted nothing since its last save carries no mark,
     /// so this reads an empty vector and touches no `apg/layers/**` file.
@@ -866,8 +824,7 @@ impl ArtifactDb {
         self.reconstruct_node_files(true)
     }
 
-    /// The shared reconstruction behind
-    /// [`node_files_from_db`](Self::node_files_from_db) and
+    /// The reconstruction behind
     /// [`dirty_node_files_from_db`](Self::dirty_node_files_from_db):
     /// `dirty_only` restricts the node-table read to rows carrying the session's
     /// `updated = 1` flag.
