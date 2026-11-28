@@ -162,11 +162,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_session.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_struct.ts",
       "properties": {}
     },
