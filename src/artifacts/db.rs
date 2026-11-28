@@ -677,41 +677,6 @@ impl ArtifactDb {
             .collect())
     }
 
-    /// Does the **held handle** carry **pending state** — a durable node row
-    /// flagged `updated = 1`, or at least one identity on the pending-removal
-    /// ledger? This is the held-handle twin of the path-level
-    /// [`db_has_pending_state`]: the same question, the same shared fold and
-    /// fail-closed contract, for a caller that already holds the connection
-    /// instead of naming an `apg/` root.
-    ///
-    /// Its first planned consumer is phase 6's `PreviousScan::capture` — the
-    /// scan's one read-only handle on the previous database, which returns
-    /// `None` when that database carries a dirty row or a pending-removal
-    /// identity, so a mutation admitted but not yet saved never seeds the
-    /// rebuild. Nothing calls it today: `Coordinator::save`, the `Request::End`
-    /// refusal and `abort` read [`dirty_node_files_from_db`](Self::dirty_node_files_from_db)
-    /// and [`pending_removals`](Self::pending_removals) directly (they need the
-    /// listings), and freshness goes through the path-level twin.
-    ///
-    /// Reads the ledger (`MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn`)
-    /// and then asks each durable node table ([`DURABLE_NODE_TABLES`], the same
-    /// `apg/layers/**` roster [`mark_dirty`](Self::mark_dirty) and
-    /// [`clear_pending_state`](Self::clear_pending_state) walk) whether a row
-    /// carries `updated = 1`; the per-table answers and the ledger fold through
-    /// the shared pure rule [`pending_state_present`], so this predicate and the
-    /// path-level `db_has_pending_state` agree by construction. Only `= 1` is
-    /// dirty: a row the session's Cypher path created holds NULL until
-    /// [`mark_dirty`](Self::mark_dirty) sets it.
-    ///
-    /// **Fails closed.** Every read error yields `true`: an unopenable
-    /// connection, a refused ledger read, or a per-table probe whose `updated`
-    /// column is absent or unreadable (the shared rule's row answer is an
-    /// infallible `bool`, so each error is folded to `true` inside the closure).
-    /// The plain-`bool` return is deliberate — a caller cannot hold an `Err` and
-    /// mistake it for a clean database, and `is_fresh` (which returns a plain
-    /// `bool`) treats any failure as not fresh. The cost is bounded: the shared
-    /// rule short-circuits on the ledger before any per-table query, and stops at
-    /// the first dirty table. No `apg/layers/**` file is touched.
     pub fn has_pending_state(&self) -> bool {
         let conn = match self.conn() {
             Ok(conn) => conn,

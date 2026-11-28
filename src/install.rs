@@ -187,14 +187,6 @@ pub const SUITE_TOOLS: &[(&str, &str)] = &[
 /// opencode's plugin discovery).
 pub const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 
-/// The layout-upgrade guide that `apg init` installs into
-/// `~/.config/opencode/lib/apg-upgrade.md` next to the shared lib: version-field
-/// meaning, mismatch detection, upgrade steps (re-run init → re-scan),
-/// common-issue fixes. The R10 version gate's block text points at it.
-///
-/// Maintained inline here; if the suite tree (`opencode-suite/lib/`) ever
-/// gains an `apg-upgrade.md`, this const should flip to an `include_str!` of
-/// it like `APG_LIB` above.
 pub const APG_UPGRADE_DOC: &str = r#"# apg layout upgrades — the `apg/config.json` version field
 
 This guide is installed by `apg init` at `~/.config/opencode/lib/apg-upgrade.md`;

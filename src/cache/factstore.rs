@@ -55,12 +55,7 @@ pub const STORE_DIR: &str = "apg";
 /// The redb database file inside the store directory: the repository's one
 /// fact store, shared by every worktree and branch.
 pub const FACTS_DB: &str = "facts.db";
-/// **Legacy.** The `<store>/facts/` directory of JSON fact files beside `facts.db`. It is
-/// retired on the first successful open; the name survives only so the
-/// migration and its tests can refer to it.
 pub const FACTS_DIR: &str = "facts";
-/// **Legacy.** The per-language scaffolding file name inside
-/// [`FACTS_DIR`]. Module scaffolding now lives in the redb `scaffolding` table.
 pub const SCAFFOLDING_FILE: &str = "scaffolding.json";
 
 /// A cached open failure: enough to replay the typed contention error on every
