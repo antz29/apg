@@ -29,7 +29,7 @@ class Collector extends TreePathScanner<Void, Void> {
     SourcePositions sourcePos;
     DocTrees docTrees;
 
-    // Targeted-scan mode (phase-02 task-11): when true, a call/use whose
+    // Targeted-scan mode: when true, a call/use whose
     // target is a project symbol NOT in the emitted target packages is
     // emitted against the target's canonical FQN — the unchanged file's
     // cached unit supplies the node, so the edge is exact. surfaceStructs /
@@ -37,7 +37,7 @@ class Collector extends TreePathScanner<Void, Void> {
     final boolean filtered;
     final Set<String> surfaceStructs;
     final Map<String, String> surfaceFuncFqn;
-    // Phase-04 task-15: indexes over the WHOLE walked tree's declaration
+    // Indexes over the WHOLE walked tree's declaration
     // surface so a degraded (error-symbol) attribution never leaks a bare
     // project-class simple name as an unresolved target —
     // `surfaceSimpleStruct` resolves an unambiguous simple name to its
@@ -66,13 +66,13 @@ class Collector extends TreePathScanner<Void, Void> {
         this.docTrees = DocTrees.instance(task);
     }
 
-    // Phase-04 task-35: the COMPLETE project-class index the resolveCall
-    // fall-through consults on the filtered path. The surface indexes cover
-    // the whole walked tree (task-15); the Collector's own target
-    // declarations live in structID (FQN -> id) and funcID (function key ->
-    // id). Both halves are unioned BY SIMPLE NAME — structID is keyed by
-    // FQN, so a raw simple name can never match it directly. Built lazily:
-    // structID/funcID are only complete after collectAll.
+    // The COMPLETE project-class index the resolveCall fall-through consults
+    // on the filtered path. The surface indexes cover the whole walked tree;
+    // the Collector's own target declarations live in structID (FQN -> id)
+    // and funcID (function key -> id). Both halves are unioned BY SIMPLE
+    // NAME — structID is keyed by FQN, so a raw simple name can never match
+    // it directly. Built lazily: structID/funcID are only complete after
+    // collectAll.
     private Map<String, String> projectStructBySimpleCache;
     private Map<String, String> projectCtorBySimpleCache;
 
@@ -124,13 +124,13 @@ class Collector extends TreePathScanner<Void, Void> {
 
     /**
      * Emits the GLOBAL Module->Module scaffolding for packages outside the
-     * per-file emission filter (feedback-103).
+     * per-file emission filter.
      *
      * The targeted scan re-emits only the target files' facts, but it walks
      * every source file (to build the class cache and package map). The
      * module hierarchy is not per-file emission: a full scan emits a
      * `module` record and `Module->Module` contains edge for every package it
-     * walks, and the win-B assembled graph/export must match a full rebuild.
+     * walks, and the assembled graph/export must match a full rebuild.
      * The target packages are covered by their own re-emitted files, so this
      * is called with the UNCHANGED packages only — the all-targets path
      * passes an empty set and stays byte-identical to the full scan.
@@ -399,8 +399,8 @@ class Collector extends TreePathScanner<Void, Void> {
             String parent = SymbolNaming.ownerFqn(directOwner);
             String name = ms.getSimpleName().toString();
             // In targeted mode an error-symbol parent is not a resolvable
-            // project method (phase-04 task-15); the full scan keeps its
-            // exact behaviour, so this guard is filtered-only.
+            // project method; the full scan keeps its exact behaviour, so this
+            // guard is filtered-only.
             if (parent != null && (!filtered || !parent.contains("<error>"))
                     && (name.equals("<init>") || name.indexOf('<') < 0) && !name.equals("<error>")) {
                 String key = parent + "." + name + "(" + String.join(",", SymbolNaming.paramStrings(ms)) + ")";
@@ -423,20 +423,19 @@ class Collector extends TreePathScanner<Void, Void> {
                 return;
             }
         }
-        // Phase-04 task-35: a degraded/error-symbol call must never leak a
-        // bare project-class simple name. The COMPLETE project-class index
-        // (the task-15 surface over the whole walked tree UNION the target
-        // declarations this Collector holds in structID/funcID) is consulted
-        // BY SIMPLE NAME: a constructor resolves to its canonical <init>
-        // FQN, and a project class with no declared constructor in the index
-        // resolves to the same `<FQN>.<init>` unresolved target the FULL
-        // context emits for its (implicit) constructor. A name the index
-        // cannot resolve to a single project class falls through to EXACTLY
-        // the full scan's own emission: the full scan is the exactness
-        // oracle, so suppressing a record it emits would be a deficit (the
-        // note-87 divergence direction). Only a genuine error symbol is
-        // withheld. The full scan (unfiltered) keeps its byte-identical
-        // behaviour.
+        // A degraded/error-symbol call must never leak a bare project-class
+        // simple name. The COMPLETE project-class index (the declaration
+        // surface over the whole walked tree UNION the target declarations
+        // this Collector holds in structID/funcID) is consulted BY SIMPLE
+        // NAME: a constructor resolves to its canonical <init> FQN, and a
+        // project class with no declared constructor in the index resolves to
+        // the same `<FQN>.<init>` unresolved target the FULL context emits
+        // for its (implicit) constructor. A name the index cannot resolve to
+        // a single project class falls through to EXACTLY the full scan's own
+        // emission: the full scan is the exactness oracle, so suppressing a
+        // record it emits would be a divergence from it. Only a genuine error
+        // symbol is withheld. The full scan (unfiltered) keeps its
+        // byte-identical behaviour.
         if (filtered && rawName != null && !rawName.contains("<error>")) {
             String ctor = projectCtorBySimple().get(rawName);
             if (ctor != null) {
@@ -480,21 +479,18 @@ class Collector extends TreePathScanner<Void, Void> {
         }
         String raw = SymbolNaming.typeRawName(type);
         if (raw == null) raw = "?";
-        // Phase-04 task-36: the previous pass's `structID.containsKey(raw)`
-        // compared a RAW SIMPLE NAME against structID's FQN keys — it could
-        // never match, and the surrounding surface reconstruction was built
-        // on it. Both are GONE: `recordUse` is a pure function of the tree's
-        // own attributed type, so when the FULL context degraded the tree
-        // (tfqn null) the full scan emits this same fall-through, and
-        // withholding or "resolving" it here would be a divergence from the
-        // exactness oracle — measured: reconstructing the unambiguous nested
-        // simple names the full context itself cannot resolve yields a
-        // deficit (DijkstraSearchFrontier / ContractionSearchFrontier /
-        // DijkstraClosestFirstIterator at jgrapht-core scale). The complete
-        // project-class index is consulted by resolveCall (task-35), where it
-        // reconstructs the correct resolved call; a type-use reference that
-        // javac could not resolve in the full context is emitted exactly as
-        // the full scan emits it. Only a genuine error symbol is withheld.
+        // `recordUse` is a pure function of the tree's own attributed type:
+        // when the FULL context degraded the tree (tfqn null) the full scan
+        // emits this same fall-through, so withholding or "resolving" it here
+        // would diverge from the exactness oracle — reconstructing the
+        // unambiguous nested simple names the full context itself cannot
+        // resolve yields a deficit (DijkstraSearchFrontier /
+        // ContractionSearchFrontier / DijkstraClosestFirstIterator at
+        // jgrapht-core scale). The complete project-class index is consulted
+        // by resolveCall, where it reconstructs the correct resolved call; a
+        // type-use reference that javac could not resolve in the full context
+        // is emitted exactly as the full scan emits it. Only a genuine error
+        // symbol is withheld.
         if (filtered && raw.contains("<error>")) return;
         writer.unresolved(raw, "unknown");
         writer.emitEdge("unresolved_use", fromId, raw);

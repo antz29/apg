@@ -47,7 +47,7 @@ class DeclarationSurface {
             if (files.size() == 1) {
                 Path abs = files.get(0).toAbsolutePath().normalize();
                 System.err.println("  [" + Progress.elapsed() + "] dropping un-attributable file: " + files.get(0));
-                // Phase-04 task-31: a dropped source must still contribute its
+                // A dropped source must still contribute its
                 // declaration surface. If the crash happened after collection
                 // (e.g. during generate()) the record is already present and is
                 // kept; otherwise recover it from a parse-only pass — the file
@@ -70,7 +70,7 @@ class DeclarationSurface {
     }
 
     /**
-     * Phase-04 task-31: the declaration surface of a source javac dropped from
+     * The declaration surface of a source javac dropped from
      * bytecode generation, recovered from a parse-only pass (a parse needs no
      * attribution, so an un-attributable file still parses). Erased parameter
      * types are unavailable without attribution, so the recovered function keys

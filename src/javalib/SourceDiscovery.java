@@ -22,7 +22,7 @@ class SourceDiscovery {
      * Splits a walked set into attributable sources and module descriptors.
      *
      * A descriptor is part of the WALKED/scanned file set — its `file` record
-     * is a graph fact (feedback-138; domain.entity.source-file: every eligible
+     * is a graph fact (domain.entity.source-file: every eligible
      * source file is included, filtering is by code_type, never by dropping the
      * file) — but it must never reach a javac task or a `-sourcepath` root: one
      * descriptor in a batch flips javac into NAMED-module attribution (`too
@@ -79,10 +79,10 @@ class SourceDiscovery {
                 return FileVisitResult.CONTINUE;
             }
 
-            // Phase-04 task-15 residual (feedback-138): a `module-info.java`
-            // is a module DESCRIPTOR — it declares no package and no
-            // struct/function/edge facts — but it is still a SCANNED source
-            // file, so it stays in the walked set and the graph still carries
+            // A `module-info.java` is a module DESCRIPTOR — it declares no
+            // package and no struct/function/edge facts — but it is still a
+            // SCANNED source file, so it stays in the walked set and the graph
+            // still carries
             // its `file` record (domain.entity.source-file: every eligible
             // source file is included; filtering is by code_type, never by
             // dropping the file). It is partitioned OUT of every javac task and

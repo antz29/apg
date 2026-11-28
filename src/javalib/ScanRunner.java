@@ -7,7 +7,7 @@ class ScanRunner {
     /**
      * The full-context scan: parse everything, attribute everything, emit
      * everything. When the pinned `--cache-dir` hand-off is present it also
-     * seeds the native class cache (phase-04 task-17) so the next targeted
+     * seeds the native class cache so the next targeted
      * scan reuses it instead of recompiling every unchanged source.
      */
     static void runFullScan(Path dir, List<Path> files, String prefix, String cacheDir)
@@ -66,11 +66,11 @@ class ScanRunner {
         c.emitAll(units, total);
         // The walked module descriptors: a `file` record each, byte-identical to
         // a compilation unit's, emitted from the walked set exactly once (they
-        // are in no attributed batch, so no unit ever emits them). feedback-138.
+        // are in no attributed batch, so no unit ever emits them).
         for (Path d : descriptors) c.emitWalkedFile(d);
         c.writer.flush();
 
-        // Phase-04 task-17: stdout is complete; seed the native class cache the
+        // stdout is complete; seed the native class cache the
         // targeted path consumes. Best-effort — a cache failure never fails the
         // scan, and an absent flag writes nothing.
         seedClassCache(allFiles, dir, cacheDir);
@@ -80,8 +80,8 @@ class ScanRunner {
      * The pinned per-worktree native-artifact root `<cache-dir>/java`, or null
      * when `--cache-dir` is absent. The full scan seeds it and a targeted scan
      * consumes the same `classes/` + `surface.tsv`, so one scan's cache is the
-     * next one's. An absent flag keeps the pre-phase-04 behaviour and writes
-     * no artifact (no cache path is fabricated or defaulted).
+     * next one's. An absent flag writes no artifact (no cache path is
+     * fabricated or defaulted).
      */
     static Path persistentJavaRoot(String cacheDir) {
         if (cacheDir == null || cacheDir.isEmpty()) return null;
@@ -89,7 +89,7 @@ class ScanRunner {
     }
 
     /**
-     * Phase-04 task-17: persists the SAME class dir + declaration surface the
+     * Persists the SAME class dir + declaration surface the
      * targeted path consumes (`compileAndCollect` + `saveSurface`), so the first
      * targeted scan after a cold full scan reuses it and reports zero
      * `compiling N unchanged-package file(s)`. The walked set is exactly the
@@ -135,7 +135,7 @@ class ScanRunner {
     }
 
     // ------------------------------------------------------------------
-    // Phase-02 task-11: package-granularity targeted (incremental) scan.
+    // Package-granularity targeted (incremental) scan.
     //
     // The target set is an EMISSION filter only: the changed packages are
     // compiled/attributed from source while the unchanged packages are made
@@ -175,7 +175,7 @@ class ScanRunner {
         // modules it does not read. It is still a WALKED/scanned file, though,
         // so it is carried separately for its `file` record — and never grouped
         // by package, where its empty package (`pkgByFile` -> "") would pull it
-        // into the default package's target/non-target batches (feedback-138).
+        // into the default package's target/non-target batches.
         List<Path> sourceList = new ArrayList<>();
         List<Path> descriptorList = new ArrayList<>();
         SourceDiscovery.partitionDescriptors(allFiles, sourceList, descriptorList);
@@ -197,7 +197,7 @@ class ScanRunner {
         }
         // Package of every walked source file (the re-emission unit for Java).
         // Parsing is cheap; attribution is the expensive part we keep to the
-        // target set. Phase 02 note: java compilers/file managers carry option
+        // target set. Java compilers/file managers carry option
         // state across tasks in one JVM, so every task gets a fresh compiler +
         // file manager.
         Map<Path, String> pkgByFile = JavacSupport.packageMap(ToolProvider.getSystemJavaCompiler(),
@@ -208,14 +208,14 @@ class ScanRunner {
             // no per-file facts (an explicit filter is in force), never
             // everything. It is still a SPAWNED Java frontend, though, so its
             // global Module->Module scaffolding must cover every walked package
-            // (feedback-103), exactly as a full scan's does. A requested module
+            // exactly as a full scan's does. A requested module
             // descriptor is a walked file with a `file` record but no package,
             // so it is emitted here (never attributed) alongside that
             // scaffolding.
             // Every walked package — the default (empty) package included.
             // emitPkgHierarchy maps "" to the non-empty default-package
             // identity, so dropping it here would omit the `(default)` module
-            // record a full scan emits (feedback-103).
+            // record a full scan emits.
             LinkedHashSet<String> allPkgs = new LinkedHashSet<>(pkgByFile.values());
             System.err.println("[" + Progress.elapsed() + "] targets matched no attributable scanned file; "
                 + "emitting global module scaffolding for " + allPkgs.size() + " package(s)"
@@ -277,7 +277,7 @@ class ScanRunner {
         // so the class dir stays a complete snapshot the unchanged packages
         // resolve against (a body-only change leaves them non-target while
         // their dependents may still reference them) — and collect the WHOLE
-        // batch's declaration surface (phase-04 task-15): the target-package
+        // batch's declaration surface: the target-package
         // declarations are part of the project-class index too, or the
         // emitter's guards cannot recognise a target class whose attribution
         // degraded and would leak it as a bare simple name. Crashing files are
@@ -297,10 +297,10 @@ class ScanRunner {
             Progress.endProgress();
         }
 
-        // Phase-04 task-15: the project-class index must be COMPLETE over the
-        // WHOLE walked tree before target attribution. `compileAndCollect`
-        // drops a source that crashes javac (task-31 recovers its
-        // declarations), so re-check every walked file — TARGET files included,
+        // The project-class index must be COMPLETE over the WHOLE walked tree
+        // before target attribution. `compileAndCollect` drops a source that
+        // crashes javac (its declarations are recovered), so re-check every
+        // walked file — TARGET files included,
         // whatever side of the target boundary it is on — and surface any still
         // absent from the class cache from source. A dropped source's
         // declarations must never be silently missing, or its references would
@@ -340,7 +340,7 @@ class ScanRunner {
         // the classpath: javac resolves deps from bytecode (full context,
         // exact) but the unchanged sources are not re-analyzed.
         //
-        // Phase-04 task-15: the class dir is a CACHE, never the whole context.
+        // The class dir is a CACHE, never the whole context.
         // javac refuses to emit bytecode for a compilation that has any error
         // (the error-stop policy cannot be overridden through the JavacTask
         // API), so a single unrelated error in the batch - an absent optional
@@ -353,7 +353,7 @@ class ScanRunner {
         // real resolution context: a type the class dir cannot supply is
         // attributed from source, exactly as the full scan resolves it.
         //
-        // Phase-04 task-15: the sourcepath must name the ACTUAL SOURCE ROOTS of
+        // The sourcepath must name the ACTUAL SOURCE ROOTS of
         // the walked files, NOT the scan root. In a Maven-like layout
         // (<root>/<module>/src/main/java/pkg/...) the scan root is not a valid
         // package root, so a scan-root sourcepath is silently INEFFECTIVE and
@@ -374,7 +374,7 @@ class ScanRunner {
                 }
             }
             if (p == null) continue;
-            // Phase-04 task-15 residual: a `module-info.java` at a sourcepath
+            // A `module-info.java` at a sourcepath
             // entry root makes javac load that descriptor and attribute the whole
             // task in NAMED-module mode, whose `requires` graph hides every JDK
             // module the descriptor does not read (java.desktop / java.sql /
@@ -428,7 +428,7 @@ class ScanRunner {
         var c = new Collector(prefix, true, surfaceStructs, surfaceFuncFqn);
         c.useTask(task);
         c.collectAll(units);
-        // feedback-103: emit the global Module->Module scaffolding for the
+        // Emit the global Module->Module scaffolding for the
         // unchanged packages the per-file filter leaves out. Target packages
         // get theirs from their own re-emitted files, so the union covers every
         // walked package — matching a full scan's hierarchy. The all-targets
@@ -436,7 +436,7 @@ class ScanRunner {
         // The default (empty) package is kept: emitPkgHierarchy maps it to the
         // non-empty default-package identity, so an unchanged default package
         // still contributes its `(default)` module record to the global
-        // scaffolding (feedback-103). A default-package TARGET never reaches
+        // scaffolding. A default-package TARGET never reaches
         // here (package granularity puts every default-package file in the
         // re-emitted set), so this cannot double-emit.
         LinkedHashSet<String> nonTargetPkgs = new LinkedHashSet<>();
@@ -452,7 +452,7 @@ class ScanRunner {
         // changed module-info.java keeps its File node without any descriptor
         // ever entering an attribution batch. A non-target descriptor is not
         // re-emitted here; its File node is reused from the cached fact unit,
-        // exactly like any unchanged file. feedback-138.
+        // exactly like any unchanged file.
         for (Path d : requestedDescriptors) c.emitWalkedFile(d);
         c.writer.flush();
 

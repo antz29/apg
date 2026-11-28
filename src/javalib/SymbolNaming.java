@@ -6,7 +6,7 @@ import java.util.*;
 
 class SymbolNaming {
     // ------------------------------------------------------------------
-    // Java module identity (phase-04)
+    // Java module identity
     //
     // Every fact that names a scope goes through one of these four
     // side-effect-free helpers: the module record (emitPkgHierarchy), the

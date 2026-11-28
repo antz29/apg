@@ -5,9 +5,9 @@ public class CallGraphBuilder {
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
         // `--id-prefix <p>` (default "n") keeps opaque ids unique across
-        // frontends when a scan merges multiple languages. The phase-02
-        // task-11 hand-off flags are appended beside it on the incremental
-        // path (the pinned target-set interface), and `--cache-dir <dir>` is
+        // frontends when a scan merges multiple languages. The targeted-scan
+        // hand-off flags are appended beside it on the incremental path (the
+        // pinned target-set interface), and `--cache-dir <dir>` is
         // the per-worktree toolchain cache root. `--module <dir>` (repeatable)
         // is a scan-root-resolved subtree root: it SELECTS the walk, so it
         // never joins `excludePaths`.
@@ -63,7 +63,7 @@ public class CallGraphBuilder {
 
         List<Path> files = SourceDiscovery.collect(dir, excludePaths, moduleRoots);
 
-        // The target set is an EMISSION filter only (phase-02 task-11). An
+        // The target set is an EMISSION filter only. An
         // absent flag or an empty file means NO filter — the byte-identical
         // full-scan path below. A non-empty list in force selects its packages
         // for re-emission (a list matching no walked file emits nothing).
@@ -73,9 +73,9 @@ public class CallGraphBuilder {
             if (targets.isEmpty()) targets = null;
         }
         if (targets == null) {
-            // Phase-04 task-32: the pinned --cache-dir hand-off reaches the
-            // full-scan path too (task-17 seeds the class cache); the
-            // incremental dispatch and the emission filter are unchanged.
+            // The pinned --cache-dir hand-off reaches the full-scan path too
+            // (the full scan seeds the class cache); the incremental dispatch
+            // and the emission filter are unchanged.
             ScanRunner.runFullScan(dir, files, prefix, cacheDir);
         } else {
             ScanRunner.runIncrementalScan(dir, files, targets, prefix, cacheDir);

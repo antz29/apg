@@ -9,7 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Gate tests for the phase-02 task-11 targeted (package-granularity) scan.
+ * Gate tests for the targeted (package-granularity) scan.
  *
  * The load-bearing invariant: a targeted scan's facts for the target packages
  * must equal what a full scan emits for them — a targeted scan walks the same
@@ -29,7 +29,7 @@ public class CallGraphBuilderTest {
     static int failures = 0;
 
     public static void main(String[] args) throws Exception {
-        // Phase-04: the pure module-identity helpers — no temp dir, no javac,
+        // The pure module-identity helpers — no temp dir, no javac,
         // no filesystem: run before any real-I/O case.
         testModuleIdentityHelpers();
         Path base = Files.createTempDirectory("apg-java-test");
@@ -122,16 +122,16 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15 fixture: the Maven-like nested-source-root defect class.
+     * Fixture for the Maven-like nested-source-root defect class.
      *
      * Sources sit under a MAVEN-LIKE NESTED root (`src/main/java/pkg/...`), so
      * the scan root is NOT a valid package root. That is the jgrapht shape
      * (`<root>/jgrapht-core/src/main/java/org/jgrapht/...`) and it is what makes
-     * the old `-sourcepath <scan root>` silently INEFFECTIVE — javac looks for
+     * a `-sourcepath <scan root>` silently INEFFECTIVE — javac looks for
      * `<scan root>/pkg/a/A.java`, which does not exist, so a reference into a
      * non-target package degrades to a javac error symbol. Sources placed
-     * directly under the scan root (the previous fixture) never reproduced the
-     * divergence because the scan root WAS a valid package root there.
+     * directly under the scan root would not reproduce the divergence: the
+     * scan root is a valid package root there.
      *
      * `pkg.a.Broken` is a source javac cannot compile — it references a package
      * that does not exist — so javac refuses to emit ANY bytecode for the batch
@@ -196,7 +196,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15 residual: the module-descriptor defect class.
+     * The module-descriptor defect class.
      *
      * jgrapht is a Maven multi-module tree with a `module-info.java` per module
      * (`<root>/<module>/src/main/java/module-info.java`). Handing several module
@@ -214,10 +214,10 @@ public class CallGraphBuilderTest {
      *
      * Smallest-scale reproduction: two modules, each with a `module-info.java`
      * that requires only `java.base`, and a target class using
-     * `javax.swing.JFrame`. RED pre-fix (the full scan emits the bare `JFrame`
-     * / `pack` / `setVisible` unknowns and diverges from the targeted leg);
-     * GREEN post-fix (both legs resolve the JDK receivers and the targeted
-     * facts equal the full scan's for the target package).
+     * `javax.swing.JFrame`. The full scan must resolve the JDK receivers
+     * rather than emitting the bare `JFrame` / `pack` / `setVisible`
+     * unknowns, and the targeted facts must equal the full scan's for the
+     * target package.
      */
     static void writeModuleDescriptorFixture(Path root) throws Exception {
         Path a = root.resolve("mod-a/src/main/java");
@@ -294,13 +294,13 @@ public class CallGraphBuilderTest {
         check("targeted facts for pkg.b equal the full scan's pkg.b facts",
             fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);
 
-        // feedback-103: global Module->Module scaffolding is NOT per-file
-        // emission. The targeted scan walks every source file (to build the
-        // class cache and package map), so the unchanged packages' module
-        // records and hierarchy edges must be present even though only pkg.b's
-        // per-file facts are re-emitted. Java was the lone frontend omitting
-        // this, which broke DB/export == full-rebuild equivalence on a partial
-        // scan that still SPAWNS the Java frontend.
+        // Global Module->Module scaffolding is NOT per-file emission. The
+        // targeted scan walks every source file (to build the class cache and
+        // package map), so the unchanged packages' module records and
+        // hierarchy edges must be present even though only pkg.b's per-file
+        // facts are re-emitted. Omitting them would break DB/export ==
+        // full-rebuild equivalence on a partial scan that still SPAWNS the
+        // Java frontend.
         check("targeted scan carries the unchanged packages' module records",
             inc.contains("module|pkg") && inc.contains("module|pkg.a") && inc.contains("module|pkg.c"),
             "targeted output was:\n" + incRaw);
@@ -327,9 +327,9 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-17/-32, retargeted onto the keyless per-worktree layout: a
-     * cold full scan invoked with the pinned `--cache-dir` hand-off persists the
-     * SAME `<cache-dir>/java/{classes,surface.tsv}` the targeted path consumes,
+     * The keyless per-worktree layout: a cold full scan invoked with the
+     * pinned `--cache-dir` hand-off persists the SAME
+     * `<cache-dir>/java/{classes,surface.tsv}` the targeted path consumes,
      * so the FIRST targeted scan after it recompiles no unchanged packages and
      * still emits the full scan's facts. Without the flag no artifact is written
      * (there is no persistent java root to fabricate).
@@ -366,7 +366,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * The class cache's integrity surface (phase-01 task-11): `surface.tsv`
+     * The class cache's integrity surface: `surface.tsv`
      * plus every class file it references is what makes `<cache-dir>/java`
      * reusable. A missing marker, and a magic-invalid/truncated class file,
      * each wipe `classes/` and reseed (the `compiling N unchanged-package
@@ -431,7 +431,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-31: a source javac drops from bytecode generation still
+     * A source javac drops from bytecode generation still
      * contributes its declaration surface — recovered from a parse-only pass,
      * so the file is never silently absent from the surface/class context.
      */
@@ -458,17 +458,16 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15: a TARGET-package class referenced from a re-emitted file
+     * A TARGET-package class referenced from a re-emitted file
      * resolves exactly even when (a) the sources sit under a Maven-like nested
-     * root — so the scan root is NOT a valid package root and the old
-     * `-sourcepath <scan root>` was silently ineffective — and (b) a source
-     * javac cannot compile has left the class dir empty. This FAILS pre-fix
-     * (the cross-package call is missing, a bare project-class simple name `A`
-     * and a bare method name `foo` leak as UnresolvedTargets) and PASSES
-     * post-fix (the `-sourcepath` names the ACTUAL source root
-     * `<proj>/src/main/java`).
+     * root — so the scan root is NOT a valid package root and a
+     * `-sourcepath <scan root>` is silently ineffective — and (b) a source
+     * javac cannot compile has left the class dir empty. The cross-package
+     * call must be present, never a bare project-class simple name `A` or a
+     * bare method name `foo` leaking as UnresolvedTargets, because the
+     * `-sourcepath` names the ACTUAL source root `<proj>/src/main/java`.
      *
-     * The enumerated oracle is the phase-04 task-9 one, scaled down: the whole
+     * The enumerated oracle, scaled down: the whole
      * target package's facts must equal a from-scratch full scan's facts for
      * those files (per-record set equality), with NO UnresolvedTarget carrying
      * a bare project-class simple name and none carrying a javac error symbol.
@@ -505,7 +504,7 @@ public class CallGraphBuilderTest {
         check("targeted facts equal the full scan's when the class dir is incomplete",
             fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);
 
-        // The CORRECT resolved targets must appear (the pre-fix deficit).
+        // The CORRECT resolved targets must appear (never a bare-name deficit).
         check("the re-emitted file's call into the unchanged package resolves",
             inc.contains("calls|pkg.b.B.go|pkg.a.A.foo"), "targeted output was:\n" + incR.out);
         check("the re-emitted file's calls to the TARGET-package class resolve",
@@ -516,7 +515,7 @@ public class CallGraphBuilderTest {
             inc.contains("uses|pkg.b.B.make|pkg.b.Target"), "targeted output was:\n" + incR.out);
 
         // No bare project-class simple name, no error symbol (the javac
-        // error-symbol leak note-87 measured on jgrapht).
+        // error-symbol leak).
         Set<String> projectClasses = new TreeSet<>();
         for (String line : full.split("\n")) {
             if (line.contains("\"type\":\"struct\"")) {
@@ -539,7 +538,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15 residual / feedback-138: the FULL-scan leg must not lose
+     * The FULL-scan leg must not lose
      * JDK-module visibility to a named-module compilation, AND the module
      * descriptor must still be a SCANNED file — a `File` record for it, exactly
      * once, byte-identical on both legs (domain.entity.source-file: every
@@ -569,7 +568,7 @@ public class CallGraphBuilderTest {
                 && !full.contains("unresolved|setVisible|unknown"),
             "full output was:\n" + fullRaw);
 
-        // feedback-138: a descriptor is a WALKED file, so its `file` record is
+        // A descriptor is a WALKED file, so its `file` record is
         // emitted from the walked set (never from a compilation unit: no
         // descriptor ever joins a javac batch), exactly once per descriptor,
         // with parent "" and the same line count a compilation unit would report.
@@ -617,7 +616,7 @@ public class CallGraphBuilderTest {
      * A target list naming only paths outside the walked tree (e.g. deleted
      * sources) selects no per-file facts, but it is still a SPAWNED Java
      * frontend: it must carry every walked package's global Module->Module
-     * scaffolding, exactly as a full scan does (feedback-103).
+     * scaffolding, exactly as a full scan does.
      */
     static void testNoMatchingTargetsEmitsScaffoldingOnly(Path proj, Path base) throws Exception {
         Path targets = base.resolve("missing.targets");
@@ -637,7 +636,7 @@ public class CallGraphBuilderTest {
     }
 
     // ------------------------------------------------------------------
-    // Phase-04: default-package module identity
+    // Default-package module identity
     // ------------------------------------------------------------------
 
     /**
@@ -645,7 +644,7 @@ public class CallGraphBuilderTest {
      * no javac, no filesystem): the empty (default) package yields a non-empty
      * module identity; the File parent and a top-level class parent are that
      * same identity; the class fqn has no leading dot; and packaged inputs
-     * (`pkg.b` / `B`) render exactly as they did before the extraction.
+     * (`pkg.b` / `B`) render unchanged.
      */
     static void testModuleIdentityHelpers() {
         String def = SymbolNaming.moduleIdentityFor("");
@@ -681,7 +680,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 e2e (CallGraphBuilderTest harness): a scratch DEFAULT-PACKAGE
+     * E2e (CallGraphBuilderTest harness): a scratch DEFAULT-PACKAGE
      * fixture (no `package` declaration) run through the real scanner. The
      * package-less File must hang under a non-empty default-package module and
      * the top-level class must render with a module parent — never a
@@ -735,18 +734,18 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-12 e2e (CallGraphBuilderTest harness): the
+     * E2e (CallGraphBuilderTest harness): the
      * targeted/incremental branch must carry the default package's module
-     * record exactly as a full scan does — feedback-103's invariant that a
+     * record exactly as a full scan does — the invariant that a
      * spawned frontend emits every walked package's scaffolding.
      *
      * `proj-default-mixed` pairs an UNCHANGED default-package source with a
      * target packaged source: the default package is then in neither the
      * re-emitted set (it is not a target) nor any Module->Module hierarchy edge
      * (a single-segment identity has none), so its `(default)` module record
-     * can only come from the global scaffolding. Pre-fix the scaffolding set
-     * dropped the empty package and the targeted module set was a strict subset
-     * of the full scan's; the no-match-targets branch dropped it too.
+     * can only come from the global scaffolding. The scaffolding set must keep
+     * the empty package, or the targeted module set is a strict subset of the
+     * full scan's; the no-match-targets branch must keep it too.
      */
     static void testDefaultPackageTargetedScaffolding(Path base) throws Exception {
         Path proj = base.resolve("proj-default-mixed");
@@ -804,7 +803,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-03 task-3: `--module` selects the walked subtree, resolved against
+     * `--module` selects the walked subtree, resolved against
      * the scan root — a relative value and its absolute equivalent admit the
      * same `.java` files, never a sibling whose name merely shares a prefix,
      * and a real `--exclude-path` value still drops its matching file. The
@@ -882,7 +881,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-13: the `--module` value is resolved to its REAL path, so
+     * The `--module` value is resolved to its REAL path, so
      * a symlinked value selects the subtree the (non-following) walk emits and
      * a `..` crossing a symlink resolves physically — not lexically. Skipped
      * where the platform cannot create symbolic links.
@@ -1072,7 +1071,7 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * The records a targeted scan of `targetFile` must emit (feedback-103).
+     * The records a targeted scan of `targetFile` must emit.
      *
      * Per-file facts — the target file's `file`/`struct`/`function` records and
      * the `contains`/`calls`/`uses`/`unresolved_*` edges between its units — are
