@@ -44,6 +44,11 @@ pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
 /// worktree and project branch remain, so re-running `apg project merge`
 /// retries the whole act.
 ///
+/// The branch worktree's blocking lock is taken before the verify read and held
+/// through the merge and cleanup, so an in-flight durable write's critical
+/// section (node files, commit, projection) closes first and merge verifies and
+/// merges against a settled branch database between writes.
+///
 /// The main rebuild after the merge is unconditional: every change-set — a
 /// spec-only one included — takes the same rebuild, with no source-diff or
 /// spec-only short-circuit. The merged authored nodes and edges reach main's
@@ -123,17 +128,13 @@ pub fn project_merge_at(
     // (R5). `plan_verify_at` also refuses when the branch DB is stale (a
     // verdict is only meaningful against a fresh branch graph).
     let wt_apg = wt_dir.join(specs::LAYOUT);
-    // Lifecycle exclusivity: a live session owns the branch DB, so merging
-    // (which removes the worktree/branch on success) must not race it. Refuse
-    // BEFORE the merge/rebuild replaces any projected DB — the caller must save
-    // the buffered state (`apg session save`) and end the session
-    // (`apg session end`) first.
-    if crate::session::live_session(&wt_apg) {
-        anyhow::bail!(
-            "refused: a live `apg session` owns the branch DB at {} — save its buffered changes and end it first (`apg session save`, then `apg session end`, inside the project worktree) before merging",
-            wt_apg.join(specs::TRANS).join("db.lbug").display()
-        );
-    }
+    // Lifecycle exclusivity: a durable write holds the branch worktree's
+    // blocking lock for its whole critical section (the node-file write, the
+    // one commit and the projection), so take the same lock before reading the
+    // branch graph and hold it until the worktree is removed. Merge queues
+    // behind an in-flight write and verifies/merges against the settled branch
+    // database between writes.
+    let _lock = crate::artifacts::acquire_spec_lock(&wt_apg)?;
     if !wt_apg.join(specs::TRANS).join("db.lbug").exists() {
         anyhow::bail!(
             "refused: project `{name}` has no branch graph — run `apg scan` inside {} first (a verdict is only meaningful against the branch's graph).",
@@ -277,9 +278,9 @@ pub(crate) fn rebuild_catching_panic(dir: &Path, rebuild: &ScanFn) -> anyhow::Re
 /// The scanned universe is read from the branch worktree's `apg/.trans/db.lbug`
 /// via [`crate::artifacts::code_universes`]; the planned set it also returns is
 /// deliberately discarded, because merge strength requires real scanned code,
-/// not a promise. This runs with no live session (the merge refuses one earlier)
-/// and after the branch database has been proven present. Pure read; refuses
-/// with every violation listed.
+/// not a promise. This runs inside the branch worktree's blocking lock the
+/// merge takes before its verify read, and after the branch database has been
+/// proven present. Pure read; refuses with every violation listed.
 fn merge_strength_check(wt_apg: &Path, name: &str) -> anyhow::Result<()> {
     let _lock = crate::artifacts::acquire_spec_lock(wt_apg)?;
     let nodes = layers::read_existing_nodes(wt_apg)?;
