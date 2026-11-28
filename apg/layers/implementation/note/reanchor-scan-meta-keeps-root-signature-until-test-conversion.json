@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "reanchor-scan-meta-keeps-root-signature-until-test-conversion",
+  "body": "The scan re-anchor keeps its root-and-state signature so the phase-four-owned git test caller still compiles while tests stay outside this task's scope; the session write path bypasses it through the held-handle scan-row refresh, so collapse the helper into a held-handle form when the test conversion task rewrites that caller.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.git.commit.reanchor_scan_meta",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
