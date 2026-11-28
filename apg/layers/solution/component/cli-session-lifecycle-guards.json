@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-lifecycle-guards",
-  "body": "The session lifecycle guards: the checks that keep a session the exclusive owner of the worktree database, refusing scan, merge, and project delete while it is live and treating a socket that fails a connect as an unclean exit.",
+  "body": "The blocking worktree lock and its context guards: every database access takes the exclusive lock, so a write runs whole while a reader, scan, merge, or project delete waits, after the project-context checks.",
   "properties": {},
   "out": [
     {
@@ -18,11 +18,6 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.project_cmd.merge.project_merge_at",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.start",
       "properties": {}
     },
     {

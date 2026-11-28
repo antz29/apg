@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "cli-session-requires-a-database",
-  "body": "A live session holds a worktree database, which a session start refuses to open absent and which a scan produces, so every admitted mutation validates against and applies to a live database.",
+  "body": "A per-invocation session operates on the worktree database, which a write refuses absent and which a scan produces, so every mutation validates against and applies to a live database.",
   "properties": {},
   "out": [],
   "in": []

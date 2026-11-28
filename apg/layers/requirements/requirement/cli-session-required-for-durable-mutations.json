@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-required-for-durable-mutations",
-  "body": "A durable node or edge mutation runs only through a live session holding the worktree database, and with the session absent the command reports that a session is required.",
+  "body": "A durable mutation has no sessionless path: it opens its own per-invocation session, which is the only way to reach the worktree database.",
   "properties": {
     "feature": "cli-session-substrate"
   },

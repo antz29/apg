@@ -2,18 +2,18 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "scan-reads-the-previous-database-first",
-  "body": "A scan reads the recorded state, code universe, and authored digest it needs from the previous database through one read-only handle ahead of replacing it, and treats a pending-state database as absent.",
+  "body": "A scan reads the recorded state, code universe, and authored digest it needs from the previous database through one read-only handle ahead of replacing it.",
   "properties": {},
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.multi-user-repo-team",
+      "kind": "driven-by",
+      "source": "domain.service.graph-materialization",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.graph-materialization",
+      "kind": "requires",
+      "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
     }
   ]

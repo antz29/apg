@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "project-delete-refuses-a-live-session",
-  "body": "`apg project delete` refuses while a live session owns the target worktree's branch database, leaving the worktree and branch intact, naming `apg session save` then `apg session end` as the fix, after the worktree-and-branch match check.",
+  "body": "`apg project delete` takes the worktree's blocking lock before removing it, so it waits for an in-flight durable write's critical section to close and never deletes a worktree mid-write.",
   "properties": {
     "feature": "cli-session-substrate"
   },

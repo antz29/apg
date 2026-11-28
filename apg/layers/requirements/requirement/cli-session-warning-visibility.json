@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-warning-visibility",
-  "body": "A durable mutation's write-time advisories reach the caller on the session path as non-blocking stderr output and leave the write result intact.",
+  "body": "A durable mutation's write-time advisories reach the caller as non-blocking stderr output and leave the write result intact.",
   "properties": {
     "feature": "cli-session-substrate"
   },
@@ -26,12 +26,12 @@
     },
     {
       "kind": "driven-by",
-      "source": "domain.service.feedback-lifecycle",
+      "source": "domain.service.cli-session-routing",
       "properties": {}
     },
     {
       "kind": "driven-by",
-      "source": "domain.service.cli-session-routing",
+      "source": "domain.service.feedback-lifecycle",
       "properties": {}
     }
   ]

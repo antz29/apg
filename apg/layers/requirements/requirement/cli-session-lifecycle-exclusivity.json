@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-lifecycle-exclusivity",
-  "body": "A scan and a project merge run only with the session closed, while the transient plan and review writes run with the session live or closed.",
+  "body": "A scan and a project merge run as ordinary callers that take the blocking worktree lock, so they interleave with durable mutations only between a mutation's write, commit, and projection.",
   "properties": {
     "feature": "cli-session-substrate"
   },

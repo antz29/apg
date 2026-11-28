@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-docs",
-  "body": "The session documentation: the readme, the agent guide, and the session help text, stating the mandatory session, its lifecycle, the read routing, and the crash-recovery marker.",
+  "body": "The session documentation: the readme, the agent guide, and the session help text, stating the per-invocation session, its read-only default, and its blocking-lock write upgrade.",
   "properties": {},
   "out": [
     {

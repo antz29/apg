@@ -67,16 +67,6 @@
     },
     {
       "kind": "driven-by",
-      "target": "requirements.requirement.session-pending-state-never-fresh",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
-      "target": "requirements.requirement.session-start-recovers-an-unclean-database",
-      "properties": {}
-    },
-    {
-      "kind": "driven-by",
       "target": "requirements.requirement.validated-authoring-requires-a-scanned-database",
       "properties": {}
     }

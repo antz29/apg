@@ -2,17 +2,12 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "navigator-authors-shortcut-notes",
-  "body": "The navigator receives each implementer-reported shortcut NOTE line and, under a live session, authors it as an implementation-layer Note whose details edge names the single code identity the shortcut is about.",
+  "body": "The navigator receives each implementer-reported shortcut NOTE line and authors it as an implementation-layer Note whose details edge names the single code identity the shortcut is about.",
   "properties": {
     "feature": "agent-discipline"
   },
   "out": [],
   "in": [
-    {
-      "kind": "requires",
-      "source": "requirements.user.navigator-agent",
-      "properties": {}
-    },
     {
       "kind": "driven-by",
       "source": "domain.service.implementer-discipline",

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-routing",
-  "body": "The session routing surface: the durable node and edge commands and the query command as the callers that route through a live session, printing the reply or opening the database directly when a session is absent.",
+  "body": "The per-invocation routing surface: the durable node and edge commands and the query command open a session each, a write upgrades under the lock, and a read observes the committed database.",
   "properties": {},
   "out": [
     {

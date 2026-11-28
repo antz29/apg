@@ -2,18 +2,18 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "session-delete-removes-the-node-at-once",
-  "body": "A session delete drops the node from the database at once, so every ordinary read reports it absent while the removed identity stays pending for the save that deletes its file.",
+  "body": "A durable delete removes the node file and its database row in one critical section, so every later read and the committed tree agree the identity is absent.",
   "properties": {},
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.cli-session-operator",
+      "kind": "driven-by",
+      "source": "domain.service.session-durability",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.session-durability",
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
       "properties": {}
     }
   ]

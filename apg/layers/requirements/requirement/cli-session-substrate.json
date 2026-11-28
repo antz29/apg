@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-substrate",
-  "body": "Durable spec mutations flow through a caller-controlled-durability session that owns the worktree database, applies each mutation to it, makes the pending set durable at a save, and treats the node files as the system of record.",
+  "body": "Every database access opens a per-invocation session that is read-only by default, and a write upgrades it under the blocking worktree lock before it writes files, commits, and projects.",
   "properties": {
     "feature": "cli-session-substrate"
   },
@@ -10,16 +10,6 @@
     {
       "kind": "contains",
       "target": "requirements.requirement.cli-session-caller-controlled-durability",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cli-session-clean-end-and-abandon",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.cli-session-crash-recovery",
       "properties": {}
     },
     {

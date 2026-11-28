@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-durability",
-  "body": "The session durability path: a save serialises the dirty rows and pending removals into node files under the layers directory in one atomic pass, then makes exactly one commit and re-anchors the scan metadata.",
+  "body": "The durable-write path: one critical section writes the changed node files under the layers directory, makes exactly one commit, re-anchors the scan metadata, and projects into the database.",
   "properties": {},
   "out": [
     {

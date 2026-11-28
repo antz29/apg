@@ -27,16 +27,6 @@
     },
     {
       "kind": "requires",
-      "target": "requirements.requirement.session-dirty-mark-covers-every-changed-file",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.session-pending-state-never-fresh",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
       "target": "requirements.requirement.session-save-serialisation-is-lossless",
       "properties": {}
     },
@@ -48,16 +38,6 @@
     {
       "kind": "requires",
       "target": "requirements.requirement.session-save-validates-what-it-writes",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.session-start-recovers-an-unclean-database",
-      "properties": {}
-    },
-    {
-      "kind": "requires",
-      "target": "requirements.requirement.session-start-requires-project-context",
       "properties": {}
     },
     {

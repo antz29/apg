@@ -2,14 +2,9 @@
   "layer": "solution",
   "type": "component",
   "name": "forced-scan-discard",
-  "body": "The forced-rebuild discard: one shared helper that removes the derived database `db.lbug` with its `wal` and `shm` sidecars for the force flag, the crash-recovery rebuild, the stale-socket reclaim, and the full-load branch.",
+  "body": "The forced-rebuild discard: one shared helper that removes the derived database `db.lbug` with its `wal` and `shm` sidecars for the force flag, a database-shape change, and the full-load branch.",
   "properties": {},
   "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.force_full_scan",
-      "properties": {}
-    },
     {
       "kind": "implemented-by",
       "target": "rust.apg.session.discard_derived_index",

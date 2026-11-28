@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "admission-holds-no-persistence-invariant",
-  "body": "Admission checks one mutation's model and holds no persistence invariant, so a session builds its model across mutations in any creation order.",
+  "body": "A durable mutation checks its own model and holds no whole-model persistence invariant, so a write may leave a partial model for the spec lint and the merge gate.",
   "properties": {},
   "out": [],
   "in": []

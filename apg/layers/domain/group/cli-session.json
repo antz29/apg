@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "cli-session",
-  "body": "The caller-controlled-durability transaction over the worktree's durable spec store, where a session owns the worktree database, writes each mutation through it, and saves the pending set as node files.",
+  "body": "The per-invocation session over the worktree's durable spec store, where every database access opens a session read-only by default and a write upgrades it under the blocking worktree lock.",
   "properties": {
     "attribute": "core",
     "root": "cli-session-coordinator"
@@ -11,11 +11,6 @@
     {
       "kind": "contains",
       "target": "domain.entity.cli-session-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.pending-node-change",
       "properties": {}
     },
     {

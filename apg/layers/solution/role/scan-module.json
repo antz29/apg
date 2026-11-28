@@ -245,11 +245,6 @@
     },
     {
       "kind": "is-role",
-      "source": "solution.component.session-pending-state",
-      "properties": {}
-    },
-    {
-      "kind": "is-role",
       "source": "solution.component.spec-lint",
       "properties": {}
     },

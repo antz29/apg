@@ -2,22 +2,12 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-coordinator",
-  "body": "The session coordinator: the session server and its command surface, owning the worktree database and spec lock for the session's life and admitting and applying routed mutations in receive order.",
+  "body": "The per-invocation session opener: opens the worktree database read-only by default and upgrades a write under the blocking worktree lock, running the file-write, commit, and projection inside the critical section.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
       "target": "rust.apg.session",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.apply_mutation",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.session_cmd",
       "properties": {}
     },
     {

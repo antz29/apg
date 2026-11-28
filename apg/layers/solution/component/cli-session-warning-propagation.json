@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-warning-propagation",
-  "body": "The write-time advisory transport on the session path: the mutation builders raise the wording and outstanding-feedback advisories and the session reply carries them back to the caller while the write proceeds.",
+  "body": "The write-time advisory transport: the mutation builders raise the wording and outstanding-feedback advisories and the command prints them to stderr while the write proceeds.",
   "properties": {},
   "out": [
     {
@@ -13,11 +13,6 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.node_cmd.node_update_change",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.handle_mutation",
       "properties": {}
     },
     {

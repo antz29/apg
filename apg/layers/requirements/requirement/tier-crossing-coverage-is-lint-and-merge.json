@@ -2,18 +2,18 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "tier-crossing-coverage-is-lint-and-merge",
-  "body": "An undriven requirement and an unrealised service reach the spec lint and the merge gate, while a session save accepts the partial model.",
+  "body": "An undriven requirement and an unrealised service reach the spec lint and the merge gate, and a single durable write accepts the partial model.",
   "properties": {},
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.stakeholder.spec-author",
+      "kind": "driven-by",
+      "source": "domain.service.spec-authoring",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.spec-authoring",
+      "kind": "requires",
+      "source": "requirements.stakeholder.spec-author",
       "properties": {}
     }
   ]

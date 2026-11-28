@@ -2,18 +2,18 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "admission-checks-the-model-not-persistence",
-  "body": "A live session admits a mutation on the model and structural rules alone, so a session builds related nodes and edges across several mutations in any order.",
+  "body": "A durable mutation validates its own model and structural rules alone and commits, so the whole-model minimums stay with the spec lint and the merge gate.",
   "properties": {},
   "out": [],
   "in": [
     {
-      "kind": "requires",
-      "source": "requirements.user.cli-session-operator",
+      "kind": "driven-by",
+      "source": "domain.service.cli-session-routing",
       "properties": {}
     },
     {
-      "kind": "driven-by",
-      "source": "domain.service.cli-session-routing",
+      "kind": "requires",
+      "source": "requirements.user.cli-session-operator",
       "properties": {}
     }
   ]

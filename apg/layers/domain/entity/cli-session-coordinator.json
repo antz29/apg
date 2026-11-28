@@ -2,17 +2,11 @@
   "layer": "domain",
   "type": "entity",
   "name": "cli-session-coordinator",
-  "body": "The live server that owns the worktree database and session socket, admitting mutations in receive order, writing them through to the database, marking each node identity pending, and serialising the pending set to `apg/layers/**` at a save.",
+  "body": "The per-invocation session that opens the worktree database read-only by default and, for a write, upgrades under the blocking worktree lock, performs the file-write, commit, and projection, then releases back to read-only.",
   "properties": {
     "kind": "entity"
   },
-  "out": [
-    {
-      "kind": "contains",
-      "target": "domain.value.cli-session-socket",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",

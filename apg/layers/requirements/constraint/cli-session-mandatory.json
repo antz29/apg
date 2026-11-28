@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "cli-session-mandatory",
-  "body": "A durable node-file mutation is never written to disk or committed outside a live session's save, the session being the sole writer of the worktree node files, the live index, and their commits.",
+  "body": "A durable node-file mutation is written and committed only inside a per-invocation session's write critical section, the session being the sole writer of the worktree node files, the live index, and their commits.",
   "properties": {},
   "out": [],
   "in": []
