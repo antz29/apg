@@ -11,8 +11,8 @@
 // the root e2e crates. Module-specific helpers belong in that module's own
 // e2e file, never here.
 pub use apg::testutil::{
-    ApgCommand, CWD_LOCK, Repo, SessionProcess, apg_bin, code_payload, commit_count, copy_dir,
-    file_line, function_line, git2_repo, module_line, payload_files, project_with_db, remove,
-    scan_checkout, scan_checkout_locked, spawn_apg, start_session_process, struct_line, touch_db,
-    with_cwd, write_scan_meta, write_scan_meta_keyed, wt_commit, wt_commit_paths,
+    ApgCommand, CWD_LOCK, Repo, apg_bin, code_payload, commit_count, copy_dir, file_line,
+    function_line, git2_repo, module_line, payload_files, project_with_db, remove, scan_checkout,
+    scan_checkout_locked, spawn_apg, struct_line, touch_db, with_cwd, write_scan_meta,
+    write_scan_meta_keyed, wt_commit, wt_commit_paths,
 };
