@@ -19,8 +19,6 @@ use crate::md::{build_doc, parse_headings, Doc};
 use crate::paths::repo_relative_dir;
 use crate::record::{write_rec, Rec};
 
-// ── shared helpers (kept at the `mod tests` root, reached by every tier) ──
-
 /// Runs a format emitter over `text` with a fresh id counter.
 fn emit(f: fn(&Path, &[u8], &str, &mut u64) -> Structure, path: &str, text: &str) -> Structure {
     let mut next = 1u64;
