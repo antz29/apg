@@ -2077,8 +2077,7 @@ mod int {
     /// still removes it and drops its edges), and a genuinely dangling endpoint
     /// (in neither the graph nor the universe) is still pruned.
     ///
-    /// Two real units under test, pure in-memory: the graph and the snapshot
-    /// are built by hand.
+    /// Two real units under test: the graph and the snapshot are built by hand.
     #[test]
     fn finalize_delta_graph_keeps_universe_endpoints() {
         use std::collections::BTreeSet;

@@ -284,8 +284,7 @@ mod unit {
         );
     }
 
-    /// unit tier -- pure in-memory: `classify_freshness` folds constructed
-    /// facts only (no git, filesystem, database or process). Pins that no
+    /// `classify_freshness` folds constructed facts only. Pins that no
     /// database or no HEAD sha is `NotApplicable` carrying the precondition's
     /// labels through unchanged, an empty difference set is `Fresh`, and a
     /// non-empty one is `Stale` carrying exactly those labels in order.
@@ -346,7 +345,7 @@ mod unit {
         );
     }
 
-    /// unit tier -- pure in-memory: the freshness invariant is pinned on the
+    /// The freshness invariant is pinned on the
     /// constructed verdicts — an empty difference set can never be `Stale`
     /// (it is `Fresh`), and every `Stale` verdict carries a non-empty
     /// `differing` list, so a stale result always names a differing input.
