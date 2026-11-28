@@ -158,17 +158,17 @@ Patch only.
         // caps plus 20: it flags aggregate re-pinning, while a single
         // template's growth is caught by its own cap.
         const CAPS: [(&str, usize); 9] = [
-            ("agent-builder.md", 477),
-            ("codebase-navigator.md", 469),
-            ("implementation-phase-reviewer.md", 262),
-            ("spec-writer.md", 169),
-            ("plan-writer.md", 185),
-            ("plan-review.md", 134),
-            ("migration-agent.md", 92),
-            ("spec-review.md", 84),
+            ("agent-builder.md", 464),
+            ("codebase-navigator.md", 460),
+            ("implementation-phase-reviewer.md", 266),
+            ("spec-writer.md", 167),
+            ("plan-writer.md", 190),
+            ("plan-review.md", 137),
+            ("migration-agent.md", 95),
+            ("spec-review.md", 86),
             ("researcher.md", 56),
         ];
-        const CORPUS_CAP: usize = 1_948;
+        const CORPUS_CAP: usize = 1_941;
 
         /// The template's lines, without the empty element a trailing newline
         /// would split out (so the count matches the file's line count).
