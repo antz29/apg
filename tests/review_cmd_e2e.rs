@@ -956,8 +956,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-7 task-5 (E2E, top-level dispatch): the `apg review` surface is
-    /// unchanged — `cmd_review` dispatches exactly
+    /// `cmd_review` dispatches exactly
     /// `add`/`action`/`resolve`/`reject`/`list`, rejects any other subcommand,
     /// and the feedback body is immutable across the status verbs (only
     /// status/disposition change). Review writes stay transient.
@@ -1077,7 +1076,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 tasks 6 & 8 (E2E): after a durable node reviewed by an item is
+    /// After a durable node reviewed by an item is
     /// removed, the item stays visible to `apg review list` — the transient
     /// record set is authoritative, so the Feedback and its reviewed-target
     /// reference survive in the requirements mirror even though the DB
@@ -1086,7 +1085,7 @@ mod e2e {
     /// item still closes through the same `apg review reject|resolve <fqn>`
     /// surfaces as any other.
     ///
-    /// Phase-01 task-32: durable mutations are mandatory-session, so the
+    /// Durable mutations are mandatory-session, so the
     /// reviewed node's add and removal each run under a live `apg session
     /// start` and are made durable by `apg session save`. The transient
     /// `apg review …` writes take the same extended flock as a live session, so
@@ -1231,7 +1230,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-4 (E2E): on the MAIN checkout (no project context) every
+    /// On the MAIN checkout (no project context) every
     /// review mutation refuses with the project-context refusal — the message
     /// begins `mutation refused —`, never target-not-found — even though the
     /// target is absent too: the guard runs before any target or feedback-store
@@ -1296,9 +1295,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-1 (E2E): on the MAIN checkout `apg review list` is a legal
+    /// On the MAIN checkout `apg review list` is a legal
     /// read of MAIN's own branch-local transient store — the content remainder
-    /// beyond the phase-2 task-4 exit-0 control. The Feedback record seeded in
+    /// beyond the bare exit-0 control. The Feedback record seeded in
     /// main's `.trans/plans/main.jsonl` (the branch name is the project key)
     /// is listed with its status, disposition and reviewed target, and no
     /// `mutation refused` text is printed.
@@ -1368,7 +1367,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-5 (E2E): inside a project worktree the guard admits the
+    /// Inside a project worktree the guard admits the
     /// mutation, so a genuinely absent target reports its own absence naming
     /// the searched project root and branch — distinct from the context
     /// refusal — and `review add` plus `review list` still succeed there.
@@ -1449,7 +1448,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-22 (e2e): `apg review list` opens the branch database in
+    /// `apg review list` opens the branch database in
     /// the **read-only** class rather than taking the exclusive read-write class
     /// a concurrent verdict/writer occupies. The test process holds both classes
     /// for the whole child run — a read-only reader, and a read-write handle

@@ -317,7 +317,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
     }
 
-    /// The Win-A freshness fast path admits no node, so it streams neither the
+    /// The freshness fast path admits no node, so it streams neither the
     /// start line nor a closing summary.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary through a pty); run via cargo test-e2e"]

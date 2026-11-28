@@ -179,7 +179,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-12: `apg node add` and `apg node update` on a tier node
+    /// `apg node add` and `apg node update` on a tier node
     /// whose `--body` carries negation/future/time-relative wording still
     /// SUCCEED — the writer decides, the advisory never blocks a write — and
     /// land their node files; AND the routed write-time wording advisory
@@ -806,7 +806,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-2 (E2E): on the MAIN checkout `apg spec lint` reads MAIN's
+    /// On the MAIN checkout `apg spec lint` reads MAIN's
     /// own `apg/layers` store and REPORTS its violations — the non-zero exit is
     /// the findings case, not a project-context refusal. The seeded R4 shape
     /// (a lone implementation note with no `details` edge) is the finding the

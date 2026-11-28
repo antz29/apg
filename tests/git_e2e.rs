@@ -1455,7 +1455,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The refined project-context wording (phase-01): every refusal states the
+    /// The project-context wording: every refusal states the
     /// current branch (or that the checkout holds none) and carries exactly one
     /// `Fix:` line naming `apg project start` and the move into the worktree.
     #[test]
@@ -1887,10 +1887,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-25 (acceptance, rewritten for the write-back buffer): with
-    /// a live session, a run of durable node/edge mutations is STAGED into the
-    /// session's write-back buffer with NO commit — `apg/layers/**` stays at the
-    /// last saved state and git history is untouched. Exactly ONE
+    /// With a live session, a run of durable node/edge mutations is STAGED into
+    /// the session's write-back buffer with NO commit — `apg/layers/**` stays at
+    /// the last saved state and git history is untouched. Exactly ONE
     /// `apg session save` then produces exactly ONE durable commit for the whole
     /// buffered set, and that commit stages durable files only — never
     /// `apg/.trans` (the gitignored transient store).

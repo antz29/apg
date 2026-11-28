@@ -350,13 +350,13 @@ mod e2e {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// feedback-102: the per-language scaffolding carries the pure-intermediate
-    /// modules, the file-less descendants, and every `Module -> Module` edge a
-    /// per-file fact unit cannot — while planned placeholders and file-less
-    /// components are excluded — and it round-trips through the store under a
-    /// cache key. PHASE_09: it also carries the `Language` root and one
-    /// `Language -> Module` edge for every module of a component, the
-    /// intermediate and file-less ones included.
+    /// The per-language scaffolding carries the pure-intermediate modules, the
+    /// file-less descendants, and every `Module -> Module` edge a per-file fact
+    /// unit cannot — while planned placeholders and file-less components are
+    /// excluded — and it round-trips through the store under a cache key. It
+    /// also carries the `Language` root and one `Language -> Module` edge for
+    /// every module of a component, the intermediate and file-less ones
+    /// included.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir + store on disk); run via cargo test-e2e"]
     fn module_scaffolding_covers_intermediates_descendants_and_round_trips() {
@@ -1171,14 +1171,13 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// phase-04 task-11: one redb store holds each worktree's OWN `refs`/scan/
-    /// delta rows, and a unit is selected on its five-part `(format, config,
-    /// language, repo-relative path, blob OID)` identity alone — the recorded
-    /// `inputs` diagnostic never gates the OID-only `candidate`/`has_unit`
-    /// selection, while the inputs-gated `has`/`reuse` still does. phase-07
-    /// task-9: the scan row is manifest-free — it carries only its
-    /// `sha`/`cache_key`/`content_key`, and each worktree's tree is asserted
-    /// through its own refs rows.
+    /// One redb store holds each worktree's OWN `refs`/scan/delta rows, and a
+    /// unit is selected on its five-part `(format, config, language,
+    /// repo-relative path, blob OID)` identity alone — the recorded `inputs`
+    /// diagnostic never gates the OID-only `candidate`/`has_unit` selection,
+    /// while the inputs-gated `has`/`reuse` still does. The scan row is
+    /// manifest-free — it carries only its `sha`/`cache_key`/`content_key`, and
+    /// each worktree's tree is asserted through its own refs rows.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo/worktrees/redb store); run via cargo test-e2e"]
     fn each_worktree_keeps_its_rows_and_units_reuse_on_the_oid_alone() {
@@ -1392,7 +1391,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// phase-07 task-9: the delta refs relay writes only the changed rows — a
+    /// The delta refs relay writes only the changed rows — a
     /// one-file delta upserts exactly that path's ref row and removes a vanished
     /// path's row, leaving every other path's row and a sibling worktree's rows
     /// untouched (no wholesale delete-plus-insert of the worktree's manifest).
@@ -1470,7 +1469,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&sibling);
     }
 
-    /// phase-05 task-6: a body written one minute ago — inside the intent grace
+    /// A body written one minute ago — inside the intent grace
     /// window — is rooted by its worktree's live intent even though no manifest
     /// reaches it, so a collection leaves the body and its unit intact. An
     /// unrooted orphan body proves the collector actually ran.
@@ -1548,7 +1547,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
     }
 
-    /// phase-05 task-6: a second worktree's scan is in flight — it has committed
+    /// A second worktree's scan is in flight — it has committed
     /// an unreferenced body + unit (no manifest row) and holds a live intent —
     /// while a collection runs against the same store. The intent still roots
     /// the body, so the body survives; an unrooted orphan body proves the
@@ -1644,7 +1643,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
     }
 
-    /// phase-05 task-6: the collector takes its own write transaction, so it
+    /// The collector takes its own write transaction, so it
     /// waits on the external gate the record's held transaction owns — the
     /// record commit is never blocked by it and never loses its row. The record
     /// commit completes promptly while the collector is still waiting; the
@@ -1730,7 +1729,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
     }
 
-    /// phase-05 task-7 (feedback-25): the scan-side intent lifecycle. A real CLI
+    /// The scan-side intent lifecycle. A real CLI
     /// scan of a scratch `/tmp` repo commits its `intents` row before its first
     /// reuse read and clears it after the record commit, so the redb `intents`
     /// table is empty once the scan exits. The row is read from `facts.db`

@@ -1,6 +1,6 @@
-//! e2e proof of the `apg scan --module` contract (module-flag-resolution
-//! phase-01 task-3), driven only through the CANDIDATE binary
-//! (`testutil::apg_bin`) against scratch `/tmp` repos — never the apg repo.
+//! e2e proof of the `apg scan --module` contract, driven only through the
+//! CANDIDATE binary (`testutil::apg_bin`) against scratch `/tmp` repos — never
+//! the apg repo.
 //!
 //! Two things are proven: a `--module` value naming a missing directory or a
 //! non-directory fails the scan loudly and writes no graph; and on one unchanged
@@ -471,8 +471,8 @@ mod e2e {
     /// Per-honouring-language CLI-through admission: on a scratch tree with two
     /// sibling source subtrees, a relative `--module <selected>` and its
     /// absolute form each exit 0 and admit exactly the selected subtree's
-    /// files — never the sibling's. Rust reuses phase-4 task-17's cargo fixture
-    /// and pins only the absolute form here (its relative pin is that task's).
+    /// files — never the sibling's. Rust reuses the shared cargo fixture and
+    /// pins only the absolute form here (the relative form is pinned elsewhere).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repos under /tmp, spawned apg + per-language frontends); run via cargo test-e2e"]
     fn per_language_relative_and_absolute_admission() {

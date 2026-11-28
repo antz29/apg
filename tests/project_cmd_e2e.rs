@@ -21,9 +21,9 @@ use std::path::{Path, PathBuf};
 /// The module/fqn namespace the payload fixtures use.
 const MOD: &str = "fixture.mod";
 const FILE: &str = "/abs/store.go";
-/// PHASE_09: the hermetic scan (`testutil::scan_checkout`, lang_switch `go`)
-/// roots the frontend-emitted module identity, so the canonical FQN of the
-/// fixture's scanned code is `go.fixture.mod.*` — the form every scanned-code
+/// The hermetic scan (`testutil::scan_checkout`, lang_switch `go`) roots the
+/// frontend-emitted module identity, so the canonical FQN of the fixture's
+/// scanned code is `go.fixture.mod.*` — the form every scanned-code
 /// expectation and every authored `implemented-by` target must use.
 const MOD_FQN: &str = "go.fixture.mod";
 
@@ -1312,7 +1312,7 @@ fn count_dirs_named(root: &Path, name: &str) -> usize {
 mod e2e {
     use super::*;
 
-    /// fast-project-start task-5 (e2e): `apg project start` at a
+    /// `apg project start` at a
     /// freshly-scanned main copies main's `apg/.trans` into the branch
     /// verbatim — the branch `db.lbug` is byte-identical to main's, its row
     /// set equals a full scan's, and NO new frontend runs (the copied
@@ -1385,7 +1385,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// fast-project-start task-6 (e2e): `apg project start` refuses when
+    /// `apg project start` refuses when
     /// the main checkout has no scan OR a stale one, naming `apg scan` in
     /// the main checkout — or, when its database is present but unreadable,
     /// names the database and the underlying cause without claiming
@@ -3988,7 +3988,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// spec-splice-guard phase-03 task-1 (e2e): a SPEC-ONLY `apg project
+    /// A SPEC-ONLY `apg project
     /// merge` — no code change at all — must land the merged authored
     /// node/edge rows in main's `db.lbug`: the rebuild's one landing artifact,
     /// and the query index every later read resolves against.
@@ -3998,13 +3998,13 @@ mod e2e {
     /// edge through a LIVE session (the mandatory-session path) and saves — a
     /// SPEC-ONLY change, with NO worktree scan, so the branch DB still matches
     /// main's seed content identity. Merging fast-forwards main to the branch;
-    /// its rebuild takes the win-C splice fast path, whose `apply` writes no
+    /// its rebuild takes the splice fast path, whose `apply` writes no
     /// authored/transient row (it applies only the code delta). Main's database
     /// therefore silently loses the merged spec, and the splice stamps the
     /// merged HEAD so a later `apg scan` fast-paths as fresh and never corrects
     /// it.
     ///
-    /// The phase-01 authored-identity guard makes the seed ineligible (the
+    /// The authored-identity guard makes the seed ineligible (the
     /// assembled graph's authored rows are not represented in the seed DB), so
     /// the correctness-reference FULL LOAD runs and assembles every row of the
     /// branch's `apg/layers/**` model into main's database. The assertions
@@ -4403,14 +4403,14 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Phase-05 task-5 (E2E): the MINIMAL success run of the project lifecycle
+    /// The MINIMAL success run of the project lifecycle
     /// SPAWNED from the main checkout's CLI — `apg project start` exits 0 and
     /// creates the worktree, branch and branch DB; after exactly one branch
     /// commit (a whole-model-valid spec plus a verify-passing plan: one
     /// Satisfies'd phase and one task over the implemented-by target),
     /// `apg project merge` exits 0 and fast-forwards the default branch to the
     /// branch tip. No session/mutate/realize/resolve lifecycle; the verify
-    /// gate's refusal halves stay with phase-3 task-3 and the merge round trip.
+    /// gate's refusal halves are pinned separately from the merge round trip.
     #[test]
     #[ignore = "e2e tier: real I/O (worktree/branch/db.lbug/git/spawned apg); run via cargo test-e2e"]
     fn project_start_and_merge_from_the_main_cli_succeed() {
@@ -4787,14 +4787,14 @@ mod e2e {
     // phase-2 task-6: the project-start toolchain-cache seeder.
     // ------------------------------------------------------------------
 
-    /// cache-copy task-6 (e2e): both `copy` and `auto` materialise the main
+    /// Both `copy` and `auto` materialise the main
     /// checkout's `.trans/cache` byte-for-byte into the new worktree.
     ///
     /// This is the observable clone-or-copy equivalence on this filesystem:
     /// `auto` attempts a CoW clone (`clonefile` on macOS, `FICLONE` on Linux)
     /// and falls back to a full recursive copy where the filesystem cannot
     /// clone, and both policies must land the same tree. The CoW-unsupported
-    /// *classification* is unit-tested (`src/project_cmd/tests.rs`, task 2.5),
+    /// *classification* is unit-tested (`src/project_cmd/tests.rs`),
     /// so no non-CoW filesystem is fabricated here.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/worktree/cache tree); run via cargo test-e2e"]
@@ -4842,7 +4842,7 @@ mod e2e {
         }
     }
 
-    /// cache-copy task-6 (e2e): the `skip` policy creates no cache subtree in
+    /// The `skip` policy creates no cache subtree in
     /// the new worktree (and leaves main's cache in place).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/worktree/cache tree); run via cargo test-e2e"]
@@ -4873,7 +4873,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// cache-copy task-6 (e2e): a clone or copy failure leaves no partial
+    /// A clone or copy failure leaves no partial
     /// `cache/` behind and the error names the destination path and the OS
     /// error. A regular FILE as the destination's parent makes
     /// `create_dir_all(parent)` fail deterministically with a real OS error on
@@ -4929,7 +4929,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// cache-copy task-6 (e2e): `project start` takes the spec lock BEFORE it
+    /// `project start` takes the spec lock BEFORE it
     /// judges freshness, so it waits out a running `--force` scan instead of
     /// reading a half-written scan as stale.
     ///
@@ -5010,7 +5010,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// phase-6 task-3 (e2e): `apg project start` seeds the new worktree's
+    /// `apg project start` seeds the new worktree's
     /// per-worktree fact-store rows (refs/manifest, scan record, deps,
     /// signatures, overloads) from the main checkout's. A cold main scan, then
     /// start, then a one-file commit in the worktree, must make the worktree's
