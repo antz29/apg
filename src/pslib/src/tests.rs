@@ -1,6 +1,3 @@
-//! The crate's unit/int test root: pure in-memory tests in inner `unit` and
-//! `int` tier submodules, with shared fixtures and helpers at this root.
-
 use crate::builtins::{is_builtin, is_system_type, ACCELERATORS, ALIASES, COMMANDS};
 use crate::diag::{error_regions, error_summary, write_diagnostic, Diagnostic};
 use crate::identity::{
