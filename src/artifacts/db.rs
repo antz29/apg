@@ -6,7 +6,6 @@ use std::sync::{Mutex, OnceLock};
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::git;
-use crate::layers::NodeFile;
 #[cfg(test)]
 use crate::layers::NodeProperties;
 use crate::load;
@@ -688,25 +687,6 @@ impl ArtifactDb {
         Ok(())
     }
 
-    /// Read the **held handle**'s pending-removal ledger: every durable identity
-    /// a session admission recorded as removed and the next save must delete the
-    /// node file of.
-    ///
-    /// Ordered by `fqn` in the query itself, so a save serialises and reports the
-    /// same identities in a stable order whatever order the storage returns. An
-    /// empty ledger is an empty vector. Runs on a fresh connection over the
-    /// caller's handle and touches no `apg/layers/**` file.
-    pub fn pending_removals(&self) -> anyhow::Result<Vec<PendingRemoval>> {
-        let (_, rows) = query_rows(
-            &self.conn()?,
-            "MATCH (n:PendingRemoval) RETURN n.fqn ORDER BY n.fqn",
-        )?;
-        Ok(rows
-            .into_iter()
-            .map(|row| PendingRemoval { fqn: cell(&row, 0) })
-            .collect())
-    }
-
     pub fn has_pending_state(&self) -> bool {
         let conn = match self.conn() {
             Ok(conn) => conn,
@@ -733,130 +713,6 @@ impl ArtifactDb {
             },
             &ledger,
         )
-    }
-
-    /// Flag exactly the durable node rows the named node files identify, on the
-    /// **held handle**: `updated = 1` on each identity's row, so the next save
-    /// serialises exactly the node files the mutation changed — and no reader
-    /// mistakes an unchanged row for a changed one.
-    ///
-    /// A node-file identity is `(label, fqn)`, and the same FQN never spans two
-    /// tables; so each identity is marked once per durable node table
-    /// ([`DURABLE_NODE_TABLES`], the `apg/layers/**` roster), and exactly one of
-    /// those statements matches the row. The `PendingRemoval` ledger is not a
-    /// durable node table and carries no `updated` column, so it is never
-    /// walked — a pending identity's node file is deleted, not written.
-    ///
-    /// `updated` has no `DEFAULT`, so a row the session's Cypher `MERGE` path
-    /// creates carries NULL until this sets it; dirty-state readers treat only
-    /// `= 1` as dirty. Marking is idempotent — an identity named twice, or a
-    /// second mark of an already-dirty row, re-sets the same `1` on the same
-    /// row — and an empty write set issues no statement and opens no
-    /// connection. Runs on a fresh connection over the caller's handle and
-    /// touches no `apg/layers/**` file.
-    pub fn mark_dirty(&self, writes: &[NodeFile]) -> anyhow::Result<()> {
-        if writes.is_empty() {
-            return Ok(());
-        }
-        let conn = self.conn()?;
-        for node in writes {
-            let layer = crate::node_cmd::resolve_layer(&node.layer)?;
-            let fqn = crate::layers::node_file::fqn(layer, &node.node_type, &node.name);
-            for &(table, _, _, _) in DURABLE_NODE_TABLES {
-                conn.query(&format!(
-                    "MATCH (n:{table} {{fqn: {}}}) SET n.updated = 1",
-                    lit(&fqn)
-                ))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Clear the **held handle**'s pending state in one call: reset the session's
-    /// dirty flag (`updated = 0`) on every marked durable node row and empty the
-    /// pending-removal ledger, so a database a save has just drained carries no
-    /// pending state any more — and the read of
-    /// [`pending_removals`](Self::pending_removals) an immediately following
-    /// save makes is empty, so that save writes nothing.
-    ///
-    /// One statement per durable node table ([`DURABLE_NODE_TABLES`], the
-    /// `apg/layers/**` roster `mark_dirty` walks) matches the dirty rows alone —
-    /// a row that was never marked holds NULL (or a stale `0`) and is left
-    /// untouched — and the ledger's `DELETE` drops every pending identity.
-    /// `updated` is session state rather than node-file data, so clearing it
-    /// changes no node file, and on an already-clean database every statement
-    /// matches no row. Runs on one connection over the caller's handle and
-    /// touches no `apg/layers/**` file.
-    pub fn clear_pending_state(&self) -> anyhow::Result<()> {
-        let conn = self.conn()?;
-        for &(table, _, _, _) in DURABLE_NODE_TABLES {
-            conn.query(&format!(
-                "MATCH (n:{table}) WHERE n.updated = 1 SET n.updated = 0"
-            ))?;
-        }
-        conn.query("MATCH (n:PendingRemoval) DELETE n")?;
-        Ok(())
-    }
-
-    /// Read the held DB's **transient, project-scoped** `Feedback` rows and
-    /// their `Reviews` edges as [`Record`]s — the DB-only source for `node rm`'s
-    /// outstanding-feedback warning.
-    ///
-    /// The direct (non-session) path builds that warning from the project's
-    /// transient `.trans` mirror files
-    /// ([`crate::specs::project_transient_files`]); this is the session-path
-    /// equivalent, reading the same project-scoped set from the DB the session
-    /// already holds instead of re-reading `.trans`. Only rows whose FQN sits in
-    /// the caller-supplied `project`'s namespace (`<project>/…`) are returned —
-    /// exactly the scope `project_transient_files` selects — so a routed `rm` in
-    /// one project never warns about another project's feedback. The `Feedback`
-    /// table carries `fqn`/`body`/`status`/`disposition`
-    /// ([`crate::artifacts::merge::node_merge`]); the `Reviews` rel carries only
-    /// its endpoints.
-    ///
-    /// This reads the **held DB** and performs no `.trans` read, and it does
-    /// **not** decide which feedback is outstanding: the open/actioned selection
-    /// and the warning text stay in [`crate::node_cmd::node_rm_change`], which
-    /// consumes these records. The caller supplies the `Coordinator`'s resolved
-    /// project; the detached-HEAD / non-git `None` case is handled by the caller
-    /// passing no project (receiving an empty set).
-    ///
-    /// Deterministic: the `Feedback` records are ordered by `fqn`, then the
-    /// `Reviews` records by `(from, to)`.
-    pub fn feedback_records_from_db(&self, project: &str) -> anyhow::Result<Vec<Record>> {
-        let conn = self.conn()?;
-        let prefix = format!("{project}/");
-        let mut records: Vec<Record> = Vec::new();
-
-        let (_, mut feedback_rows) = query_rows(
-            &conn,
-            "MATCH (f:Feedback) RETURN f.fqn, f.body, f.status, f.disposition",
-        )?;
-        feedback_rows.retain(|row| cell(row, 0).starts_with(&prefix));
-        feedback_rows.sort_by_key(|row| cell(row, 0));
-        for row in feedback_rows {
-            records.push(Record::Feedback {
-                fqn: cell(&row, 0),
-                body: cell(&row, 1),
-                status: cell(&row, 2),
-                disposition: cell(&row, 3),
-            });
-        }
-
-        let (_, mut review_rows) = query_rows(
-            &conn,
-            "MATCH (f:Feedback)-[r:Reviews]->(t) RETURN f.fqn, t.fqn",
-        )?;
-        review_rows.retain(|row| cell(row, 0).starts_with(&prefix));
-        review_rows.sort_by_key(|row| (cell(row, 0), cell(row, 1)));
-        for row in review_rows {
-            records.push(Record::Reviews {
-                from: cell(&row, 0),
-                to: cell(&row, 1),
-            });
-        }
-
-        Ok(records)
     }
 }
 

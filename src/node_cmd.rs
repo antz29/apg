@@ -475,12 +475,11 @@ fn node_rm_change(
     // project's transient record set, so the writer's claim and the reviewer's
     // resolve-or-reject still proceed. The selection runs over the
     // caller-supplied effective `feedback` record set (the `Record::Feedback` /
-    // `Record::Reviews` shape `ArtifactDb::feedback_records_from_db` returns):
-    // the direct path supplies it from `.trans`, the session from the held DB.
-    // Best-effort: the write's own project-context guard still governs. Carrying
-    // it (rather than printing here) lets a routed mutation return it in the
-    // session reply, and the caller (cmd_node) prints it on its own stderr while
-    // the removal completes.
+    // `Record::Reviews` shape [`build_change`] reads from the project's `.trans`
+    // mirrors); an empty set carries no warning. Best-effort: the write's own
+    // project-context guard still governs. Carrying it (rather than printing
+    // here) keeps the warning in the returned [`Change`], which the caller
+    // (`cmd_node`) prints on its own stderr while the removal completes.
     let mut warnings = Vec::new();
     let mut items: Vec<String> = Vec::new();
     for r in feedback {
