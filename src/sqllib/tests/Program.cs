@@ -13,7 +13,7 @@ namespace SqlFrontend.Tests
     /// Framework-free gate tests for the SQL frontend, run with `dotnet run` and this
     /// project's path (src/sqllib/tests/SqlFrontend.Tests.csproj). Prints FAIL lines and
     /// exits non-zero on any failure. An optional argument selects one tier (unit, int or e2e;
-    /// none runs all three): unit and int are pure in-memory, e2e reads the committed fixtures.
+    /// none runs all three).
     public static class TestMain
     {
         static int _failures;
