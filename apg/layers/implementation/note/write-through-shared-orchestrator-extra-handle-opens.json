@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "write-through-shared-orchestrator-extra-handle-opens",
+  "body": "The write-through delegates to the shared write-project orchestrator, so beside the projection re-ingest on the held handle its code-universe read and scan-row refresh open their own handles, and the pending-deletion flush re-anchors on one; fold those per-write opens into the single critical section when the release task reworks the scan re-anchor.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.session.Session.write_through",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
