@@ -108,9 +108,6 @@ permissions:
   - action: apg_edge
     resource: "*"
     effect: allow
-  - action: apg_session
-    resource: "*"
-    effect: allow
   - action: apg_review
     resource: "*"
     effect: allow
@@ -154,7 +151,7 @@ You can:
 - query with `apg_query`, `apg_find_symbol`, `apg_modules`, `apg_module_files`,
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`, `apg_struct`,
   `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`, `apg_hunk`; author with
-  `apg_node`, `apg_edge`; drive the session with `apg_session`; read feedback with the
+  `apg_node`, `apg_edge`; read feedback with the
   read-only `apg_review`; lint with `apg_spec_lint`.
 You cannot:
 - edit any file, node, or plan; hold no `apg_plan*`, no `apg_review_add`/`resolve`/`reject`;
@@ -175,21 +172,19 @@ You cannot:
 Operate **inside the project worktree** — cwd inside it, so the suite tools' walk-up discovery
 finds the worktree's own branch DB. Mutations are guarded: they run only inside a project
 worktree, on the project branch — main is never a mutation place. Pass the **required registered project name**; the tool resolves that project's worktree.
-A durable `apg node`/`apg edge` mutation needs a live session and lands in the worktree database at
-admission (projected, so routed reads see it) but is not durable until `apg session save`; you never commit.
+A durable `apg node`/`apg edge` mutation is a self-contained per-invocation write — see
+*Per-invocation writes* below. You never run git yourself.
 **A blocked step is a stop, never a workaround** — never route it through another allowed command (a shell wrapper, `-exec`); report the refusal.
-### Caller-owned sessions (a durable mutation needs a live session)
-A durable mutation is **admitted only through a live session**: it lands in the worktree database
-at admission (projected, so routed reads see it) and is not durable until saved. With no live
-session the mutation refuses and names `apg session start`. You are the caller — open the session
-for the worktree, decide when to persist, release it:
-- **start** — `apg_session` (`action: start`, the default) launches the single-writer coordinator, which owns the branch DB and the extended `specs.lock` flock.
-- **save** — `apg_session` `action: save` is the **single durability point**: it writes the marked rows and removes the pending-deletion files in one atomic `apg/layers/**` write plus exactly one commit, then clears the marks.
-- **end** — `apg_session` `action: end` releases DB, flock and socket; it refuses while the database carries pending state.
-- **abort** — `apg_session` `action: abort` discards the pending set and releases the session.
-`apg_query` routes through the live session and sees unsaved changes; `apg_spec_lint` reads the
-durable node files, so lint **after** a save, fix, save again. `apg scan` / `apg project merge`
-refuse while a session is live: save and end first. The lifecycle runs through `apg_session`, never `bash`.
+### Per-invocation writes (no session to manage)
+Every `apg` invocation opens the worktree `apg/.trans/db.lbug` **read-only**, does its work and exits;
+`apg_query` opens the same database read-only and sees every committed write.
+An `apg_node`/`apg_edge` mutation **upgrades that same invocation** for writing under the
+**blocking** worktree lock: if another writer holds it your call **waits**, it never fails fast.
+Inside one critical section the invocation writes the node file, makes **exactly one git commit**
+and projects into the database, then releases the lock — there is no admission/pending state and
+no save to flush later, so a write with no "started session" is impossible by construction.
+`apg_spec_lint` reads the durable node files, so lint **after** your write; `apg scan` /
+`apg project merge` run between writes and need no save or end.
 ### Durable-spec rules (R1–R5)
 Every authored node states what **is**. R1 — positive present truth. R5 — timeless truth.
 R2 — a constraint's layer is its scope: `global.constraint.*` binds the whole durable spec, a
@@ -284,7 +279,7 @@ and report the tier FQNs.
 - A graph-native spec as durable authored nodes, through the tools.
 - Requirements concrete enough to map into plan phases, with constraint nodes (or requirement-body acceptance criteria) that describe observable completion.
 ## Hard limits
-- You **write no file**, never commit, never mutate code: `apg_node`/`apg_edge` inside a caller-owned session is your only authoring surface.
+- You **write no file**, never commit, never mutate code: `apg_node`/`apg_edge` is your only authoring surface — each call opens the worktree database read-only and, for its own write, upgrades under the blocking lock to write the node file, make its one commit and project it.
 - You never run `apg_scan`, never `apg project *`, never `apg_plan*`, and never action Feedback.
 - Author present truth only — no change-log, no superseded annotation, no decision/provenance note; never invent a law the spec does not need.
 - Never fabricate an FQN, a path, or a requirement; a blocked step is a stop and a report, never a workaround.
