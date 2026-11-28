@@ -59,7 +59,6 @@ pub fn is_apg_layout_root(dir: &Path) -> bool {
 }
 
 /// Path of a plan's JSONL under the gitignored `apg/.trans/plans/`.
-#[allow(dead_code)]
 pub fn plan_jsonl_path(apg_root: &Path, project: &str) -> PathBuf {
     apg_root
         .join(TRANS)
@@ -102,7 +101,6 @@ pub fn read_jsonl(path: &Path) -> anyhow::Result<Vec<Record>> {
 /// Serializes records into a JSONL file, creating parent dirs (write-through:
 /// the file is written atomically in one write, so a crash mid-session loses
 /// nothing).
-#[allow(dead_code)]
 pub fn write_jsonl(path: &Path, records: &[Record]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

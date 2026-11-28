@@ -29,10 +29,6 @@
 //! refs/scan/delta rows stay this worktree's own
 //! (`requirements.requirement.fact-manifests-are-per-worktree`).
 
-// A few helpers on this surface are consumed by the splice path and the
-// integration tests rather than by `cmd_scan` directly.
-#![allow(dead_code)]
-
 // The orchestration is split into its cohesive halves — the language mapping
 // ([`language`]), the preparation ([`prepare`]), and the recording
 // ([`record`]) — all re-exported here so `crate::incremental::<name>` keeps

@@ -33,9 +33,8 @@
 //! declared FQN and every function's arity/params unchanged has an unchanged
 //! signature and does not pull dependents into the target set.
 
-// The incremental surface: several helpers here (e.g. `target_set`,
-// `signature_changed_files`, `by_language`) are consumed by the impact unit
-// tests and the scan orchestration rather than by `cmd_scan` directly.
+// `signature::params_of` is the FQN-suffix parser with no caller: a graph node
+// carries its `params` directly, so this module keeps the allow for it.
 #![allow(dead_code)]
 
 // The impact closure is split into its three cohesive halves — the signature

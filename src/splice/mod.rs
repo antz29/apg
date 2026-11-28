@@ -44,8 +44,6 @@
 //! introspecting the result, so any future schema change automatically
 //! invalidates seeds written by an older/newer binary with no list to update.
 
-#![allow(dead_code)]
-
 // The seam is split into its cohesive halves — the seed ([`seed`]), the delta
 // application ([`apply`]), the post-apply re-resolution of the seed's unresolved
 // edges ([`unresolved`]), and the atomic publish ([`publish`]). The seed, apply

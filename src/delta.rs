@@ -18,11 +18,6 @@
 //!
 //! Everything here is libgit2 (the git CLI is never shelled out to, R6).
 
-// The incremental surface: some accessors (e.g. `FullScanReason::tag`,
-// `Plan::requires_full_scan`) are exercised by the delta unit tests and the
-// scan orchestration rather than by `cmd_scan` directly.
-#![allow(dead_code)]
-
 use std::collections::BTreeSet;
 use std::path::Path;
 

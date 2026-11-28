@@ -57,11 +57,6 @@
 //! it into each record's `code_type`, so a config change must force a full
 //! load).
 
-// This module holds the content-addressed API, and the whole module's
-// surface is deliberately public even though a few accessors are not wired into
-// production: `FactStore::has` is used only by the test suites, and
-// `Manifest::rebase_root` currently has no caller at all.
-//
 // The implementation is split across cohesive submodules — the body codec
 // ([`body`]), the manifest and global cache key ([`manifest`]), the per-file
 // fact units, single-pass index and module scaffolding ([`fragment`]), the
@@ -69,7 +64,6 @@
 // facade over the redb store ([`factstore`]), the reachability collector
 // ([`gc`]), and the checkout-local toolchain cache layout ([`toolchain`]) — all
 // re-exported here so `crate::cache::<name>` keeps resolving.
-#![allow(dead_code)]
 
 pub mod body;
 pub mod factstore;
