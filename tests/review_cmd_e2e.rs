@@ -1085,11 +1085,12 @@ mod e2e {
     /// item still closes through the same `apg review reject|resolve <fqn>`
     /// surfaces as any other.
     ///
-    /// Durable mutations are mandatory-session, so the
-    /// reviewed node's add and removal each run under a live `apg session
-    /// start` and are made durable by `apg session save`. The transient
-    /// `apg review …` writes take the same extended flock as a live session, so
-    /// they run only once the session has ended — between the add (which the
+    /// Durable mutations are per-invocation: the reviewed node's add and
+    /// removal each complete in their own invocation, inside the blocking
+    /// worktree critical section (node-file write, exactly one commit, database
+    /// projection), so no session is started, saved or ended. The transient
+    /// `apg review …` writes take the same extended flock per invocation and
+    /// need no live session either, so they run between the add (which the
     /// review attaches to) and the removal (which orphans it).
     #[test]
     #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
@@ -1097,10 +1098,11 @@ mod e2e {
         let (apg_root, repo, wt) = fixture("orphan");
 
         // The reviewed node is seeded through the DIRECT primitive: the review
-        // fixture's base is deliberately partial, so it cannot pass the SPEC
-        // §8.1 whole-model save boundary a live session now enforces (that
-        // refusal is pinned in `node_cmd_e2e`). Review's own subject is the
-        // transient record set, not the session mechanics.
+        // fixture's base is deliberately partial, so it is not whole-model
+        // valid (a judgement `apg spec lint` and the merge gate make, not the
+        // write boundary — that contract is pinned in `node_cmd_e2e`), and
+        // review's own subject is the transient record set, not the durable
+        // write path.
         apg::layers::write_project(
             &apg_root,
             &[testutil::node("requirements", "requirement", "gone")],
