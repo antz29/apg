@@ -14,8 +14,8 @@ class ApgRust < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.31.0"
-    rebuild 14
-    sha256 cellar: :any_skip_relocation, arm64_sequoia: "93c8535019b067616f45f4d2f9132d6202dbaed5da85e91166cfd85ca08dc4a5"
+    rebuild 15
+    sha256 cellar: :any_skip_relocation, arm64_sequoia: "402a82bc08f55688efacfaf3b10db01158c4f56a0a075e01fc89bbf2ee21362b"
   end
 
   depends_on "rust" => :build
