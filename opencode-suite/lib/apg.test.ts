@@ -24,9 +24,9 @@ import {
   QUERY_FAILED_PREFIX,
 } from "./apg.ts"
 
-// project-binding phase-03.task-8: every registered suite tool takes a REQUIRED
-// registered `project` name and no `directory` selector. The full roster is
-// imported so the contract is pinned tool by tool, not sampled.
+// Every registered suite tool takes a REQUIRED registered `project` name and no
+// `directory` selector. The full roster is imported so the contract is pinned
+// tool by tool, not sampled.
 import apgScan from "../tools/apg_scan.ts"
 import apgQuery from "../tools/apg_query.ts"
 import apgFindSymbol from "../tools/apg_find_symbol.ts"
@@ -112,9 +112,8 @@ test("noteIfEmpty appends only when there are no data rows", () => {
   expect(noteIfEmpty("headers\nrow\n", "(none)")).toBe("headers\nrow\n")
 })
 
-// fix-module-identity task-27: the pure stored<->absolute conversion. No fs,
-// no subprocess, no apg spawn — `resolveProjectPath` is a path spelling
-// transform only.
+// The pure stored<->absolute conversion. No fs, no subprocess, no apg spawn —
+// `resolveProjectPath` is a path spelling transform only.
 test("resolveProjectPath maps a stored repo-relative identity to an absolute path", () => {
   const dir = "/home/u/repo"
   expect(resolveProjectPath(dir, "src/a.rs")).toBe("/home/u/repo/src/a.rs")
@@ -138,11 +137,11 @@ test("resolveProjectPath round-trips in both directions", () => {
   expect(resolveProjectPath(dir, resolveProjectPath(dir, absolute))).toBe(absolute)
 })
 
-// fix-module-identity feedback-17: `apg_find_symbol` is the one curated tool
-// whose identity cell is kind-dependent — a File row's fqn (column 1) is its
-// path, a symbol row's fqn is a symbol name and its path (column 2) is the
-// path. The selector must pick the identity cell per kind, never blind-rebase
-// column 1 (which would join a symbol name under the project dir).
+// `apg_find_symbol` is the one curated tool whose identity cell is
+// kind-dependent — a File row's fqn (column 1) is its path, a symbol row's fqn
+// is a symbol name and its path (column 2) is the path. The selector must pick
+// the identity cell per kind, never blind-rebase column 1 (which would join a
+// symbol name under the project dir).
 test("findSymbolRebaseColumns rebases a File's fqn but a symbol's path", () => {
   // kind, n.fqn, n.path, start, end
   expect(findSymbolRebaseColumns(["File", "src/a.rs", "", "1", "9"])).toEqual([1, 2])
@@ -162,13 +161,12 @@ test("findSymbolRebaseColumns does not turn a symbol fqn into a path", () => {
   expect(findSymbolRebaseColumns(file)).toContain(1)
 })
 
-// apg-plan-phases-scoping phase-01: the PURE project-requirement scoping core.
-// `scopeProjectRequirements` is the scoping DECISION — side-effect-free (no fs,
-// no subprocess, no db, no git), so it lives in the `bun test` unit tier; the
-// git branch-delta wrapper that feeds it is covered by the opt-in boundary
-// e2e. `satisfies` is THIS project's `Satisfies` relation (requirement FQN ->
-// this project's phase FQNs): a foreign project's edge is filtered by the
-// caller and never reaches the core.
+// The PURE project-requirement scoping core: `scopeProjectRequirements` is the
+// scoping DECISION — side-effect-free (no fs, no subprocess, no db, no git), so
+// it lives in the `bun test` unit tier; the git branch-delta wrapper that feeds
+// it is covered by the opt-in boundary e2e. `satisfies` is THIS project's
+// `Satisfies` relation (requirement FQN -> this project's phase FQNs): a
+// foreign project's edge is filtered by the caller and never reaches the core.
 const REQ = REQUIREMENT_FQN_PREFIX
 
 test("scopes a branch-added-only requirement and reports it unsatisfied", () => {
@@ -247,11 +245,11 @@ test("a requirement Satisfied by another project's phase is not over-satisfied b
   expect(foreign.unsatisfied).toEqual([])
 })
 
-// opencode-2x-support phase-01.task-5: the V2 fs-scope decision. `fsScopeDecision`
-// no longer re-derives an agent's edit grants (the retired `editAllowGlobs`
-// parser): it asserts an operation's resolved path(s) through opencode 2.x's
-// permission engine (`ctx.permission.assert`, the `edit` action) and reduces the
-// outcome to `{ allowed, reason }`.
+// The V2 fs-scope decision. `fsScopeDecision` does not re-derive an agent's
+// edit grants (the retired `editAllowGlobs` parser): it asserts an operation's
+// resolved path(s) through opencode 2.x's permission engine
+// (`ctx.permission.assert`, the `edit` action) and reduces the outcome to
+// `{ allowed, reason }`.
 //
 // TIER: in production the decision's frame does real I/O — `mainCheckoutRoot`
 // shells `git rev-parse` and `canonicalPath` calls `realpathSync` — so the REAL
@@ -819,11 +817,10 @@ test("mainAnchoredResource takes no canonicaliser argument", () => {
   expect(mainAnchoredResource.length).toBe(2)
 })
 
-// project-binding phase-03.task-8: every registered suite tool now names a
-// REQUIRED registered `project` and has no `directory` selector. A tool is a V2
-// `Plugin.define` plugin: its `setup(ctx)` registers through
-// `ctx.tool.transform(editor.add)`, faked below; `execute` never runs, so the
-// test stays pure in-memory.
+// Every registered suite tool names a REQUIRED registered `project` and has no
+// `directory` selector. A tool is a V2 `Plugin.define` plugin: its `setup(ctx)`
+// registers through `ctx.tool.transform(editor.add)`, faked below; `execute`
+// never runs, so the test stays pure in-memory.
 
 type AddedToolProperty = {
   type?: string
@@ -915,9 +912,9 @@ test("every registered suite tool declares a required project and no directory s
   }
 })
 
-// project-context-guard phase-02.task-8: `apg_project` exposes the `claim` verb
-// as one of its actions — the tool that takes ownership of an ownerless
-// registered project (e.g. one recorded by `apg project reconstruct`).
+// `apg_project` exposes the `claim` verb as one of its actions — the tool that
+// takes ownership of an ownerless registered project (e.g. one recorded by
+// `apg project reconstruct`).
 test("apg_project exposes the claim action for an ownerless registered project", async () => {
   const tool = await registeredTool(apgProject)
   expect(tool.name).toBe("apg_project")
@@ -929,14 +926,14 @@ test("apg_project exposes the claim action for an ownerless registered project",
   expect(action?.description ?? "").toContain('"claim"')
 })
 
-// schema-alignment phase-05.task-20: the plan-authoring tools speak the task
-// tier's EDGE vocabulary. A task carries its assigned-to Agent (`assignedTo`),
-// its implements Component (`implements`) and its per-kind operation edges
-// (`operations`, each exactly `{kind, verb, target}`), plus the renames/moves
-// `target` destination — never the retired taskKind/tier/verb/to task fields.
-// `fqn` survives as a PLANNED-NODE input only, so the no-fqn pin is scoped to
-// the task surface (the operation entries and the planned-node description)
-// rather than deleting the planned-node input.
+// The plan-authoring tools speak the task tier's EDGE vocabulary. A task carries
+// its assigned-to Agent (`assignedTo`), its implements Component (`implements`)
+// and its per-kind operation edges (`operations`, each exactly `{kind, verb,
+// target}`), plus the renames/moves `target` destination — never the retired
+// taskKind/tier/verb/to task fields. `fqn` survives as a PLANNED-NODE input
+// only, so the no-fqn pin is scoped to the task surface (the operation entries
+// and the planned-node description) rather than deleting the planned-node
+// input.
 
 test("apg_plan_add's task inputs name the assigned Agent, implements Component and operation edges only", async () => {
   const tool = await registeredTool(apgPlanAdd)
@@ -983,11 +980,11 @@ test("apg_plan's overview derives each phase's targets from the operation edges"
   )
 })
 
-// scan-force phase-02.task-2: `apg scan --force` is a true rebuild (discard the
-// derived index + export, re-run every frontend instead of reusing the shared
-// fact store). The tool-level `description` is the surface an agent reads to
-// DISCOVER the option, so both it and the `force` input are pinned; `execute`
-// never runs here (the argv it assembles is pinned in the opt-in boundary e2e).
+// `apg scan --force` is a true rebuild (discard the derived index + export,
+// re-run every frontend instead of reusing the shared fact store). The
+// tool-level `description` is the surface an agent reads to DISCOVER the
+// option, so both it and the `force` input are pinned; `execute` never runs
+// here (the argv it assembles is pinned in the opt-in boundary e2e).
 test("apg_scan declares a boolean force input and names the from-scratch rebuild in its description", async () => {
   const tool = await registeredTool(apgScan)
   expect(tool.name).toBe("apg_scan")
@@ -996,9 +993,9 @@ test("apg_scan declares a boolean force input and names the from-scratch rebuild
   expect(tool.description ?? "").toContain("from-scratch rebuild")
 })
 
-// cobol-frontend P2 task-26: the `apg_scan` tool declares a `dialect` string input
-// and lists `cobol` among the scannable languages. The argv it forwards as
-// `--std <dialect>` is pinned in the opt-in boundary e2e (it spawns a stub binary).
+// The `apg_scan` tool declares a `dialect` string input and lists `cobol` among
+// the scannable languages. The argv it forwards as `--std <dialect>` is pinned
+// in the opt-in boundary e2e (it spawns a stub binary).
 test("apg_scan declares a string dialect input and lists cobol as a language", async () => {
   const tool = await registeredTool(apgScan)
   expect(tool.input?.properties?.dialect?.type).toBe("string")
@@ -1006,14 +1003,14 @@ test("apg_scan declares a string dialect input and lists cobol as a language", a
   expect(tool.input?.properties?.language?.description).toContain("cobol")
 })
 
-// sql-frontend P6 task-24: the `apg_scan` language list names `sql` as a list item.
+// The `apg_scan` language list names `sql` as a list item.
 test("apg_scan lists sql as a language", async () => {
   const tool = await registeredTool(apgScan)
   expect(tool.input?.properties?.language?.description ?? "").toMatch(/[:,]\s*sql\s*,/)
 })
 
-// powershell-frontend P7 task-13: the `apg_scan` language list names `ps` as a
-// comma-delimited id, so a substring of another word cannot satisfy it.
+// The `apg_scan` language list names `ps` as a comma-delimited id, so a
+// substring of another word cannot satisfy it.
 test("apg_scan lists ps as a language", async () => {
   const tool = await registeredTool(apgScan)
   expect(tool.input?.properties?.language?.description ?? "").toContain("ps,")

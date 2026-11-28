@@ -40,9 +40,9 @@ import {
   type ToolContext,
 } from "../lib/apg.ts"
 
-// opencode-2x-support phase-02.task-41: the ported V2 plugin. Importing the
-// tool module runs `Plugin.define({ id, setup })` at module scope, so the
-// registration-shape e2e below can assert the returned plugin object directly.
+// The ported V2 plugin. Importing the tool module runs
+// `Plugin.define({ id, setup })` at module scope, so the registration-shape e2e
+// below can assert the returned plugin object directly.
 import apgQuery from "../tools/apg_query.ts"
 import apgScan from "../tools/apg_scan.ts"
 import apgProject from "../tools/apg_project.ts"
@@ -202,9 +202,9 @@ test.skipIf(!enabled || !binary)(
       expect(refusal).toContain("projects.db")
       expect(refusal).toContain("main")
       expect(refusal).toContain(project)
-      // plan.phase-02.task-2: the refusal names the command it ran, that
-      // command's exit code and the cwd the lookup ran against — the caller's
-      // context directory chain, since no resolved worktree exists yet.
+      // The refusal names the command it ran, that command's exit code and the
+      // cwd the lookup ran against — the caller's context directory chain,
+      // since no resolved worktree exists yet.
       const directRefusal = Bun.spawnSync({
         cmd: [bin, "project", "resolve", "no-such-project"],
         cwd: repo,
@@ -252,10 +252,9 @@ test.skipIf(!enabled || !binary)(
       expect(await runInProject(bound, ["project", "resolve", project])).toBe(worktree)
       expect(process.cwd()).toBe(cwdBefore)
 
-      // plan.phase-02.task-2: an INDUCED non-zero exit names the root/worktree
-      // the command actually ran against, alongside the command, its exit code
-      // and its stderr — so an operator reading a suite error knows which
-      // checkout produced it.
+      // An INDUCED non-zero exit names the root/worktree the command actually
+      // ran against, alongside the command, its exit code and its stderr — so
+      // an operator reading a suite error knows which checkout produced it.
       const cliFailure = await runCli(bound, ["definitely-not-a-subcommand"])
       expect(typeof cliFailure).toBe("string")
       expect(cliFailure).toContain("definitely-not-a-subcommand")
@@ -276,10 +275,10 @@ test.skipIf(!enabled || !binary)(
       expect(queryFailure.startsWith(QUERY_FAILED_PREFIX)).toBe(true)
       expect(queryFailure).toContain(worktree)
 
-      // `apg_find_symbol`'s kind-aware boundary (feedback-17): its one query
-      // returns a File row whose identity is the `n.fqn` cell (column 1) and
-      // File nodes carry no `path`, so `findSymbolRebaseColumns` resolves that
-      // fqn cell to an absolute path under the resolved worktree.
+      // `apg_find_symbol`'s kind-aware boundary: its one query returns a File
+      // row whose identity is the `n.fqn` cell (column 1) and File nodes carry
+      // no `path`, so `findSymbolRebaseColumns` resolves that fqn cell to an
+      // absolute path under the resolved worktree.
       const toolQuery =
         "MATCH (n) WHERE n.fqn CONTAINS 'a.go' AND labels(n) = 'File' " +
         "RETURN labels(n) as kind, n.fqn, n.path, n.start_line, n.end_line"
@@ -298,18 +297,18 @@ test.skipIf(!enabled || !binary)(
   },
 )
 
-// suite-root-plumbing phase-03.task-3: `apg_project`'s `start` is a main-checkout
-// operation whose registry row is owned by the session `runCli` puts on its
-// child env. The DISCRIMINATION PIN: this process starts with NO
-// `APG_CALLER_SESSION` (deleted below, restored in finally), so no inherited
-// `s1` can own the row — without runCli's own injection the row stays ownerless
-// and the project-bound call below is refused. The POSITIVE half proves the
-// opposite: the same session then makes a bound call with no claim round-trip.
-// The NEGATIVE half, after the positive, rebuilds the live rows ownerless
-// (`apg project reconstruct`) and the SAME bound call is refused with the
-// binary's claim-required message. Real I/O (scratch /tmp repo, a real scan, a
-// project worktree and registry), so opt-in suite e2e against a candidate
-// binary (`global.constraint.no-real-project-test`).
+// `apg_project`'s `start` is a main-checkout operation whose registry row is
+// owned by the session `runCli` puts on its child env. The DISCRIMINATION PIN:
+// this process starts with NO `APG_CALLER_SESSION` (deleted below, restored in
+// finally), so no inherited `s1` can own the row — without runCli's own
+// injection the row stays ownerless and the project-bound call below is
+// refused. The POSITIVE half proves the opposite: the same session then makes a
+// bound call with no claim round-trip. The NEGATIVE half, after the positive,
+// rebuilds the live rows ownerless (`apg project reconstruct`) and the SAME
+// bound call is refused with the binary's claim-required message. Real I/O
+// (scratch /tmp repo, a real scan, a project worktree and registry), so opt-in
+// suite e2e against a candidate binary
+// (`global.constraint.no-real-project-test`).
 test.skipIf(!enabled || !binary)(
   "e2e: apg_project start records runCli's injected caller session as the registry owner",
   async () => {
@@ -409,11 +408,10 @@ test.skipIf(!enabled || !binary)(
   60000,
 )
 
-// apg-plan-phases-scoping phase-03: the git branch-delta WRAPPER is real I/O
-// (`Bun.$` git subprocesses) so it is covered here, at the opt-in e2e tier; the
-// pure scoping core it feeds is unit-covered in `lib/apg.test.ts`. This wrapper
-// needs only git + fs (no candidate `apg` binary), so it gates on the e2e opt-in
-// alone.
+// The git branch-delta WRAPPER is real I/O (`Bun.$` git subprocesses) so it is
+// covered here, at the opt-in e2e tier; the pure scoping core it feeds is
+// unit-covered in `lib/apg.test.ts`. This wrapper needs only git + fs (no
+// candidate `apg` binary), so it gates on the e2e opt-in alone.
 
 test.skipIf(!enabled)(
   "e2e: git branch delta reports exactly the branch-added requirement names",
@@ -465,10 +463,9 @@ test.skipIf(!enabled)(
   },
 )
 
-// apg-plan-phases-scoping phase-01.task-3 (feedback-4) / phase-03.task-3: a
-// NON-`main` default branch with NO `origin/HEAD` must resolve its NAME from the
-// MAIN checkout's symbolic HEAD — the binary's `main_checkout_head` fallback —
-// not a hardcoded `main`. The branch delta must therefore report the
+// A NON-`main` default branch with NO `origin/HEAD` must resolve its NAME from
+// the MAIN checkout's symbolic HEAD — the binary's `main_checkout_head`
+// fallback — not a hardcoded `main`. The branch delta must therefore report the
 // branch-added requirement, not silently return empty.
 test.skipIf(!enabled)(
   "e2e: a non-main default branch with no origin/HEAD resolves via the main checkout HEAD",
@@ -505,18 +502,18 @@ test.skipIf(!enabled)(
   },
 )
 
-// opencode-2x-support phase-02.task-41: the V2 fs-scope gate. Phase 1 retired
-// the V1 frontmatter-glob parser (`agentFsGlobs` / `editAllowGlobs`), so the fs
-// tools (`apg_rm`/`apg_mv`/`apg_cp`) no longer re-derive an acting agent's edit
-// grants here. They assert their resolved target path(s) through opencode 2.x's
-// OWN permission engine — `ctx.permission.assert({ ..., action: "edit",
-// resources })` — via the shared `fsScopeDecision`, and `throw new
-// Error(reason)` when it refuses. The tool modules import `@opencode/plugin`
-// (the V2 plugin dependency this suite installs); these scenarios stay
-// plugin-free and drive the SAME sequence with a STUBBED `permission.assert`
-// (a fake modelling opencode's resolve=allow / reject=deny) plus the real fs op
-// gated on `decision.allowed`, against scratch /tmp git repos (no live opencode
-// 2.x; `global.constraint.no-real-project-test`).
+// The V2 fs-scope gate. The V1 frontmatter-glob parser (`agentFsGlobs` /
+// `editAllowGlobs`) is retired, so the fs tools (`apg_rm`/`apg_mv`/`apg_cp`) no
+// longer re-derive an acting agent's edit grants here. They assert their
+// resolved target path(s) through opencode 2.x's OWN permission engine —
+// `ctx.permission.assert({ ..., action: "edit", resources })` — via the shared
+// `fsScopeDecision`, and `throw new Error(reason)` when it refuses. The tool
+// modules import `@opencode/plugin` (the V2 plugin dependency this suite
+// installs); these scenarios stay plugin-free and drive the SAME sequence with
+// a STUBBED `permission.assert` (a fake modelling opencode's resolve=allow /
+// reject=deny) plus the real fs op gated on `decision.allowed`, against scratch
+// /tmp git repos (no live opencode 2.x;
+// `global.constraint.no-real-project-test`).
 
 /// A scratch git repo with a `src/` tree and an out-of-scope `outside.txt`,
 /// committed. Returns its root.
@@ -882,10 +879,10 @@ test.skipIf(!enabled)(
   worktreeScopePermission,
 )
 
-// project-binding phase-03.task-8: `mainCheckoutRoot`'s fs-scope frame is
-// anchored on `context.worktree` ALONE when one was resolved, falling back to the
-// plugin load location (`ctx.location.directory`) otherwise. Real I/O (fs + a git
-// subprocess), so opt-in suite e2e.
+// `mainCheckoutRoot`'s fs-scope frame is anchored on `context.worktree` ALONE
+// when one was resolved, falling back to the plugin load location
+// (`ctx.location.directory`) otherwise. Real I/O (fs + a git subprocess), so
+// opt-in suite e2e.
 
 test.skipIf(!enabled)(
   "e2e: mainCheckoutRoot's frame is anchored on context.worktree alone",
@@ -912,16 +909,15 @@ test.skipIf(!enabled)(
   },
 )
 
-// suite-root-plumbing phase-01.task-3: a caller with NO resolved project
-// worktree (`context.worktree`) is refused by every project-bound helper with
-// the shared MISSING_WORKTREE_ERROR signal — the helpers never walk up from the
-// load location or cwd to find a database. The string-returning helpers
-// (runCypher, runCli, startDetachedSession) return the refusal verbatim; the
-// helpers that hand back a structured value (`branchAddedRequirementNames`
-// returns a Set) throw it, and `runInProject` throws its own pre-existing
-// missing-resolved-project refusal, which is a distinct message. Every path is
-// a pure refusal (no spawn, no fs write), so the opt-in suite-e2e gate alone
-// enables it.
+// A caller with NO resolved project worktree (`context.worktree`) is refused by
+// every project-bound helper with the shared MISSING_WORKTREE_ERROR signal —
+// the helpers never walk up from the load location or cwd to find a database.
+// The string-returning helpers (runCypher, runCli, startDetachedSession) return
+// the refusal verbatim; the helpers that hand back a structured value
+// (`branchAddedRequirementNames` returns a Set) throw it, and `runInProject`
+// throws its own pre-existing missing-resolved-project refusal, which is a
+// distinct message. Every path is a pure refusal (no spawn, no fs write), so
+// the opt-in suite-e2e gate alone enables it.
 test.skipIf(!enabled)(
   "e2e: a worktree-less context is refused by every project-bound helper",
   async () => {
@@ -951,16 +947,15 @@ test.skipIf(!enabled)(
   },
 )
 
-// project-binding phase-03.task-8: the ported suite tools are V2
-// `Plugin.define` plugins. Importing a tool module runs `Plugin.define({ id,
-// setup })` at module scope; its `setup(ctx)` registers the tool through
-// `ctx.tool.transform((editor) => editor.add({...}))`. Without a live opencode
-// host this is pinned structurally: the plugin object carries the id + a setup
-// function, a faked plugin context captures the added tool, and the tool's
-// `execute` returns the `{ content }` result shape. `apg_query` now requires a
-// registered `project`; a project whose worktree has no database is refused by
-// the binary, NAMING the project and its worktree, never the shared
-// `NO_DB_ERROR` and never a fallback to another checkout's database.
+// The ported suite tools are V2 `Plugin.define` plugins. Importing a tool
+// module runs `Plugin.define({ id, setup })` at module scope; its `setup(ctx)`
+// registers the tool through `ctx.tool.transform((editor) => editor.add({...}))`.
+// Without a live opencode host this is pinned structurally: the plugin object
+// carries the id + a setup function, a faked plugin context captures the added
+// tool, and the tool's `execute` returns the `{ content }` result shape.
+// `apg_query` requires a registered `project`; a project whose worktree has no
+// database is refused by the binary, NAMING the project and its worktree, never
+// the shared `NO_DB_ERROR` and never a fallback to another checkout's database.
 test.skipIf(!enabled || !binary)(
   "e2e: a ported tool registers through Plugin.define/ctx.tool.transform(editor.add) and executes to {content}",
   async () => {
@@ -1027,9 +1022,9 @@ test.skipIf(!enabled || !binary)(
   },
 )
 
-// apg-sessions phase-04.task-12: the `apg_session` suite tool. Its body is the
-// plugin-free `startDetachedSession` helper (the tool wraps it and appends a
-// status message), so — like the fs-tool scenarios above — this drives the SAME
+// The `apg_session` suite tool. Its body is the plugin-free
+// `startDetachedSession` helper (the tool wraps it and appends a status
+// message), so — like the fs-tool scenarios above — this drives the SAME
 // sequence the tool runs: spawn `apg session start` DETACHED, wait for its
 // socket to answer live, and return while the coordinator keeps running. A
 // durable `apg node` mutation then routes through the live session: it lands in
@@ -1213,15 +1208,15 @@ test.skipIf(!enabled || !binary)(
   60000,
 )
 
-// apg-sessions phase-04.task-18: regression guard for the hang-proof liveness
-// probe (task-17). `sessionLiveAt` must resolve `false` — never hang — for a
-// socket path that does not exist, for a path that once existed and was removed,
-// and for a path where a non-socket file sits with no listener behind it (the
-// removed/stale socket shapes a crashed coordinator leaves behind). The probe's
-// hard, socket-event-independent deadline is what bounds the wait; a settled
-// promise proves the hang regression stays fixed. `startDetachedSession` must
-// likewise return its string error (not hang) for a root with no live session.
-// Real I/O (Unix-socket connects, fs), so opt-in suite e2e.
+// Regression guard for the hang-proof liveness probe. `sessionLiveAt` must
+// resolve `false` — never hang — for a socket path that does not exist, for a
+// path that once existed and was removed, and for a path where a non-socket
+// file sits with no listener behind it (the removed/stale socket shapes a
+// crashed coordinator leaves behind). The probe's hard,
+// socket-event-independent deadline is what bounds the wait; a settled promise
+// proves the hang regression stays fixed. `startDetachedSession` must likewise
+// return its string error (not hang) for a root with no live session. Real I/O
+// (Unix-socket connects, fs), so opt-in suite e2e.
 test.skipIf(!enabled)(
   "e2e: sessionLiveAt resolves false without hanging for absent/removed socket paths",
   async () => {
@@ -1278,11 +1273,11 @@ test.skipIf(!enabled)(
   15000,
 )
 
-// plan.phase-02.task-2: an induced SPAWN failure (a bogus/absent APG_BINARY
-// makes `Bun.spawn` throw) on a WORKTREE-BEARING context still names the root
-// `apg session start` ran against, begins `apg session start` and is never the
-// shared NO_DB_ERROR. Nothing is spawned outside the scratch dir; the previous
-// APG_BINARY is restored in a finally.
+// An induced SPAWN failure (a bogus/absent APG_BINARY makes `Bun.spawn` throw)
+// on a WORKTREE-BEARING context still names the root `apg session start` ran
+// against, begins `apg session start` and is never the shared NO_DB_ERROR.
+// Nothing is spawned outside the scratch dir; the previous APG_BINARY is
+// restored in a finally.
 test.skipIf(!enabled)(
   "e2e: a failed session spawn names the worktree it ran against",
   async () => {
@@ -1340,10 +1335,10 @@ function scanStubTool(base: string): {
   return { repo, worktree, stub, argv }
 }
 
-// scan-force phase-02.task-3: the `apg_scan` tool's spawned argv carries
-// `--force` when the caller asks for a from-scratch rebuild, and not otherwise.
-// The required project resolves through the stub, and the scan runs in the
-// RESOLVED WORKTREE — never an implicit workspace root.
+// The `apg_scan` tool's spawned argv carries `--force` when the caller asks for
+// a from-scratch rebuild, and not otherwise. The required project resolves
+// through the stub, and the scan runs in the RESOLVED WORKTREE — never an
+// implicit workspace root.
 test.skipIf(!enabled)(
   "e2e: apg_scan passes --force to the spawned scan only when force is set",
   async () => {
@@ -1387,8 +1382,8 @@ test.skipIf(!enabled)(
   15000,
 )
 
-// cobol-frontend P2 task-26: the `apg_scan` tool forwards its `dialect` input as
-// `--std <dialect>` (and nothing when omitted), mirroring the stub-argv pattern above.
+// The `apg_scan` tool forwards its `dialect` input as `--std <dialect>` (and
+// nothing when omitted), mirroring the stub-argv pattern above.
 test.skipIf(!enabled)(
   "e2e: apg_scan passes dialect to the spawned scan as --std only when set",
   async () => {
