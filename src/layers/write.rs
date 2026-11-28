@@ -7,10 +7,9 @@
 //! per-invocation [`crate::session::Session`] holds the blocking worktree lock,
 //! and [`write_project`] validates the complete change, writes every affected
 //! node file (and deletes the removed ones) in one commit, and re-merges the
-//! exact delta into the database through that session's held write handle. The
-//! still-compiled daemon's `apg session save` also reaches
-//! [`write_through_with_deletes`], with its whole pending set — one atomic write
-//! plus exactly ONE git commit.
+//! exact delta into the database through that session's held write handle.
+//! [`write_set`] is the shared atomic step: one logical mutation's writes and
+//! deletes, plus exactly ONE git commit.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -65,97 +64,14 @@ use super::{layer_of, validate_assembled_rules};
 /// on disk (keeps non-git temp-dir tests working; real mutations run in a
 /// project worktree).
 pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()> {
-    // --- Structural pre-check (before any filesystem touch) ---
-    let mut paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
-    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
-    for node in writes {
-        let layer = Layer::ALL
-            .iter()
-            .find(|l| l.layer_dir() == node.layer)
-            .copied()
-            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
-        if layer.storage() == StoragePolicy::TransientPlans {
-            anyhow::bail!(
-                "layer `plans` is transient (apg/.trans/plans/) — not a durable node-file layer"
-            );
-        }
-        if !valid_name(&node.name) {
-            anyhow::bail!(
-                "node name `{}` is invalid — the name allowlist is [a-z0-9][a-z0-9-]* (refused, never sanitized)",
-                node.name
-            );
-        }
-        let path = apg_root
-            .join(LAYERS_DIR)
-            .join(layer.layer_dir())
-            .join(&node.node_type)
-            .join(format!("{}.json", node.name));
-        if !seen.insert(path.clone()) {
-            anyhow::bail!(
-                "duplicate write: two entries target `{}` — one logical mutation touches each node file once",
-                path.display()
-            );
-        }
-        paths.push(path);
-    }
-
-    // Serialize every node file up front — a serialization failure is caught
-    // before anything is written, so no rollback is needed for it.
-    let serialized: Vec<String> = writes
-        .iter()
-        .map(serde_json::to_string_pretty)
-        .collect::<Result<_, _>>()
-        .map_err(|e| anyhow::anyhow!("serialize node file failed: {e}"))?;
-
-    // Record the pre-existing bytes of every path BEFORE any write (None = the
-    // file did not exist) — the snapshot a failure restores from.
-    let mut prior: Vec<Option<Vec<u8>>> = Vec::with_capacity(paths.len());
-    for path in &paths {
-        prior.push(std::fs::read(path).ok());
-    }
-
-    // Write every file; on the first failure restore the whole set and return.
-    for (i, path) in paths.iter().enumerate() {
-        if let Some(parent) = path.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            rollback(&paths, &prior);
-            return Err(anyhow::anyhow!(
-                "create_dir_all {} failed: {e}",
-                parent.display()
-            ));
-        }
-        if let Err(e) = std::fs::write(path, &serialized[i]) {
-            rollback(&paths, &prior);
-            return Err(anyhow::anyhow!("write {} failed: {e}", path.display()));
+    if write_set(apg_root, writes, &[])? {
+        // Re-anchor the staleness gate's recorded scan_meta (mirrors the JSONL
+        // funnel's commit path — DB and tree in sync by construction). A
+        // re-anchor failure degrades to a warning.
+        if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+            eprintln!("apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}");
         }
     }
-
-    // Commit once — all affected paths together. Outside a git repo there is
-    // no commit (the mutation still lands on disk); a commit failure rolls the
-    // writes back so a failed mutation never leaves mismatched files.
-    if git::in_repo(apg_root) {
-        let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
-        let msg = git::graph_mutation_message(apg_root, &refs);
-        match git::commit_files(apg_root, &refs, &[], &msg) {
-            Ok(Some(_)) => {
-                // Re-anchor the staleness gate's recorded scan_meta (mirrors
-                // the JSONL funnel's commit path — DB and tree in sync by
-                // construction). A re-anchor failure degrades to a warning.
-                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
-                    eprintln!(
-                        "apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}"
-                    );
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                rollback(&paths, &prior);
-                return Err(e);
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -464,22 +380,21 @@ pub fn validate_save_model(dirty_rows: &[NodeFile], held_rows: &[NodeFile]) -> a
     }
 }
 
-/// Write a SET of node files atomically AND delete a set of node-file paths,
-/// in one logical mutation (SPEC §4.1 "renames / deletions are atomic
-/// write-throughs"): snapshot the prior state of every affected path, write
-/// the writes, remove the deletes, and on any failure restore every path —
-/// never leave mismatched endpoint files. Commits once. `write_through` (the
-/// write-only primitive) delegates here with an empty delete list.
-/// An already-absent delete path is success, not a failure (a retried save or
+/// The shared atomic write step: write a SET of node files, delete a SET of
+/// node-file paths, and commit the whole mutation exactly once (SPEC §4.1
+/// "renames / deletions are atomic write-throughs"). Snapshot the prior state
+/// of every affected path, write the writes, remove the deletes, and on any
+/// failure restore every path — never leave mismatched endpoint files.
+/// [`write_through`] (the write-only primitive) passes an empty delete list;
+/// the durable-mutation orchestrator ([`write_project_with`]) passes its one
+/// logical mutation's writes and deletes — one call, one commit.
+///
+/// An already-absent delete path is success, not a failure (a retried write or
 /// a partial earlier write), so the removal stays idempotent.
-/// `apg session save` reaches this once with the database's marked rows and its
-/// pending-deletion identities — one call, one commit; the direct mutation path
-/// calls it once per logical mutation.
-pub fn write_through_with_deletes(
-    apg_root: &Path,
-    writes: &[NodeFile],
-    deletes: &[PathBuf],
-) -> anyhow::Result<()> {
+///
+/// Returns whether a git commit landed (`Ok(false)` outside a repo, or when the
+/// staged tree already matched HEAD).
+fn write_set(apg_root: &Path, writes: &[NodeFile], deletes: &[PathBuf]) -> anyhow::Result<bool> {
     // Structural pre-check: no plans layer, valid names, no duplicate write
     // path, and a path may not be both written and deleted.
     let mut write_paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
@@ -558,7 +473,7 @@ pub fn write_through_with_deletes(
     for path in deletes {
         match std::fs::remove_file(path) {
             Ok(()) => {}
-            // Already gone: a replayed save, or an earlier partial write
+            // Already gone: a retried write, or an earlier partial write
             // removed it. The prior snapshot recorded `None`, so rollback of
             // this path stays a no-op.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -571,27 +486,28 @@ pub fn write_through_with_deletes(
 
     // Commit once. Outside a git repo there is no commit; a commit failure
     // rolls back so a failed mutation never leaves mismatched files.
-    if git::in_repo(apg_root) {
-        let write_refs: Vec<&Path> = write_paths.iter().map(|p| p.as_path()).collect();
-        let delete_refs: Vec<&Path> = deletes.iter().map(|p| p.as_path()).collect();
-        let all_refs: Vec<&Path> = write_refs
-            .iter()
-            .chain(delete_refs.iter())
-            .copied()
-            .collect();
-        let msg = git::graph_mutation_message(apg_root, &all_refs);
-        match git::commit_files(apg_root, &write_refs, &delete_refs, &msg) {
-            // The durable write is now committed — the system-of-record
-            // durability point. The staleness re-anchor and the projection are
-            // the caller's (`write_project`), applied only AFTER this commit.
-            Ok(Some(_)) | Ok(None) => {}
-            Err(e) => {
-                rollback(&paths, &prior);
-                return Err(e);
-            }
+    if !git::in_repo(apg_root) {
+        return Ok(false);
+    }
+    let write_refs: Vec<&Path> = write_paths.iter().map(|p| p.as_path()).collect();
+    let delete_refs: Vec<&Path> = deletes.iter().map(|p| p.as_path()).collect();
+    let all_refs: Vec<&Path> = write_refs
+        .iter()
+        .chain(delete_refs.iter())
+        .copied()
+        .collect();
+    let msg = git::graph_mutation_message(apg_root, &all_refs);
+    match git::commit_files(apg_root, &write_refs, &delete_refs, &msg) {
+        // The durable write is now committed — the system-of-record
+        // durability point. The staleness re-anchor and the projection are
+        // the caller's (`write_project_with`), applied only AFTER this commit.
+        Ok(Some(_)) => Ok(true),
+        Ok(None) => Ok(false),
+        Err(e) => {
+            rollback(&paths, &prior);
+            Err(e)
         }
     }
-    Ok(())
 }
 
 /// A test-only failure-injection point on the durable mutation path, at the
@@ -690,14 +606,11 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 ///    project context satisfies the guard (`git::require_project_context`).
 /// 2. **Staleness gate** — refuse-on-stale when a DB exists, before any write.
 /// 3. **Validate the complete change** ([`validate_change`]) before writing.
-/// 4. **Atomic write + delete + single commit** ([`write_through_with_deletes`])
-///    — the system-of-record durability point, and the ONLY step that controls
-///    the flock-guaranteed single commit. On the direct (test/single-mutation)
-///    path that commit is one logical mutation; under a live session the save
-///    flush reaches step 4 with the whole pending set — the dirty rows plus the
-///    pending-deletion identities — and makes one commit for all of it. Nothing
-///    durable exists before that commit: the files hit disk (and git) here, not
-///    at admission.
+/// 4. **Atomic write + delete + single commit** ([`write_set`]) — the
+///    system-of-record durability point, and the ONLY step that controls the
+///    flock-guaranteed single commit: this invocation's one logical mutation
+///    (its writes plus its deletes). Nothing durable exists before that
+///    commit: the files hit disk (and git) here, not at admission.
 /// 5. **Capture the post-commit git state** — no `graph.jsonl` lead is
 ///    re-anchored; step 7 is the one row refresh, reconciling the database's
 ///    own `Scan` row to this state.
@@ -772,10 +685,9 @@ pub fn write_project_with(
     fire_mutation_hook(MutationBoundary::BeforeCommit)?;
 
     // 4. Atomic write + delete + single commit — the durability point. This is
-    //    the whole flock-held sequence's controlled commit (the direct path's
-    //    one logical mutation; under a session the save flush reaches this via
-    //    `write_through_with_deletes` with the whole pending set).
-    write_through_with_deletes(apg_root, writes, deletes)?;
+    //    the whole flock-held sequence's controlled commit: this invocation's
+    //    one logical mutation, writes and deletes together.
+    write_set(apg_root, writes, deletes)?;
 
     // 5. Capture the post-commit git state. No `graph.jsonl` lead is re-anchored
     //    here: step 7 is the one row refresh, reconciling the worktree DB's own
