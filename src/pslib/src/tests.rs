@@ -709,7 +709,7 @@ fn tree_identity<B: AsRef<[u8]>>(tree: &[(&str, B)]) -> Identity {
     identity::resolve(&tree_map(tree), &units, &paths)
 }
 
-/// Phase 7's `ps` rendering re-implemented over `recs`: each Module/Struct/Function
+/// The `ps` rendering re-implemented over `recs`: each Module/Struct/Function
 /// record's (key, `ps.` + key), Functions grouped by exact (parent, name) as the
 /// ingestor's render_function_fqns does.
 fn ps_rendered(recs: &[Rec]) -> Vec<(String, String)> {
@@ -4370,7 +4370,7 @@ mod int {
             ("function F { . ./f.ps1 }", dot(st("./f.ps1", false))),
             ("class C { M() { . ./m.ps1 } }", dot(st("./m.ps1", false))),
             (". { Get-Date }", vec![]),
-            // the call operator is phase 6's
+            // the call operator is not a dot-source
             ("& ./lib.ps1", vec![]),
         ];
         for (src, want) in cases {

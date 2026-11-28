@@ -316,7 +316,7 @@ fn params_of(r: &serde_json::Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// Phase 7's `ps` rendering re-implemented over `recs`: each Module/Struct/Function
+/// The `ps` rendering re-implemented over `recs`: each Module/Struct/Function
 /// record's (key, `ps.` + key) — Module key = fqn, Struct key = parent.name verbatim,
 /// Functions grouped by exact (parent, name) as the ingestor's render_function_fqns does.
 fn ps_rendered(recs: &[serde_json::Value]) -> Vec<(String, String)> {
