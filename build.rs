@@ -425,7 +425,7 @@ fn stage_struct(stage_dir: &Path) -> Vec<String> {
     // Compile structlib with cargo into its own isolated target dir
     // (src/structlib/target). ALWAYS `--release`, independent of the outer
     // cargo profile, and staged into the ACTIVE outer profile's frontends
-    // dir (same rationale as rustlib above). structlib is a standalone,
+    // dir. structlib is a standalone,
     // non-workspace crate exactly like src/rustlib, so its lockfile and
     // target tree stay independent. ONE `structfrontend` binary serves every
     // structural stream id — the `md` stream plus the per-format streams and
@@ -480,7 +480,7 @@ fn stage_py(stage_dir: &Path) -> Vec<String> {
     // Compile pylib with cargo into its own isolated target dir
     // (src/pylib/target). ALWAYS `--release`, independent of the outer
     // cargo profile, and staged into the ACTIVE outer profile's frontends
-    // dir (same rationale as rustlib above). pylib is a standalone,
+    // dir. pylib is a standalone,
     // non-workspace crate exactly like src/rustlib and src/structlib, so
     // its lockfile and target tree stay independent. The staged artifact is
     // the `pyfrontend` binary (the crate's `[[bin]]` name — unaffected by
