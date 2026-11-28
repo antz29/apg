@@ -356,7 +356,7 @@ mod e2e {
 
     // --- Pairing/atomicity regression (phase-3 task-12) ---
 
-    /// note-18 regression: a node rewrite (rename or delete) must leave every
+    /// Regression: a node rewrite (rename or delete) must leave every
     /// incident edge intact — the source's out-half AND the target's in-half
     /// are rewritten or removed together, never dropped on one side.
     /// [`write_through`] is the atomic rewrite (SPEC §4.1 "renames / deletions
@@ -823,8 +823,8 @@ mod e2e {
 
     /// SPEC §4.1: the code-ref drift check runs BEFORE anything is written —
     /// `write_project` with `implemented-by` targeting a FQN gone from the
-    /// scanned graph is refused with no file and no commit (the class note-24
-    /// fixed for constraints); the same edge to a `.trans` planned FQN is
+    /// scanned graph is refused with no file and no commit; the same edge to a
+    /// `.trans` planned FQN is
     /// pending, not an error, and is accepted at write time.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
