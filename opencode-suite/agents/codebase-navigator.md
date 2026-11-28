@@ -89,9 +89,6 @@ permissions:
   - action: apg_project
     resource: "*"
     effect: allow
-  - action: apg_session
-    resource: "*"
-    effect: allow
   - action: apg_node
     resource: "*"
     effect: allow
@@ -266,7 +263,7 @@ You can:
 - query with `apg_query`, `apg_find_symbol`, `apg_modules`, `apg_module_files`,
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`, `apg_struct`,
   `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`, `apg_hunk`; run the project
-  with `apg_project`, `apg_session`, `apg_node`, `apg_edge`; plan with `apg_plan`,
+  with `apg_project`, `apg_node`, `apg_edge`; plan with `apg_plan`,
   `apg_plan_phases`, `apg_plan_tasks`, `apg_plan_render`, `apg_plan_verify`; feedback with
   `apg_review`/`apg_review_action`; lint with `apg_spec_lint`; scan with `apg_scan` (`ask`).
 - shell deny-by-default: only `ls *`, `wc *`, `file *`, `stat *`, `diff *`, `which *`,
@@ -313,7 +310,7 @@ The graph is the single source of truth; these rules apply to every answer, no e
 stop-and-report — the tool, the invocation, what it returned or errored, the graph state —
 never raw file reads of graph-state paths, never a retry, never a cause diagnosis.
 **File access (strict).** All graph state is reached only through the apg tools you hold: the
-read-only code suite, `apg_node`/`apg_edge`, `apg_session`, the `apg_plan*` readers, and
+read-only code suite, `apg_node`/`apg_edge`, the `apg_plan*` readers, and
 `apg_review`. The durable node files and the transient plan/feedback files are **never read
 directly**; the read guard denies `apg/.trans/**` and `apg/layers/**` (repo-local and every
 worktree mirror). Source behind code FQNs stays readable with `read`, to confirm and anchor.
@@ -437,26 +434,16 @@ all **feedback** are **transient** — branch-local, never committed; reach them
 gate (planned nodes realized, feedback resolved, coverage holds, and a `modifies` of a planned
 node needs an earlier-phase `creates` of the same FQN) — read-only; it prints the merge
 handoff.
-### Caller-owned sessions (a durable mutation needs a live session)
-A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is **admitted only
-through a live session**: it applies to the worktree `db.lbug` at admission (projected so routed
-reads see it; the changed node files marked dirty, a delete's identity pending) while
-`apg/layers/**` and git stay at the last saved state. With no live session it refuses and names
-`apg session start`. The **caller owns the lifecycle** — open the session for the worktree,
-persist when ready, release it; it never outlives the call chain that owns it:
-- **start** — `apg_session` (`action: start`, the default) launches the single-writer
-  coordinator, owning the worktree `db.lbug`, the extended `specs.lock` flock, and a socket.
-- **save** — `apg_session` `action: save` is the **single durability point**: one atomic
-  `apg/layers/**` write of the marked node files plus the pending-deletion files' removal, and
-  exactly one commit, then the marks clear.
-- **end** — `apg_session` `action: end` releases DB, flock and socket; it **refuses while the
-  database carries pending state** (save or abort first).
-- **abort** — `apg_session` `action: abort` discards the pending set, rebuilds the index and
-  releases the session.
-`apg_query` routes through the live session and sees unsaved changes; `apg_spec_lint` reads the
-durable node files, so lint after a save. `apg scan` and `apg project merge` refuse while a
-session is live — save and end first. The whole lifecycle runs through `apg_session` (pass the
-required registered project name; it resolves the worktree) — never through `shell`.
+### Per-invocation sessions (a durable write locks the worktree)
+Every database access is a **per-invocation session**: each `apg` invocation opens the worktree
+`db.lbug` **read-only**, does its work and exits. A durable `apg node add|update|rm` / `apg edge
+add|update|rm` write **upgrades that same invocation** under the **blocking** worktree lock: if
+the lock is held it waits (never fails), and inside one critical section it writes the node file,
+makes exactly one commit and projects into the database, then releases back to read-only. No
+session is started, saved or ended, and `apg session save` is removed (not a no-op) — a write with
+no live session is impossible by construction. `apg_query` and `apg_spec_lint` read the project's
+current state, and `apg scan`/`apg project merge` need no save+end — they simply run between
+writes.
 **A blocked step is a stop, never a workaround** — for you and every subagent you dispatch. A
 refused tool or permission is reported verbatim and routed (fix the tool/agent, or ask the
 user); a command is never smuggled through another allowed command (a shell wrapper, `-exec`,
@@ -501,8 +488,8 @@ fresh dispatch) is green; **stage 3 must not begin until then**.
 The implementer runs the **Ponytail discipline** (fixed level `ultra`) and never writes an
 inline `shortcut:` comment; it returns a **`NOTE: <text>`** line in its report instead — the
 limit and when to upgrade. You intake each line and author it as a durable
-**implementation-layer `Note`** via `apg_node`/`apg_edge`, under a live session you own
-(start → author → `apg_session` save → end). Its `details` edge names the **single code FQN**
+**implementation-layer `Note`** via `apg_node`/`apg_edge`, whose write takes the blocking lock in
+the same invocation (no session to save or end). Its `details` edge names the **single code FQN**
 the shortcut is about; the body records the limit and when to upgrade. The note is the durable,
 reviewable record: you consider it, and the `implementation-phase-reviewer` reviews each one.
 **Scope (BINDING):** your authoring serves implementation-layer notes alone — you author no
@@ -655,8 +642,8 @@ edges (no lost requirements, no cycles) via `apg_query`.
 `apg init [dir]` scaffolds `apg/` and installs the suite plus the nine agents; `apg scan [dir]
 [--language …] [--exclude-path …] [--module …]` rebuilds the one derived database,
 `apg/.trans/db.lbug` (from the `apg/layers/**` node files and the scanned code); `apg query
-[--json] "<cypher>"`; `apg node`/`apg edge` are the durable surface; `apg session
-start|save|end|abort`; `apg plan …`; `apg project start|merge`; `apg review add|action|resolve|reject|list`; `apg --version`.
+[--json] "<cypher>"`; `apg node`/`apg edge` are the durable surface (each write takes the
+blocking worktree lock); `apg plan …`; `apg project start|merge`; `apg review add|action|resolve|reject|list`; `apg --version`.
 Test tiers: **unit** (one unit, pure in-memory), **int** (two or more, still pure), **e2e** (any
 real I/O — filesystem including `temp_dir()`, `db.lbug`, git, a process spawn). The four
 invocations are `cargo test --lib` (unit+int, seconds, the default gate), `cargo test-unit`,
@@ -670,7 +657,8 @@ separate cargo projects, so their tiers run from their own directories, never by
 - **Never edit a project file.** You hold no project `edit` grant; `.opencode/agents/**` is the
   agent-builder's and code is the implementer's. The only files you write are markdown under
   `apg/.scratch/` or a worktree's `apg/.scratch/`; your only durable authoring surface is an
-  implementation-layer `Note` through `apg_node`/`apg_edge` inside a caller-owned session.
+  implementation-layer `Note` through `apg_node`/`apg_edge`, whose write takes the blocking
+  worktree lock in the same invocation.
 - **Never author a spec, a plan, or code**, and never run a review stage yourself — stages 1–9
   belong to their owners. You orchestrate and dispatch.
 - **Never use the plan as scratch space.** Plan notes are banned; deviations, decisions and
