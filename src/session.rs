@@ -115,7 +115,8 @@ pub struct Session {
     /// write upgrade reopens it read-write and the release drops back here.
     apg_root: PathBuf,
     /// The held database handle: read-only between writes, write-capable for
-    /// one [`Session::upgrade_to_write`] critical section.
+    /// one [`Session::open_for_write`] (or [`Session::upgrade_to_write`])
+    /// critical section.
     db: ArtifactDb,
 }
 
@@ -137,6 +138,36 @@ impl Session {
             apg_root: apg_root.to_path_buf(),
             db: ArtifactDb::open_read_only(apg_root)?,
         })
+    }
+
+    /// Opens the worktree database of the layout root `apg_root`
+    /// **write-capable**, taking the blocking worktree lock FIRST.
+    ///
+    /// This is the entry point every durable writer takes: the exclusive `flock`
+    /// is acquired before `db.lbug` is opened, so no read-only handle of ours is
+    /// ever open across another writer's checkpoint recovery — a concurrent
+    /// writer queues on the lock and then opens a database at a settled state,
+    /// instead of racing recovery and failing ("Cannot open database in
+    /// read-only mode while checkpoint recovery is pending"). A missing
+    /// database is refused naming `apg scan`, exactly as [`ArtifactDb::open`]
+    /// does.
+    ///
+    /// The returned [`WriteGuard`] holds the lock for the caller's critical
+    /// section ([`write_through`](Self::write_through)). A per-invocation
+    /// writer closes its handle and only then releases the lock — dropping the
+    /// [`Session`] before the guard — because lbug's own database lock is
+    /// non-blocking: a writer queued on the flock must not wake at release to
+    /// find this process's handle still open.
+    pub fn open_for_write(apg_root: &Path) -> anyhow::Result<(Session, WriteGuard)> {
+        let lock = acquire_spec_lock(apg_root)?;
+        let db = ArtifactDb::open(apg_root)?;
+        Ok((
+            Session {
+                apg_root: apg_root.to_path_buf(),
+                db,
+            },
+            WriteGuard { _lock: lock },
+        ))
     }
 
     /// The held database handle, read-only between writes — the seam a
@@ -168,7 +199,8 @@ impl Session {
     /// into the worktree database — the whole sequence inside the caller's held
     /// write critical section.
     ///
-    /// `guard` is the [`WriteGuard`] from [`upgrade_to_write`](Self::upgrade_to_write):
+    /// `guard` is the [`WriteGuard`] from [`open_for_write`](Self::open_for_write)
+    /// (or a later [`upgrade_to_write`](Self::upgrade_to_write)):
     /// passing it makes the critical section explicit, so the write runs only
     /// while the blocking worktree lock is held and the handle is
     /// write-capable. The sequence is the shared durable-mutation orchestrator
@@ -198,6 +230,7 @@ impl Session {
 
     /// Drops the write-capable handle and its blocking worktree lock back to
     /// the read-only class — the counterpart of
+    /// [`open_for_write`](Self::open_for_write) /
     /// [`upgrade_to_write`](Self::upgrade_to_write), run once the caller's write
     /// critical section ([`write_through`](Self::write_through)) completes.
     ///

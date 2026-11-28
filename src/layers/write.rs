@@ -673,9 +673,9 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 /// paths `deletes` to remove — run as **one critical section over a
 /// per-invocation [`crate::session::Session`]**.
 ///
-/// The session opens the worktree database read-only, upgrades to the
-/// write-capable class under the blocking worktree lock
-/// ([`crate::session::Session::upgrade_to_write`]), and
+/// The session opens the worktree database write-capable under the blocking
+/// worktree lock, taking the lock FIRST
+/// ([`crate::session::Session::open_for_write`]), and
 /// [`crate::session::Session::write_through`] runs the sequence below, with the
 /// projection re-ingested through the session's held write handle rather than a
 /// second independently-opened one. The guard is released when this call
@@ -724,9 +724,14 @@ pub fn write_project(
     // from the default branch refuses with the project-context wording even on
     // a checkout with no `db.lbug`.
     git::require_project_context(apg_root)?;
-    let mut session = crate::session::Session::open(apg_root)?;
-    let guard = session.upgrade_to_write()?;
-    session.write_through(&guard, writes, deletes)
+    let (mut session, guard) = crate::session::Session::open_for_write(apg_root)?;
+    let applied = session.write_through(&guard, writes, deletes);
+    // Close the write-capable handle BEFORE releasing the flock: lbug's own
+    // database lock is non-blocking, so a writer queued on the lock must not
+    // wake at release and find this process's handle still open.
+    drop(session);
+    drop(guard);
+    applied
 }
 
 /// [`write_project`]'s shared sequence with an injectable projection apply and

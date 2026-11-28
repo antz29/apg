@@ -101,25 +101,29 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
     // `node rm` refuse as a context error — never as a missing-database or
     // absent-node error.
     crate::git::require_project_context(&apg_root)?;
-    // A durable mutation runs through one per-invocation session: open the
-    // worktree database read-only, upgrade under the blocking worktree lock
-    // (waiting behind a concurrent writer, never `EAGAIN`), build the
-    // read-modify-write over the committed node set INSIDE that critical
+    // A durable mutation runs through one per-invocation session: take the
+    // blocking worktree lock FIRST and open the worktree database write-capable
+    // under it (waiting behind a concurrent writer, never `EAGAIN`, so no
+    // read-only handle ever races another writer's checkpoint recovery), build
+    // the read-modify-write over the committed node set INSIDE that critical
     // section, write → commit → project through the held write handle, then
-    // release back to read-only. There is no liveness probe, no routed forward
-    // and no at-most-once client id: the blocking lock serialises writers.
-    let mut session = session::Session::open(&apg_root)?;
-    let guard = session.upgrade_to_write()?;
+    // close the handle and release the lock. There is no liveness probe, no
+    // routed forward and no at-most-once client id: the blocking lock
+    // serialises writers.
+    let (mut session, guard) = session::Session::open_for_write(&apg_root)?;
     let applied = build_change(&apg_root, "node", args).and_then(|change| {
         session.write_through(&guard, &change.writes, &change.deletes)?;
         Ok(change)
     });
-    // Release the lock even when the change failed to build or write, keeping
-    // the original error primary; a release failure only surfaces on a write
-    // that otherwise succeeded.
-    let released = session.release_write(guard);
+    // Close the write-capable handle BEFORE releasing the flock: lbug's own
+    // database lock is non-blocking, so a writer queued on the flock must not
+    // wake at release and find this process's handle still open. Dropping the
+    // session (and its database) then the guard closes the handle, then
+    // releases the lock — even when the change failed to build or write, so the
+    // original error stays primary.
+    drop(session);
+    drop(guard);
     let change = applied?;
-    released?;
     println!("{}", change.message);
     // Write-time advisories (the node-add/update wording advisory and the
     // node-rm outstanding-feedback notice) print on the caller's stderr after
@@ -141,25 +145,29 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
     // checkout `edge add`, `edge update` and `edge rm` refuse as a context
     // error — never as a missing-database or absent-node/edge error.
     crate::git::require_project_context(&apg_root)?;
-    // A durable mutation runs through one per-invocation session: open the
-    // worktree database read-only, upgrade under the blocking worktree lock
-    // (waiting behind a concurrent writer, never `EAGAIN`), build the
-    // read-modify-write over the committed node set INSIDE that critical
+    // A durable mutation runs through one per-invocation session: take the
+    // blocking worktree lock FIRST and open the worktree database write-capable
+    // under it (waiting behind a concurrent writer, never `EAGAIN`, so no
+    // read-only handle ever races another writer's checkpoint recovery), build
+    // the read-modify-write over the committed node set INSIDE that critical
     // section, write → commit → project through the held write handle, then
-    // release back to read-only. There is no liveness probe, no routed forward
-    // and no at-most-once client id: the blocking lock serialises writers.
-    let mut session = session::Session::open(&apg_root)?;
-    let guard = session.upgrade_to_write()?;
+    // close the handle and release the lock. There is no liveness probe, no
+    // routed forward and no at-most-once client id: the blocking lock
+    // serialises writers.
+    let (mut session, guard) = session::Session::open_for_write(&apg_root)?;
     let applied = build_change(&apg_root, "edge", args).and_then(|change| {
         session.write_through(&guard, &change.writes, &change.deletes)?;
         Ok(change)
     });
-    // Release the lock even when the change failed to build or write, keeping
-    // the original error primary; a release failure only surfaces on a write
-    // that otherwise succeeded.
-    let released = session.release_write(guard);
+    // Close the write-capable handle BEFORE releasing the flock: lbug's own
+    // database lock is non-blocking, so a writer queued on the flock must not
+    // wake at release and find this process's handle still open. Dropping the
+    // session (and its database) then the guard closes the handle, then
+    // releases the lock — even when the change failed to build or write, so the
+    // original error stays primary.
+    drop(session);
+    drop(guard);
     let change = applied?;
-    released?;
     println!("{}", change.message);
     // Write-time advisories print on the caller's stderr after the output —
     // one per line, verbatim, already beginning `apg: warning: …`. They are
