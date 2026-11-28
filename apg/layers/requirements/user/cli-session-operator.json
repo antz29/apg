@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "user",
   "name": "cli-session-operator",
-  "body": "The operator of a durable-spec authoring session in a project worktree, who issues a run of node and edge mutations, chooses when the accumulated change becomes durable, and then ends or abandons the session.",
+  "body": "The operator of the durable-spec authoring flow in a project worktree, who issues node and edge mutations, each written, committed, and projected before the call returns.",
   "properties": {},
   "out": [
     {
