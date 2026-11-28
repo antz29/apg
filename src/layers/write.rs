@@ -63,7 +63,6 @@ use super::{layer_of, validate_assembled_rules};
 /// back too. Outside a git repo there is no commit — the mutation still lands
 /// on disk (keeps non-git temp-dir tests working; real mutations run in a
 /// project worktree).
-#[allow(dead_code)]
 pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()> {
     // --- Structural pre-check (before any filesystem touch) ---
     let mut paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
@@ -163,7 +162,6 @@ pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()>
 /// the recorded bytes, or delete the file when it did not previously exist.
 /// Best-effort — the caller returns the primary failure; a rollback step that
 /// cannot be applied (e.g. a path blocked by a directory) is left as-is.
-#[allow(dead_code)]
 fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
     for (path, prev) in paths.iter().zip(prior.iter()) {
         match prev {

@@ -740,9 +740,7 @@ pub fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
 
 /// The endpoints of an edge record, if it is one.
 // Kept as a shared record-rewrite primitive: its production callers are the
-// incident-edge-stripping paths (`remove_node`), currently exercised by the
-// test suite (the strict plan add surface no longer upserts).
-#[allow(dead_code)]
+// incident-edge-stripping paths (`remove_node`, driven by the plan rm cascade).
 pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
     match r {
         Record::Contains { from, to, .. }
@@ -793,9 +791,8 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
 /// Removes an existing node record with `fqn` plus every edge incident to it
 /// (idempotent authoring: `add` upserts by id, `rm` removes node + edges).
 // Retained as the shared incident-edge-stripping primitive for the record
-// surface (the plan rm cascade will reuse it); the strict add/update surface
-// no longer upserts, so only the test suite drives it today.
-#[allow(dead_code)]
+// surface; the plan rm cascade (`plan_cmd::authoring::cascade_remove`) drives
+// it.
 pub fn remove_node(records: &mut Vec<Record>, fqn: &str) {
     records.retain(|r| match (node_fqn(r), edge_endpoints(r)) {
         (Some(n), _) => n != fqn,

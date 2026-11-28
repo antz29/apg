@@ -12,7 +12,6 @@ use std::collections::BTreeSet;
 /// (SPEC §4.1 "code endpoints are exempt"): a code FQN is language-native and
 /// opaque — never parsed, never layer-classified. Exact string set membership
 /// against the two caller-supplied universes is the whole check.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeRefStatus {
     /// The FQN resolves in the scanned graph — the code exists.
@@ -119,7 +118,6 @@ pub fn code_identity(fqn: &str) -> &str {
 /// **The scanned graph is the stronger check**: membership in `scanned` wins
 /// over membership in `planned` — a FQN in both universes is `Real` (it has
 /// landed; the plan's planned-node declaration is moot).
-#[allow(dead_code)]
 pub fn classify_code_ref(
     fqn: &str,
     scanned: &BTreeSet<String>,
@@ -141,7 +139,6 @@ pub fn classify_code_ref(
 /// [`CodeRefStatus::Drift`] ref errors — the FQN is gone from the scanned graph
 /// (spec drift). Bails on the first Drift, naming the offending FQN. Pure — no
 /// I/O; the caller supplies both universes.
-#[allow(dead_code)]
 pub fn validate_code_refs(
     refs: &[&str],
     scanned: &BTreeSet<String>,

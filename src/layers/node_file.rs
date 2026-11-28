@@ -77,7 +77,6 @@ pub fn properties_from_json(raw: &str) -> anyhow::Result<NodeProperties> {
 /// source's file, in in the target's — the pairing check is separate, and the
 /// edge/type validation is [`validate_node`]/[`validate_edges`],
 /// called by write_project **before** [`write_node`]).
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeFile {
     /// The layer dir name (e.g. `requirements`) — must equal the path segment.
@@ -107,7 +106,6 @@ pub struct NodeFile {
 /// One out-edge in a node file (SPEC §4.1): this node is the source. Two
 /// separate structs for out/in — they carry different fields (`target` vs
 /// `source`).
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutEdge {
     /// The edge kind (e.g. `driven-by`).
@@ -121,7 +119,6 @@ pub struct OutEdge {
 }
 
 /// One in-edge in a node file (SPEC §4.1): this node is the target.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InEdge {
     /// The edge kind (e.g. `contains`).
@@ -136,7 +133,6 @@ pub struct InEdge {
 /// Build an authored-node FQN (`<layer>.<type>.<name>`) from its identity —
 /// the inverse of [`parse_fqn`]. The file name IS the identity, so the FQN is
 /// derived, never stored.
-#[allow(dead_code)]
 pub fn fqn(layer: Layer, node_type: &str, name: &str) -> String {
     format!("{}.{node_type}.{name}", layer.layer_dir())
 }
@@ -162,7 +158,6 @@ pub fn fqn(layer: Layer, node_type: &str, name: &str) -> String {
 ///
 /// Returns the written file's path. Nothing here treats a `properties` key as
 /// identity — short ids are metadata, stored verbatim.
-#[allow(dead_code)]
 pub fn write_node(apg_root: &Path, node: &NodeFile) -> anyhow::Result<PathBuf> {
     let layer = Layer::ALL
         .iter()

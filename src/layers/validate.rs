@@ -1229,7 +1229,6 @@ pub(crate) fn validate_cardinalities(
 /// FQNs, each normalized so the lower FQN sorts first (a pair is unordered).
 /// Purely derived data — nothing is stored and no Group→Group edge or coupling
 /// node is produced.
-#[allow(dead_code)]
 pub fn derive_coupling(
     edges: &[(&str, &str, &str)],
     owner: &BTreeMap<String, String>,
@@ -1351,7 +1350,6 @@ pub fn eval_constraint(
 /// Pure — no I/O; the caller supplies the node files to check. Builds the
 /// FQN → node-file map with [`fqn`] (the file name IS the identity), then
 /// verifies every edge half against its counterpart.
-#[allow(dead_code)]
 pub fn check_edge_pairing(nodes: &[NodeFile]) -> anyhow::Result<()> {
     // FQN → node file: the identity universe the pairing check resolves
     // authored endpoints against. The FQN is derived (`fqn`), never read.

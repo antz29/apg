@@ -267,9 +267,8 @@ pub struct PendingRemoval {
 }
 
 /// True when `fqn` resolves to a node in the live graph (any kind). Used by
-/// the test suite and the tool surface; `#[allow(dead_code)]` because the
-/// shipping CLI paths test existence via label queries.
-#[allow(dead_code)]
+/// the test suite and the tool surface; the shipping CLI paths test existence
+/// via label queries.
 fn node_exists(db: &Database, fqn: &str) -> bool {
     count(
         db,
@@ -478,9 +477,8 @@ impl ArtifactDb {
     }
 
     /// Existence of any node at `fqn` in the live graph. Used by the test suite
-    /// and the tool surface; `#[allow(dead_code)]` because the shipping CLI paths
-    /// test existence via label queries.
-    #[allow(dead_code)]
+    /// and the tool surface; the shipping CLI paths test existence via label
+    /// queries.
     pub fn has_node(&self, fqn: &str) -> bool {
         node_exists(&self.db, fqn)
     }
