@@ -81,11 +81,11 @@ impl Drop for SpecLockGuard {
 /// The acquire is **blocking**: the exclusive `flock` waits until every other
 /// holder has released it, so a concurrent writer queues behind this one
 /// instead of failing with `EAGAIN`. That is what makes it the per-write
-/// availability gate — `Session::upgrade_to_write` takes it for one write
-/// critical section (the node-file write, the single commit and the database
-/// projection) and releases it when its guard drops, and the direct
-/// plan/review authoring paths (and the JSONL funnel they write through) take
-/// the same lock for their own sequence.
+/// availability gate — `Session::open_for_write` takes it **before** opening
+/// the database write-capable, and the `WriteGuard`'s drop releases it after
+/// the caller closes the write-capable handle; the direct plan/review authoring
+/// paths (and the JSONL funnel they write through) take the same lock for their
+/// own sequence.
 ///
 /// That single flock is what serializes the three contended locks a parallel
 /// burst hits: the node-file read-modify-write, git's `.git/index.lock` (inside
