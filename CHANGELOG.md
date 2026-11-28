@@ -9,6 +9,71 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.31.0
+
+Minor release: per-invocation sessions (a breaking CLI change), a source-comment
+law with a repo-wide discipline sweep, repo-gate and opencode-suite hardening, a
+bounded freshness verdict with accurate refusals, and the shared redb fact
+store, project registry and `--module` selection work.
+
+**Per-invocation sessions (headline, breaking).** Sessions are now
+per-invocation and read-only by default. A durable `apg node`/`apg edge`
+mutation upgrades the *same* invocation: it takes the blocking worktree `flock`
+first — it waits, never fails with `EAGAIN` — then performs the node-file write,
+exactly one git commit, and the database projection in one critical section,
+and drops back to read-only on exit. Concurrent writers queue with no lock
+error and no lost update; a read that overlaps a write never observes an empty
+or partial database; a write with no session is impossible by construction; and
+`apg scan` / `apg project merge` need no save+end — they simply run between
+writes. **Removed:** the `apg session start|save|end|abort` subcommand and the
+`apg_session` suite tool, the session daemon (`src/session.rs` coordinator,
+protocol, socket and forward surface), `session_cmd`,
+`write_through_with_deletes`, `Session::upgrade_to_write`/`release_write`, and
+the dead `ArtifactDb` pending-ledger reads. The legacy
+`PendingRemoval`/`updated` schema is retained only so a database left pending by
+the retired save model is detected and rebuilt. Two named Model C acceptance
+tests were added (concurrent writers queue; a read during a write sees a
+complete committed state) and 11 session-contract e2e suites converted.
+
+**Comment law.** Two new durable constraints:
+`global.constraint.source-comments-state-only-api-or-directive` — a source
+comment states only what the code does: an API fact, or an
+implementation/behaviour directive, never plans, history or reviewer notes —
+and `implementation.constraint.source-limit-is-one-implementation-note`, with
+six `applies-to` language edges (rust, java, cpp, go, csharp, ts), which records
+a source limit as one implementation note rather than an inline `shortcut:`
+comment.
+
+**Comment-discipline sweep.** A repo-wide source-comment cleanup against that
+law (P1–P6, 40 tasks), the opencode-suite prompts included, adding four new
+implementation notes.
+
+**Gate and suite hardening.** The repo gate now type-checks the opencode-suite
+test sources (bootstrapping the toolchain from the committed `bun.lock`) and
+enforces the suite-test type-check requirement; suite failures name the worktree
+they ran against; and `findApgRoot` root resolution was repaired (the Rust
+structural-guard fix included).
+
+**Freshness refusals.** The stale-graph refusal and the scan preamble now name
+every differing freshness input as `differing: …`.
+
+**Plan-review assignment coverage.** The plan-review, plan-writer and
+implementation-phase-reviewer prompts require the assigned agent's grants to
+cover every target a task names.
+
+**Scan, graph and project plumbing.** The shared fact store moved onto a redb
+database at `<git-common-dir>/apg/facts.db` behind a bounded-wait external lock,
+with per-worktree manifests and scan intents and reachability GC; each worktree
+gets its own toolchain cache. The project registry gains `apg project claim`,
+`resolve` and `reconstruct`, and `apg init`/`start`/`merge`/`delete` maintain
+it. `--module` selection is documented and honoured by every frontend (resolved
+against the canonicalised scan root, refused when it is not a directory) and
+participates in the freshness verdict. C++ module identities are path-based
+(the base module roots as `cpp`), a planned-node `modifies` is licensed by an
+earlier phase's `creates`, and the gate prints a per-step summary.
+
+No durable-spec model change.
+
 ## v0.30.0
 
 Minor release: merge failure atomicity, scan/graph reliability fixes, a faster
