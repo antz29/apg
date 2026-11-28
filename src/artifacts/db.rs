@@ -74,21 +74,21 @@ impl Drop for SpecLockGuard {
     }
 }
 
-/// Acquires the exclusive cross-process lock that serializes a whole durable
-/// sequence on the project: the **extended** spec/plan/review write lock.
+/// Acquires the exclusive cross-process lock that serializes a durable write
+/// on the project: the **extended** spec/plan/review write lock.
 ///
-/// A live session takes it exactly once at `Coordinator::start`, before any
-/// node-file read, and holds it for the session's whole life — across every
-/// admitted mutation's write to the worktree database, which marks exactly the
-/// node files the mutation changes dirty, plus the single commit at `apg
-/// session save` that writes those marked rows and deletes the pending-removal
-/// files. The direct plan/review authoring paths (and the JSONL funnel they
-/// write through) take the same lock for their own sequence.
+/// The acquire is **blocking**: the exclusive `flock` waits until every other
+/// holder has released it, so a concurrent writer queues behind this one
+/// instead of failing with `EAGAIN`. That is what makes it the per-write
+/// availability gate — `Session::upgrade_to_write` takes it for one write
+/// critical section (the node-file write, the single commit and the database
+/// projection) and releases it when its guard drops, and the direct
+/// plan/review authoring paths (and the JSONL funnel they write through) take
+/// the same lock for their own sequence.
+///
 /// That single flock is what serializes the three contended locks a parallel
 /// burst hits: the node-file read-modify-write, git's `.git/index.lock` (inside
-/// `git::commit_files`), and the read-write `db.lbug` projection apply. Because
-/// the session holds it for its life, it and any direct writer are mutually
-/// exclusive.
+/// `git::commit_files`), and the read-write `db.lbug` projection apply.
 ///
 /// Reentrant within the process: a nested acquire returns a guard that shares
 /// the already-held fd (incrementing the depth), so a command that acquires

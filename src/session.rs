@@ -113,17 +113,19 @@ pub fn require_apg_root() -> anyhow::Result<PathBuf> {
 pub struct Session {
     /// The layout root whose `apg/.trans/db.lbug` this handle holds — the
     /// write upgrade reopens it read-write and the release drops back here.
-    #[expect(
-        dead_code,
-        reason = "the write-path methods added in the following phase-1 tasks read this state"
-    )]
     apg_root: PathBuf,
-    /// The held database handle.
-    #[expect(
-        dead_code,
-        reason = "the write-path methods added in the following phase-1 tasks read this state"
-    )]
+    /// The held database handle: read-only between writes, write-capable for
+    /// one [`Session::upgrade_to_write`] critical section.
     db: ArtifactDb,
+}
+
+/// A held write upgrade: the blocking worktree lock that serialises one
+/// durable write's critical section. While it lives the [`Session`]'s database
+/// handle is write-capable; dropping it releases the flock, and
+/// `Session::release_write` drops the handle back to read-only.
+#[must_use = "dropping the guard immediately releases the whole-write lock"]
+pub struct WriteGuard {
+    _lock: SpecLockGuard,
 }
 
 impl Session {
@@ -135,6 +137,24 @@ impl Session {
             apg_root: apg_root.to_path_buf(),
             db: ArtifactDb::open_read_only(apg_root)?,
         })
+    }
+
+    /// Upgrades the read-only handle to the write-capable class under the
+    /// **blocking** extended worktree lock.
+    ///
+    /// The lock is taken before the database is reopened and it waits: a
+    /// concurrent writer holds the same exclusive `flock`, so this queues
+    /// behind it instead of failing with `EAGAIN`. The returned [`WriteGuard`]
+    /// keeps the lock held for the caller's critical section, during which
+    /// `Session::write_through` writes, commits and projects; the release
+    /// drops the handle back to read-only.
+    pub fn upgrade_to_write(&mut self) -> anyhow::Result<WriteGuard> {
+        let lock = acquire_spec_lock(&self.apg_root)?;
+        // Read-only opens take no lock, so the new write handle and the old
+        // read-only one can coexist; assigning the field drops the read-only
+        // handle once the write-capable one is open.
+        self.db = ArtifactDb::open(&self.apg_root)?;
+        Ok(WriteGuard { _lock: lock })
     }
 }
 
