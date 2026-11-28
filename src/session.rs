@@ -102,6 +102,42 @@ pub fn require_apg_root() -> anyhow::Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("no apg/ directory found from {}", start.display()))
 }
 
+/// A per-invocation handle on a worktree's graph database, opened **read-only**
+/// by default.
+///
+/// Every production command holds one for the length of its invocation. A
+/// durable write upgrades the handle under the blocking worktree lock, runs the
+/// node-file write, commit and projection inside that critical section, and
+/// releases it back to read-only; until then the read-only class takes no
+/// exclusive read-write class a concurrent reader or writer needs.
+pub struct Session {
+    /// The layout root whose `apg/.trans/db.lbug` this handle holds — the
+    /// write upgrade reopens it read-write and the release drops back here.
+    #[expect(
+        dead_code,
+        reason = "the write-path methods added in the following phase-1 tasks read this state"
+    )]
+    apg_root: PathBuf,
+    /// The held database handle.
+    #[expect(
+        dead_code,
+        reason = "the write-path methods added in the following phase-1 tasks read this state"
+    )]
+    db: ArtifactDb,
+}
+
+impl Session {
+    /// Opens the worktree database of the layout root `apg_root` in the
+    /// read-only class. A missing database is refused naming `apg scan` as the
+    /// remedy, exactly as [`ArtifactDb::open_read_only`] does.
+    pub fn open(apg_root: &Path) -> anyhow::Result<Session> {
+        Ok(Session {
+            apg_root: apg_root.to_path_buf(),
+            db: ArtifactDb::open_read_only(apg_root)?,
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Wire protocol: one JSON line per message over the Unix socket.
 // ---------------------------------------------------------------------------
