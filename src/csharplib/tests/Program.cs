@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace CsharpFrontend.Tests;
 
 /// <summary>
-/// Gate tests for the phase-02 task-12 targeted (file-granularity) C# scan.
+/// Gate tests for the targeted (file-granularity) C# scan.
 ///
 /// The load-bearing invariant: a symbol declared in a NON-emitted file must be
 /// emitted as the ingestor's canonical FQN, so the cached unit supplies the
@@ -369,7 +369,7 @@ public static class TestMain
 
     /// <summary>
     /// Targeted facts for the target file equal what a full scan emits for that
-    /// file (same records, ids canonicalized), mirroring the phase-02 int test's
+    /// file (same records, ids canonicalized), mirroring the int test's
     /// oracle (src/main.rs acceptance_targeted_rescan_equivalence_*).
     /// </summary>
     private static void TestTargetedEqualsFullForTargetFile(string proj, string baseDir)
@@ -1254,7 +1254,7 @@ public static class TestMain
     }
 
     /// <summary>
-    /// Razor through the phase-6 pipeline: (a) a .razor component's generated type is one struct record (no
+    /// Razor through the pipeline: (a) a .razor component's generated type is one struct record (no
     /// declaration-only duplicate); (b) two projects sharing RootNamespace and Views/Home/Index.cshtml get
     /// collision-qualified `<project path>.MyApp` parents, no duplicate FQN; (c) a targeted .cs calling an @code
     /// overload of an untargeted .razor lands on the full scan's FQN, (params) suffix included.

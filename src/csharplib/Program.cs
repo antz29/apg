@@ -27,7 +27,7 @@ public static class Program
         // frontends when a scan merges multiple languages (each frontend
         // starts its counter at `n1`).
         string idPrefix = "n";
-        // The phase-02 target-set hand-off (the pinned interface): `--targets`
+        // The target-set hand-off (the pinned interface): `--targets`
         // is an emission filter, `--cache-dir`/`--cache-key` locate the shared
         // per-language artifact directory.
         string? targetsPath = null;
@@ -209,7 +209,7 @@ public class Scanner
     private readonly List<string> _excludePatterns;
     private readonly string _idPrefix;
 
-    // The target-set emission filter (the pinned phase-02 hand-off). Non-empty
+    // The target-set emission filter (the pinned hand-off). Non-empty
     // means only the target files' per-file facts are emitted; the full
     // compilation is still built so every reference resolves exactly.
     private readonly HashSet<string> _targetFiles;

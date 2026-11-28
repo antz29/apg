@@ -40,7 +40,7 @@ internal static class CollisionQualifier
     /// (`Namespace.Name`, arity-suffixed) is declared in more than one
     /// compilation and maps every declaring (file path, plain FQN) of a project
     /// member to its unrooted qualified parent: the project file's absolute
-    /// path (task 5's module identity, whole) plus `.Namespace`, or the path
+    /// path (the module identity, whole) plus `.Namespace`, or the path
     /// alone for the global namespace. Projectless members, single-compilation
     /// types and .csx script types get no entry (they keep the plain FQN).
     /// Also replaces the stored file- and assembly-keyed maps QualifiedParent reads.

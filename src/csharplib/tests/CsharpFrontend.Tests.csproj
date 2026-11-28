@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    Gate tests for the phase-02 task-12 targeted (file-granularity) C# scan.
+    Gate tests for the targeted (file-granularity) C# scan.
     A framework-free console harness (the crate has no test framework; this
     mirrors the sibling Java frontend's CallGraphBuilderTest). It references
     the production scanner project and drives `Program.Main` / `Scanner.Run`
