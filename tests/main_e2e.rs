@@ -10300,8 +10300,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// A zero-target incremental scan on a scratch /tmp repo (real `apg init`
-    /// + real `apg scan`, CANDIDATE binary only —
+    /// A zero-target incremental scan on a scratch /tmp repo (real `apg init` +
+    /// real `apg scan`, CANDIDATE binary only —
     /// `global.constraint.no-real-project-test`) keeps the Agent roster and the
     /// Task→Agent `AssignedTo` rows without double-emitting the roster. An
     /// empty commit moves HEAD with the tree untouched, so the recorded scan is
