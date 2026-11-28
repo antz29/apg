@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <string>
 
-// ── JSONL serialization / sink (extracted from main.cpp) ─────────────
+// ── JSONL serialization / sink ───────────────────────────────────────
 
 // When non-null, scanner output is appended here instead of stdout. Used by
 // the --self-test harness to compare a full scan against a target-filtered one

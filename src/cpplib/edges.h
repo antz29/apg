@@ -2,7 +2,7 @@
 
 #include <string>
 
-// ── Edge emission + unresolved classification (extracted from main.cpp) ─
+// ── Edge emission + unresolved classification ────────────────────────
 
 // Classify an unresolved symbol name. Qualified names are external symbols;
 // bare identifiers are function pointers/locals (func-value) or, for types,

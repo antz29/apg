@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-// ── Generic tree-sitter node utilities (extracted from main.cpp) ─────
+// ── Generic tree-sitter node utilities ───────────────────────────────
 
 static std::string node_text(TSNode node, const std::string &source) {
     uint32_t start = ts_node_start_byte(node);

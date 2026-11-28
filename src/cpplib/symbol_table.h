@@ -38,7 +38,7 @@ static std::unordered_map<std::string, std::string> funcIDByFqn;
 // unresolvedSeen deduplicates unresolved node records by fqn.
 static std::unordered_set<std::string> unresolvedSeen;
 
-// ── Target-set emission filter (phase-02 task-13, the pinned hand-off) ──
+// ── Target-set emission filter (the pinned hand-off) ─────────────────
 //
 // `--targets <file>` carries a UTF-8, newline-delimited list of absolute
 // source-file paths. An absent flag or an empty file means NO filter — the

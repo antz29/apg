@@ -7,7 +7,7 @@
 #include <fstream>
 #include <string>
 
-// ── --self-test: the phase-02 task-13 emission-exactness fixture ─────
+// ── --self-test: the target-set emission-exactness fixture ───────────
 //
 // src/cpplib has no test harness of its own (build.rs compiles main.cpp into
 // the cppfrontend binary and nothing else), so this mode embeds a ≥2-file

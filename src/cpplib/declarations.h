@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-// ── Declaration records + collection (extracted from main.cpp) ───────
+// ── Declaration records + collection ─────────────────────────────────
 
 struct Decl {
     std::string kind;      // "class" | "method"
@@ -23,7 +23,7 @@ struct Decl {
 };
 
 // A class/struct's base-class reference, tagged with the deriving declaration's
-// file so the target-set emission filter (phase-02 task-13) can attribute the
+// file so the target-set emission filter can attribute the
 // `uses` edge to the file that authored it.
 struct BaseRef {
     std::string derived;

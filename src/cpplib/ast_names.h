@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-// ── C++ grammar-shape name / type extraction (extracted from main.cpp) ─
+// ── C++ grammar-shape name / type extraction ─────────────────────────
 
 static bool fn_name_segments(TSNode node, const std::string &source, std::vector<std::string> &out) {
     const char *kind = ts_node_type(node);

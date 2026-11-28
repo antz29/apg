@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-// ── FQN / scope arithmetic + name resolution (extracted from main.cpp) ─
+// ── FQN / scope arithmetic + name resolution ─────────────────────────
 
 static std::string clean_fqn(const std::string &raw) {
     std::string out;

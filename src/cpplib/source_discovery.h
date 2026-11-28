@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
-// ── Filesystem discovery + target-list read (extracted from main.cpp) ─
+// ── Filesystem discovery + target-list read ──────────────────────────
 
 static bool is_cpp_ext(const std::string &ext) {
     return ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c++" ||
@@ -130,7 +130,7 @@ static std::string read_file(const fs::path &path) {
     return out;
 }
 
-// Reads the pinned `--targets` list (phase-02 task-13): a UTF-8,
+// Reads the pinned `--targets` list: a UTF-8,
 // newline-delimited file of absolute source-file paths, one per line, no
 // header; blank (and whitespace-only) lines are ignored. A missing/unreadable
 // file warns and yields an empty set, which the caller treats as "no filter".

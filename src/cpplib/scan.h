@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-// ── Scan orchestration + parser lifecycle (extracted from main.cpp) ──
+// ── Scan orchestration + parser lifecycle ────────────────────────────
 
 extern "C" const TSLanguage *tree_sitter_cpp(void);
 

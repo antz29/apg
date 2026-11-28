@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
     }
 
     // Parse --module <dir> pairs, --id-prefix, and the pinned target-set
-    // hand-off flags (phase-02 task-13); remaining args are excludes.
+    // hand-off flags; remaining args are excludes.
     std::vector<std::string> module_dirs;
     std::vector<std::string> excludes;
     std::string targets_path, cache_dir, cache_key;

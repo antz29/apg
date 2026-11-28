@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
-// ── Type-aware reference / call resolution (extracted from main.cpp) ─
+// ── Type-aware reference / call resolution ───────────────────────────
 
 // Forward declarations: resolve_refs (above its definition) calls resolve_calls
 // and resolve_calls calls extract_call_target, both defined below in this
