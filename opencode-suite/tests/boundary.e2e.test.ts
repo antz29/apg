@@ -31,12 +31,9 @@ import {
   mainCheckoutRoot,
   REQUIREMENT_FQN_PREFIX,
   csvToRows,
-  startDetachedSession,
-  sessionLiveAt,
   MISSING_WORKTREE_ERROR,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
-  type DetachedSession,
   type ToolContext,
 } from "../lib/apg.ts"
 
@@ -912,7 +909,7 @@ test.skipIf(!enabled)(
 // A caller with NO resolved project worktree (`context.worktree`) is refused by
 // every project-bound helper with the shared MISSING_WORKTREE_ERROR signal —
 // the helpers never walk up from the load location or cwd to find a database.
-// The string-returning helpers (runCypher, runCli, startDetachedSession) return
+// The string-returning helpers (runCypher, runCli) return
 // the refusal verbatim; the helpers that hand back a structured value
 // (`branchAddedRequirementNames` returns a Set) throw it, and `runInProject`
 // throws its own pre-existing missing-resolved-project refusal, which is a
@@ -926,7 +923,6 @@ test.skipIf(!enabled)(
 
     expect(await runCypher(context, "MATCH (n) RETURN n")).toBe(MISSING_WORKTREE_ERROR)
     expect(await runCli(context, ["query", "MATCH (n) RETURN n"])).toBe(MISSING_WORKTREE_ERROR)
-    expect(await startDetachedSession(context)).toBe(MISSING_WORKTREE_ERROR)
 
     let branchRefusal = ""
     try {
@@ -1022,21 +1018,17 @@ test.skipIf(!enabled || !binary)(
   },
 )
 
-// The `apg_session` suite tool. Its body is the plugin-free
-// `startDetachedSession` helper (the tool wraps it and appends a status
-// message), so — like the fs-tool scenarios above — this drives the SAME
-// sequence the tool runs: spawn `apg session start` DETACHED, wait for its
-// socket to answer live, and return while the coordinator keeps running. A
-// durable `apg node` mutation then routes through the live session: it lands in
-// the worktree database at admission, so no node file appears before `apg
-// session save` writes the marked rows in one commit, and `apg session end`
-// releases the session. A second detached start while one is live, and a root
-// with no `db.lbug`, both fail cleanly rather than blocking or throwing.
-// Real I/O (scratch /tmp git repo, a scanned db.lbug, a detached process, a Unix
-// socket, git commits), so opt-in suite e2e against a candidate binary
-// (`global.constraint.no-real-project-test`).
+// PER-INVOCATION durable writes (Model C). There is no session daemon: a
+// durable `apg node`/`apg edge` mutation opens read-only, upgrades under the
+// worktree's blocking lock for one critical section, writes its node file,
+// makes exactly one commit and projects into db.lbug, then releases back to
+// read-only — all in the ONE invocation, with no `apg session start|save|end`
+// step anywhere. The removed `apg session` subcommand is not even dispatched,
+// so every session lifecycle call exits non-zero and writes nothing. Real I/O
+// (scratch /tmp git repo, a scanned db.lbug, git commits), so opt-in suite e2e
+// against a candidate binary (`global.constraint.no-real-project-test`).
 test.skipIf(!enabled || !binary)(
-  "e2e: apg_session starts a detached live session, routes a mutation, saves, and ends; no db fails cleanly",
+  "e2e: a durable apg node write lands its file, one commit and the projection in the invoking process, with no session lifecycle",
   async () => {
     const bin = binary as string
     const previousBinary = process.env.APG_BINARY
@@ -1044,75 +1036,53 @@ test.skipIf(!enabled || !binary)(
     process.env.APG_BINARY = bin
 
     const repo = scratchRepo()
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-home-"))
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-invocation-home-"))
     // Keep `apg init` hermetic: pre-create the plugin dir so it never shells
-    // out to `bun install`, and redirect HOME so the detached session never
-    // reads a real `~/.config/opencode` (`global.constraint.no-real-project-test`).
+    // out to `bun install`, and redirect HOME so nothing reads a real
+    // `~/.config/opencode` (`global.constraint.no-real-project-test`).
     fs.mkdirSync(path.join(home, ".config", "opencode", "node_modules", "@opencode", "plugin"), {
       recursive: true,
     })
     process.env.HOME = home
 
-    const sessionId = "s1"
+    const env = { ...process.env, HOME: home }
     const runIn = (dir: string, args: string[], extraEnv: Record<string, string> = {}) =>
       Bun.spawnSync({
         cmd: [bin, ...args],
         cwd: dir,
-        env: { ...process.env, ...extraEnv },
+        env: { ...env, ...extraEnv },
         stdout: "pipe",
         stderr: "pipe",
       })
     const run = (args: string[], extraEnv: Record<string, string> = {}) => runIn(repo, args, extraEnv)
+    const git = (dir: string, args: string[]) =>
+      Bun.spawnSync({ cmd: ["git", ...args], cwd: dir, env, stdout: "pipe", stderr: "pipe" })
+    const commitCount = (dir: string) =>
+      Number(git(dir, ["rev-list", "--count", "HEAD"]).stdout.toString().trim())
 
-    let live: DetachedSession | null = null
-    let worktree: string | null = null
     try {
       expect(run(["init", "."]).exitCode).toBe(0)
-      // Commit the scaffold (the documented scratch flow) so the session's own
-      // save commit lands on a clean tracked tree.
-      const git = (args: string[]) =>
-        Bun.spawnSync({ cmd: ["git", ...args], cwd: repo, stdout: "pipe", stderr: "pipe" })
-      git(["add", "-A"])
-      git(["commit", "-q", "-m", "apg init"])
+      // Commit the scaffold (the documented scratch flow) so the durable
+      // write's own commit lands on a clean tracked tree.
+      git(repo, ["add", "-A"])
+      git(repo, ["commit", "-q", "-m", "apg init"])
 
       const scan = run(["scan", "."])
       if (scan.exitCode !== 0) throw new Error(`scan failed: ${scan.stderr.toString()}`)
 
       // Durable mutations are legal only inside a project worktree on the
-      // project branch (R3), so start a project from the scanned main checkout
-      // and drive the session from its worktree — the documented flow. The
-      // calling session owns the registry row, so the project-bound session
-      // start is authorised.
-      const project = "suite-session"
-      const startedProject = run(["project", "start", project], { APG_CALLER_SESSION: sessionId })
+      // project branch, so start a project from the scanned main checkout and
+      // write from its worktree — the documented flow.
+      const project = "suite-invocation"
+      const startedProject = run(["project", "start", project], { APG_CALLER_SESSION: "s1" })
       if (startedProject.exitCode !== 0) {
         throw new Error(`project start failed: ${startedProject.stderr.toString()}`)
       }
-      worktree = path.join(repo, "apg", ".worktrees", project)
+      const worktree = path.join(repo, "apg", ".worktrees", project)
+      const before = commitCount(worktree)
 
-      const context: ToolContext = {
-        ...v2Context(worktree),
-        projectName: project,
-        worktree,
-        sessionID: sessionId,
-      }
-
-      // The tool's plugin-free core: detached `apg session start`, returning
-      // once the socket answers live while the coordinator keeps running.
-      const started = await startDetachedSession(context, { timeoutMs: 30000 })
-      expect(typeof started).not.toBe("string")
-      live = started as DetachedSession
-      expect(live.root).toBe(worktree)
-      expect(existsSync(live.socket)).toBe(true)
-      expect(await sessionLiveAt(live.socket)).toBe(true)
-
-      // A routed durable mutation is admitted while the session is live: its
-      // row lands in the worktree database at admission, and no node file
-      // appears on disk until save. The save boundary's scope is per-node
-      // structure over the dirty rows plus edge pairing over the held set — the
-      // whole-model minimums are deferred to lint and merge — so a bare
-      // `global` constraint, which carries no such obligation, is accepted
-      // there (a lone `requirement` must be driven-by a Service, §3.4).
+      // (a) The durable write completes in THIS invocation — no session is
+      // started, and there is no save step to run afterwards.
       const nodeFile = path.join(
         worktree,
         "apg",
@@ -1128,75 +1098,47 @@ test.skipIf(!enabled || !binary)(
         "constraint",
         "session-node",
         "--body",
-        "routed",
+        "durable per-invocation write",
       ])
       expect(added.exitCode).toBe(0)
       expect(added.stdout.toString().trim()).toBe("Added node global.constraint.session-node")
-      expect(existsSync(nodeFile)).toBe(false)
 
-      // A SECOND detached start while one is live fails cleanly: `apg session
-      // start` exits early (one session per worktree DB), so no socket ever
-      // appears and the helper reports an error string instead of blocking.
-      const second = await startDetachedSession(context, { timeoutMs: 30000 })
-      expect(typeof second).toBe("string")
-      expect(second as string).toContain("apg session start failed")
-
-      // `apg session save` writes the marked rows in one commit …
-      const save = runIn(worktree, ["session", "save"])
-      expect(save.exitCode).toBe(0)
-      expect(save.stdout.toString().trim()).toBe("Session saved")
+      // (b) Write-through: the node file exists the moment the invocation
+      // returns, and the invocation made exactly one commit carrying it.
       expect(existsSync(nodeFile)).toBe(true)
+      expect(commitCount(worktree)).toBe(before + 1)
+      const committed = git(worktree, [
+        "show",
+        "--name-only",
+        "--pretty=format:",
+        "HEAD",
+      ]).stdout.toString()
+      expect(committed).toContain("apg/layers/global/constraint/session-node.json")
 
-      // … and `apg session end` releases the live session.
-      const ended = runIn(worktree, ["session", "end"])
-      expect(ended.exitCode).toBe(0)
-      expect(ended.stdout.toString().trim()).toBe("Session ended")
-      // The session is released: its socket is reclaimed. (Poll briefly: the
-      // coordinator removes the socket just after replying, and `sessionLiveAt`
-      // is for a socket file that EXISTS with no listener — connecting to a
-      // removed path does not settle, so assert on the file itself.)
-      const gone = Date.now() + 10000
-      while (existsSync(live.socket) && Date.now() < gone) {
-        await new Promise((r) => setTimeout(r, 50))
-      }
-      expect(existsSync(live.socket)).toBe(false)
-      live = null
+      // (c) The projection already landed: a plain read in a fresh invocation
+      // sees the FQN, with no `apg session save` in between.
+      const query = runIn(worktree, [
+        "query",
+        "MATCH (n:Constraint {fqn:'global.constraint.session-node'}) RETURN n.fqn",
+      ])
+      expect(query.exitCode).toBe(0)
+      expect(query.stdout.toString()).toContain("global.constraint.session-node")
 
-      // Failure path: a WORKTREE-BEARING root with no `db.lbug` (a bare dir,
-      // then an `apg/.trans` with no db) proceeds to the spawn — the worktree
-      // short-circuits the root derivation — and `apg session start` refuses
-      // there, so the helper returns its spawn-refusal STRING, which begins
-      // `apg session start`, never the shared NO_DB_ERROR.
-      const noDb = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-nodb-"))
-      try {
-        const bare = path.join(noDb, "bare")
-        fs.mkdirSync(bare, { recursive: true })
-        const bareRefusal = await startDetachedSession(v2Context(bare, { worktree: bare }))
-        expect(typeof bareRefusal).toBe("string")
-        expect((bareRefusal as string).startsWith("apg session start")).toBe(true)
-        expect(bareRefusal).not.toBe(NO_DB_ERROR)
-        const badRoot = path.join(noDb, "bad")
-        fs.mkdirSync(path.join(badRoot, "apg", ".trans"), { recursive: true })
-        const badRefusal = await startDetachedSession(v2Context(badRoot, { worktree: badRoot }))
-        expect(typeof badRefusal).toBe("string")
-        expect((badRefusal as string).startsWith("apg session start")).toBe(true)
-        expect(badRefusal).not.toBe(NO_DB_ERROR)
-      } finally {
-        fs.rmSync(noDb, { recursive: true, force: true })
+      // (d) No session lifecycle exists: the subcommand is not dispatched, so
+      // each call exits non-zero naming the unknown subcommand, prints no
+      // save/start success line, and writes nothing — no commit, clean tree,
+      // the node file still in place.
+      for (const sub of ["save", "start"]) {
+        const session = runIn(worktree, ["session", sub])
+        expect(session.exitCode).not.toBe(0)
+        expect(session.stderr.toString()).toContain("apg: unknown subcommand: session")
+        expect(session.stdout.toString()).not.toContain("Session saved")
+        expect(session.stdout.toString()).not.toContain("Session started")
+        expect(commitCount(worktree)).toBe(before + 1)
+        expect(git(worktree, ["status", "--porcelain"]).stdout.toString().trim()).toBe("")
+        expect(existsSync(nodeFile)).toBe(true)
       }
     } finally {
-      // Best-effort teardown: end a still-live session (or kill it if the end
-      // never reaches it) so no detached coordinator outlives the test.
-      if (worktree) {
-        try {
-          runIn(worktree, ["session", "end"])
-        } catch {}
-      }
-      if (live) {
-        try {
-          process.kill(live.pid)
-        } catch {}
-      }
       if (previousBinary === undefined) delete process.env.APG_BINARY
       else process.env.APG_BINARY = previousBinary
       if (previousHome === undefined) delete process.env.HOME
@@ -1206,101 +1148,6 @@ test.skipIf(!enabled || !binary)(
     }
   },
   60000,
-)
-
-// Regression guard for the hang-proof liveness probe. `sessionLiveAt` must
-// resolve `false` — never hang — for a socket path that does not exist, for a
-// path that once existed and was removed, and for a path where a non-socket
-// file sits with no listener behind it (the removed/stale socket shapes a
-// crashed coordinator leaves behind). The probe's hard,
-// socket-event-independent deadline is what bounds the wait; a settled promise
-// proves the hang regression stays fixed. `startDetachedSession` must likewise
-// return its string error (not hang) for a root with no live session. Real I/O
-// (Unix-socket connects, fs), so opt-in suite e2e.
-test.skipIf(!enabled)(
-  "e2e: sessionLiveAt resolves false without hanging for absent/removed socket paths",
-  async () => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-probe-"))
-    // The scratch dir and its socket paths are self-contained: `sessionLiveAt`
-    // probes absolute paths under `base`, and the worktree-bearing
-    // `startDetachedSession` call in (4) spawns in its own worktree — neither
-    // reaches the checkout this test file lives in (no real project, ever).
-    try {
-      // (1) A path that was never bound.
-      const missing = path.join(base, "never-bound.sock")
-      const t0 = Date.now()
-      expect(await sessionLiveAt(missing, 500)).toBe(false)
-      expect(Date.now() - t0).toBeLessThan(5000)
-
-      // (2) A path that once existed and was removed (the crash shape: the
-      // coordinator's socket file is gone but a client still probes the path).
-      const removed = path.join(base, "removed.sock")
-      fs.writeFileSync(removed, "")
-      fs.rmSync(removed, { force: true })
-      expect(existsSync(removed)).toBe(false)
-      const t1 = Date.now()
-      expect(await sessionLiveAt(removed, 500)).toBe(false)
-      expect(Date.now() - t1).toBeLessThan(5000)
-
-      // (3) A stale socket FILE with no listener behind it (present-but-
-      // unreachable): a regular file at the socket path.
-      const stale = path.join(base, "stale.sock")
-      fs.writeFileSync(stale, "")
-      expect(existsSync(stale)).toBe(true)
-      const t2 = Date.now()
-      expect(await sessionLiveAt(stale, 500)).toBe(false)
-      expect(Date.now() - t2).toBeLessThan(5000)
-
-      // (4) `startDetachedSession` reports a string error (not a hang) for a
-      // WORKTREE-BEARING root with no live session — the worktree short-circuits
-      // the root derivation, so the spawn runs and `apg session start` refuses
-      // there; the returned STRING begins `apg session start` and is never the
-      // shared NO_DB_ERROR.
-      const bare = path.join(base, "bare")
-      fs.mkdirSync(bare, { recursive: true })
-      const t3 = Date.now()
-      const started = await startDetachedSession(v2Context(bare, { worktree: bare }), {
-        timeoutMs: 500,
-      })
-      expect(typeof started).toBe("string")
-      expect((started as string).startsWith("apg session start")).toBe(true)
-      expect(started).not.toBe(NO_DB_ERROR)
-      expect(Date.now() - t3).toBeLessThan(5000)
-    } finally {
-      fs.rmSync(base, { recursive: true, force: true })
-    }
-  },
-  15000,
-)
-
-// An induced SPAWN failure (a bogus/absent APG_BINARY makes `Bun.spawn` throw)
-// on a WORKTREE-BEARING context still names the root `apg session start` ran
-// against, begins `apg session start` and is never the shared NO_DB_ERROR.
-// Nothing is spawned outside the scratch dir; the previous APG_BINARY is
-// restored in a finally.
-test.skipIf(!enabled)(
-  "e2e: a failed session spawn names the worktree it ran against",
-  async () => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-spawnfail-"))
-    const previousBinary = process.env.APG_BINARY
-    process.env.APG_BINARY = path.join(base, "no-such-apg-binary")
-    try {
-      const root = path.join(base, "worktree")
-      fs.mkdirSync(root, { recursive: true })
-      const failed = await startDetachedSession(v2Context(root, { worktree: root }), {
-        timeoutMs: 500,
-      })
-      expect(typeof failed).toBe("string")
-      expect((failed as string).startsWith("apg session start")).toBe(true)
-      expect(failed).not.toBe(NO_DB_ERROR)
-      expect(failed as string).toContain(root)
-    } finally {
-      if (previousBinary === undefined) delete process.env.APG_BINARY
-      else process.env.APG_BINARY = previousBinary
-      fs.rmSync(base, { recursive: true, force: true })
-    }
-  },
-  15000,
 )
 
 /** A scratch project served by an argv-recording stub binary: `project resolve`
