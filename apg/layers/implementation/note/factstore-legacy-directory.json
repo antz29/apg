@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "factstore-legacy-directory",
+  "body": "Limit — `FACTS_DIR`, `SCAFFOLDING_FILE` and `retire_legacy_store` are retained only so the phase-2 `<store>/facts/` JSON fact-file migration and its tests can refer to them. Upgrade — Delete them once no released binary writes a phase-2 store.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.factstore.retire_legacy_store",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

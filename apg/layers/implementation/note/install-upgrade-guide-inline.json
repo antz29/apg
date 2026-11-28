@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "install-upgrade-guide-inline",
+  "body": "Limit — The layout-upgrade guide `apg init` installs into the project is an inline `const` string literal in `src/install.rs` rather than a single-sourced `include_str!` of a suite file, because `opencode-suite/lib/` carries no `apg-upgrade.md` yet. Upgrade — When that file lands, replace the literal with `include_str!(\"../opencode-suite/lib/apg-upgrade.md\")`, matching `APG_LIB`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "src/install.rs",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
