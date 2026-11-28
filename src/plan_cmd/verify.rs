@@ -298,8 +298,8 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     // pure — a pre-existing unchanged claim is exempt, and the
     // Requirement ←driven-by— Service ←realises— Component —implemented-by→ code
     // spine is never walked. Task targets
-    // come from the transient plan records (note-26: the DB's Task table is
-    // static — the plan JSONL is the source of truth). The suggestion names the
+    // come from the transient plan records — the DB's Task table is static, the plan
+    // JSONL is the source of truth. The suggestion names the
     // verb the uncovered FQN's status calls for: a `modifies` over code that
     // already resolves, a `creates` over a planned or still-absent FQN.
     let delta = change_set_spec_delta(apg_root)?;
@@ -633,7 +633,7 @@ pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
 
 /// Change-set delta coverage (SPEC §5, requirement
 /// plan-coverage-scoped-to-change-set-delta). Pure — no I/O: the caller
-/// supplies the transient plan records (note-26: the
+/// supplies the transient plan records (the
 /// `.trans/plans/<project>.jsonl`, not the DB's static Task table, is the task
 /// source of truth) and the merge-base durable-spec [`SpecDelta`].
 ///
