@@ -6,7 +6,9 @@ use std::sync::{Mutex, OnceLock};
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::git;
-use crate::layers::{InEdge, NodeFile, NodeProperties, OutEdge, parse_fqn, properties_from_json};
+#[cfg(test)]
+use crate::layers::NodeProperties;
+use crate::layers::{InEdge, NodeFile, OutEdge, parse_fqn, properties_from_json};
 use crate::load;
 use crate::schema::Record;
 use crate::specs;
@@ -940,102 +942,6 @@ impl ArtifactDb {
         Ok(nodes)
     }
 
-    /// Reconstruct the **in-edges** incident to a caller-supplied FQN set from
-    /// the **live database** — the general from-DB incident-edge restore seam,
-    /// the complement to [`records_for_nodes`](crate::layers::records_for_nodes)
-    /// for in-edges.
-    ///
-    /// [`records_for_nodes`](crate::layers::records_for_nodes) emits each
-    /// partial node record's **out**-edges (and the source-side half of any edge
-    /// the node owns), so a restore seam that re-merges a changed/removed
-    /// identity only needs the **in**-edges it would otherwise drop: rows
-    /// `(a)-[r:TABLE]->(b)` whose `b.fqn` is in `fqns` and whose `a.fqn` is
-    /// **not**. A source outside the set owns its own out half, so it is not
-    /// duplicated here; a source inside the set is skipped because that node
-    /// record's out-edge already carries the row.
-    ///
-    /// Every durable authored rel table ([`DURABLE_EDGE_TABLES`]) is read back
-    /// with its serialized-properties column decoded by [`properties_from_json`]
-    /// — the exact inverse of `edge_merge` — and the three transient rels
-    /// `Reviews`/`Gates`/`Satisfies` (which carry no properties column) are read
-    /// too. The result is deterministic: the durable tables in their declared
-    /// order, then the transient tables, each table's rows sorted by
-    /// `(from, to)`.
-    ///
-    /// **Ledger-held endpoints are omitted.** An identity on the pending-removal
-    /// ledger ([`pending_removals`](Self::pending_removals)) is a node an
-    /// admission detached whose node file a save still owes deleting, so
-    /// [`node_files_from_db`](Self::node_files_from_db) omits it from the
-    /// reconstructed durable base — and an in-edge naming it would be a half
-    /// whose endpoint has no node file, refused by the save boundary's
-    /// edge-pairing check. Neither an in-edge row whose source nor one whose
-    /// target is ledger-held is restored; the surviving rows keep their
-    /// `(from, to)` order. A call with no FQNs restores nothing and reads no
-    /// ledger.
-    ///
-    /// This reads the **held DB** and performs no `.trans` read; it is **not**
-    /// authoring-mutation-specific — the future core-scan-into-session work
-    /// reuses it.
-    pub fn incident_edge_records_from_db(
-        &self,
-        fqns: &BTreeSet<String>,
-    ) -> anyhow::Result<Vec<Record>> {
-        if fqns.is_empty() {
-            return Ok(Vec::new());
-        }
-        // Read the pending-removal ledger before the rows: an in-edge naming a
-        // ledger-held identity must not be restored.
-        let held: BTreeSet<String> = self
-            .pending_removals()?
-            .into_iter()
-            .map(|pending| pending.fqn)
-            .collect();
-        let conn = self.conn()?;
-        // The FQN set as a Cypher list literal; `lit` escapes each identity.
-        let list = fqns.iter().map(|f| lit(f)).collect::<Vec<_>>().join(", ");
-        let mut records: Vec<Record> = Vec::new();
-
-        for (table, _) in DURABLE_EDGE_TABLES {
-            let (_, mut rows) = query_rows(
-                &conn,
-                &format!(
-                    "MATCH (a)-[r:{table}]->(b) WHERE b.fqn IN [{list}] AND NOT a.fqn IN [{list}] RETURN a.fqn, b.fqn, r.properties"
-                ),
-            )?;
-            rows.sort_by_key(|row| (cell(row, 0), cell(row, 1)));
-            for row in rows {
-                let from = cell(&row, 0);
-                let to = cell(&row, 1);
-                if held.contains(&from) || held.contains(&to) {
-                    continue;
-                }
-                let properties = properties_from_json(&cell(&row, 2))
-                    .map_err(|e| anyhow::anyhow!("{table} `{from}` -> `{to}`: {e}"))?;
-                records.push(durable_edge_record(table, from, to, properties));
-            }
-        }
-
-        for table in TRANSIENT_EDGE_TABLES {
-            let (_, mut rows) = query_rows(
-                &conn,
-                &format!(
-                    "MATCH (a)-[r:{table}]->(b) WHERE b.fqn IN [{list}] AND NOT a.fqn IN [{list}] RETURN a.fqn, b.fqn"
-                ),
-            )?;
-            rows.sort_by_key(|row| (cell(row, 0), cell(row, 1)));
-            for row in rows {
-                let from = cell(&row, 0);
-                let to = cell(&row, 1);
-                if held.contains(&from) || held.contains(&to) {
-                    continue;
-                }
-                records.push(transient_edge_record(table, from, to));
-            }
-        }
-
-        Ok(records)
-    }
-
     /// Read the held DB's **transient, project-scoped** `Feedback` rows and
     /// their `Reviews` edges as [`Record`]s — the DB-only source for `node rm`'s
     /// outstanding-feedback warning.
@@ -1201,47 +1107,12 @@ impl PreviousScan {
     }
 }
 
-/// The transient `.trans` rel tables an authored plan/review edge can occupy.
-/// Unlike [`DURABLE_EDGE_TABLES`] these carry **no** serialized-properties
-/// column ([`edge_merge`](crate::artifacts::merge::edge_merge) returns `None` for
-/// them), so [`ArtifactDb::incident_edge_records_from_db`] reads only their
-/// endpoints. The task edges ([`crate::load::tables::TASK_EDGE_TABLES`]) join
-/// the plan/review rels here: a task's own storage is title+status, its
-/// assignment and per-kind operation rows are these property-less edges.
-const TRANSIENT_EDGE_TABLES: [&str; 26] = [
-    "Reviews",
-    "Gates",
-    "Satisfies",
-    "AssignedTo",
-    "Implements",
-    "Target",
-    "ModuleCreate",
-    "ModuleModify",
-    "ModuleDelete",
-    "ModuleMove",
-    "ModuleRename",
-    "FileCreate",
-    "FileModify",
-    "FileDelete",
-    "FileMove",
-    "FileRename",
-    "StructCreate",
-    "StructModify",
-    "StructDelete",
-    "StructMove",
-    "StructRename",
-    "FunctionCreate",
-    "FunctionModify",
-    "FunctionDelete",
-    "FunctionMove",
-    "FunctionRename",
-];
-
 /// Build the durable-authored edge [`Record`] for one `(a)-[r:TABLE]->(b)` row,
 /// keyed by its rel table. The inverse of
 /// [`edge_merge`](crate::artifacts::merge::edge_merge)'s table arm — every
 /// `table` here is an element of [`DURABLE_EDGE_TABLES`], so the fallback is
 /// unreachable.
+#[cfg(test)]
 pub(crate) fn durable_edge_record(
     table: &str,
     from: String,
@@ -1325,41 +1196,6 @@ pub(crate) fn durable_edge_record(
             properties,
         },
         other => unreachable!("DURABLE_EDGE_TABLES carries no `{other}` table"),
-    }
-}
-
-/// Build the property-less transient edge [`Record`] for one
-/// `(a)-[r:TABLE]->(b)` row of [`TRANSIENT_EDGE_TABLES`]; the fallback is
-/// unreachable because the caller iterates exactly that list.
-fn transient_edge_record(table: &str, from: String, to: String) -> Record {
-    match table {
-        "Reviews" => Record::Reviews { from, to },
-        "Gates" => Record::Gates { from, to },
-        "Satisfies" => Record::Satisfies { from, to },
-        "AssignedTo" => Record::AssignedTo { from, to },
-        "Implements" => Record::Implements { from, to },
-        "Target" => Record::Target { from, to },
-        "ModuleCreate" => Record::ModuleCreate { from, to },
-        "ModuleModify" => Record::ModuleModify { from, to },
-        "ModuleDelete" => Record::ModuleDelete { from, to },
-        "ModuleMove" => Record::ModuleMove { from, to },
-        "ModuleRename" => Record::ModuleRename { from, to },
-        "FileCreate" => Record::FileCreate { from, to },
-        "FileModify" => Record::FileModify { from, to },
-        "FileDelete" => Record::FileDelete { from, to },
-        "FileMove" => Record::FileMove { from, to },
-        "FileRename" => Record::FileRename { from, to },
-        "StructCreate" => Record::StructCreate { from, to },
-        "StructModify" => Record::StructModify { from, to },
-        "StructDelete" => Record::StructDelete { from, to },
-        "StructMove" => Record::StructMove { from, to },
-        "StructRename" => Record::StructRename { from, to },
-        "FunctionCreate" => Record::FunctionCreate { from, to },
-        "FunctionModify" => Record::FunctionModify { from, to },
-        "FunctionDelete" => Record::FunctionDelete { from, to },
-        "FunctionMove" => Record::FunctionMove { from, to },
-        "FunctionRename" => Record::FunctionRename { from, to },
-        other => unreachable!("TRANSIENT_EDGE_TABLES carries no `{other}` rel"),
     }
 }
 
