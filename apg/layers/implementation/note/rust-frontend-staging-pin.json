@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "rust-frontend-staging-pin",
+  "body": "Limit — The Rust frontend is pinned to the rust-analyzer release in `src/rustlib/Cargo.toml` and is always compiled `--release` into the outer profile's frontends dir; a staging failure skips rust rather than aborting the whole build. Upgrade — Move the pin only by editing `src/rustlib/Cargo.toml` and `src/rustlib/Cargo.lock` in one commit, then re-run `APG_REBUILD_FRONTENDS=1 cargo build` so a cached `deps/` artifact is not re-uplifted.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.build_script_build.stage_rust",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
