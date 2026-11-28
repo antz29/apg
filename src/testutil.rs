@@ -17,7 +17,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
 
 use crate::graph::{Location, Node, NodeKind};
 use crate::layers::{InEdge, NodeFile, OutEdge};
@@ -840,54 +839,6 @@ impl ApgCommand {
 /// override or a parallel [`ApgCommand::spawn`].
 pub fn spawn_apg(args: &[&str], cwd: &Path) -> Output {
     ApgCommand::new(args).cwd(cwd).output()
-}
-
-// ---------------------------------------------------------------------------
-// Session harness: drive a real long-running `apg session start`
-// process. The coordinator must be a genuinely separate process — it owns the
-// DB and the extended flock for its life — so session tests spawn it, wait
-// until its socket answers, route mutations/reads through it, and end it (or
-// SIGKILL it, for the crash/reclaim case).
-// ---------------------------------------------------------------------------
-
-/// A live `apg session start` process under test.
-pub struct SessionProcess {
-    pub child: Child,
-}
-
-/// Spawns `apg session start` in `wt` with an isolated `HOME`, then waits until
-/// the session socket answers (or panics, dumping the child's output).
-pub fn start_session_process(wt: &Path, home: &Path) -> SessionProcess {
-    std::fs::create_dir_all(home).unwrap();
-    let apg_root = specs::find_apg_root(wt).expect("fixture layout root");
-    let mut child = ApgCommand::new(&["session", "start"])
-        .cwd(wt)
-        .env("HOME", home.to_str().unwrap())
-        .spawn();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        if crate::session::live_session(&apg_root) {
-            return SessionProcess { child };
-        }
-        if let Some(status) = child.try_wait().unwrap() {
-            let out = child.wait_with_output().unwrap();
-            panic!(
-                "session exited early ({status}): {}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let out = child.wait_with_output().unwrap();
-            panic!(
-                "session did not become live: {}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
 }
 
 /// Commits `rels` on `wt`'s current branch (git2 — the same mechanics
