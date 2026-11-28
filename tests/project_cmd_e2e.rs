@@ -1209,7 +1209,7 @@ fn warm_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output
 /// record set (code nodes/edges and the authored/transient rows) a full scan,
 /// the warm-assembled branch database and an untouched main database must
 /// agree on. The `Scan` control node (the export's former `scan_meta` lead)
-/// and the session's `PendingRemoval` ledger are not graph records and are
+/// and the database's `PendingRemoval` ledger are not graph records and are
 /// skipped.
 fn graph_records(dir: &Path) -> std::collections::BTreeSet<String> {
     let path = dir.join(specs::LAYOUT).join(specs::TRANS).join("db.lbug");
@@ -2038,20 +2038,14 @@ mod e2e {
         let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
         let wt_apg = wt.join(specs::LAYOUT);
 
-        // mutate: author the durable spec THROUGH A LIVE SESSION — the
-        // mandatory-session path a real caller uses (`apg node add` is admitted
-        // into the write-back buffer, `apg session save` makes it durable in
-        // one commit, `apg session end` releases) — then author the transient
-        // plan directly (`.trans` runs regardless of a live session). This pins
-        // that the live-session guard does NOT block a legitimate merge once
-        // the session has saved and ended.
+        // mutate: author the durable spec in ONE per-invocation write — inside
+        // the blocking worktree lock the invocation writes the node file, makes
+        // exactly one commit and projects into the branch database, then exits
+        // — and author the transient plan directly (`.trans` never commits).
+        // This pins that a completed write leaves the branch settled for a
+        // legitimate merge, with no save step and nothing pending behind.
         let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the session must be live"
-        );
-
+        let commits_before = testutil::commit_count(&wt);
         let add = testutil::ApgCommand::new(&[
             "node",
             "add",
@@ -2068,46 +2062,26 @@ mod e2e {
         .output();
         assert!(
             add.status.success(),
-            "node add through the session: {}",
+            "node add: {}",
             String::from_utf8_lossy(&add.stderr)
         );
-        // The add is BUFFERED: no node file and no commit until save.
+        // The write is WHOLE: its node file is on disk and exactly one commit
+        // landed — the invocation itself is the only durability point.
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "timer").exists(),
-            "a buffered add must not write a node file before save"
+            layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "timer").exists(),
+            "the write invocation must land its node file"
         );
-
-        // The single durability point: `apg session save` flushes the buffer
-        // (one atomic node-file write + one commit); `apg session end`
-        // releases the session.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "session save: {}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "session end: {}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "session process: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "session end must release the session"
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the write invocation must land exactly one commit"
         );
 
         let plan_path = wt_apg.join(specs::TRANS).join("plans").join("foo.jsonl");
         artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &plan_records(true))
             .unwrap();
-        // The session's save commit holds the spec node file; the plan mutation
-        // committed nothing (R8 — .trans never commits).
+        // The write invocation's commit holds the spec node file; the plan
+        // mutation committed nothing (R8 — .trans never commits).
         let wt_repo = git2::Repository::open(&wt).unwrap();
         let foo_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
         assert!(
@@ -3893,98 +3867,69 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// A durable write holds the branch worktree's blocking lock for its whole
+    /// critical section (the node-file write, the one commit and the
+    /// projection), and `project delete` takes the same lock before it removes
+    /// anything: delete queues behind an in-flight write instead of racing it,
+    /// then removes the settled project.
+    ///
+    /// Deterministic inverse hold: this process holds the cross-process
+    /// `specs.lock` flock (the one a durable write holds) while a separate
+    /// `apg project delete` child is spawned from the main checkout. A delete
+    /// that did not take the lock would exit immediately; blocking on the flock
+    /// is what proves it queues behind a write. Once released, the delete
+    /// completes and leaves nothing behind.
     #[test]
-    #[ignore = "e2e tier: real I/O (worktree/branch/live session/db.lbug); run via cargo test-e2e"]
-    fn delete_refuses_while_a_live_session_owns_the_branch_db() {
-        // A live session owns the branch DB for its whole life; deleting the
-        // project removes the worktree and branch out from under it. Refuse
-        // before any removal, naming the save/end fix, and leave the worktree,
-        // the branch and the admitted-but-unsaved row exactly where they are.
-        let repo = Repo::new("del-live-session");
+    #[ignore = "e2e tier: real I/O (worktree/branch/spec flock/spawned apg); run via cargo test-e2e"]
+    fn delete_waits_for_a_write_under_the_blocking_lock() {
+        let repo = Repo::new("del-lock-wait");
         repo.write(
             "code/seed.scan.jsonl",
             &testutil::code_payload(MOD, FILE, &["Store"]),
         );
         repo.commit_all("seed code");
         let wt = repo.start_project("live");
-        // The started project's branch DB — the state the session owns.
+        // The started project's branch DB — the state a durable write mutates.
         testutil::scan_checkout(&wt).unwrap();
         let wt_apg = wt.join(specs::LAYOUT);
-
         let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the session must be live"
-        );
 
-        // One durable mutation is admitted into the live DB but never saved:
-        // a routed read sees it, and it must survive the refused delete.
-        let add = testutil::ApgCommand::new(&[
-            "node",
-            "add",
-            "requirements",
-            "requirement",
-            "timer",
-            "--body",
-            "A workitem can be started",
-        ])
-        .cwd(&wt)
-        .env("HOME", home.to_str().unwrap())
-        .output();
-        assert!(
-            add.status.success(),
-            "node add through the session: {}",
-            String::from_utf8_lossy(&add.stderr)
-        );
-
-        // From the main checkout: delete must refuse while the session lives.
-        let err = project_delete_at(&repo.apg_root(), "live").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("live `apg session`"), "{msg}");
-        assert!(msg.contains("apg session save"), "{msg}");
-        assert!(msg.contains("apg session end"), "{msg}");
-
-        // Nothing was removed: the worktree and its branch survive, and the
-        // admitted row is still in the branch DB (routed read through the
-        // live session).
+        let hold = artifacts::acquire_spec_lock(&wt_apg).unwrap();
+        let started = std::time::Instant::now();
+        let mut child = testutil::ApgCommand::new(&["project", "delete", "live"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .spawn();
+        let mut exited_while_held = false;
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                exited_while_held = true;
+                break;
+            }
+            if started.elapsed() >= std::time::Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let held_for = started.elapsed();
+        // Nothing was removed while the write's critical section ran.
         assert_project_present(&repo, "live");
-        let routed = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.timer'}) RETURN count(n)",
-            ],
-            &wt,
-        );
+        drop(hold);
+        let out = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            routed.status.success(),
-            "{}",
-            String::from_utf8_lossy(&routed.stderr)
+            !exited_while_held,
+            "the delete must queue on the held write lock, not exit while it is held \
+             (observed after {held_for:?}): {stderr}"
         );
-        assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "the refused delete must leave the admitted row in the branch DB"
-        );
-
-        // Clean up: abort discards the unsaved row and releases the session
-        // (nothing pending becomes durable), so the fixture leaves nothing
-        // running.
-        let abort = testutil::spawn_apg(&["session", "abort"], &wt);
-        assert!(
-            abort.status.success(),
-            "{}",
-            String::from_utf8_lossy(&abort.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
         assert!(
             out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
+            "the released delete must succeed: {stderr}"
         );
+        // Delete removed the settled project: worktree, branch and directory.
+        assert_project_gone(&repo, "live");
+        assert!(!wt.exists(), "the deleted worktree dir must be removed");
+
         testutil::remove(&repo);
     }
 
@@ -3995,9 +3940,11 @@ mod e2e {
     ///
     /// The defect path: `project start` seeds the branch DB from main's scan;
     /// the branch then authors a durable requirement + service + `driven-by`
-    /// edge through a LIVE session (the mandatory-session path) and saves — a
-    /// SPEC-ONLY change, with NO worktree scan, so the branch DB still matches
-    /// main's seed content identity. Merging fast-forwards main to the branch;
+    /// edge with per-invocation writes — each `apg node`/`apg edge` invocation
+    /// writes its node files, makes exactly one commit and projects into the
+    /// branch DB inside one blocking critical section — a SPEC-ONLY change,
+    /// with NO worktree scan, so the branch DB still matches main's seed
+    /// content identity. Merging fast-forwards main to the branch;
     /// its rebuild takes the splice fast path, whose `apply` writes no
     /// authored/transient row (it applies only the code delta). Main's database
     /// therefore silently loses the merged spec, and the splice stamps the
@@ -4011,7 +3958,7 @@ mod e2e {
     /// below compare that database against the branch's own durable snapshot —
     /// database-side equality, with nothing compared against an export.
     #[test]
-    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/live session/db.lbug); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/node files/db.lbug); run via cargo test-e2e"]
     fn merge_spec_only_lands_authored_rows_in_main_db() {
         let req_fqn = "requirements.requirement.timer";
         let svc_fqn = "domain.service.tick-svc";
@@ -4049,14 +3996,13 @@ mod e2e {
             "start must seed the branch db.lbug"
         );
 
-        // Author a durable authored node + edge THROUGH A LIVE SESSION — the
-        // mandatory-session surface a real caller uses. Each admission is
-        // projected into the live branch DB; `session save` is the single
-        // durability point (one atomic node-file write + one commit) and
-        // `session end` releases. SPEC-ONLY: no code edit and NO worktree scan
-        // follows, so the branch DB stays at main's seed content identity (the
-        // eligibility the pre-fix splice needs).
-        let session = testutil::start_session_process(&wt, &home);
+        // Author the durable authored nodes + edges with per-invocation writes:
+        // each `apg node`/`apg edge` invocation writes its node files, makes
+        // exactly one commit and projects into the branch DB inside one
+        // blocking critical section, then exits — nothing is left pending.
+        // SPEC-ONLY: no code edit and NO worktree scan follows, so the branch
+        // DB stays at main's seed content identity (the eligibility the pre-fix
+        // splice needs).
         let add_req = warm_run(
             &wt,
             &home,
@@ -4173,28 +4119,9 @@ mod e2e {
             );
         }
 
-        let save = warm_run(&wt, &home, &["session", "save"]);
-        assert!(
-            save.status.success(),
-            "session save: {}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let end = warm_run(&wt, &home, &["session", "end"]);
-        assert!(
-            end.status.success(),
-            "session end: {}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "session process: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "session end must release the session"
-        );
+        // Every write above committed inside its own invocation; the node files
+        // are on disk and the branch DB projects them, with no session to save
+        // or end.
 
         // A minimal transient plan that passes `apg plan verify` with NO
         // planned node: one phase that `Satisfies` the changed requirement,
@@ -4528,13 +4455,38 @@ mod e2e {
         );
 
         // `apg project merge` from the MAIN checkout's CLI: verify gate ->
-        // fast-forward -> main rebuild -> self-cleanup.
-        let merge = warm_run(&repo_dir, &home, &["project", "merge", "mini"]);
+        // fast-forward -> main rebuild -> self-cleanup. It takes the branch
+        // worktree's blocking lock before its verify read, so it queues behind
+        // an in-flight durable write's critical section instead of reading a
+        // half-written branch graph: hold that lock here and the merge must not
+        // exit while it is held, then complete once it is released.
+        let hold = artifacts::acquire_spec_lock(&wt_apg).unwrap();
+        let started = std::time::Instant::now();
+        let mut merge = testutil::ApgCommand::new(&["project", "merge", "mini"])
+            .cwd(&repo_dir)
+            .env("HOME", &home.to_string_lossy())
+            .spawn();
+        let mut exited_while_held = false;
+        loop {
+            if merge.try_wait().unwrap().is_some() {
+                exited_while_held = true;
+                break;
+            }
+            if started.elapsed() >= std::time::Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let held_for = started.elapsed();
+        drop(hold);
+        let merge = merge.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&merge.stderr);
         assert!(
-            merge.status.success(),
-            "project merge: {}",
-            String::from_utf8_lossy(&merge.stderr)
+            !exited_while_held,
+            "the merge must queue on the held write lock, not exit while it is held \
+             (observed after {held_for:?}): {stderr}"
         );
+        assert!(merge.status.success(), "project merge: {stderr}");
         let after = git2::Repository::open(&repo_dir).unwrap();
         assert_eq!(
             after.head().unwrap().peel_to_commit().unwrap().id(),
@@ -5993,10 +5945,10 @@ mod e2e {
     }
 
     // ------------------------------------------------------------------
-    // missing-worktree-database (e2e): a bound read/session targets the
-    // registered worktree's own `db.lbug`; its absence is that project's
-    // refusal, named with the project and worktree, never a fall-through to
-    // the main checkout's database.
+    // missing-worktree-database (e2e): a bound read and a durable write
+    // target the registered worktree's own `db.lbug`; its absence is that
+    // project's refusal, named with the database path and the scan fix, never
+    // a fall-through to the main checkout's database.
     // ------------------------------------------------------------------
 
     /// A bound `apg query` on a worktree with no database refuses, naming the
@@ -6045,64 +5997,57 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// A bound `apg session start` on the same missing worktree database
-    /// refuses immediately, naming the project, the worktree and its missing
-    /// `db.lbug` (the same `open_owned_db` wording), and leaves no session
-    /// socket bound.
+    /// A bound durable write on the same missing worktree database refuses
+    /// immediately, naming the worktree's missing `db.lbug` and the `apg scan`
+    /// fix line, and creates no database (it never falls through to the main
+    /// checkout's, and there is no session to start).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/worktree/registry/spawned apg); run via cargo test-e2e"]
-    fn missing_worktree_database_session_start_refuses_named_without_a_socket() {
-        let (repo, wt_canon, wt_db) = missing_worktree_db_fixture("missing-db-session");
-        let wt_apg = wt_canon.join(specs::LAYOUT);
-        let home = std::env::temp_dir().join(format!(
-            "apg-missing-db-session-home-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&home).unwrap();
+    fn missing_worktree_database_write_refuses_named_without_creating_one() {
+        let (repo, wt_canon, wt_db) = missing_worktree_db_fixture("missing-db-write");
 
-        // The missing database is checked before the socket is bound, so the
-        // refusal returns immediately: `output()`, not the blocking session
-        // harness (which panics on an early exit), is the correct spawn.
-        let out = testutil::ApgCommand::new(&["session", "start"])
-            .cwd(&wt_canon)
-            .env("HOME", &home.to_string_lossy())
-            .env("APG_PROJECT", "alpha")
-            .env("APG_CALLER_SESSION", "session-a")
-            .output();
+        // A per-invocation write opens read-only, then upgrades under the
+        // blocking lock and opens the database write-capable; the missing
+        // database is refused before any node file is written or committed.
+        let out = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "timer",
+            "--body",
+            "A workitem can be started",
+        ])
+        .cwd(&wt_canon)
+        .env("APG_PROJECT", "alpha")
+        .env("APG_CALLER_SESSION", "session-a")
+        .output();
         assert!(
             !out.status.success(),
-            "a session start on a worktree with no database must refuse"
+            "a durable write on a worktree with no database must refuse"
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("project `alpha`"), "{stderr}");
-        assert!(
-            stderr.contains(&wt_canon.display().to_string()),
-            "the refusal must name the worktree: {stderr}"
-        );
         assert!(
             stderr.contains(&wt_db.display().to_string()),
             "the refusal must name the missing database: {stderr}"
         );
         assert!(
-            stderr.contains(&format!(
-                "has no database `{}`. Fix: run `apg scan` inside `{}`.",
-                wt_db.display(),
-                wt_canon.display()
-            )),
+            stderr.contains("run `apg scan` first"),
             "the refusal must carry the scan fix line: {stderr}"
         );
-
         assert!(
-            !apg::session::live_session(&wt_apg),
-            "a refused start must leave no live session"
+            !wt_db.exists(),
+            "a refused write must create no database: {}",
+            wt_db.display()
         );
+        let wt_apg = wt_canon.join(specs::LAYOUT);
         assert!(
-            !apg::session::socket_path(&wt_apg).exists(),
-            "a refused start must bind no session socket"
+            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "timer")
+                .exists(),
+            "a refused write must land no node file"
         );
 
         testutil::remove(&repo);
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     // ------------------------------------------------------------------
@@ -6157,7 +6102,7 @@ mod e2e {
     }
 
     /// A guarded node mutation on the default branch refuses on the same
-    /// context arm, before the live-session requirement.
+    /// context arm, before the per-invocation session opens.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg); run via cargo test-e2e"]
     fn project_context_refusal_node_add_on_default_branch_names_main_and_start() {
