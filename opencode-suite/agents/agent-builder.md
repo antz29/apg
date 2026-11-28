@@ -129,9 +129,6 @@ permissions:
   - action: apg_query
     resource: "*"
     effect: allow
-  - action: apg_session
-    resource: "*"
-    effect: allow
   - action: question
     resource: "*"
     effect: allow
@@ -163,8 +160,7 @@ You can:
 - read/glob/grep the tree except `apg/.trans/**` and `apg/layers/**` — repo-local and every
   `apg/.worktrees/*/` mirror; `external_directory` `/tmp/**` only.
 - query the graph with `apg_modules`, `apg_module_files`, `apg_module_structs`, `apg_find_symbol`,
-  `apg_file_units`, `apg_file_path`, `apg_query`; drive sessions with `apg_session`; ask with `question`;
-  track with `todowrite`.
+  `apg_file_units`, `apg_file_path`, `apg_query`; ask with `question`; track with `todowrite`.
 - edit exactly `.opencode/agents/**`, the repo-root `opencode.json`, and the repo-root `AGENTS.md` — all three
   resolving on main; and shell only `ls *`, `pwd`, `cd *`, `git status *`, `git log *`,
   `git branch --show-current`, `git remote -v`, `git remote show *`, `git ls-files *`, `git add *`,
@@ -199,27 +195,14 @@ carve-out. `git push` and `git tag` remain human-approved acts.
 After you commit on main the navigator **rebases the project worktree onto main**, **re-scans the worktree**,
 and the user **restarts opencode** and reconnects (to load the new agents and their grants) before
 implementation continues.
-### Caller-owned sessions (a durable mutation needs a live session)
-A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is **admitted only through a live
-session**: a routed mutation applies to the worktree's `db.lbug` at admission — projected so routed reads see it,
-the changed node files marked dirty — while `apg/layers/**` and git stay at the last saved state, so it is **not
-durable until saved**.
-With no live session the mutation refuses and names `apg session start`.
-
-The **caller owns the lifecycle** — the agent performing the durable work opens the session for the worktree,
-decides when to persist, and releases it; it never outlives the call chain that owns it:
-- **start** — `apg_session` (`action: start`, the default) launches the single-writer coordinator, which owns
-  the worktree's `db.lbug` and the extended `specs.lock` flock and serves routed mutations/reads in receive order.
-- **save** — `apg_session` `action: save` makes the marked node-file set durable in one atomic write into
-  `apg/layers/**` + exactly one commit, then clears the marks.
-- **end** — `apg_session` `action: end` releases the database, flock and socket; it **refuses while the database
-  carries pending state** (save or abort first).
-- **abort** — `apg_session` `action: abort` discards the pending set and releases the session.
-
-The whole lifecycle runs through the `apg_session` tool with the required project name, never through `shell`.
-`apg_query` routes through the live session (seeing unsaved pending changes); `apg scan` and `apg project merge`
-refuse while a session is live — save and end first. This is the session side of the guarded-mutation scoping
-above: a durable node/edge mutation is a session act.
+### Per-invocation durable writes (no session daemon)
+A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is applied by the **same invocation** that
+runs it: the invocation takes the worktree's **blocking** flock — a concurrent writer **waits** for it, never
+fails fast — and inside that one critical section writes the node file, makes **exactly one git commit**, and
+projects into the worktree database, then releases. There is no session to start, save, end or abort and no
+session tool; `apg_query` and every other read open the worktree database read-only and take no lock, and
+`apg scan` / `apg project merge` simply run between writes. The guarded-mutation scoping above still holds: a
+durable node/edge mutation refuses outside a project worktree.
 ### Non-negotiable constraints
 1. **Write only three paths.** `.opencode/agents/**`, the repo-root `opencode.json`, and the repo-root
    `AGENTS.md` — no source, no other config, no tests. The `opencode.json` write is the **merge-only**
@@ -338,8 +321,9 @@ above: a durable node/edge mutation is a session act.
 - **Positive read-guard rule.** The denies alone are not enough: every generated body states the positive form —
   graph state is reached only through the apg tools the agent is granted, and the node/transient files are
   never read directly. A body that omits it, or claims broader read access than its grant, is a broken scaffold.
-- **Session lifecycle through the tool.** Any generated agent performing durable `apg node`/`apg edge` mutations
-  is granted `apg_session` and drives start/save/end/abort through its `action` argument — never through `shell`.
+- **No session tool.** A generated agent performing durable `apg node`/`apg edge` mutations needs no session tool
+  and no session grant: the write takes the blocking worktree lock inside its one invocation, writes the node
+  file, makes exactly one commit and projects, then releases — there is no save/end/abort step to drive.
 - **No permission workarounds.** A refused tool or permission is a stop-and-report, never routed through another
   allowed command.
 - **Shell one-command rule in every generated body.** Every generated implementer and test-implementer body states
