@@ -8,8 +8,8 @@ use vfs::Vfs;
 
 use crate::source::path_of_vfs;
 
-/// Directory names never descended into by the all-manifest discovery walk
-/// (phase-05 task-3 PART 1): a `Cargo.toml` inside any of them is never a scan
+/// Directory names never descended into by the all-manifest discovery walk:
+/// a `Cargo.toml` inside any of them is never a scan
 /// root. Matched on a whole path component, so a file named `target.rs` or a
 /// directory named `targets` is unaffected.
 pub(crate) const DISCOVERY_EXCLUDED_DIRS: &[&str] =
@@ -23,7 +23,7 @@ pub(crate) fn is_discovery_excluded_dir(name: &str) -> bool {
 /// `root`. The exclusion is relative to the scan root, so a project checked out
 /// under a `.worktrees/` directory (the apg project flow) is not itself
 /// excluded, while a `target/`, `vendor/`, `node_modules/` or nested
-/// `.worktrees/` tree inside it is (phase-05 task-3 PART 2).
+/// `.worktrees/` tree inside it is.
 pub(crate) fn under_excluded_tree(path: &str, root: &std::path::Path) -> bool {
     let p = std::path::Path::new(path);
     let rel = p.strip_prefix(root).unwrap_or(p);
@@ -34,7 +34,7 @@ pub(crate) fn under_excluded_tree(path: &str, root: &std::path::Path) -> bool {
 }
 
 /// Every directory at or below `root` that holds a `Cargo.toml`, with the
-/// generated/dependency/other-tree directories pruned (phase-05 task-1/-3).
+/// generated/dependency/other-tree directories pruned.
 /// Nested non-workspace crates are found; members of a discovered workspace are
 /// found too and deduped by the load loop in [`crate::scanner::run`].
 pub(crate) fn discover_manifest_dirs(root: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -77,7 +77,7 @@ pub(crate) fn discover_manifest_dirs(root: &std::path::Path) -> Vec<std::path::P
 /// The root files of every local crate the loaded workspace resolved. Used to
 /// dedupe discovered projects by manifest root: a candidate directory a
 /// previously loaded workspace already covers is never re-loaded as a top-level
-/// project (phase-05 task-2).
+/// project.
 pub(crate) fn local_crate_root_files(db: &RootDatabase, vfs: &Vfs) -> Vec<std::path::PathBuf> {
     Crate::all(db)
         .into_iter()
@@ -88,8 +88,8 @@ pub(crate) fn local_crate_root_files(db: &RootDatabase, vfs: &Vfs) -> Vec<std::p
         .collect()
 }
 
-/// The absolute target set read from the pinned `--targets <file>` hand-off
-/// (phase-02 task-9). An absent flag, a missing/unreadable file, or an empty
+/// The absolute target set read from the pinned `--targets <file>` hand-off.
+/// An absent flag, a missing/unreadable file, or an empty
 /// file yields `None` — "no emission filter", the byte-identical full scan.
 pub(crate) fn read_target_set(path: Option<&str>) -> Option<HashSet<std::path::PathBuf>> {
     let path = path?;
@@ -116,7 +116,7 @@ pub(crate) fn read_target_set(path: Option<&str>) -> Option<HashSet<std::path::P
 }
 
 /// The pinned per-language native-artifact location for the Rust frontend,
-/// `<cache-dir>/rust/<cache-key>/` (phase-02 task-9 NATIVE-ARTIFACT RULE).
+/// `<cache-dir>/rust/<cache-key>/`.
 /// rust-analyzer resolves through an in-process salsa database, so the
 /// directory carries no separate on-disk compiler cache; creating it makes the
 /// shared store's Rust location exist and keeps it keyed by the global cache

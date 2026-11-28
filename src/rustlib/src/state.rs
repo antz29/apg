@@ -16,7 +16,7 @@ pub(crate) struct State {
     /// `parent.name(params)` overload suffix). Built over the FULL collected
     /// declaration set — the full resolution context — so a cross-crate edge to
     /// a declaration outside the emission target set can carry its canonical
-    /// FQN instead of a dangling opaque id (phase-05 task-8).
+    /// FQN instead of a dangling opaque id.
     pub(crate) id_fqn: HashMap<String, String>,
     /// The ids whose node records are actually part of the emitted stream (the
     /// target set, or every declaration when no filter is in force). An edge to

@@ -39,9 +39,9 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
     // id prefix (`--id-prefix`, default "n") keeps opaque ids unique across
     // frontends when a scan merges multiple languages.
     let mut id_prefix = "n";
-    // The pinned phase-02 target-set hand-off (task-9): `--targets` is an
-    // emission filter, `--cache-dir`/`--cache-key` locate the shared
-    // per-language native-artifact directory.
+    // The pinned target-set hand-off: `--targets` is an emission filter,
+    // `--cache-dir`/`--cache-key` locate the shared per-language
+    // native-artifact directory.
     let mut targets_path: Option<String> = None;
     let mut cache_dir: Option<String> = None;
     let mut cache_key: Option<String> = None;
@@ -101,10 +101,10 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
 
     // ── Discover and load every Cargo project under the scan root ──────
     // Each discovered workspace root is loaded once; its members are resolved
-    // through it and never re-loaded as top-level projects (phase-05 task-2).
+    // through it and never re-loaded as top-level projects.
     // The nested `src/rustlib` crate is a standalone project, not a member of
     // the root workspace, and stays byte-identical on disk — discovery never
-    // mutates a manifest (phase-05 task-4).
+    // mutates a manifest.
     let manifest_dirs = discover_manifest_dirs(&root_abs);
     if manifest_dirs.is_empty() {
         eprintln!(
@@ -196,15 +196,15 @@ pub(crate) fn scan(
             within_module_limit(std::path::Path::new(&path), &module_dirs)
         })
         .collect();
-    // Prefer the cargo PACKAGE name as each crate's module prefix (phase-05
-    // task-10): `src/rustlib` declares `[package] name = "apg-rustfrontend"`
+    // Prefer the cargo PACKAGE name as each crate's module prefix:
+    // `src/rustlib` declares `[package] name = "apg-rustfrontend"`
     // but `[[bin]] name = "rustfrontend"`, so the target/display name would
     // otherwise render `rustfrontend.*` and shadow the package identity. The
     // package name is preferred ONLY when the package maps to exactly one local
     // crate. A package with several targets keeps each target's display name,
     // EXCEPT when two would render the same prefix (the default lib + bin
     // package): the bin then gets a distinct `<pkg>-bin` prefix so distinct
-    // crates never collapse onto one module FQN (libbin-fix).
+    // crates never collapse onto one module FQN.
     ctx.package_prefix = package_prefix_map(&ctx, &crates);
     crates.sort_by_key(|k| crate_prefix(&ctx, *k));
 
@@ -222,7 +222,7 @@ pub(crate) fn scan(
         let mut seen: HashSet<Module> = HashSet::new();
         let mut stack: Vec<Module> = vec![root_mod];
         // A crate is re-emitted when any of its source files is in the target
-        // set (per-crate/module granularity, phase-05 task-8). No filter in
+        // set (per-crate/module granularity). No filter in
         // force selects every crate.
         let mut crate_emit = target_filter.is_none();
         while let Some(m) = stack.pop() {
@@ -351,7 +351,7 @@ pub(crate) fn scan(
     // `(parent, name)` group is overloaded. Computed over the FULL collected
     // declaration set — the full resolution context — so an edge to a
     // declaration outside the emission target set can carry its canonical FQN
-    // instead of a dangling opaque id (phase-05 task-8).
+    // instead of a dangling opaque id.
     let mut fn_groups: HashMap<(String, String), usize> = HashMap::new();
     for d in &decls {
         if d.kind == "function" {
@@ -380,9 +380,8 @@ pub(crate) fn scan(
             format!("{}.{}", d.parent, d.name)
         };
         state.id_fqn.insert(d.id.clone(), fqn.clone());
-        // Generated/out-dir declarations are never code nodes (phase-05 task-3
-        // PART 2), so they are withheld from the emitted set even when their
-        // crate is targeted.
+        // Generated/out-dir declarations are never code nodes, so they are
+        // withheld from the emitted set even when their crate is targeted.
         if d.emit && under_excluded_tree(&d.path, root_abs) {
             d.emit = false;
         }
@@ -407,7 +406,7 @@ pub(crate) fn scan(
     let mut files: Vec<FileId> = file_module.keys().copied().collect();
     files.sort_by_key(|f| path_of(&ctx, *f));
     // A file is emitted when its crate is targeted and its path is neither
-    // user-excluded nor a generated/dependency tree (task-3 PART 2 / task-8).
+    // user-excluded nor a generated/dependency tree.
     // The module-containment test is defence in depth: the crate-level filter
     // above already admits only selected crates, and every emitted file of an
     // admitted crate lies under its root, so this can only withhold a file.

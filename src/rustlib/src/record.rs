@@ -76,9 +76,9 @@ pub(crate) struct Decl {
     pub(crate) start_line: u32,
     pub(crate) end_line: u32,
     pub(crate) src_key: (String, u32),
-    /// Whether this declaration belongs to a crate selected for emission
-    /// (phase-05 task-8). With no `--targets` filter every declaration is
-    /// emitted, so the stream is byte-identical to a full scan.
+    /// Whether this declaration belongs to a crate selected for emission.
+    /// With no `--targets` filter every declaration is emitted, so the stream
+    /// is byte-identical to a full scan.
     pub(crate) emit: bool,
 }
 

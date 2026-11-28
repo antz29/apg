@@ -18,14 +18,14 @@ pub(crate) struct Ctx<'db> {
     pub(crate) sema: Semantics<'db, RootDatabase>,
     pub(crate) vfs: &'db Vfs,
     /// Cargo package name keyed by the crate-root file's absolute path, for
-    /// every target of every package the loaded project resolved (phase-05
-    /// task-10). Consulted by [`crate::identity::package_prefix_map`] to group
+    /// every target of every package the loaded project resolved. Consulted by
+    /// [`crate::identity::package_prefix_map`] to group
     /// local crates by package and to prefer the package identity over the
     /// target/display name.
     pub(crate) package_by_root: HashMap<String, String>,
     /// Resolved prefix override by crate-root absolute path: the cargo package
     /// name for a single-target package, and the distinct `<pkg>-bin` prefix for
-    /// the bin of a colliding lib + bin package (libbin-fix). Populated per
+    /// the bin of a colliding lib + bin package. Populated per
     /// loaded project by [`crate::scanner::scan`]; an absent entry means "use the
     /// display-name fallback".
     pub(crate) package_prefix: HashMap<String, String>,
@@ -88,8 +88,8 @@ pub(crate) fn load_project(
     };
 
     // The cargo PACKAGE identity per crate-root file, retained from the loaded
-    // project model before it is consumed by `load_workspace` (phase-05
-    // task-10). The target/display name rust-analyzer derives can differ from
+    // project model before it is consumed by `load_workspace`. The
+    // target/display name rust-analyzer derives can differ from
     // the package name (`[[bin]] name` vs `[package] name`), and the module
     // prefix must carry the package identity.
     let package_by_root = match &ws.kind {
@@ -103,7 +103,7 @@ pub(crate) fn load_project(
 }
 
 /// Cargo package name by the crate-root file's absolute path, for every target
-/// of every package the loaded workspace resolved (phase-05 task-10). The map
+/// of every package the loaded workspace resolved. The map
 /// also covers dependency packages; only the local crates' roots are ever
 /// consulted (see [`crate::identity::package_prefix_map`]).
 pub(crate) fn package_roots(cargo: &CargoWorkspace) -> HashMap<String, String> {

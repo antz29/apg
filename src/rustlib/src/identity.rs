@@ -23,7 +23,7 @@ struct LocalCrate {
 /// * a package with EXACTLY ONE local crate target — the cargo package name is
 ///   preferred over the target/display name (`src/rustlib` declares
 ///   `[package] name = "apg-rustfrontend"` but `[[bin]] name = "rustfrontend"`,
-///   so the display name would shadow the package identity) (phase-05 task-10);
+///   so the display name would shadow the package identity);
 /// * a package whose local crates would otherwise COLLIDE on the same fallback
 ///   prefix — the default lib + bin package, where both targets carry the
 ///   package name: the bin gets a distinct `<pkg>-bin` prefix so the two crate
@@ -154,8 +154,8 @@ pub(crate) fn root_stem(root: &str) -> String {
 /// (synthetic/no-manifest, distinct-name multi-target package, foreign crate)
 /// renders [`fallback_prefix`] unchanged.
 pub(crate) fn crate_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
-    // The loaded project's override takes precedence (phase-05 task-10,
-    // libbin-fix): the cargo PACKAGE name for a single-target package, and the
+    // The loaded project's override takes precedence: the cargo PACKAGE name for
+    // a single-target package, and the
     // distinct `<pkg>-bin` prefix for the bin of a colliding lib + bin package.
     // Everything else renders its per-target display-name-then-root-module-name
     // fallback unchanged, so synthetic/no-manifest crates, distinct-name
