@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-stdlib-snapshot-limits",
+  "body": "Limit — The stdlib/alias/type tables are a fixed PowerShell 7.6.0 all-platform-union snapshot: not diffed against 7.6.6, the PSResourceGet 1.2.0 branch/gallery tag is assumed rather than verified, and no table is checked against a live `pwsh`. Upgrade — Re-fetch from the PowerShell repository at the new tag, diff the accelerator table mechanically (not by eye), and add a `Get-Command`/`TypeAccelerators::Get` dump comparison.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.psfrontend.builtins",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
