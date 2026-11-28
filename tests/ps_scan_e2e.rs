@@ -402,7 +402,7 @@ mod e2e {
     /// import-module Struct-to-File Uses (beside PROGA's COBOL copy edge) hold
     /// with their kinds through every assembly of an auto-detected scan: the
     /// cold full scan, the warm-cache path (db.lbug deleted, every file from
-    /// cached units, zero frontends), the stale-socket full-load fallback
+    /// cached units, zero frontends), the spec-only full-load fallback
     /// (`ingest_with_reuse`, ps files reused) and a `--force` rebuild. The
     /// whole `apg/` layout is ignored and untracked so every tracked path is
     /// a located File with a fact unit (the warm path needs one per entry).
@@ -480,18 +480,24 @@ mod e2e {
         );
         assert_eq!(file_edge_rows(root), expected, "(2) warm cache");
 
-        // (3) Full-load fallback: a COBOL-only edit (ps files reused) under a
-        // planted stale session socket re-assembles through ingest_with_reuse.
+        // (3) Full-load fallback: a COBOL-only edit (ps files reused) beside a
+        // spec-only durable delta (one hand-written node file) re-assembles
+        // through ingest_with_reuse — the splice guard refuses the authored
+        // row the seed db.lbug does not represent, with no session socket.
         std::fs::write(
             root.join("PROGA.cbl"),
             PROGA.replacen("\n", "\n      * edited\n", 1),
         )
         .unwrap();
         p.repo.commit_all("edit PROGA");
-        let socket = apg::session::socket_path(&p.repo.apg_root());
-        std::fs::write(&socket, b"stale-session").unwrap();
+        let layers_dir = root.join("apg/layers/global/constraint");
+        std::fs::create_dir_all(&layers_dir).unwrap();
+        std::fs::write(
+            layers_dir.join("ps-cached-assembly.json"),
+            "{\n  \"layer\": \"global\",\n  \"type\": \"constraint\",\n  \"name\": \"ps-cached-assembly\",\n  \"body\": \"A spec-only rescan re-assembles from cached facts.\"\n}\n",
+        )
+        .unwrap();
         let log = scan(&[]);
-        let _ = std::fs::remove_file(&socket);
         for line in [
             "[scan] incremental: ",
             "[load] full-load fallback: re-assembling the full graph",
