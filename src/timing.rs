@@ -3,9 +3,9 @@
 //!
 //! `apg scan` measures four phases — **startup/overhead**, **frontend**,
 //! **ingest-assembly**, **db-load** — and reports them first-class: a human
-//! `[timing]` log line plus a machine-readable `[timing-json]` line, so the
-//! incremental wins (win A/B/C) can be measured against the recorded full-scan
-//! baseline. On the freshness fast-path the language frontends never run, so the
+//! `[timing]` log line plus a machine-readable `[timing-json]` line, so
+//! incremental gains can be measured against the recorded full-scan baseline.
+//! On the freshness fast-path the language frontends never run, so the
 //! frontend phase is reported with the `frontend-skipped` marker while all four
 //! phase keys stay present.
 //!
@@ -151,7 +151,7 @@ impl TimingReport {
     /// `None` for anything that is not a complete `scan_timing` object (so a
     /// malformed or foreign line is never mistaken for a report). The parser is
     /// the report model's reader and is exercised by the in-process round-trip
-    /// tests (task-6) and the real-scan acceptance test (task-11).
+    /// tests and the real-scan acceptance test.
     pub fn from_machine_line(line: &str) -> Option<TimingReport> {
         let line = line.trim();
         let json = line.strip_prefix(MACHINE_PREFIX).unwrap_or(line);
@@ -176,7 +176,7 @@ impl TimingReport {
 }
 
 /// The two phase durations [`crate::run_pipeline`] owns and hands back to
-/// `cmd_scan` for the report (phase-04 task-4).
+/// `cmd_scan` for the report.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PipelineTimings {
     /// Ingest + graph assembly inside the pipeline.

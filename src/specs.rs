@@ -102,7 +102,6 @@ pub fn read_jsonl(path: &Path) -> anyhow::Result<Vec<Record>> {
 /// Serializes records into a JSONL file, creating parent dirs (write-through:
 /// the file is written atomically in one write, so a crash mid-session loses
 /// nothing).
-// (Unused until Phase 03's write-through authoring.)
 #[allow(dead_code)]
 pub fn write_jsonl(path: &Path, records: &[Record]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {

@@ -1,5 +1,4 @@
-//! Win-B git delta + correctness-only full-scan fallbacks (phase-02 tasks 3
-//! and 4).
+//! Git delta + correctness-only full-scan fallbacks.
 //!
 //! The delta is `git diff --name-status -M <recorded-commit>` for **committed**
 //! changes (`rust.apg.delta`), PLUS the index/working-tree/untracked state
@@ -7,7 +6,7 @@
 //! with `/` separators, matching the shared manifest.
 //!
 //! Two correctness/version gates force a **full scan** rather than an
-//! incremental one (task-4), never as a heuristic:
+//! incremental one, never as a heuristic:
 //!
 //! 1. the recorded commit is not an ancestor of HEAD (a rebase/force-push/history
 //!    rewrite makes a commit-range diff meaningless), or
@@ -19,9 +18,9 @@
 //!
 //! Everything here is libgit2 (the git CLI is never shelled out to, R6).
 
-// The phase-02 win-B surface: some accessors (e.g. `FullScanReason::tag`,
+// The incremental surface: some accessors (e.g. `FullScanReason::tag`,
 // `Plan::requires_full_scan`) are exercised by the delta unit tests and the
-// phase-03 orchestration rather than by `cmd_scan` directly.
+// scan orchestration rather than by `cmd_scan` directly.
 #![allow(dead_code)]
 
 use std::collections::BTreeSet;
@@ -152,14 +151,13 @@ pub struct ScanRecord {
     /// rows, and the recording scan keeps this copy in memory.
     #[serde(skip)]
     pub manifest: Manifest,
-    /// The content-identity key of the tree this scan ran on (win A,
-    /// phase-01) — the same key the scan records in the database's `Scan` row
-    /// (the `scan_meta` record), and the same tree `manifest` describes. It is
-    /// captured here so the NEXT scan can verify that this worktree's LOCAL
-    /// `db.lbug` was built from the very tree the SHARED delta is derived from
-    /// (see `crate::splice::seed_checked`, feedback-101). A missing key (a
-    /// pre-hardening record, or one written before this field existed) makes
-    /// the win-C splice ineligible — equivalence cannot be verified.
+    /// The content-identity key of the tree this scan ran on — the same key
+    /// the scan records in the database's `Scan` row (the `scan_meta` record),
+    /// and the same tree `manifest` describes. It is captured here so the NEXT
+    /// scan can verify that this worktree's LOCAL `db.lbug` was built from the
+    /// very tree the SHARED delta is derived from (see
+    /// `crate::splice::seed_checked`). A missing key makes the incremental
+    /// splice ineligible — equivalence cannot be verified.
     #[serde(default)]
     pub content_key: Option<String>,
 }
@@ -220,7 +218,7 @@ impl ScanVerdict {
     }
 }
 
-/// The **pure** scan verdict (task-9): decided only from an in-memory scan
+/// The **pure** scan verdict: decided only from an in-memory scan
 /// record, the current cache key, the current HEAD and the recorded commit's
 /// ancestry — **no git discovery and no filesystem access**. This is the single
 /// source of truth the git wrappers [`full_scan_reason`]/[`plan`] consume, so
@@ -314,7 +312,7 @@ pub fn scan_state(
     (record, verdict)
 }
 
-/// The full-scan predicate (task-4): `Some(reason)` when an incremental scan is
+/// The full-scan predicate: `Some(reason)` when an incremental scan is
 /// unsafe and the full pipeline must run. Applied before any delta is computed.
 ///
 /// `current_key` is the key this binary+config would compute now; a mismatch
@@ -423,7 +421,7 @@ pub fn compute(apg_root: &Path, recorded_sha: &str) -> anyhow::Result<Delta> {
 pub struct Plan {
     pub delta: Option<Delta>,
     pub full_scan: Option<FullScanReason>,
-    /// The recorded scan is at exactly HEAD under the current key (task-3): the
+    /// The recorded scan is at exactly HEAD under the current key: the
     /// shared store's recorded facts describe this tree, so the caller may
     /// assemble from them with zero frontends when the store is complete. The
     /// delta is `None` on this path — the recorded manifest IS the state.

@@ -1,8 +1,7 @@
 //! The `apg query` surface: open `db.lbug` read-only, render CSV/JSON rows.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — byte-identical output for
-//! both the direct path and the session coordinator's routed-read branch.
+//! A cohesive single-responsibility module: byte-identical output for both the
+//! direct path and the session coordinator's routed-read branch.
 
 use lbug::{Connection, Database};
 
@@ -28,7 +27,7 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let apg_root = find_apg_root(&start)
         .ok_or_else(|| anyhow::anyhow!("no apg/ directory found from {}", start.display()))?;
 
-    // The env-gated registry binding (phase-02): with `APG_PROJECT` present the
+    // The env-gated registry binding: with `APG_PROJECT` present the
     // read targets the registered project's own worktree and nothing else, so a
     // missing database there is refused rather than served from another
     // checkout; the seam's refusals (lost registry, unregistered, stale,
@@ -45,7 +44,7 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
         format!("{query};")
     };
 
-    // Read routing (phase-03): while a session owns db.lbug, route the read
+    // Read routing: while a session owns db.lbug, route the read
     // through it so a separate reader sees the current state with no lock error
     // and without waiting for the session to end. With no live session the DB
     // file is not held and a normal (read-only) direct open serves the read —
@@ -56,7 +55,7 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Recovery (phase-04 task-9): with no live session, run the shared reclaim
+    // Recovery: with no live session, run the shared reclaim
     // unconditionally before the read-only open. It reclaims a dead socket and
     // classifies the database: one carrying pending state (an
     // admitted-but-unsaved row, or a pending-removal identity) or a table shape

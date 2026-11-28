@@ -3,9 +3,9 @@
 //! dispatches into the library's entry point; the inline white-box tests live
 //! here with the modules they exercise.
 //!
-//! Every module is public so integration crates (and the relocated test tiers)
-//! can reach the internals they exercise. `testutil` is the shared test
-//! harness and compiles unconditionally as a public module.
+//! Every module is public so integration crates and the test tiers can reach
+//! the internals they exercise. `testutil` is the shared test harness and
+//! compiles unconditionally as a public module.
 
 pub mod artifacts;
 pub mod cache;
@@ -43,9 +43,9 @@ pub mod timing;
 pub mod version_gate;
 pub mod warm;
 
-// The cohesive submodules above were split out of this file (phase-04
-// decomposition). Re-export their public items so the crate-root surface every
-// integration crate and test tier reaches (`apg::<name>`) is unchanged.
+// The cohesive submodules above are re-exported here so the crate-root surface
+// every integration crate and test tier reaches (`apg::<name>`) stays at the
+// root.
 pub use frontends::*;
 pub use install::*;
 pub use logging::*;
@@ -64,7 +64,7 @@ pub(crate) use scan::cmd_scan;
 
 use std::path::{Path, PathBuf};
 
-// The relocated root test tier (`src/tests.rs`) reaches `BTreeSet` through
+// The root test tier (`src/tests.rs`) reaches `BTreeSet` through
 // `use super::*;`; gate it to the test build so the non-test library has no
 // unused import.
 #[cfg(test)]
@@ -72,7 +72,7 @@ pub(crate) use std::collections::BTreeSet;
 
 /// The `apg --help` text. Split from [`print_help`] so the strict add|update|rm
 /// surface and the unchanged `apg review` line can be asserted directly by the
-/// Phase-7 help/dispatch acceptance test (no stdout capture).
+/// help/dispatch acceptance test (no stdout capture).
 pub fn help_text() -> String {
     "apg — program graph scanner + LadybugDB query CLI for opencode
 
@@ -183,7 +183,7 @@ fn print_help() {
     println!("{}", help_text());
 }
 
-/// `apg session <start|save|abort|end>` (phase-03): `start` launches the
+/// `apg session <start|save|abort|end>`: `start` launches the
 /// session-scoped single-writer coordinator (bind socket, own `db.lbug`, serve
 /// routed mutations/reads) and blocks in the foreground; `save` signals the
 /// running session to make the database's marked node files and pending

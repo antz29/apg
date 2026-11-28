@@ -2,10 +2,9 @@
 //! upgrade guide, distributed agents), the idempotent install/prune logic, and
 //! the `apg/` layout + `.gitignore` scaffolding.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — the same embedded bytes
-//! (`include_str!` paths stay `../opencode-suite/...`, resolved from `src/`),
-//! the same install/update/prune semantics, and the same printed output.
+//! A cohesive single-responsibility module: the embedded bytes (`include_str!`
+//! paths stay `../opencode-suite/...`, resolved from `src/`), the
+//! install/update/prune semantics, and the printed output.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -516,7 +515,7 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize, usize
     if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
         suite_files += 1;
     }
-    // The upgrade guide the R10 gate's block text points at (task-4).
+    // The upgrade guide the R10 gate's block text points at.
     // Best-effort with a warning: an unwritable ~/.config/opencode must not
     // fail init (mirrors the npm-install failure handling below).
     let upgrade_doc_path = lib_dir.join("apg-upgrade.md");

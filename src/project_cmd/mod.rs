@@ -33,7 +33,7 @@
 //!   delete does NOT require the branch to be merged (delete-refuses-unsafe).
 //!   On the success path the project's worktree at
 //!   `<main>/apg/.worktrees/<name>` is removed and its branch deleted via the
-//!   shared phase-1 helpers; the default branch and the main checkout are
+//!   shared project helpers; the default branch and the main checkout are
 //!   never touched (never-touch-default-branch).
 //!
 //! - `apg project resolve <name>` — print the registered worktree path for

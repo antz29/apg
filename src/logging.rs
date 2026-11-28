@@ -1,9 +1,8 @@
 //! The scan run log (`apg-frontend.log` + stderr) and the first-class timing
 //! report emitter.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — the same messages, in the
-//! same order, to the same destinations.
+//! A cohesive single-responsibility module: messages go to the same
+//! destinations, in the same order.
 
 use std::io::Write;
 use std::path::Path;
@@ -40,7 +39,7 @@ impl Log {
     }
 }
 
-/// Emits the per-phase timing report first-class (phase-04 task-1/task-2): the
+/// Emits the per-phase timing report first-class: the
 /// human `[timing]` line plus the machine-readable `[timing-json]` line, both
 /// through the scan log (stderr *and* `apg-frontend.log`).
 pub fn emit_timing(log: &mut Log, report: &timing::TimingReport) {

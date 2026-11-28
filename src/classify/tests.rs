@@ -4,7 +4,7 @@ use super::*;
 mod unit {
     use super::*;
 
-    /// fix-module-identity phase-03 task-6: the shared build-output
+    /// The shared build-output
     /// exclusion predicate rejects every `.git/**` and `target/**` path
     /// (the observed self-ingestion offenders: the Go build cache under
     /// `.git/apg/facts` and the TS/staged frontends under `target/`) and
@@ -35,7 +35,7 @@ mod unit {
         }
     }
 
-    /// cobol-frontend phase-02 task-18: a COBOL file is `test` under a
+    /// A COBOL file is `test` under a
     /// test/tests segment or a test filename marker (matched
     /// case-insensitively), `generated` under gen/generated, `external` under
     /// vendor/third_party/thirdparty, and `src` otherwise (copybooks included).
@@ -81,7 +81,7 @@ mod unit {
         }
     }
 
-    /// sql-frontend phase-06 task-13: a SQL file's code type follows path
+    /// A SQL file's code type follows path
     /// segments only — test/tests → `test`, gen/generated/obj (SSDT build
     /// output) → `generated`, vendor/third_party/thirdparty → `external` —
     /// with no filename marker, and a test segment wins over obj.
@@ -110,7 +110,7 @@ mod unit {
         }
     }
 
-    /// powershell-frontend phase-07 task-3: a PowerShell file's code type
+    /// A PowerShell file's code type
     /// follows directory segments and the Pester `*.Tests.ps1` filename,
     /// case-insensitively; a segment check never matches the filename itself.
     #[test]
@@ -137,12 +137,12 @@ mod unit {
         }
     }
 
-    /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
+    /// With a config present, a STRUCTURAL
     /// record takes the config's structural `code_type` (default `config`)
     /// instead of falling through to `default`; `md` keeps its built-in
     /// `docs` classification; a configured `code_type` overrides the non-md
-    /// default; and a code record is unchanged. schema-alignment phase-02
-    /// task-15: an `agent` definition is a Markdown document, so it takes the
+    /// default; and a code record is unchanged. An `agent` definition is a
+    /// Markdown document, so it takes the
     /// same `docs` classification as `md` under a default config and under a
     /// config whose `structural.code_type` is set.
     #[test]

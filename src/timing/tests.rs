@@ -4,7 +4,7 @@ use super::*;
 mod unit {
     use super::*;
 
-    /// Phase-04 task-6: all four phase durations are present on every report
+    /// All four phase durations are present on every report
     /// and the machine-readable line round-trips exactly.
     #[test]
     fn report_carries_all_four_phases_and_machine_line_round_trips() {
@@ -35,7 +35,7 @@ mod unit {
         }
     }
 
-    /// Phase-04 task-6: the fast-path `frontend-skipped` marker is set on a
+    /// The fast-path `frontend-skipped` marker is set on a
     /// skip and clear on a normal scan (the flag drives both lines).
     #[test]
     fn frontend_skip_marker_sets_and_clears() {

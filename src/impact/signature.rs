@@ -7,7 +7,7 @@ use crate::graph::{Graph, NodeKind};
 use super::depindex::rel;
 
 // ---------------------------------------------------------------------------
-// Per-language granularity / signature (task-6, DECIDED)
+// Per-language granularity / signature (DECIDED)
 // ---------------------------------------------------------------------------
 
 /// The emission granularity of a language (the unit a targeted scan re-emits).

@@ -1,4 +1,4 @@
-//! Win-B impact closure + signature early cutoff (phase-02 tasks 5 and 6).
+//! Impact closure + signature early cutoff.
 //!
 //! The re-emission target set is **not** just the changed files:
 //!
@@ -11,7 +11,7 @@
 //! with a **signature early cutoff**: a body-only change whose exported
 //! signature is unchanged does not cascade to dependents.
 //!
-//! ## Granularity and signatures (DECIDED per language, task-6)
+//! ## Granularity and signatures (DECIDED per language)
 //!
 //! A frontend's *emission granularity* is the unit it can re-emit on a targeted
 //! scan:
@@ -33,9 +33,9 @@
 //! declared FQN and every function's arity/params unchanged has an unchanged
 //! signature and does not pull dependents into the target set.
 
-// The phase-02 win-B surface: several helpers here (e.g. `target_set`,
+// The incremental surface: several helpers here (e.g. `target_set`,
 // `signature_changed_files`, `by_language`) are consumed by the impact unit
-// tests and the phase-03 orchestration rather than by `cmd_scan` directly.
+// tests and the scan orchestration rather than by `cmd_scan` directly.
 #![allow(dead_code)]
 
 // The impact closure is split into its three cohesive halves — the signature
@@ -50,10 +50,9 @@ pub use depindex::*;
 pub use signature::*;
 pub use targetset::*;
 
-// The relocated unit tests reach `Graph`/`NodeKind`/`BTreeSet` through
-// `use super::*` (they were declared in this module before the split); keep
-// them reachable in test builds only, so a non-test build carries no unused
-// import.
+// The unit tests reach `Graph`/`NodeKind`/`BTreeSet` through `use super::*`;
+// keep them reachable in test builds only, so a non-test build carries no
+// unused import.
 #[cfg(test)]
 use crate::graph::{Graph, NodeKind};
 #[cfg(test)]

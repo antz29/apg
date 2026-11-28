@@ -3,7 +3,7 @@ use super::*;
 mod unit {
     use super::*;
 
-    /// Phase-7 task-7 (gate): the `apg --help` text documents the strict
+    /// The `apg --help` text documents the strict
     /// `add|update|rm` surface for node/edge/plan, no longer names the retired
     /// `plan init`/`plan link` verbs, and leaves the `apg review` line
     /// unchanged. It also pins the buffer-free session lifecycle entries and
@@ -133,13 +133,13 @@ mod unit {
         );
     }
 
-    /// Phase-03 task-5: the per-language spawn verdict. On the incremental
+    /// The per-language spawn verdict. On the incremental
     /// path, in the PARTIAL case (the scan has other changed languages) a
     /// language whose target set is empty is SKIPPED entirely (no process
     /// spawn), while a language with targets spawns. When the whole target set
-    /// is empty phase-02's unfiltered path runs every language, and on a full
+    /// is empty the unfiltered path runs every language, and on a full
     /// scan every language spawns. The verdict is derived from the SAME
-    /// phase-2 `targets_rel` set that drives the win-C DB splice, via
+    /// `targets_rel` set that drives the DB splice, via
     /// `targets_for_language`, never a fresh detection walk.
     #[test]
     fn spawn_verdict_skips_unchanged_languages_only_on_the_incremental_path() {
@@ -234,7 +234,7 @@ mod unit {
         );
     }
 
-    /// Phase-03 task-5: the pure scan-time toolchain mapping and the named,
+    /// The pure scan-time toolchain mapping and the named,
     /// actionable error text. The mapping is exactly the per-language
     /// scan-time tool set (`go`; a JDK's `java`; `cargo` + `rustc`; `node`
     /// for both `ts` and `js`) and nothing for the four self-contained
@@ -317,7 +317,7 @@ mod unit {
         );
     }
 
-    /// Phase-06 task-10: `builtin_code_type`'s JS rules are **extension-
+    /// `builtin_code_type`'s JS rules are **extension-
     /// keyed, not stream-id-keyed** — the bundle-filename rule fires under
     /// BOTH the `ts` id (a mixed/TS-detected repo scans its incidental
     /// JavaScript under `ts`) and the `js` id. A bare `.cjs` suffix is never
@@ -377,7 +377,7 @@ mod unit {
         }
     }
 
-    /// Phase-08 task-16: the `py` code-type arm. An ordinary module is
+    /// The `py` code-type arm. An ordinary module is
     /// `src`; a `*_test.py` (or `test_*.py`, or a `test/` segment) is
     /// `test`; a hand-written `.pyi` stub is `src` — NEVER `generated`
     /// (the `.d.ts` analog, a declaration is authored source) — UNLESS it

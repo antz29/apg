@@ -12,7 +12,7 @@ use super::{require_apg_root, validate_project_name};
 /// is NOT merged. Refuses (naming the actual state + one fix command) unless
 /// deleting the branch is safe; on success removes the project's worktree at
 /// `<main>/apg/.worktrees/<name>` and deletes `refs/heads/<name>` via the
-/// shared phase-1 helpers. Discarding the branch's commits is the point —
+/// shared project helpers. Discarding the branch's commits is the point —
 /// delete does NOT require the branch to be merged.
 pub(crate) fn project_delete(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);

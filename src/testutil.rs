@@ -2,8 +2,8 @@
 //! fixtures built entirely with git2 — the git CLI is never shelled out to
 //! anywhere in src (R6), so fixture construction cannot use it either.
 //!
-//! It compiles unconditionally (not only under `cfg(test)`) so the relocated
-//! e2e integration crates can reach it as `apg::testutil`; nothing here is
+//! It compiles unconditionally (not only under `cfg(test)`) so the e2e
+//! integration crates can reach it as `apg::testutil`; nothing here is
 //! ever called by production code.
 //!
 //! R4 consequence: mutation-command tests no longer run against non-git
@@ -193,7 +193,7 @@ impl Repo {
 ///
 /// The content-identity key is taken from the checkout's CURRENT git state, so
 /// a fixture that records the live sha/clean is genuinely fresh under the
-/// phase-01 content rule. Use [`write_scan_meta_keyed`] to record an explicit
+/// content-identity rule. Use [`write_scan_meta_keyed`] to record an explicit
 /// key (e.g. a stale or pre-hardening one).
 pub fn write_scan_meta(apg_root: &Path, sha: Option<&str>, clean: bool, at: &str) {
     let key = crate::git::git_state(apg_root).content_key;
@@ -675,7 +675,7 @@ pub fn valid_model() -> Vec<NodeFile> {
 /// the direct [`write_project`](crate::layers::write_project) path — the shared
 /// whole-model-valid base the SPEC §8.1 save boundary requires of a semantic
 /// fixture (a test then adds its specific nodes/edges on top). A pure I/O
-/// helper shared by the relocated e2e crates; it panics on any write failure so
+/// helper shared by the e2e crates; it panics on any write failure so
 /// a broken fixture is loud.
 pub fn seed_valid_model(apg_root: &Path) {
     crate::layers::write_project(apg_root, &valid_model(), &[]).unwrap();
@@ -843,7 +843,7 @@ pub fn spawn_apg(args: &[&str], cwd: &Path) -> Output {
 }
 
 // ---------------------------------------------------------------------------
-// Session harness (phase-03): drive a real long-running `apg session start`
+// Session harness: drive a real long-running `apg session start`
 // process. The coordinator must be a genuinely separate process — it owns the
 // DB and the extended flock for its life — so session tests spawn it, wait
 // until its socket answers, route mutations/reads through it, and end it (or
@@ -914,7 +914,7 @@ pub fn wt_commit(wt: &Path, rels: &[&str], msg: &str) -> String {
 /// HEAD sha. Unlike [`wt_commit`] it stages through the index pathspec matcher,
 /// so `rels` may name a directory or a git pathspec — the superset needed by
 /// test setup that deliberately writes outside the commit funnel, before a
-/// scan_meta re-anchor. The single canonical home for the relocated e2e
+/// scan_meta re-anchor. The single canonical home for the e2e
 /// crates' `wt_commit_paths` fixtures.
 pub fn wt_commit_paths(wt: &Path, rels: &[&str], msg: &str) -> String {
     let repo = git2::Repository::open(wt).unwrap();
@@ -1045,7 +1045,7 @@ pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Runs `f` with the process cwd temporarily set to `dir`, restoring it after.
-/// The single canonical home for the relocated e2e crates' cwd-scoped fixtures
+/// The single canonical home for the e2e crates' cwd-scoped fixtures
 /// (`apg::testutil::with_cwd`); serialized behind [`CWD_LOCK`] so a chdir never
 /// interleaves with [`scan_checkout`], which also mutates the process-global
 /// cwd.
@@ -1060,7 +1060,7 @@ pub fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
 
 /// The `Vec<String>` CLI-argv shape the node/plan command dispatchers take
 /// (positionals + repeatable flags). A pure builder used by BOTH the unit/int
-/// tier and the e2e tier of `node_cmd` (and the sibling `plan_cmd` relocation),
+/// tier and the e2e tier of `node_cmd` and `plan_cmd`,
 /// so it has exactly one definition here per
 /// `solution.constraint.test-layout-shape`.
 pub fn av(args: &[&str]) -> Vec<String> {
@@ -1069,7 +1069,7 @@ pub fn av(args: &[&str]) -> Vec<String> {
 
 /// A layers `NodeFile` with the given identity and `(kind, target)` out-edges
 /// — the pure builder for `plan_cmd`'s coverage/spine fixtures. Used by BOTH
-/// the unit/int tier (sibling `src/plan_cmd/tests.rs`) and the relocated e2e
+/// the unit/int tier (sibling `src/plan_cmd/tests.rs`) and the e2e
 /// crate, so it is single-sourced here per
 /// `solution.constraint.test-layout-shape`.
 pub fn nf(

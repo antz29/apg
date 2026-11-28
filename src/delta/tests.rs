@@ -19,11 +19,11 @@ const VALID_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
 /// unit tier -- pure in-memory: no filesystem, git repository or process.
 /// The git-wrapper path (`full_scan_reason` discovery/ancestry over a real
-/// repo) stays e2e below; these drive the extracted pure [`scan_verdict`].
+/// repo) stays e2e below; these drive the pure [`scan_verdict`].
 mod unit {
     use super::*;
 
-    /// fix-module-identity phase-06 task-9: the recorded-HEAD warm-cache
+    /// The recorded-HEAD warm-cache
     /// condition and every `FullScanReason` branch are decided from the
     /// in-memory scan record + cache key + HEAD — no git discovery, no
     /// filesystem. The warm verdict is `WarmCache` (the store's facts
