@@ -19,8 +19,7 @@ func main() {
 	root, _ := filepath.Abs(os.Args[1])
 
 	// Parse --module <dir> pairs, --id-prefix, and the target-set hand-off
-	// flags (phase-02 task-10, the pinned interface); remaining args are
-	// excludes.
+	// flags (the pinned interface); remaining args are excludes.
 	var moduleDirs []string
 	var excludes []string
 	var targetsPath, cacheDir string

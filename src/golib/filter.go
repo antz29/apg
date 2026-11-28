@@ -41,7 +41,7 @@ func isExcluded(path string, excludes []string) bool {
 	return false
 }
 
-// --- target-set hand-off (phase-02 task-10, the pinned interface) ---
+// --- target-set hand-off (the pinned interface) ---
 
 // fileSet is the set of cleaned absolute source-file paths read from the
 // `--targets` hand-off. An empty/nil set means "no emission filter".

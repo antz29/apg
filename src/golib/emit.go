@@ -20,9 +20,9 @@ import (
 // (edgeEndpoint), which the ingestor's cached-fact splice resolves against the
 // reused unit.
 func emitFacts(projectPkgs []*packages.Package, mods []moduleInfo, modSet map[string]bool, targets fileSet, excludes []string) {
-	// Package-granularity emission selection (phase-02 task-10): a package is
-	// re-emitted when any of its Go files is in the target set. `nil` means no
-	// filter is in force, so every package is scanned (the full-scan stream).
+	// Package-granularity emission selection: a package is re-emitted when any
+	// of its Go files is in the target set. `nil` means no filter is in force,
+	// so every package is scanned (the full-scan stream).
 	targetPkgs := targetPkgPaths(projectPkgs, targets)
 	selectedPkg := func(p *packages.Package) bool {
 		return targetPkgs == nil || targetPkgs[p.PkgPath]

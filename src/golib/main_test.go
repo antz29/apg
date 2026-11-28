@@ -136,10 +136,9 @@ func TestApplyGoBuildCache(t *testing.T) {
 	}
 }
 
-// TestIsGeneratedScratchPath is the phase-03 task-9 unit: the pure emission
-// filter rejects the per-scan GOCACHE, the generated `_testmain`
-// scratch file, and the synthesized `init`/`main` declared in it — while
-// keeping ordinary project source.
+// TestIsGeneratedScratchPath covers the pure emission filter: it rejects the
+// per-scan GOCACHE, the generated `_testmain` scratch file, and the synthesized
+// `init`/`main` declared in it — while keeping ordinary project source.
 func TestIsGeneratedScratchPath(t *testing.T) {
 	cacheDir := goBuildCacheDir("/facts")
 
@@ -191,10 +190,10 @@ func TestIsGeneratedScratchPath(t *testing.T) {
 	}
 }
 
-// TestToolchainScratchFromRecordedCache is the phase-03 task-9 unit for the
-// wiring: once applyGoBuildCache has recorded the per-scan GOCACHE
-// (`goBuildCacheDir` dir), a generated `_testmain` under it never reaches
-// the emission stream, while project source does.
+// TestToolchainScratchFromRecordedCache covers the wiring: once
+// applyGoBuildCache has recorded the per-scan GOCACHE (`goBuildCacheDir` dir),
+// a generated `_testmain` under it never reaches the emission stream, while
+// project source does.
 func TestToolchainScratchFromRecordedCache(t *testing.T) {
 	prev := goBuildCacheRoots
 	goBuildCacheRoots = nil
@@ -300,12 +299,12 @@ func emitToBuffer(t *testing.T, projectPkgs []*packages.Package, targets fileSet
 	return buf.String()
 }
 
-// TestEmitFactsCrossPackageEdgeWithTargetFilter is the phase-02 task-10
-// regression: when only the CALLING package is re-emitted, a resolved call/use
-// into a non-target (cached) package must still be emitted, addressed by the
-// target's canonical FQN so the ingestor's fact splice can resolve it. The
-// pre-fix code built the opaque-id maps over the filtered package set only and
-// silently dropped the edge.
+// TestEmitFactsCrossPackageEdgeWithTargetFilter guards the cross-package edge:
+// when only the CALLING package is re-emitted, a resolved call/use into a
+// non-target (cached) package must still be emitted, addressed by the target's
+// canonical FQN so the ingestor's fact splice can resolve it. Building the
+// opaque-id maps over the filtered package set alone would silently drop the
+// edge.
 func TestEmitFactsCrossPackageEdgeWithTargetFilter(t *testing.T) {
 	root := writeScratchModule(t, scratchFixture)
 	projectPkgs := loadScratchProjectPkgs(t, root)
@@ -447,7 +446,7 @@ func TestEmitFactsNoFilterMatchesAllTargets(t *testing.T) {
 	}
 }
 
-// TestAbsRestrictResolvesAgainstScanRoot is the phase-02 task-2 unit: a
+// TestAbsRestrictResolvesAgainstScanRoot checks the restrict resolution: a
 // relative --module value joins the scan root, an absolute value passes
 // through unchanged, and the two forms of the same dir yield the identical
 // restrict set (the process working directory never decides).
@@ -481,8 +480,8 @@ func TestAbsRestrictResolvesAgainstScanRoot(t *testing.T) {
 		t.Fatalf("relative and absolute forms differ: %v vs %v", rel, abs)
 	}
 
-	// feedback-19: an unclean absolute value is cleaned, so each selects the same
-	// subtree as its equivalent relative form (the process CWD never decides).
+	// An unclean absolute value is cleaned, so each selects the same subtree as
+	// its equivalent relative form (the process CWD never decides).
 	equivalences := []struct {
 		root, rel, abs, want string
 	}{
@@ -498,12 +497,12 @@ func TestAbsRestrictResolvesAgainstScanRoot(t *testing.T) {
 	}
 }
 
-// TestAbsRestrictResolvesSymlinkedModuleDir is the phase-04 task-12 real-I/O
-// case (e2e by body: it creates a real tree and a symlink): an absolute --module
-// value spelled through a symlink must select the same subtree as its canonical
-// spelling. Before this change it selected nothing, because dirAllowed compares
-// against the physical dirs the scan walks, and the symlink spelling never
-// prefix-matched them.
+// TestAbsRestrictResolvesSymlinkedModuleDir is a real-I/O case (e2e by body: it
+// creates a real tree and a symlink): an absolute --module value spelled
+// through a symlink must select the same subtree as its canonical spelling.
+// dirAllowed compares against the physical dirs the scan walks, so an
+// unresolved symlink spelling would never prefix-match them and would select
+// nothing.
 func TestAbsRestrictResolvesSymlinkedModuleDir(t *testing.T) {
 	base := t.TempDir()
 	real := filepath.Join(base, "real")
