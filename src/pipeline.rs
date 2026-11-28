@@ -292,7 +292,7 @@ pub(crate) fn run_pipeline_with(
     let force_full_load = pending_state;
     if pending_state {
         log.ln(
-            "[load] database carries pending state (an admitted but unsaved mutation) — discarding it and rebuilding db.lbug from apg/layers/**",
+            "[load] database carries pending state (a database left pending by the retired save model) — discarding it and rebuilding db.lbug from apg/layers/**",
         );
         // cwd is `.trans`, so the derived index lives at ".".
         session::discard_derived_index(Path::new("."));
