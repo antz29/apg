@@ -1712,8 +1712,8 @@ mod e2e {
             ),
             (
                 "rust",
-                "apg.session.Coordinator.start",
-                "rust.apg.session.Coordinator.start",
+                "apg.session.Session.open",
+                "rust.apg.session.Session.open",
             ),
         ];
         let function = |id: &str, parent: &str, name: &str| apg::schema::Record::Function {
@@ -2260,9 +2260,10 @@ mod e2e {
     }
 
     /// The suite install derives from SUITE_TOOLS: the new project/layers
-    /// tools (apg_node/apg_edge/apg_project/apg_session/apg_plan_verify) embed
-    /// and install, and the retired spec/invariant tools are gone from both the
-    /// embed list and the installed set (a stale file in the target is pruned).
+    /// tools (apg_node/apg_edge/apg_project/apg_plan_verify) embed and install,
+    /// the retired spec/invariant tools and the retired `apg_session` tool are
+    /// gone from both the embed list and the installed set (a stale file in the
+    /// target is pruned).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
@@ -2308,7 +2309,6 @@ mod e2e {
             "apg_node.ts",
             "apg_edge.ts",
             "apg_project.ts",
-            "apg_session.ts",
             "apg_plan_verify.ts",
             "apg_rm.ts",
             "apg_mv.ts",
@@ -2330,6 +2330,8 @@ mod e2e {
             "apg_invariants.ts",
             "apg_invariant_add.ts",
             "apg_plan_apply.ts",
+            // The mandatory-session lifecycle is gone: no `apg_session` tool.
+            "apg_session.ts",
         ] {
             assert!(
                 !dir.join("plugins").join(name).exists(),
@@ -2342,7 +2344,6 @@ mod e2e {
             "apg_node.ts",
             "apg_edge.ts",
             "apg_project.ts",
-            "apg_session.ts",
             "apg_plan_verify.ts",
             "apg_rm.ts",
             "apg_mv.ts",
@@ -2356,6 +2357,10 @@ mod e2e {
                 && !names.contains(&"apg_spec_add.ts")
                 && !names.contains(&"apg_spec_requirements.ts"),
             "no retired apg_spec tools remain in SUITE_TOOLS"
+        );
+        assert!(
+            !names.contains(&"apg_session.ts"),
+            "the retired apg_session tool must not be embedded"
         );
         assert!(
             !names.contains(&"apg_invariants.ts") && !names.contains(&"apg_invariant_add.ts"),
@@ -3650,7 +3655,6 @@ mod e2e {
             ("apg_unresolved", "*", "allow"),
             ("apg_hunk", "*", "allow"),
             ("apg_project", "*", "allow"),
-            ("apg_session", "*", "allow"),
             ("apg_node", "*", "allow"),
             ("apg_edge", "*", "allow"),
             ("apg_plan", "*", "allow"),
@@ -4132,26 +4136,25 @@ mod e2e {
     }
 
     /// The strict-mutation surface's
-    /// refusal sweep, under mandatory-session. Every create arm — `node add`,
-    /// `edge add`, `plan add` (the plan itself), and `plan add
+    /// refusal sweep, under the per-invocation session contract. Every create
+    /// arm — `node add`, `edge add`, `plan add` (the plan itself), and `plan add
     /// phase|task|planned` — refuses an existing entity (non-zero, error naming
     /// the `update`/`rm` follow-up, no store change); `rm` on an absent plan
     /// entity is non-zero, never a silent no-op.
     ///
-    /// The durable `node`/`edge` arms run inside a live `apg session start`
-    /// process: the top-level `cmd_node`/`cmd_edge` dispatch forwards each
-    /// mutation to the coordinator, which stages it in its write-back buffer
-    /// (projected at admission, NON-durable until `apg session save`). A refused
-    /// re-add changes nothing; an accepted `rm` of an existing node proceeds
-    /// into the buffer, while a `rm` of a never-existing node is refused (the
-    /// strict refusal), not admitted as a buffered no-op; `save` is the
-    /// single durability point (asserted), and the session ends cleanly before
-    /// the transient `plan` arms (which take the same extended flock).
+    /// The durable `node`/`edge` arms each run as their OWN invocation: the
+    /// top-level `cmd_node`/`cmd_edge` dispatch takes the blocking worktree
+    /// lock, opens the database write-capable, and inside that one critical
+    /// section writes the node files, makes exactly ONE commit and projects the
+    /// change — then releases. A refused re-add changes nothing; an accepted
+    /// `rm` of an existing node proceeds, while an `rm` of a never-existing node
+    /// is refused (the strict refusal), not admitted as a no-op; each accepted
+    /// mutation lands exactly one commit. No session is started, saved or ended,
+    /// and the transient `plan` arms run as their own per-invocation writes.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
         let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
-        let home = repo.root.join("home");
 
         // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
         // anchor Requirement, covered by a Service (with its leaf Group,
@@ -4192,9 +4195,8 @@ mod e2e {
 
         let before_commits = testutil::commit_count(&wt);
 
-        // A routed read helper: while the session is live the DB is owned by
-        // the coordinator, so a direct open is out of contract — reads go
-        // through a separate `apg query` process routed to the session.
+        // A read-only invocation helper: every read opens the worktree
+        // database read-only in its own process and takes no lock.
         let query = |q: &str| -> String {
             let out = testutil::spawn_apg(&["query", q], &wt);
             assert!(
@@ -4209,15 +4211,9 @@ mod e2e {
                 .unwrap_or_default()
         };
 
-        // Durable mutations are mandatory-session: open one. The top-level
-        // `cmd_node`/`cmd_edge` dispatch below forwards each durable write to
-        // it, which stages the change in its write-back buffer (projected into
-        // the held DB at admission, NON-durable until `apg session save`).
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&apg_root),
-            "the durable arms must run under a live session"
-        );
+        // Each durable mutation below is its own invocation: the top-level
+        // `cmd_node`/`cmd_edge` dispatch takes the blocking lock, writes the
+        // node files, makes one commit and projects the change.
 
         // --- node add refuses an existing FQN (naming update/rm) ---
         with_cwd(&wt, || {
@@ -4234,18 +4230,20 @@ mod e2e {
             ]))
         })
         .unwrap();
-        // The admitted write is visible to a routed read at admission but stays
-        // buffered: no node file lands until `apg session save`.
+        // The invocation made its write durable: the node file landed and the
+        // read-only invocation sees it.
         let r1_path =
             layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r1");
         assert!(
-            !r1_path.exists(),
-            "an admitted node must stay buffered until save"
+            r1_path.exists(),
+            "the add invocation must land its node file"
         );
+        let r1_bytes = std::fs::read(&r1_path).unwrap();
         assert_eq!(
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
             "1"
         );
+        let commits_after_r1 = testutil::commit_count(&wt);
         let err = with_cwd(&wt, || {
             node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"])).unwrap_err()
         });
@@ -4253,8 +4251,17 @@ mod e2e {
         assert!(msg.contains("already exists"), "{msg}");
         assert!(msg.contains("apg node update"), "{msg}");
         assert!(msg.contains("apg node rm"), "{msg}");
-        // A refused re-add writes nothing and changes no buffered state.
-        assert!(!r1_path.exists(), "a refused re-add must write nothing");
+        // A refused re-add writes nothing and lands no commit.
+        assert_eq!(
+            std::fs::read(&r1_path).unwrap(),
+            r1_bytes,
+            "a refused re-add must not rewrite the node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_after_r1,
+            "a refused re-add must not commit"
+        );
         assert_eq!(
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
             "1"
@@ -4292,12 +4299,19 @@ mod e2e {
             "requirements.requirement.r2",
         ]);
         with_cwd(&wt, || node_cmd::cmd_edge(&edge)).unwrap();
+        let commits_after_contains = testutil::commit_count(&wt);
         let err = with_cwd(&wt, || node_cmd::cmd_edge(&edge).unwrap_err());
         let msg = err.to_string();
         assert!(msg.contains("already exists"), "{msg}");
         assert!(msg.contains("apg edge update"), "{msg}");
         assert!(msg.contains("apg edge rm"), "{msg}");
-        // The duplicate added neither a second out-half nor an in-half.
+        // The duplicate added neither a second out-half nor an in-half, and
+        // landed no commit.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_after_contains,
+            "a refused duplicate edge must not commit"
+        );
         assert_eq!(
             query(
                 "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:Contains]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
@@ -4305,12 +4319,10 @@ mod e2e {
             "1"
         );
 
-        // --- rm of an EXISTING node proceeds into the buffer ---
-        // (An absent-node rm is refused inside the session, not admitted as a
-        // buffered no-op: `node_rm_change` bails on an identity absent from the
-        // cumulative effective set — the refusal restored by phase-01 task-40.
-        // This assertion was re-added by phase-01 task-41, un-dropping what
-        // task-28 removed.)
+        // --- rm of an EXISTING node proceeds and lands its own commit ---
+        // (An absent-node rm is refused, not admitted as a no-op:
+        // `node_rm_change` bails on an identity absent from the effective set —
+        // the refusal restored by phase-01 task-40.)
         with_cwd(&wt, || {
             node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "r1"]))
         })
@@ -4318,20 +4330,21 @@ mod e2e {
         assert_eq!(
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
             "0",
-            "the buffered rm must be visible to a routed read"
+            "the rm invocation must project the removal"
         );
-        assert!(!r1_path.exists(), "a buffered rm must not touch disk");
+        assert!(!r1_path.exists(), "the rm must remove the node file");
 
-        // --- rm of an ABSENT node is refused inside the session ---
+        // --- rm of an ABSENT node is refused ---
         // The same strict refusal as the direct path: an identity that never
-        // existed is non-zero (naming `does not exist`), never a buffered
-        // no-op. Nothing is written and no delete is staged.
+        // existed is non-zero (naming `does not exist`), never a no-op. Nothing
+        // is written and no commit lands.
         let ghost_path = layers::node_file_path(
             &apg_root,
             layers::Layer::Requirements,
             "requirement",
             "ghost",
         );
+        let commits_before_ghost = testutil::commit_count(&wt);
         let err = with_cwd(&wt, || {
             node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "ghost"])).unwrap_err()
         });
@@ -4342,33 +4355,33 @@ mod e2e {
             "a refused absent-node rm must write nothing"
         );
         assert_eq!(
-            query("MATCH (n:Requirement {fqn: 'requirements.requirement.ghost'}) RETURN count(n)"),
-            "0",
-            "a refused absent-node rm must not stage a delete"
-        );
-
-        // --- `apg session save` is the single durability point: the buffered
-        // set (r2 written, r1 added-then-removed) lands in exactly one commit ---
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
+            testutil::commit_count(&wt),
+            commits_before_ghost,
+            "a refused absent-node rm must not commit"
         );
         assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.ghost'}) RETURN count(n)"),
+            "0",
+            "a refused absent-node rm must not project a delete"
         );
+
+        // --- every accepted durable mutation landed exactly one commit ---
+        // Seven accepted invocations above: add r1, requires owner→r1, add r2,
+        // requires owner→r2, driven-by svc→r2, contains r1→r2, rm r1.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 7,
+            "each accepted durable mutation lands exactly one commit"
+        );
+        // The committed node files agree: r1 is gone, r2 survives, and r2's
+        // incident `contains` in-half from r1 was dropped by the rm commit.
         assert!(
             !r1_path.exists(),
-            "the buffered `rm r1` must land (no node file)"
+            "the `rm r1` must have removed its node file"
         );
         let r2_path =
             layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r2");
-        assert!(
-            r2_path.exists(),
-            "save must land the buffered `r2` node file"
-        );
+        assert!(r2_path.exists(), "r2's node file must exist");
         let r2 =
             layers::read_node_file(&apg_root, layers::Layer::Requirements, "requirement", "r2")
                 .unwrap();
@@ -4376,7 +4389,7 @@ mod e2e {
             !r2.in_edges
                 .iter()
                 .any(|e| e.kind == "contains" && e.source == "requirements.requirement.r1"),
-            "the saved `rm r1` must drop r2's incident `contains` in-half"
+            "the `rm r1` must drop r2's incident `contains` in-half"
         );
         assert!(
             r2.in_edges
@@ -4384,32 +4397,6 @@ mod e2e {
                 .any(|e| e.kind == "requires" && e.source == "requirements.stakeholder.owner"),
             "r2's `requires` in-half from the seeded Stakeholder must survive"
         );
-        assert_eq!(
-            testutil::commit_count(&wt),
-            before_commits + 1,
-            "the whole buffered set must land in exactly one commit"
-        );
-
-        // End the session cleanly; the transient plan arms below take the same
-        // extended flock, so they run once it has ended.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&apg_root),
-            "the session must be ended before the transient plan arms"
-        );
-
-        // --- plan add refuses an existing plan, naming update/rm ---
         with_cwd(&wt, || plan_cmd::cmd_plan(&argv(&["add", "foo"]))).unwrap();
         let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
         let plan_before = std::fs::read_to_string(&plan_path).unwrap();
@@ -4561,10 +4548,12 @@ mod e2e {
     /// The `apg node` / `apg edge` command
     /// surface is transparent — the SAME literal forms the CLI documents appear
     /// in `help_text`, the node/edge suite tools, and the distributed agent
-    /// prompts. The same pinning covers the session
-    /// surface: `help_text` documents start|save|end|abort, the `apg_session`
-    /// suite tool is embedded, and the navigator/agent-builder/spec-writer
-    /// prompts carry the caller-owned-session guidance.
+    /// prompts. The same pinning covers the per-invocation session
+    /// contract: `help_text` documents that each invocation opens read-only and
+    /// a durable write upgrades under the blocking worktree lock for one
+    /// critical section, there is no `apg_session` tool, and the
+    /// navigator/agent-builder/spec-writer prompts carry the per-invocation
+    /// guidance.
     ///
     /// The expected strings are PINNED here as literals, not read back from the
     /// consts: a test that compares `AGENTS`/`SUITE_TOOLS` to themselves is a
@@ -4580,8 +4569,21 @@ mod e2e {
             "Durable node-file model mutations:",
             "add/update/rm (type-as-argument, writes apg/layers;",
             "add/update/rm (kind/from/to;",
-            // Phase-04 task-4 documented the session surface: the help block
-            // names the coordinator and each of start/save/abort/end.
+            // The per-invocation session contract: one invocation opens
+            // read-only and a durable write upgrades under the blocking lock.
+            "Each invocation opens a read-only session; a",
+            "durable apg node/edge write upgrades under the",
+            "worktree's blocking lock for one critical",
+            "once and projects into db.lbug — then releases",
+            "back to read-only. Reads never take the lock.",
+        ] {
+            assert!(
+                help.contains(needle),
+                "help must contain {needle:?}: {help}"
+            );
+        }
+        // The retired daemon lifecycle is gone from the help surface.
+        for retired in [
             "apg session <sub> …",
             "Session-scoped single-writer coordinator",
             "start — own db.lbug exclusively",
@@ -4590,8 +4592,8 @@ mod e2e {
             "end — release the DB/socket and exit, refusing",
         ] {
             assert!(
-                help.contains(needle),
-                "help must contain {needle:?}: {help}"
+                !help.contains(retired),
+                "help must not document the retired session surface {retired:?}"
             );
         }
 
@@ -4611,15 +4613,14 @@ mod e2e {
             tool("apg_edge.ts").contains("apg edge add|update|rm <kind> <from> <to>"),
             "apg_edge.ts must carry the pinned edge command form"
         );
-        // Phase-04 task-1 added the apg_session tool; it is embedded (and thus
-        // installed by `apg init`) and carries the pinned session command forms.
-        let session_tool = tool("apg_session.ts");
-        for needle in ["apg session save", "apg session end", "apg session abort"] {
-            assert!(
-                session_tool.contains(needle),
-                "apg_session.ts must carry the pinned session form {needle:?}"
-            );
-        }
+        // The retired `apg_session` tool is not embedded (and thus never
+        // installed): the per-invocation contract has no session lifecycle.
+        assert!(
+            !SUITE_TOOLS
+                .iter()
+                .any(|(name, _)| *name == "apg_session.ts"),
+            "the retired apg_session tool must not be embedded"
+        );
 
         // 3. The distributed agent prompts: the authoring prompts carry the
         // exact command forms; the reviewer prompts name the authoring
@@ -4654,32 +4655,32 @@ mod e2e {
                 "implementation-phase-reviewer.md",
                 "`apg_node`/`apg_edge`/`apg_plan_add`",
             ),
-            // Phase-04 tasks 5/6/14 added caller-owned-session guidance to the
-            // three authoring prompts: each carries the heading and the
-            // mandatory-admission refusal wording.
+            // The per-invocation session guidance in the three authoring
+            // prompts: each carries the heading and the blocking-lock wording,
+            // and none carries the retired caller-owned-session lifecycle.
             (
                 "spec-writer.md",
-                "### Caller-owned sessions (a durable mutation needs a live session)",
+                "### Per-invocation writes (no session to manage)",
             ),
             (
                 "codebase-navigator.md",
-                "### Caller-owned sessions (a durable mutation needs a live session)",
+                "### Per-invocation sessions (a durable write locks the worktree)",
             ),
             (
                 "agent-builder.md",
-                "### Caller-owned sessions (a durable mutation needs a live session)",
+                "### Per-invocation durable writes (no session daemon)",
             ),
             (
                 "spec-writer.md",
-                "session the mutation refuses and names `apg session start`.",
+                "Inside one critical section the invocation writes the node file, makes **exactly one git commit**",
             ),
             (
                 "codebase-navigator.md",
-                "With no live session it refuses and names",
+                "session is started, saved or ended, and `apg session save` is removed (not a no-op)",
             ),
             (
                 "agent-builder.md",
-                "live session the mutation refuses and names `apg session start`.",
+                "There is no session to start, save, end or abort and no",
             ),
         ];
         for (name, needle) in pinned {
@@ -4689,24 +4690,16 @@ mod e2e {
             );
         }
 
-        // The session lifecycle is driven through the `apg_session` tool's
-        // `action` argument (never bash), and no distributed agent grants
-        // `find *` — `find -exec` runs arbitrary commands past every bash deny.
-        assert!(
-            session_tool.contains(r#"enum: ["start", "save", "end", "abort"]"#),
-            "apg_session.ts must expose the start/save/end/abort actions"
-        );
-        for name in [
-            "spec-writer.md",
-            "codebase-navigator.md",
-            "agent-builder.md",
-        ] {
-            assert!(
-                agent(name).contains("`apg_session` `action: save`"),
-                "agent prompt {name} must drive save through apg_session"
-            );
-        }
+        // No distributed agent carries the retired caller-owned-session
+        // lifecycle guidance, and none grants `find *` — `find -exec` runs
+        // arbitrary commands past every bash deny.
         for (name, content) in AGENTS {
+            for retired in ["### Caller-owned sessions", "`apg_session` `action: save`"] {
+                assert!(
+                    !content.contains(retired),
+                    "agent prompt {name} must not carry the retired session guidance {retired:?}"
+                );
+            }
             assert!(
                 !content.contains(r#""find *""#),
                 "agent prompt {name} must not grant `find *`"
@@ -4725,131 +4718,85 @@ mod e2e {
         }
     }
 
-    /// The full read-routing contract.
-    /// With a session live, a separate routed `apg query` process returns the
-    /// post-mutation state — including an UNSAVED buffered change (read-your-
-    /// writes through the session's held projection) — with no lock error and
-    /// without waiting for the session to end. A NON-routing direct `db.lbug`
-    /// open is out of contract for both reasons the routing exists: the
-    /// session's cache/projection is not on disk, and the session holds the DB's
-    /// lock, so lbug errors rather than waiting. `apg session save` is the single
-    /// durability point; the session's buffer must be clean before `apg session
-    /// end` (a dirty end is refused), and after the clean save + end a fresh
-    /// query opens the DB directly and reads the saved state.
+    /// The per-invocation read/write contract. A durable `apg node add` is one
+    /// invocation: it opens the worktree database read-write under the blocking
+    /// worktree lock, writes its node file, makes exactly one commit and
+    /// projects the change, then releases. A separate `apg query` invocation
+    /// opens the database **read-only** and returns the committed state — no
+    /// daemon, no socket and no routed forward, and it takes no lock. The
+    /// database is openable read-only after the write (and write-capable only
+    /// while no writer holds the lock).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn read_access_during_a_live_session_routes_and_after_end_reads_directly() {
+    fn write_upgrades_in_its_own_invocation_and_a_read_opens_read_only() {
         let (repo, wt, wt_apg) = testutil::project_with_db("read-access");
-        let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
 
-        // A routed mutation lands in the write-back buffer and is projected
-        // write-through into the session-held DB — but it is NOT yet durable.
-        // A lone `global.constraint` keeps the model whole-model-valid (SPEC §8.1).
+        // A durable write is its own invocation: the node file lands, exactly
+        // one commit is made and the change is projected. A lone
+        // `global.constraint` keeps the model whole-model-valid (SPEC §8.1).
+        let commits_before = testutil::commit_count(&wt);
         let add = testutil::spawn_apg(&["node", "add", "global", "constraint", "live"], &wt);
         assert!(
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
+        let live_file =
+            layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "live");
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "live").exists(),
-            "a routed mutation must stay buffered (unsaved) until `session save`"
+            live_file.exists(),
+            "the write invocation must land its node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the write invocation must land exactly one commit"
         );
 
-        // Routed read: the session's route exposes the UNSAVED buffered change
-        // (read-your-writes), with no lock error and no wait for end.
+        // A separate read-only invocation sees the committed change, and a
+        // read-only open succeeds (reads take no lock).
         let query = "MATCH (n:Constraint {fqn: 'global.constraint.live'}) RETURN count(n)";
-        let routed = testutil::spawn_apg(&["query", query], &wt);
+        let read = testutil::spawn_apg(&["query", query], &wt);
         assert!(
-            routed.status.success(),
-            "a routed read must succeed while the session is live: {}",
-            String::from_utf8_lossy(&routed.stderr)
+            read.status.success(),
+            "a read-only invocation must succeed: {}",
+            String::from_utf8_lossy(&read.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
+            String::from_utf8_lossy(&read.stdout)
                 .lines()
                 .last()
                 .map(str::trim),
             Some("1"),
-            "the live routed read must see the unsaved buffered change"
+            "the read-only invocation must see the committed write"
+        );
+        assert!(
+            apg::artifacts::ArtifactDb::open_read_only(&wt_apg).is_ok(),
+            "the database must open in the read-only class after the write"
         );
 
-        // Non-routing direct open: out of contract while the session holds the DB
-        // (errors on the lock, never waits).
-        let err = match apg::artifacts::ArtifactDb::open(&wt_apg) {
-            Ok(_) => {
-                panic!("a non-routing direct DB open must fail while the session holds the DB")
-            }
-            Err(e) => format!("{e:#}"),
-        };
-        assert!(err.contains("Could not set lock on file"), "{err}");
-
-        // `apg session save` is the durability point: the buffered node file
-        // lands and the buffer clears, so the session can be ended cleanly (a
-        // dirty end is refused).
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        // No daemon, socket or pending set is left behind.
         assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert!(
-            layers::node_file_path(&wt_apg, layers::Layer::Global, "constraint", "live").exists(),
-            "save must land the buffered node file"
-        );
-
-        // End the (now clean) session; a fresh query opens the DB directly and
-        // reads the saved state.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "the session must be ended before the direct read"
-        );
-
-        let fresh = testutil::spawn_apg(&["query", query], &wt);
-        assert!(
-            fresh.status.success(),
-            "{}",
-            String::from_utf8_lossy(&fresh.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&fresh.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "after a clean `session save` + `session end` the direct reader sees the saved state"
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
     }
 
-    /// Under mandatory-session, metadata
-    /// mutations require NO code re-scan. A live `apg session start` process
-    /// owns the DB and the single-writer lock, so the durable `node add`/`node
-    /// rm` and `edge add`/`edge rm` are admitted into its write-back buffer and
-    /// projected into the held `db.lbug` AT ADMISSION — a NEW routed `apg query`
-    /// process observes each one immediately (read-your-writes) with NO save and
-    /// no scan; `apg session save` is then the single durability point. The
-    /// transient `plan` add/rm (task/planned) and `review` add/action/resolve
-    /// take the same extended flock, so they run once the session has ended and
-    /// are likewise observed by a NEW `apg query` process. The "no scan invoked"
-    /// evidence is concrete: `db.lbug`'s inode never changes (a scan unlinks and
-    /// recreates it), the scan's `scanned_at` scan-meta is never restamped (a
-    /// scan writes a new timestamp; the mutation re-anchor preserves it), and
-    /// the scan pipeline's `apg-frontend.log` is never recreated.
+    /// Under the per-invocation session contract, metadata
+    /// mutations require NO code re-scan. Each durable `node add`/`node rm` and
+    /// `edge add`/`edge rm` runs as its OWN invocation: it takes the blocking
+    /// worktree lock, writes its node files, makes exactly one commit and
+    /// projects into `db.lbug` inside that critical section — a NEW `apg query`
+    /// invocation observes each one immediately (read-your-writes) with no save
+    /// and no scan. The transient `plan` add/rm (task/planned) and `review`
+    /// add/action/resolve are likewise per-invocation writes and observed by a
+    /// NEW `apg query` process. The "no scan invoked" evidence is concrete:
+    /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
+    /// scan's `scanned_at` scan-meta is never restamped (a scan writes a new
+    /// timestamp; the write-through re-anchor preserves it), and the scan
+    /// pipeline's `apg-frontend.log` is never recreated.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn metadata_mutations_are_immediately_queryable_without_a_scan() {
@@ -4908,8 +4855,8 @@ mod e2e {
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
         let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
         let inode_before = std::fs::metadata(&db_path).unwrap().ino();
-        // Routed read: a live session owns the database, so the scan's
-        // recorded `scanned_at` is read through `apg query`.
+        // Read-only invocation: the scan's recorded `scanned_at` is read in a
+        // separate `apg query` process.
         let scanned_at = || -> String {
             let out = testutil::spawn_apg(&["query", "MATCH (s:Scan) RETURN s.scanned_at"], &wt);
             assert!(
@@ -4953,19 +4900,13 @@ mod e2e {
                 .unwrap_or_default()
         };
 
-        // (0) Durable mutations are mandatory-session: one live `apg session
-        // start` process owns the DB and its single-writer lock, so the durable
-        // writes below are admitted into its write-back buffer (not written to
-        // disk) and projected into the held `db.lbug` at admission — a NEW
-        // routed `apg query` observes each one with no save and no scan.
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the durable mutations must run under a live session"
-        );
+        // (0) Every durable write below is its own invocation: it takes the
+        // blocking worktree lock, writes its node files, makes one commit and
+        // projects into `db.lbug`; a NEW `apg query` observes each one with no
+        // save and no scan.
         let before_commits = testutil::commit_count(&wt);
 
-        // --- durable node add/rm + edge add/rm (admitted into the session) ---
+        // --- durable node add/rm + edge add/rm, each its own invocation ---
         mutate(&["node", "add", "requirements", "requirement", "r1"]);
         assert_eq!(
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
@@ -5021,9 +4962,8 @@ mod e2e {
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
             "0"
         );
-        // A durable target for the review section below (saved by this session:
-        // the transient plan/review mutations take the same extended flock as
-        // the live session, so they run only after it has ended).
+        // A durable target for the review section below (committed by its own
+        // invocation).
         mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
         mutate(&[
             "edge",
@@ -5046,23 +4986,29 @@ mod e2e {
             "requirements.requirement.reviewed",
         ]);
 
-        // The writes stay BUFFERED: no node file has landed and no commit has
-        // been made — `apg session save` is the one durability point.
-        for name in ["r1", "r2", "reviewed"] {
+        // Each accepted invocation made its write durable: the surviving node
+        // files are on disk, the removed one is gone, and exactly one commit
+        // landed per accepted mutation (ten above).
+        assert!(
+            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "r1")
+                .exists(),
+            "the `rm r1` must have removed its node file"
+        );
+        for name in ["r2", "reviewed"] {
             assert!(
-                !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", name)
+                layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", name)
                     .exists(),
-                "`{name}` must stay buffered until save"
+                "the add invocation must land `{name}`'s node file"
             );
         }
         assert_eq!(
             testutil::commit_count(&wt),
-            before_commits,
-            "a buffered mutation must not create a commit before save"
+            before_commits + 10,
+            "each accepted durable mutation lands exactly one commit"
         );
 
-        // --- no re-scan while the session is live: projection inode, scan_meta,
-        // and the scan log are untouched ---
+        // --- no re-scan: projection inode, scan_meta, and the scan log are
+        // untouched by the metadata mutations ---
         assert_eq!(
             std::fs::metadata(&db_path).unwrap().ino(),
             inode_before,
@@ -5078,71 +5024,14 @@ mod e2e {
             "a metadata mutation must not enter the scan pipeline"
         );
 
-        // --- `apg session save` is the single durability point: the whole
-        // buffered set lands as node files in exactly one commit ---
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-        assert!(
-            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "r2")
-                .exists(),
-            "save must land the buffered `r2` node file"
-        );
-        assert!(
-            layers::node_file_path(
-                &wt_apg,
-                layers::Layer::Requirements,
-                "requirement",
-                "reviewed"
-            )
-            .exists(),
-            "save must land the buffered `reviewed` node file"
-        );
-        assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "r1")
-                .exists(),
-            "the buffered `rm r1` must land (no node file)"
-        );
-        assert_eq!(
-            testutil::commit_count(&wt),
-            before_commits + 1,
-            "the whole buffered set must land in exactly one commit"
-        );
-
-        // --- end the session cleanly; a fresh query then reads the saved state
-        // directly ---
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "the session must be ended"
-        );
         assert_eq!(
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(n)"),
             "1",
-            "after session end the direct reader sees the saved durable state"
+            "the read-only invocation sees the committed durable state"
         );
 
-        // --- transient plan: phase/task/planned add + rm (no live session:
-        // these take the same extended flock, so they run once it has ended;
-        // each is still immediately queryable without a scan) ---
+        // --- transient plan: phase/task/planned add + rm (each its own
+        // per-invocation write; still immediately queryable without a scan) ---
         mutate(&["plan", "add", "foo", "--title", "F", "--strategy", "S"]);
         assert_eq!(
             query("MATCH (p:Plan {fqn: 'foo/plan'}) RETURN count(p)"),
@@ -5209,7 +5098,7 @@ mod e2e {
         );
 
         // --- transient review: add/action/resolve (the target `reviewed` is the
-        // durable requirement the live session saved above) ---
+        // durable requirement committed by its own invocation above) ---
         mutate(&[
             "review",
             "add",
@@ -5254,29 +5143,27 @@ mod e2e {
     }
 
     /// Real-CLI read-your-writes across the
-    /// mandatory-session + write-back contract, without a scan. A live
-    /// `apg session start` process owns the DB and the single-writer lock, so
-    /// the durable mutations (`apg node add` ×2 and `apg edge add`) are admitted
-    /// into its write-back buffer rather than written to disk. A NEW `apg query`
-    /// process routes through that live session and resolves foo + the buffered
-    /// edge — read-your-writes with no re-scan and no save yet. `apg session
-    /// save` is then the single durability point, after which the node files
-    /// land and the session ends cleanly. The no-scan premise is concrete:
-    /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
-    /// scan's `scanned_at` scan-meta is never restamped, and the scan pipeline's
-    /// `apg-frontend.log` is never recreated.
+    /// per-invocation session contract, without a scan. Each durable mutation
+    /// (`apg node add` ×2 and `apg edge add`) is its OWN invocation: it opens
+    /// the worktree database write-capable under the blocking lock, writes its
+    /// node files, makes exactly one commit and projects the change, then
+    /// releases. A NEW `apg query` process opens the database read-only and
+    /// resolves foo + the committed edge — read-your-writes with no re-scan and
+    /// no save step. The no-scan premise is concrete: `db.lbug`'s inode never
+    /// changes (a scan unlinks and recreates it), the scan's `scanned_at`
+    /// scan-meta is never restamped, and the scan pipeline's `apg-frontend.log`
+    /// is never recreated.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn acceptance_read_your_writes_across_the_real_cli_without_a_scan() {
         use std::os::unix::fs::MetadataExt;
 
         let (repo, wt, wt_apg) = testutil::project_with_db("accept-ryw");
-        let home = repo.root.join("home");
 
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
         let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
-        // Routed read: a live session owns the database, so the scan's
-        // recorded `scanned_at` is read through `apg query`.
+        // Read-only invocation: the scan's recorded `scanned_at` is read in a
+        // separate `apg query` process.
         let scanned_at = || -> String {
             let out = testutil::spawn_apg(&["query", "MATCH (s:Scan) RETURN s.scanned_at"], &wt);
             assert!(
@@ -5296,19 +5183,14 @@ mod e2e {
         // pipeline.
         let _ = std::fs::remove_file(&log_path);
 
-        // (0) Open the live session: durable mutations are mandatory-session, so
-        // one live `apg session start` process owns the DB and its single-writer
-        // lock, and every mutation below lands in its write-back buffer.
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the acceptance mutations must run under a live session"
-        );
+        // (0) Each durable mutation below is its own invocation: it takes the
+        // blocking worktree lock, writes its node files, makes one commit and
+        // projects the change.
         let before_commits = testutil::commit_count(&wt);
 
-        // (1) The durable mutations return successfully, admitted into the
-        // session's buffer. A Stakeholder `requires` a Requirement — the minimal
-        // whole-model-valid authored pair/edge (SPEC §8.1).
+        // (1) The durable mutations each succeed in their own invocation. A
+        // Stakeholder `requires` a Requirement — the minimal whole-model-valid
+        // authored pair/edge (SPEC §8.1).
         let mutations: [&[&str]; 11] = [
             &["node", "add", "requirements", "stakeholder", "foo"],
             &["node", "add", "requirements", "requirement", "bar"],
@@ -5369,22 +5251,22 @@ mod e2e {
             );
         }
 
-        // The mutations stay BUFFERED: no node file has landed and no commit has
-        // been made — `apg session save` is the one durability point.
+        // The mutations are durable immediately: every node file landed and
+        // exactly one commit was made per accepted invocation (eleven above).
         let foo_file =
             layers::node_file_path(&wt_apg, layers::Layer::Requirements, "stakeholder", "foo");
         assert!(
-            !foo_file.exists(),
-            "the mutation must stay buffered until save"
+            foo_file.exists(),
+            "the invocation must land the stakeholder node file"
         );
         assert_eq!(
             testutil::commit_count(&wt),
-            before_commits,
-            "a buffered mutation must not create a commit before save"
+            before_commits + 11,
+            "each accepted durable mutation lands exactly one commit"
         );
 
-        // (2) A NEW `apg query` process, routed through the live session,
-        // resolves foo AND the buffered edge — no flush/session-end/save.
+        // (2) A NEW `apg query` process, opening the database read-only,
+        // resolves foo AND the committed edge — no save step.
         let q = testutil::spawn_apg(
             &[
                 "query",
@@ -5399,7 +5281,7 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW process must read the buffered mutation through the session"
+            "a NEW process must read the committed mutation"
         );
         let edge_q = testutil::spawn_apg(
             &[
@@ -5419,7 +5301,7 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW process must read the buffered edge through the session, unsaved"
+            "a NEW process must read the committed edge"
         );
 
         // (3) No `apg scan` was invoked.
@@ -5438,43 +5320,7 @@ mod e2e {
             "a metadata mutation must not enter the scan pipeline"
         );
 
-        // (4) `apg session save` is the single durability point: the buffered
-        // mutations land as node files in exactly one commit.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-        assert!(foo_file.exists(), "save must land the buffered node file");
-        assert_eq!(
-            testutil::commit_count(&wt),
-            before_commits + 1,
-            "the buffered mutations must land in exactly one commit"
-        );
-
-        // (5) End the session cleanly; a fresh query then reads the saved state
-        // directly.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "the session must be ended"
-        );
+        // (4) The committed state is what a fresh read-only invocation sees.
         let direct = testutil::spawn_apg(
             &[
                 "query",
@@ -5493,7 +5339,12 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "after session end the direct reader sees the saved mutation"
+            "a fresh read-only invocation sees the committed mutation"
+        );
+        // No daemon, socket or pending set is left behind.
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
@@ -5502,11 +5353,12 @@ mod e2e {
     /// The hermetic external-project scratch-repo
     /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
     /// `apg scan` (the genuine added dimension; every other test uses the
-    /// hermetic `scan_checkout` payload fixture) — under the mandatory-session +
-    /// write-back contract. A live session admits a BURST of durable mutations
-    /// into its write-back buffer, read-your-writes is observed through the
-    /// session, `apg session save` is the single durability point (one commit),
-    /// and the session ends cleanly.
+    /// hermetic `scan_checkout` payload fixture) — under the per-invocation
+    /// session contract. A BURST of N concurrent durable mutations, each its
+    /// own `apg` invocation, queues on the blocking worktree lock (never a lock
+    /// error) and each writes its node files, makes exactly one commit and
+    /// projects its change; read-your-writes is observed through fresh
+    /// read-only invocations.
     ///
     /// The already-built artifact is resolved through the `apg.testutil`
     /// binary-locating helper (`ApgCommand`) — no nested `cargo build`. Each
@@ -5514,8 +5366,7 @@ mod e2e {
     /// 2024 forbids process-wide `env::set_var`, and `apg init` installs the
     /// suite into `$HOME/.config/opencode`). A real source file is committed BEFORE
     /// scanning so `auto_detect_languages` selects just the Go frontend. The
-    /// project context is established with `apg project start`, the live session
-    /// is started with a real `apg session start` process, and every
+    /// project context is established with `apg project start`, and every
     /// durable-write assertion runs with cwd inside
     /// `<scratch>/apg/.worktrees/<name>`. Both the `/tmp` scratch repo and the
     /// isolated HOME are torn down at the end.
@@ -5620,20 +5471,10 @@ mod e2e {
         );
         let wt_apg = wt.join(specs::LAYOUT);
 
-        // ---- (a) open the live session; the burst is admitted into its buffer ----
-        // Durable mutations are mandatory-session: one live `apg session start`
-        // process owns the DB and the single-writer lock, and every mutation
-        // below is admitted into its write-back buffer rather than written to
-        // disk. The burst of N separate `apg` processes (each its own binary
-        // invocation) routes through that one live session, so the serial
-        // application and the zero-lock-error property are preserved by
-        // construction.
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the acceptance burst must run under a live session"
-        );
-        let before_commits = testutil::commit_count(&wt);
+        // ---- (a) each mutation is its own per-invocation write ----
+        // Every `run_in` below is a separate `apg` invocation: it takes the
+        // blocking worktree lock, writes its node files, makes exactly one
+        // commit and projects its change, then releases.
 
         const N: usize = 6;
         // A Stakeholder requiring `hub` roots the hub and (via the burst's
@@ -5732,6 +5573,7 @@ mod e2e {
             ],
         );
         let home_burst = home_s.clone();
+        let before_burst = testutil::commit_count(&wt);
         let mut kids = Vec::with_capacity(N);
         for i in 0..N {
             let to = format!("requirements.requirement.leaf-{i}");
@@ -5765,23 +5607,32 @@ mod e2e {
             );
         }
 
-        // The whole burst is BUFFERED: no node file has landed and no commit has
-        // been made — `apg session save` is the one durability point.
+        // Each burst invocation made its write durable: the hub's node file
+        // exists, its N out-edges are all present, and exactly N commits landed
+        // — one per queued invocation, with no lock error.
+        let hub_file =
+            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "hub");
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
-                .exists(),
-            "the burst must stay buffered until save"
+            hub_file.exists(),
+            "the burst invocation must land the hub's node file"
+        );
+        let hub =
+            layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
+                .unwrap();
+        assert_eq!(
+            hub.out.len(),
+            N,
+            "the burst store must equal the serial application"
         );
         assert_eq!(
             testutil::commit_count(&wt),
-            before_commits,
-            "a buffered burst must not create a commit before save"
+            before_burst + N,
+            "each burst invocation lands exactly one commit"
         );
 
-        // ---- (b) read-your-writes through the live session ----
-        // The session projected the cumulative buffer into its held DB, so a
-        // SEPARATE `apg query` process (routed through the socket) sees the
-        // hub's N buffered out-edges before any save.
+        // ---- (b) read-your-writes through fresh read-only invocations ----
+        // A SEPARATE `apg query` process (opening the database read-only) sees
+        // the hub's N committed out-edges.
         let burst_read = testutil::spawn_apg(
             &[
                 "query",
@@ -5800,11 +5651,11 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("6"),
-            "a NEW apg query process must read the buffered burst through the session"
+            "a NEW apg query process must read the committed burst"
         );
 
-        // An immediate read-your-writes across the real CLI, still unsaved.
-        // `foo` is a lone `solution.role` (unconstrained: whole-model-valid).
+        // An immediate read-your-writes across the real CLI. `foo` is a lone
+        // `global.constraint` (unconstrained: whole-model-valid).
         run_in(&wt, &["node", "add", "global", "constraint", "foo"]);
         let q = testutil::spawn_apg(
             &[
@@ -5820,61 +5671,22 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW apg query process must read foo through the session with no save"
+            "a NEW apg query process must read the committed write"
         );
 
-        // ---- (c) `apg session save` is the single durability point ----
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-        // The whole buffered burst is now durable, and it equals the serial
-        // application: the hub carries all N out-edges, in exactly one commit.
-        let hub =
-            layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
-                .unwrap();
-        assert_eq!(
-            hub.out.len(),
-            N,
-            "the burst store must equal the serial application"
-        );
-        assert_eq!(
-            testutil::commit_count(&wt),
-            before_commits + 1,
-            "the whole burst must land in exactly one commit"
-        );
-
-        // ---- (d) session lifecycle: end cleanly, then a direct read sees the
-        // saved state and db.lbug is consistent with the node files ----
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "the session must be ended"
-        );
+        // ---- (c) no daemon: db.lbug is directly openable, a fresh read-only
+        // invocation sees the committed state, and the database is consistent
+        // with the node files ----
         assert!(
             apg::artifacts::ArtifactDb::open(&wt_apg).is_ok(),
-            "with no live session the DB must be directly openable"
+            "the DB must be directly openable after the writes"
+        );
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
-        // With no live session, a fresh query process reads the last saved state
-        // directly from db.lbug.
+        // A fresh query process reads the committed state directly from db.lbug.
         let direct = testutil::spawn_apg(
             &[
                 "query",
@@ -5893,7 +5705,7 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "after session end the direct reader sees the saved mutation"
+            "a fresh read-only invocation sees the committed mutation"
         );
         {
             let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
@@ -7257,14 +7069,16 @@ mod e2e {
     /// `splice_dispatch_falls_back_when_the_local_seed_is_stale`; neither is
     /// re-tested here.
     ///
-    /// (b)(i) A stale session socket is the delta-vs-full re-assembly
+    /// (b)(i) A spec-only durable delta — a node file written between scans by a
+    /// per-invocation `apg node`-style write — is the delta-vs-full re-assembly
     /// discriminator: a one-file edit leaves unchanged files whose facts live
     /// only in the reuse plan, so the target-only delta graph genuinely differs
-    /// from the re-assembled full graph. `force_full_load` short-circuits
-    /// `try_splice_build` (the seed is discarded before any splice is
-    /// attempted), the `[load] full-load fallback` line re-assembles the full
-    /// graph from the buffered target spool plus the unchanged-file reuse plan,
-    /// no `[load] splice:` line is printed, and the published `db.lbug` equals a
+    /// from the re-assembled full graph. The previous database's seed predates
+    /// the authored row, so `try_splice_build` refuses it (`does not represent
+    /// the assembled graph's authored/transient rows`), the `[load] full-load
+    /// fallback` line re-assembles the full graph from the buffered target spool
+    /// plus the unchanged-file reuse plan, the splice publishes nothing (`full
+    /// load skipped` never appears), and the published `db.lbug` equals a
     /// `--force` full rebuild of the same tree on every table.
     ///
     /// (b)(ii) Pending state is pre-empted by `incremental::prepare`, which
@@ -7410,7 +7224,7 @@ mod e2e {
         );
         let _ = std::fs::remove_dir_all(&apply_base);
 
-        // ---- (b)(i) stale session socket: delta vs full re-assembly ------
+        // ---- (b)(i) spec-only durable delta: delta vs full re-assembly ------
         let (stale_base, stale_repo) = winb_scratch("mid-dml-stale-socket", &winb_go_fixture());
         let stale_home = stale_base.join("home");
         let stale_run = |args: &[&str]| -> String {
@@ -7439,42 +7253,48 @@ mod e2e {
             "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 7 }\n",
         )
         .unwrap();
-        let stale_apg = stale_repo.join(specs::LAYOUT);
-        let socket = session::socket_path(&stale_apg);
-        std::fs::write(&socket, b"stale-session").unwrap();
-        assert!(
-            !session::live_session_at(&socket),
-            "the planted socket must be unreachable (a genuine unclean exit)"
-        );
+        // A spec-only durable delta written between scans: the previous
+        // database's seed predates this authored row, so the splice guard must
+        // refuse and re-assemble the full graph.
+        let stale_layers = stale_repo.join("apg/layers/global/constraint");
+        std::fs::create_dir_all(&stale_layers).unwrap();
+        std::fs::write(
+            stale_layers.join("mid-dml-probe.json"),
+            "{\n  \"layer\": \"global\",\n  \"type\": \"constraint\",\n  \"name\": \"mid-dml-probe\",\n  \"body\": \"The spec-only delta forces the full-load fallback.\"\n}\n",
+        )
+        .unwrap();
 
         let inc_err = stale_run(&["scan", "."]);
         assert!(
-            inc_err.contains("[scan] incremental: 1 target file(s),"),
-            "the one-file edit must take the delta path: {inc_err}"
+            inc_err.contains("[scan] incremental: 2 target file(s),"),
+            "the one-file edit plus the spec-only node file must take the delta path: {inc_err}"
         );
         assert!(
             !inc_err.contains("0 reusable file(s)"),
             "unchanged files' facts must be in the reuse plan (so the delta graph differs from the full graph): {inc_err}"
         );
         assert!(
-            inc_err.contains("session socket present but unreachable"),
-            "the stale socket must force the full load: {inc_err}"
+            inc_err.contains("does not represent the assembled graph's authored/transient rows"),
+            "the splice guard must refuse the unrepresented authored row: {inc_err}"
         );
         assert!(
             inc_err.contains("[load] full-load fallback: re-assembling the full graph"),
             "the full-load branch must re-assemble the full graph: {inc_err}"
         );
         assert!(
-            !inc_err.contains("[load] splice:"),
-            "the stale socket must short-circuit try_splice_build entirely: {inc_err}"
+            !inc_err.contains("full load skipped"),
+            "the guard refusal must not publish a spliced database: {inc_err}"
         );
-        let stale_db = stale_apg.join(specs::TRANS).join("db.lbug");
+        let stale_db = stale_repo
+            .join(specs::LAYOUT)
+            .join(specs::TRANS)
+            .join("db.lbug");
         let delta_fallback = every_table_snapshot(&stale_db);
         stale_run(&["scan", ".", "--force"]);
         let forced_full = every_table_snapshot(&stale_db);
         assert_eq!(
             delta_fallback, forced_full,
-            "the stale-socket full-load fallback must equal a --force full rebuild on every table"
+            "the full-load fallback must equal a --force full rebuild on every table"
         );
         let _ = std::fs::remove_dir_all(&stale_base);
 
@@ -11009,18 +10829,14 @@ mod e2e {
     ///   non-fast-path, the immediate `apg plan verify` never reports the stale
     ///   refusal and verifies green, and a second immediate verify with no scan
     ///   between agrees.
-    /// - **B (session teardown — the integration guard, not a
-    ///   reproducer).** Ten times: a detached `apg session start`, one durable
-    ///   `apg node add` admitted through it, `apg session save`, `apg session
-    ///   end`, then IMMEDIATELY a real `apg scan` (exit 0 asserted) and
-    ///   IMMEDIATELY `apg plan verify`, plus a second verify with no scan
-    ///   between that agrees. With the bounded socket-gone wait in place, that
-    ///   teardown leaves the checkout fresh. A green run is the EXPECTED outcome
-    ///   here — the raced window is microseconds wide and this arm's next
-    ///   readers are spawned long afterwards — so it is an integration guard,
-    ///   never a diagnosis finding and never a
-    ///   reason to weaken the arm. The deterministic evidence for the teardown
-    ///   mechanism is `git_e2e::dead_session_socket_makes_the_graph_unfresh`.
+    /// - **B (per-invocation write → scan → verify — the integration guard, not
+    ///   a reproducer).** Ten times: one durable `apg node add` (its own
+    ///   per-invocation write — node file, exactly one commit, projection and
+    ///   scan-meta re-anchor), then IMMEDIATELY a real `apg scan` (exit 0
+    ///   asserted) and IMMEDIATELY `apg plan verify`, plus a second verify with
+    ///   no scan between that agrees. The write and the scan each take the
+    ///   blocking worktree lock, so the scan runs between writes and settles the
+    ///   checkout fresh.
     /// - **C1 (the extended lock precedes the staleness check; deterministic
     ///   inverse hold).** A committed-but-unscanned source change
     ///   leaves the branch graph genuinely stale; the TEST acquires the
@@ -11050,7 +10866,7 @@ mod e2e {
     /// `is_stale`; scan: preflight → lock), so process-spawn ordering cannot
     /// prove the wait. The reproduce-or-diagnose contract is carried by the
     /// deterministic inverse-hold arms C1 and C2 alone; A and B stay the
-    /// sequential and session-teardown integration guards.
+    /// sequential and per-invocation-write integration guards.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scan_then_immediate_plan_verify_treats_the_branch_graph_as_fresh() {
@@ -11184,30 +11000,23 @@ mod e2e {
             );
         }
 
-        // --- Window B (session teardown, the post-fix integration guard — NOT
-        // a reproducing arm): a clean teardown followed IMMEDIATELY by a real
-        // scan and a verify must leave the checkout's graph fresh. Green before
-        // the bounded socket-gone wait is the EXPECTED pre-fix outcome (the
-        // raced window is microseconds wide and this arm's next readers are
-        // spawned long after it); the deterministic evidence for the teardown
-        // mechanism is `git_e2e::dead_session_socket_makes_the_graph_unfresh`.
+        // --- Window B (per-invocation write → scan → verify, the integration
+        // guard — NOT a reproducing arm): a durable write completed in its own
+        // invocation, followed IMMEDIATELY by a real scan and a verify, must
+        // leave the checkout's graph fresh. ---
         for i in 0..10 {
-            let session = testutil::start_session_process(&wt, &home);
             let name = format!("teardown-{i}");
+            // The write is its own invocation: node file, exactly one commit,
+            // projection and scan-meta re-anchor, then release.
             run(&wt, &["node", "add", "global", "constraint", name.as_str()]);
-            run(&wt, &["session", "save"]);
-            run(&wt, &["session", "end"]);
 
-            // IMMEDIATELY, with no reaping wait between `end` and the scan: the
-            // session process is reaped only after both verifies have run, so
-            // this keeps the teardown → scan → verify sequence inside the
-            // window under guard. `run` asserts the scan's exit 0.
+            // IMMEDIATELY: a real scan between writes. `run` asserts exit 0.
             run(&wt, &["scan", "."]);
 
             let first = run(&wt, &["plan", "verify", "demo"]);
             assert!(
                 !format!("{}{}", stdout_of(&first), stderr_of(&first)).contains(STALE),
-                "window B iteration {i}: the immediate post-teardown verify must not \
+                "window B iteration {i}: the immediate post-write verify must not \
                  refuse stale: {}{}",
                 stdout_of(&first),
                 stderr_of(&first)
@@ -11217,7 +11026,7 @@ mod e2e {
             let second = run(&wt, &["plan", "verify", "demo"]);
             assert!(
                 !format!("{}{}", stdout_of(&second), stderr_of(&second)).contains(STALE),
-                "window B iteration {i}: the repeated post-teardown verify must agree the \
+                "window B iteration {i}: the repeated post-write verify must agree the \
                  graph is fresh: {}{}",
                 stdout_of(&second),
                 stderr_of(&second)
@@ -11226,13 +11035,6 @@ mod e2e {
                 second.status.success(),
                 first.status.success(),
                 "window B iteration {i}: the two immediate verifies must agree"
-            );
-
-            let ended = session.child.wait_with_output().unwrap();
-            assert!(
-                ended.status.success(),
-                "window B iteration {i}: the session must end cleanly: {}",
-                String::from_utf8_lossy(&ended.stderr)
             );
         }
 
@@ -12485,10 +12287,11 @@ mod e2e {
     ///   is skipped, `discard_derived_index` removes `db.lbug` with its
     ///   `.wal`/`.shm` sidecars, and the full load rebuilds it from the durable
     ///   `apg/layers/**` node files.
-    /// * `apg query`: with no live session `Coordinator::reclaim_stale_socket`
-    ///   classifies the database and, for either cause, runs the same
-    ///   rebuilding full scan before the read-only open — the recovery the
-    ///   dead-socket e2e already pins, reached here without a socket.
+    /// * `apg query`: a read is a per-invocation **read-only** open — it takes
+    ///   no lock and never writes, so it does NOT rebuild the derived index (the
+    ///   retired daemon's `reclaim_stale_socket` is gone). The query arms prove
+    ///   the read leaves either cause in place, the recovery scan then rebuilds,
+    ///   and a fresh read serves exactly the committed durable rows.
     ///
     /// Each case starts from a FRESH baseline (the hermetic scan over a
     /// committed, whole-model-valid `apg/layers/**` tree), injects exactly one
@@ -12701,7 +12504,7 @@ mod e2e {
         assert_rebuilt();
         assert_extra_table_gone();
 
-        // ---- (3) PENDING STATE + query -----------------------------------
+        // ---- (3) PENDING STATE + query: a read is read-only; the scan recovers -
         reset();
         inject_pending();
         let q = testutil::spawn_apg(
@@ -12710,13 +12513,45 @@ mod e2e {
         );
         assert!(
             q.status.success(),
-            "the pending-state recovery query must succeed: {}",
+            "the pending-state read-only query must succeed: {}",
             String::from_utf8_lossy(&q.stderr)
         );
-        let qerr = String::from_utf8_lossy(&q.stderr);
         assert!(
-            qerr.contains("carries pending state"),
-            "the query must reclaim and rebuild the pending-state DB: {qerr}"
+            !String::from_utf8_lossy(&q.stderr).contains("carries pending state"),
+            "a read-only invocation must not rebuild the derived index: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        // The read wrote nothing: the injected pending state survives it.
+        assert!(
+            apg::artifacts::db_has_pending_state(&wt_apg),
+            "a read-only invocation must leave the pending state in place"
+        );
+        assert!(
+            !apg::git::is_fresh(&wt_apg),
+            "a read must not make the stale graph fresh"
+        );
+        // The recovery surface is the scan.
+        let scan = testutil::spawn_apg(&["scan", "."], &wt);
+        assert!(
+            scan.status.success(),
+            "the pending-state recovery scan must succeed: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&scan.stderr).contains("[load] database carries pending state"),
+            "the scan must classify the pending state as an unclean exit: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+        assert_rebuilt();
+        // After the recovery scan a fresh read serves exactly the durable rows.
+        let q = testutil::spawn_apg(
+            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "the recovered-state query must succeed: {}",
+            String::from_utf8_lossy(&q.stderr)
         );
         let stdout = String::from_utf8_lossy(&q.stdout);
         assert!(
@@ -12732,9 +12567,8 @@ mod e2e {
             ],
             "the recovered query must serve exactly the durable apg/layers requirements"
         );
-        assert_rebuilt();
 
-        // ---- (4) SHAPE CHANGE + query ------------------------------------
+        // ---- (4) SHAPE CHANGE + query: a read is read-only; the scan recovers -
         reset();
         inject_shape();
         let q = testutil::spawn_apg(
@@ -12743,13 +12577,20 @@ mod e2e {
         );
         assert!(
             q.status.success(),
-            "the shape-changed recovery query must succeed (no binder error): {}",
+            "the shape-changed read-only query must succeed (no binder error): {}",
             String::from_utf8_lossy(&q.stderr)
         );
-        let qerr = String::from_utf8_lossy(&q.stderr);
         assert!(
-            qerr.contains("unrecognised table shape"),
-            "the query must reclaim and rebuild the unrecognised-shape DB: {qerr}"
+            !String::from_utf8_lossy(&q.stderr).contains("unrecognised table shape"),
+            "a read-only invocation must not rebuild the derived index: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        // The read left the unrecognised shape in place; the scan recovers it.
+        let scan = testutil::spawn_apg(&["scan", "."], &wt);
+        assert!(
+            scan.status.success(),
+            "the shape-changed recovery scan must succeed: {}",
+            String::from_utf8_lossy(&scan.stderr)
         );
         assert_eq!(
             csv_rows(String::from_utf8_lossy(&q.stdout).into_owned()),
@@ -12758,7 +12599,7 @@ mod e2e {
                 LAYERS_REQUIREMENTS[0].to_string(),
                 LAYERS_REQUIREMENTS[1].to_string(),
             ],
-            "the recovered query must serve the rebuilt apg/layers rows"
+            "the read over the unrecognised-shape DB must serve the durable apg/layers rows"
         );
         assert_rebuilt();
         assert_extra_table_gone();
