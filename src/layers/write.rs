@@ -729,16 +729,19 @@ pub fn write_project(
     session.write_through(&guard, writes, deletes)
 }
 
-/// [`write_project`]'s shared sequence with an injectable projection apply.
-/// [`Session::write_through`](crate::session::Session::write_through) passes a
-/// closure that applies the delta through the session's held write handle, so a
-/// durable write projects on the one handle its critical section already owns
-/// (the write, the single commit and the projection land while the blocking
-/// worktree lock is held).
+/// [`write_project`]'s shared sequence with an injectable projection apply and
+/// the caller's **held write handle**. [`Session::write_through`] passes both:
+/// the closure applies the delta through the same handle, and every database
+/// read the sequence needs — the `implemented-by` code universes (steps 3 and
+/// 6) and the final `Scan`-row refresh (step 7) — runs on that handle too, so
+/// the whole write → commit → project → re-anchor sequence happens inside the
+/// one blocking-worktree-lock critical section without opening a second
+/// `db.lbug`.
 pub fn write_project_with(
     apg_root: &Path,
     writes: &[NodeFile],
     deletes: &[PathBuf],
+    db: &artifacts::ArtifactDb,
     project: ProjectionApply<'_>,
 ) -> anyhow::Result<()> {
     // 1. Membership guard (writes only happen inside a project context).
@@ -751,8 +754,12 @@ pub fn write_project_with(
         anyhow::bail!("{msg}");
     }
 
-    // 3. Validate the complete change before anything is written.
-    validate_change(apg_root, writes, deletes)?;
+    // 3. Validate the complete change before anything is written, against the
+    //    on-disk base node set and the `implemented-by` code universes read from
+    //    the held write handle (no second database open).
+    let base = read_existing_nodes(apg_root)?;
+    let (scanned, planned) = db.code_universes_from_db()?;
+    validate_change_over(apg_root, &base, writes, deletes, &scanned, &planned)?;
 
     // Test-only injection at the BEFORE-COMMIT boundary (the before-commit
     // window): a failure here must leave the mutation in neither the durable
@@ -778,55 +785,31 @@ pub fn write_project_with(
     // 6. Projection delta — applied only AFTER the durable commit
     //    (commit-then-project). The effective node set is read back from the
     //    just-written tree and the FQN delete set is the same
-    //    `projection_deletes`; the direct path assembles its own record set —
+    //    `projection_deletes`; the record set is assembled here —
     //    `ingest_nodes` validates + converts the on-disk node set, then
     //    `append_transient_records` re-merges the worktree's transient records
-    //    (the plan store + tier mirrors) — and hands the partial [`project_only`]
-    //    that delta (also used by the session's projection-only path, so there
-    //    is one projection implementation).
-    //    The direct path owns the caller-side responsibilities [`project_only`]
-    //    used to carry: the no-DB skip (the projection applies only when a query
-    //    index exists — the files are the durable form otherwise) and the full
-    //    transient re-merge. The code-identity universes come from the worktree
-    //    database itself ([`artifacts::code_universes`]); this block runs only
-    //    when that database exists, so it is always the identity source.
+    //    (the plan store + tier mirrors) — and handed to the partial
+    //    [`project_only`] apply. The code-identity universes come from the held
+    //    write handle, so the projection and its record build share the one
+    //    handle the critical section already owns.
     let nodes = read_existing_nodes(apg_root)?;
     let deletes = projection_deletes(apg_root, writes, deletes);
-    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        let (scanned, planned) = artifacts::code_universes(apg_root)?;
-        // The direct path assembles its own records: validate + convert the
-        // on-disk node set (`ingest_nodes`) and re-merge the worktree's
-        // transient records (`append_transient_records`) before handing the
-        // partial [`project_only`] its delta — the assembly `project_only` used
-        // to perform internally.
-        let mut records = ingest_nodes(&nodes, &scanned, &planned)?;
-        append_transient_records(apg_root, &mut records)?;
-        project_only(&deletes, &records, project)?;
-    }
+    let (scanned, planned) = db.code_universes_from_db()?;
+    let mut records = ingest_nodes(&nodes, &scanned, &planned)?;
+    append_transient_records(apg_root, &mut records)?;
+    project_only(&deletes, &records, project)?;
 
     // 7. Reconcile the DB's own `Scan` row to the post-commit git state captured
-    //    in step 5 — the one row refresh this path performs, so the recorded
-    //    state names the worktree the commit left. The projection above opened
-    //    and closed its own DB, so this opens a fresh handle (there is no held
-    //    one on the direct path); a failure degrades to a warning — the durable
-    //    write already landed and the next scan rebuilds.
-    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        match artifacts::ArtifactDb::open(apg_root) {
-            Ok(db) => {
-                if let Err(e) = db.refresh_scan_row(
-                    state.sha.as_deref(),
-                    state.sha.as_ref().map(|_| state.clean),
-                    state.content_key.as_deref(),
-                ) {
-                    eprintln!(
-                        "apg: warning: could not refresh the DB Scan row after node-file commit: {e:#}"
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("apg: warning: could not open the DB to refresh its Scan row: {e:#}");
-            }
-        }
+    //    in step 5 — the one row refresh this path performs, through the held
+    //    write handle, so the recorded state names the worktree the commit left.
+    //    A failure degrades to a warning — the durable write already landed and
+    //    the next scan rebuilds.
+    if let Err(e) = db.refresh_scan_row(
+        state.sha.as_deref(),
+        state.sha.as_ref().map(|_| state.clean),
+        state.content_key.as_deref(),
+    ) {
+        eprintln!("apg: warning: could not refresh the DB Scan row after node-file commit: {e:#}");
     }
     Ok(())
 }

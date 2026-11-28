@@ -180,9 +180,29 @@ impl Session {
         writes: &[layers::NodeFile],
         deletes: &[PathBuf],
     ) -> anyhow::Result<()> {
-        layers::write::write_project_with(&self.apg_root, writes, deletes, &|deletes, records| {
-            self.db.reingest_layers_on(deletes, records)
-        })
+        layers::write::write_project_with(
+            &self.apg_root,
+            writes,
+            deletes,
+            &self.db,
+            &|deletes, records| self.db.reingest_layers_on(deletes, records),
+        )
+    }
+
+    /// Drops the write-capable handle and its blocking worktree lock back to
+    /// the read-only class — the counterpart of
+    /// [`upgrade_to_write`](Self::upgrade_to_write), run once the caller's write
+    /// critical section ([`write_through`](Self::write_through)) completes.
+    ///
+    /// The read-only handle is opened while the lock is still held, so the
+    /// database is never left write-capable without the exclusive `flock`;
+    /// consuming the [`WriteGuard`] then releases the lock so the next writer,
+    /// scan or merge can take it.
+    pub fn release_write(&mut self, guard: WriteGuard) -> anyhow::Result<()> {
+        let read_only = ArtifactDb::open_read_only(&self.apg_root)?;
+        drop(guard);
+        self.db = read_only;
+        Ok(())
     }
 }
 
@@ -774,9 +794,10 @@ impl Coordinator {
     /// [`layers::write::write_through_with_deletes`] in ONE atomic write of
     /// `apg/layers/**` plus exactly ONE git commit, the marks are then cleared
     /// ([`crate::artifacts::ArtifactDb::clear_pending_state`]) and the staleness
-    /// gate's recorded `scan_meta` is re-anchored ([`git::reanchor_scan_meta`],
-    /// mirroring the direct path's steps 4–5), so an immediately following save
-    /// reads an empty pending set.
+    /// gate's recorded `scan_meta` is re-anchored through the held handle
+    /// ([`crate::artifacts::ArtifactDb::refresh_scan_row`], mirroring the direct
+    /// path's step 7), so an immediately following save reads an empty pending
+    /// set.
     ///
     /// An empty pending set — no marked row and no ledger identity — writes
     /// nothing, makes no commit, and reports no pending changes: a pure no-op.
@@ -820,33 +841,17 @@ impl Coordinator {
         self.db.clear_pending_state()?;
 
         // Re-anchor the staleness gate AFTER the commit (mirrors the direct
-        // path's write_project_with steps 4–5): refresh the worktree database's
-        // `Scan` row. The helper opens the database and writes that row; with
-        // this session's socket live it returns without taking a second handle,
-        // so the same state is reconciled below through the handle already
-        // held. A re-anchor failure degrades to a warning — the durable write
-        // already landed.
+        // path's write_project_with step 7): refresh the worktree database's
+        // `Scan` row through the handle this session already holds — never a
+        // second `db.lbug` open. A failure degrades to a warning — the durable
+        // write already landed.
         let state = crate::git::git_state(&self.apg_root);
-        match crate::git::reanchor_scan_meta(&self.apg_root, &state) {
-            Ok(()) => {
-                // Reconcile the session's OWN DB `Scan` row to the SAME state,
-                // through the handle it already holds — never a second `db.lbug`
-                // open. The session always holds the database (a DB-less session
-                // is refused at `start`, via `open_owned_db`), so the DB `Scan`
-                // row is always present to refresh.
-                if let Err(e) = self.db.refresh_scan_row(
-                    state.sha.as_deref(),
-                    state.sha.as_ref().map(|_| state.clean),
-                    state.content_key.as_deref(),
-                ) {
-                    eprintln!(
-                        "apg: warning: could not refresh the DB Scan row after session save: {e:#}"
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("apg: warning: could not re-anchor scan_meta after session save: {e:#}");
-            }
+        if let Err(e) = self.db.refresh_scan_row(
+            state.sha.as_deref(),
+            state.sha.as_ref().map(|_| state.clean),
+            state.content_key.as_deref(),
+        ) {
+            eprintln!("apg: warning: could not refresh the DB Scan row after session save: {e:#}");
         }
 
         // Clear the pending-identity list in step with the drained database: an

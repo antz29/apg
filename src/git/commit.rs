@@ -137,26 +137,22 @@ pub fn in_repo(apg_root: &Path) -> bool {
 }
 
 /// Re-anchors the staleness gate's recorded scan state after a durable commit
-/// (the JSONL funnel's per-write commit, the direct write path's
-/// [`write_through`](crate::layers::write::write_through), or the session save
-/// flush): refreshes the worktree database's own `Scan` row to the post-commit
-/// git state, so every durability point lands exactly one row in the index the
-/// tree's identities live in and [`is_stale`](crate::git::is_stale) agrees with
-/// the tree by construction. The code graph itself is untouched — the commit
+/// (the JSONL funnel's per-write commit or the write-only
+/// [`write_through`](crate::layers::write::write_through) primitive): refreshes
+/// the worktree database's own `Scan` row to the post-commit git state, so
+/// every durability point lands exactly one row in the index the tree's
+/// identities live in and [`is_stale`](crate::git::is_stale) agrees with the
+/// tree by construction. The code graph itself is untouched — the commit
 /// carries exactly the mutated node/mirror content.
 ///
-/// No `graph.jsonl` control line is read or rewritten. A session socket means
-/// the session owns the database — a live session's `save` refreshes the row
-/// through the handle it already holds (`Coordinator::save`), and an unclean
-/// exit's leftover socket marks the database not fresh until a scan or
-/// `session start` reclaims it — so this never opens a second handle there.
-/// (The socket presence, not a liveness ping, is the in-process-safe test: the
-/// single-threaded accept loop cannot answer its own ping while it is saving.)
-/// An absent database has nothing to re-anchor and is likewise a no-op.
+/// The per-invocation write-through critical section does NOT call this: it
+/// refreshes the same row on the write handle it already holds
+/// ([`ArtifactDb::refresh_scan_row`], `layers::write::write_project_with` step
+/// 7), so it never opens a second handle and nothing here probes a session
+/// socket or liveness. This path-based helper remains for the non-session
+/// callers that own no held handle. An absent database has nothing to
+/// re-anchor and is a no-op.
 pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<()> {
-    if crate::session::socket_path(apg_root).exists() {
-        return Ok(());
-    }
     let db_path = apg_root.join(crate::specs::TRANS).join("db.lbug");
     if !db_path.exists() {
         return Ok(());
