@@ -49,11 +49,12 @@ mod e2e {
     /// that gate belongs to `apg plan verify`.
     ///
     /// Lint inspects a deliberately-INVALID durable model, so the fixture writes
-    /// that model through the direct `write_project` primitive rather than a
-    /// live session: the SPEC §8.1 save boundary correctly refuses to persist an
-    /// inconsistent whole model (that refusal is pinned in `node_cmd_e2e`), while
-    /// lint's job is to READ and report such a model. The read-only lint leaves
-    /// the durable store authorable.
+    /// that model through the direct `write_project` primitive — the
+    /// per-invocation write path, which writes the node files, makes one commit
+    /// and projects the change in that one call. It validates the change it is
+    /// handed, not the whole-model cardinalities lint reports, so the invalid
+    /// store is durable for lint to READ. The read-only lint leaves the durable
+    /// store authorable.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn spec_lint_reports_r3_r4_and_skips_delta_gates() {
@@ -75,9 +76,9 @@ mod e2e {
         testutil::scan_checkout(&wt).unwrap();
 
         // The intentionally-invalid durable model, written through the direct
-        // primitive (a whole-model-invalid store cannot be persisted through a
-        // session save — the save boundary refuses it). Both are the write-time
-        // legitimate halves the lint then reports:
+        // primitive (the per-invocation write path validates the change it is
+        // handed, not the whole-model cardinalities lint reports). Both are the
+        // write-time legitimate halves the lint then reports:
         //
         // R3 — two implementation-layer notes both detailing the same code node
         // (`global.constraint.note-details-shape`), so the code node holds two
@@ -182,21 +183,24 @@ mod e2e {
     /// `apg node add` and `apg node update` on a tier node
     /// whose `--body` carries negation/future/time-relative wording still
     /// SUCCEED — the writer decides, the advisory never blocks a write — and
-    /// land their node files; AND the routed write-time wording advisory
-    /// (`crate::spec_lint::WORDING_ADVISORY`, R1/R5) reaches the CLIENT's stderr
+    /// land their node files; AND the write-time wording advisory
+    /// (`crate::spec_lint::WORDING_ADVISORY`, R1/R5) reaches the CALLER's stderr
     /// (`apg: warning: <fqn>: …`) while the write completes. Plain present-tense
     /// wording prints no warning and is accepted too. Covers the write-surface
     /// hooks `rust.apg.node_cmd.node_add_change` / `node_update_change`, the
-    /// session's warning carrier, and `cmd_node`'s caller-side print.
+    /// write command's warning carrier, and `cmd_node`'s caller-side print.
     ///
-    /// Durable mutations are mandatory-session: the add/updates run under one
-    /// live `apg session start` and `apg session save` is the single durability
-    /// point the node-file/read-back assertions below observe.
+    /// Every durable write is its own invocation: it opens the worktree
+    /// database read-only, upgrades under the blocking worktree lock, writes
+    /// its node file, makes exactly one commit and projects the change, then
+    /// releases. There is no session to start, save or end — the durability
+    /// point IS the write.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_add_and_update_emit_advisory_wording_warning() {
         let (apg_root, repo, wt) = wt_fixture("advisory");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
         let path = apg::layers::node_file_path(
             &apg_root,
             apg::layers::Layer::Requirements,
@@ -204,11 +208,11 @@ mod e2e {
             "demo-val",
         );
 
-        // A session always holds a database, so seed a committed baseline and
-        // scan it before opening the session — the same write-then-scan pattern
-        // the crash/reclaim test uses. The base is a complete, whole-model-valid
-        // durable model (SPEC §8.1), so the `demo-val` requirement added below
-        // can be rooted and driven-by'd onto it at save.
+        // A durable write always opens the worktree database, so seed a
+        // committed baseline and scan it before the write. The base is a
+        // complete, whole-model-valid durable model (SPEC §8.1), so the
+        // `demo-val` requirement added below can be rooted and driven-by'd onto
+        // it.
         //
         // Ordering constraint: the direct `write_project` seed validates code
         // refs against the worktree database, so a minimal current (empty) DB
@@ -225,37 +229,21 @@ mod e2e {
         testutil::seed_valid_model(&apg_root);
         testutil::scan_checkout(&wt).unwrap();
 
-        // Durable mutations are mandatory-session: one live `apg session start`
-        // owns the DB AND the write-back buffer, so every `node` write below is
-        // forwarded to it and staged (NON-durable until `apg session save`).
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&apg_root),
-            "the durable mutations must run under a live session"
-        );
+        // Every durable write is its own invocation: record the baseline the
+        // three writes and two updates below must each advance by exactly one
+        // commit.
+        let before_commits = testutil::commit_count(&wt);
 
-        // A routed durable write: the client forwards to the live session
-        // (buffered), with the isolated HOME the session was started under.
         let run = |args: &[&str]| -> std::process::Output {
             testutil::ApgCommand::new(args)
                 .cwd(&wt)
                 .env("HOME", home.to_str().unwrap())
                 .output()
         };
-        // The single durability point: `apg session save` flushes the buffered
-        // set into node files so the file/read-back assertions observe it.
-        let save = |wt: &Path| {
-            let out = testutil::spawn_apg(&["session", "save"], wt);
-            assert!(
-                out.status.success(),
-                "session save failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "Session saved");
-        };
 
         // `node add`: time-relative wording (`was`) still succeeds — an
-        // advisory, never a refusal — and the node file lands on save.
+        // advisory, never a refusal — and the node file lands in this same
+        // invocation.
         let out = run(&[
             "node",
             "add",
@@ -270,21 +258,21 @@ mod e2e {
             "the advisory must not block the add: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        // The advisory is routed back through the session reply and printed on
-        // the CLIENT's stderr, naming the mutated node — while the write
-        // completes (the success assert above).
+        // The advisory is printed by the write command on the CALLER's stderr,
+        // naming the mutated node — while the write completes (the success
+        // assert above).
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
             stderr.contains("apg: warning: requirements.requirement.demo-val:"),
-            "the warning must name the mutated node on the client's stderr: {stderr}"
+            "the warning must name the mutated node on the caller's stderr: {stderr}"
         );
         assert!(
             stderr.contains(apg::spec_lint::WORDING_ADVISORY),
-            "the wording advisory must reach the client's stderr: {stderr}"
+            "the wording advisory must reach the caller's stderr: {stderr}"
         );
         // Root the new requirement under the seeded Stakeholder and drive it
-        // from the seeded Service so the buffered model stays whole-model-valid
-        // at the save boundary (SPEC §8.1/§3.4).
+        // from the seeded Service so the durable model stays whole-model-valid
+        // (SPEC §8.1/§3.4).
         for edge in [
             &[
                 "edge",
@@ -308,10 +296,39 @@ mod e2e {
                 String::from_utf8_lossy(&out.stderr)
             );
         }
-        save(&wt);
+        // Each of the three invocations landed its own durable write: the node
+        // file is on disk immediately and every invocation made exactly one
+        // commit.
         assert!(
             path.exists(),
             "the flagged-but-advisory write must still land its node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 3,
+            "each durable invocation must land exactly one commit"
+        );
+        // The invocation that wrote the requirement projected it into the
+        // branch database inside the same critical section.
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (r:Requirement {fqn: 'requirements.requirement.demo-val'}) RETURN count(r)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "query: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the written requirement must be in the branch database"
         );
 
         // `node update`: future-tense wording (`will`) still succeeds; the body
@@ -330,18 +347,18 @@ mod e2e {
             "the advisory must not block the update: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        // The future-tense (`will`) advisory also reaches the client's stderr
+        // The future-tense (`will`) advisory also reaches the caller's stderr
         // while the update completes.
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
             stderr.contains("apg: warning: requirements.requirement.demo-val:"),
-            "the warning must name the mutated node on the client's stderr: {stderr}"
+            "the warning must name the mutated node on the caller's stderr: {stderr}"
         );
         assert!(
             stderr.contains(apg::spec_lint::WORDING_ADVISORY),
-            "the wording advisory must reach the client's stderr: {stderr}"
+            "the wording advisory must reach the caller's stderr: {stderr}"
         );
-        save(&wt);
+        // Durable at once: the updated body is on disk in this same invocation.
         let back = apg::layers::read_node_file(
             &apg_root,
             apg::layers::Layer::Requirements,
@@ -350,9 +367,14 @@ mod e2e {
         )
         .unwrap();
         assert_eq!(back.body, "The service will retry the request.");
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 4,
+            "the update must land exactly one commit"
+        );
 
         // Plain present-tense wording is accepted too; the body is stored. Its
-        // accepted wording is NOT flagged, so the client's stderr carries no
+        // accepted wording is NOT flagged, so the caller's stderr carries no
         // warning — the advisory is body-driven, not unconditional.
         let out = run(&[
             "node",
@@ -373,7 +395,6 @@ mod e2e {
             !stderr.contains("apg: warning:"),
             "plain wording must not print a warning: {stderr}"
         );
-        save(&wt);
         let back = apg::layers::read_node_file(
             &apg_root,
             apg::layers::Layer::Requirements,
@@ -382,23 +403,34 @@ mod e2e {
         )
         .unwrap();
         assert_eq!(back.body, "The service stores the record.");
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 5,
+            "the plain update must land exactly one commit"
+        );
+        // The branch database carries the projected body, not the stale one.
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (r:Requirement {fqn: 'requirements.requirement.demo-val'}) RETURN r.body",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "query: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&q.stdout).contains("The service stores the record."),
+            "the update must be projected into the branch database: {}",
+            String::from_utf8_lossy(&q.stdout)
+        );
 
-        // End the session cleanly.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        // Per-invocation sessions leave no daemon and no session socket behind.
         assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&apg_root),
-            "the session must be ended cleanly"
+            !apg_root.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
@@ -691,21 +723,25 @@ mod e2e {
     /// A tier-scoped constraint is prose-only and needs no attachment: a NEW
     /// `domain.constraint.*` with an arbitrary metadata property is ADMITTED
     /// (the model has no constraint-attachment edge or property), and its node
-    /// file lands on save.
+    /// file lands — with exactly one commit and the database projection — in
+    /// the same invocation.
     ///
-    /// Every durable `node` write is routed through one live `apg session
-    /// start` and staged in its write-back buffer; `apg session save` is the
-    /// single durability point the file/read-back assertions below observe.
+    /// Every durable `node` write is its own invocation: it opens read-only,
+    /// upgrades under the blocking worktree lock, writes the node file, makes
+    /// exactly one commit and projects the change. There is no session to
+    /// start, save or end, so the file/read-back assertions below observe the
+    /// write directly.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
     fn tier_scoped_constraint_with_metadata_is_authorable() {
         let (apg_root, repo, wt) = wt_fixture("attaches");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
 
-        // A session always holds a database, so seed a committed baseline and
-        // scan it before opening the session. The base node is a lone
-        // `global.constraint` — an unconstrained type, so the seeded store is
-        // whole-model-valid (SPEC §8.1) on its own.
+        // A durable write always opens the worktree database, so seed a
+        // committed baseline and scan it before the write. The base node is a
+        // lone `global.constraint` — an unconstrained type, so the seeded store
+        // is whole-model-valid (SPEC §8.1) on its own.
         //
         // Ordering constraint: the direct `write_project` seed validates code
         // refs against the worktree database, so a minimal current (empty) DB
@@ -727,13 +763,7 @@ mod e2e {
         .unwrap();
         testutil::scan_checkout(&wt).unwrap();
 
-        // Durable mutations are mandatory-session.
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&apg_root),
-            "the durable mutations must run under a live session"
-        );
-
+        let before_commits = testutil::commit_count(&wt);
         let run = |args: &[&str]| -> std::process::Output {
             testutil::ApgCommand::new(args)
                 .cwd(&wt)
@@ -759,20 +789,8 @@ mod e2e {
             String::from_utf8_lossy(&out.stderr)
         );
 
-        // The single durability point: `apg session save` flushes the buffered
-        // set (the plain law) into node files in one commit.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-
-        // Durable result: the constraint's node file landed with its metadata.
+        // Durable result: this one invocation landed the constraint's node file
+        // with its metadata, made exactly one commit and projected the change.
         assert!(
             law_path.exists(),
             "the plain constraint's node file must land"
@@ -784,23 +802,36 @@ mod e2e {
             back.properties.get("scope").map(String::as_str),
             Some("global")
         );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the write must land exactly one commit"
+        );
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (c:Constraint {fqn: 'domain.constraint.law'}) RETURN count(c)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "query: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the written constraint must be in the branch database"
+        );
 
-        // End the session cleanly.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        // Per-invocation sessions leave no daemon and no session socket behind.
         assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&apg_root),
-            "the session must be ended cleanly"
+            !apg_root.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
