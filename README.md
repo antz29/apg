@@ -423,8 +423,7 @@ session claims it with `apg project claim <name>` (the `apg_project` tool's
 | `apg_query` | ad-hoc read-only Cypher (power users) |
 | `apg_scan` | rebuild `apg/.trans/db.lbug` |
 | `apg_project` | project lifecycle — `start` (main → worktree + branch + branch DB), `verify`, `merge`, `claim` (take ownership of an ownerless registered project) |
-| `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges (require a live session) |
-| `apg_session` | start a live session for a worktree — spawns `apg session start` detached, waits for its socket, returns while the session stays live |
+| `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges (each write takes the blocking worktree lock inside its own invocation; no started session) |
 | `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, verify gate |
 | `apg_review` / `apg_review_*` | coordinator-mediated writer↔reviewer feedback cycle (transient mirrors) |
 | `apg_rm` | path-scoped remove — resolves each path against the required registered project's worktree and self-enforces the acting agent's granted globs + the project/worktree boundary |
@@ -434,9 +433,10 @@ session claims it with `apg project claim <name>` (the `apg_project` tool's
 The code-graph tools above return location data; the `apg_project`/`apg_node`/
 `apg_edge`/`apg_plan_*`/`apg_review_*` tools operate on the project's spec/plan
 graph (see [Graph-native specs and plans](#graph-native-specs-and-plans)).
-`apg_session` starts the live session that durable `apg_node`/`apg_edge`
-mutations require — save with `apg session save`, then end with `apg session
-end` (or `apg session abort` to discard).
+Every invocation opens the worktree database read-only; a durable
+`apg_node`/`apg_edge` write upgrades its own invocation under the blocking
+worktree lock and commits inside that critical section — no started session and
+no save step (see [Sessions](#sessions-per-invocation-read-only-by-default)).
 
 Every row carries `fqn`, `path`, and `start_line`/`end_line` where relevant, so
 the agent can jump straight to source. All suite tools accept an optional
@@ -528,7 +528,7 @@ or missing scan), and **prints the worktree path**; sessions then work in that
 worktree — the suite resolves it from the registered project name, and CLI
 invocations run with cwd inside it (walk-up discovery finds the worktree's own
 `apg/` and its branch DB). Main is never a mutation place —
-`apg node`/`apg edge`/`apg plan`/`apg review`/`apg session start` refuse outside
+`apg node`/`apg edge`/`apg plan`/`apg review` refuse outside
 a project context (the default branch is never a mutation place).
 
 `apg project start <name> --cache-copy auto|clone|copy|skip` (both
@@ -588,10 +588,10 @@ the previous owner, and refuses `main` and an unregistered name.
 
 The durable spec is a **node-file store** under `apg/layers/` — one JSON file
 per node, authored with `apg node add|rm <layer> <type> <name>` and
-`apg edge add|rm <kind> <from> <to>` from a live session (see
-[Sessions](#sessions-caller-controlled-durability)); the files are never
-hand-edited — the binary validates schema, pairings, and references, and
-`apg session save` makes the session's pending changes durable.
+`apg edge add|rm <kind> <from> <to>` (see
+[Sessions](#sessions-per-invocation-read-only-by-default)); the files are never
+hand-edited — the binary validates schema, pairings, and references, and each
+write commits its node files inside the same blocking critical section.
 The FQN is **`<layer>.<type>.<name>`** — the file name IS the identity, no
 project prefix. Six layers:
 
@@ -628,52 +628,31 @@ with every tier above it, including each coverage rule whose supplying tier is
 in scope; omitted, it checks all tiers. Change-set delta coverage is not a lint
 rule — that is the `apg plan verify` gate.
 
-### Sessions (caller-controlled durability)
+### Sessions (per-invocation, read-only by default)
 
-Durable `apg node`/`apg edge` mutations require a **live session** — a
-single-writer coordinator that owns the worktree's `db.lbug` exclusively. With
-no live session the mutation refuses and names `apg session start`:
+Every database access goes through a **per-invocation session**: each `apg`
+invocation opens the worktree `apg/.trans/db.lbug` **read-only**, does its work,
+and exits. There is no daemon, no socket and no `apg session` subcommand — the
+invocation itself is the only opener, so a durable write with no started
+session is impossible by construction.
 
-```sh
-apg: a live session is required for durable mutations — run `apg session start` first
-```
-
-`apg session start` launches that coordinator in the foreground: it binds
-`apg/.trans/session.sock`, takes the branch DB and its extended `specs.lock`
-flock for its whole life, and serves routed mutations and reads in receive
-order. One session owns one worktree — a second `start` refuses.
-
-While the session is live, the database is its working state: each
-`apg node`/`apg edge` mutation is applied to the worktree `db.lbug` at
-admission — projected so a routed read sees it, with exactly the node files it
-changes marked dirty and a deleted node's row gone at once — while
-`apg/layers/**` and git history stay at the last saved state. `apg query` also
-routes through the session and sees the unsaved rows; with no live session it
-opens `db.lbug` directly for the last saved state.
-
-`apg session save` is the **single durability point**: it writes exactly the
-marked rows at their node-file paths and removes each pending-deletion file in
-one atomic `apg/layers/**` write and exactly one git commit, then clears the
-marks. A save over a clean session writes nothing and commits nothing.
-
-The two closing verbs:
-
-- `apg session end` — release the database, the flock, and the socket and exit.
-  It **refuses while the database carries pending state** (dirty rows or
-  pending deletions, which it lists; save or abort first), leaving the session
-  live and the unsaved state intact.
-- `apg session abort` — **discard** the pending set and release the session;
-  `apg/layers/**` and git stay at the last saved state.
-
-Because the session owns the branch DB, `apg scan` and `apg project merge`
-refuse while it is live (save and end first). A session socket left behind by a
-crash is treated as an unclean exit and repaired — the derived `db.lbug` is
-rebuilt from `apg/layers/**` and the stale socket reclaimed.
-
-The `apg_session` suite tool wraps the detached start: it spawns `apg session
-start` in the background for a worktree, waits until the socket answers live,
-and returns (with the session's root, socket, and pid) while the coordinator
-keeps running — so the agent can begin routing mutations without blocking.
+- **A durable write upgrades the same invocation.** `apg node add|update|rm` /
+  `apg edge add|update|rm` reopens the database for writing under the
+  **blocking** worktree flock: if another writer holds it the command
+  **waits** (never `EAGAIN`/fail-fast), so concurrent writers queue instead of
+  failing.
+- **One critical section.** Inside the lock the invocation writes the node
+  file(s), makes **exactly one git commit**, then projects into the database,
+  and releases the lock — dropping back to read-only (or exiting). Nothing is
+  written to `apg/layers/**` or the database outside that critical section, and
+  there is no save/pending state to flush later.
+- **No lifecycle.** There is no `apg session start|save|end|abort` and no
+  `apg_session` suite tool; `apg session save` is removed (not a no-op) — the
+  commit is part of the write.
+- **Scan and merge run between writes.** `apg scan` and `apg project merge`
+  need no save+end; they simply run between writes, and freshness is judged
+  against the last commit. `apg plan verify` and `apg project merge` are still
+  run by the installed binary.
 
 ### Planned Implementation nodes (the pre-build bridge)
 
