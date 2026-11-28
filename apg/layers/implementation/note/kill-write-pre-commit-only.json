@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "kill-write-pre-commit-only",
+  "body": "The crash-durability test deterministically kills a writer while it queues on the blocking worktree lock (the pre-commit half), not inside node-file-write to commit to projection. A kill after the commit but before the projection can leave the derived database one projection behind the committed node file, so the test asserts only the pre-commit atomic guarantee. Upgrade when the write path exposes a deterministic pause or abort hook inside the write-through orchestrator.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.testutil_e2e.e2e.killed_write_loses_nothing_committed_and_leaves_no_phantom_projection",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

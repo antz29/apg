@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "stale-socket-artifact-plain-file-only",
+  "body": "The retired-session-socket freshness arms use a plain file under apg/.trans as the artifact, because binding a real Unix listener at a scratch-temp path exceeds the Unix socket path length. Upgrade to a short-socket fixture only if a future daemon-shaped artifact must be exercised again.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.git_e2e.e2e.retired_session_socket_artifact_is_not_a_freshness_input",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

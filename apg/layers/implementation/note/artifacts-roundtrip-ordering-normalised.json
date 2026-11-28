@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "artifacts-roundtrip-ordering-normalised",
+  "body": "The lossless round-trip helper normalises authored edge order on both sides because the durable read preserves authored order where the removed daemon read sorted. This canonical-order helper is now the only ordering contract in the artifact round-trip; revisit if the durable read ever gains an explicit ordering guarantee.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.artifacts_e2e.assert_lossless_round_trip",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

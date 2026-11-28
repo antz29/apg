@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "read-during-write-acceptance-seam-window",
+  "body": "The read-during-write acceptance observes the reader at the injected BeforeCommit and BeforeProject seams, which run on the writer's thread while its blocking lock and read-write handle are held; it cannot pause inside the projection's single transaction, so a half-applied projection is excluded by the commit-then-project ordering rather than sampled mid-apply. Upgrade to a mid-projection fault-injection point if the projection transaction ever needs direct observation.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.node_cmd_e2e.e2e.acceptance_model_c_read_during_write_observes_a_complete_committed_state",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

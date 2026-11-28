@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "project-delete-wait-pin-poll-bound",
+  "body": "The project-delete and project-merge wait pins prove queuing by observing that the child has not exited within a bounded one-second poll while the worktree lock is held; the after-release success assertions are the compensating check. Upgrade to a started-but-blocked probe if a lock-free path ever exceeds one second under CI load.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.project_cmd_e2e.e2e.delete_waits_for_a_write_under_the_blocking_lock",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

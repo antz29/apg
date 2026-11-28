@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "open-read-only-checkpoint-retry-bound",
+  "body": "The read-only open retries a concurrent writer's checkpoint recovery for at most about five seconds (25 ms steps) and matches only the documented lbug recovery wordings (checkpoint recovery is pending, and the WAL shadow/checkpoint messages). A real recovery on a very large graph, or a differently-worded recovery error, surfaces the last error rather than retrying further. Raise the bound or widen the predicate if a legitimate recovery is observed to exceed it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.db.ArtifactDb.open_read_only",
+      "properties": {}
+    }
+  ],
+  "in": []
+}

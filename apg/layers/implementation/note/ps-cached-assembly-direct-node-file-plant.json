@@ -1,0 +1,15 @@
+{
+  "layer": "implementation",
+  "type": "note",
+  "name": "ps-cached-assembly-direct-node-file-plant",
+  "body": "The ps cached-assembly full-load-fallback case writes its durable node file directly on disk, matching the splice end-to-end fixture, rather than through apg node add, because the fixture gitignores the whole apg layout and the fallback is driven by the on-disk layers tree. Upgrade to the CLI write path if direct node-file authoring is ever disallowed in tests.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.ps_scan_e2e.e2e.file_dependency_edges_survive_the_cached_fact_assembly",
+      "properties": {}
+    }
+  ],
+  "in": []
+}
