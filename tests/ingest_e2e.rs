@@ -1142,12 +1142,12 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-04 task-24: the reuse splice re-resolves unresolved edges whose
-    /// target FQN a cached unit declares as a real node. Pass 1 replaces the
-    /// UnresolvedTarget placeholder, but the spool-authored unresolved edges
-    /// still name the FQN; pass 4 converts them to `calls`/`uses` and GCs the
-    /// now-unreferenced row, so the assembled graph equals a full-scan assembly
-    /// of the same tree — the falsifiable re-resolution claim (task-16).
+    /// The reuse splice re-resolves unresolved edges whose target FQN a cached
+    /// unit declares as a real node. Pass 1 replaces the UnresolvedTarget
+    /// placeholder, but the spool-authored unresolved edges still name the FQN;
+    /// pass 4 converts them to `calls`/`uses` and GCs the now-unreferenced row,
+    /// so the assembled graph equals a full-scan assembly of the same tree — the
+    /// falsifiable re-resolution claim.
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn reuse_splice_reresolves_unresolved_edges_to_cached_real_nodes() {
@@ -1412,7 +1412,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// feedback-102: a language whose frontend was skipped re-emits nothing, so
+    /// A language whose frontend was skipped re-emits nothing, so
     /// its global module scaffolding (pure-intermediate modules, file-less
     /// descendants, and every `Module -> Module` edge) must be replayed from the
     /// store so the assembled graph — and, with it, the database rows it lands
@@ -1579,7 +1579,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// csharp-projects task-27: a skipped csharp language whose every cached
+    /// A skipped csharp language whose every cached
     /// file is namespace-less has no Module to replay, so `splice_cached` must
     /// rebuild the `Language` root itself — the assembly and its database rows
     /// equal a full ingest of the same tree.
@@ -1940,7 +1940,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-02 task-8: the win-B assembly reports the spool AND every
+    /// The assembly reports the spool AND every
     /// `splice_cached` admission through the same `Progress` emitter — exactly
     /// one symbol (and one summary tally) per node that enters the graph, never
     /// a second one. The cached go unit's `Callee`/`Model` replace the spool's
@@ -2146,7 +2146,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-02 task-11: a two-stream (`go` then `rust`) spool reports each
+    /// A two-stream (`go` then `rust`) spool reports each
     /// language's own node count, including the DEFERRED admissions — Functions
     /// (pass B), Modules (pass B2), and Language roots (pass B4) — which are
     /// inserted after the stream loop and must re-select their own language
@@ -2219,7 +2219,7 @@ mod e2e {
         );
     }
 
-    /// Phase-03 task-9 — the splice path END-TO-END: a scratch /tmp git repo
+    /// The splice path END-TO-END: a scratch /tmp git repo
     /// driven by the CANDIDATE binary only
     /// (global.constraint.no-real-project-test). (1) The DETERMINISTIC
     /// no-full-DB-rebuild observable: the distinct splice verdict line is
@@ -2470,7 +2470,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&repo.root);
     }
 
-    /// Phase-07 task-1 — the cached-fact assembly realization CONTRACT.
+    /// The cached-fact assembly realization CONTRACT.
     ///
     /// The live defect (`implementation.note.splice-delta-location-selection`):
     /// `ingest_with_reuse` admits the spool — and with it the transient
@@ -2481,12 +2481,11 @@ mod e2e {
     /// and the export it produces — therefore carries `status: planned` at a
     /// location-less placeholder over real code.
     ///
-    /// Asserted AHEAD of the seam fix (phase-07 task-2), so this test is RED
-    /// until the assembly is fixed and flips green with NO test change: a cached
-    /// declaration supersedes a `planned` placeholder for all four kinds —
-    /// status cleared, the FQN kept, the cached location restored (a Module is
-    /// location-less by model) — and the assembled database is table- and
-    /// row-equal to a no-reuse full rebuild of the same facts.
+    /// The contract is that a cached declaration supersedes a `planned`
+    /// placeholder for all four kinds — status cleared, the FQN kept, the cached
+    /// location restored (a Module is location-less by model) — and the
+    /// assembled database is table- and row-equal to a no-reuse full rebuild of
+    /// the same facts.
     ///
     /// The oracle is the two `db.lbug` files, not the JSONL export: both graphs
     /// are bulk-loaded through [`build_db`] (the `schema_db_at` template plus a
@@ -2500,7 +2499,7 @@ mod e2e {
     /// `skipped_language_scaffolding_is_replayed_into_the_assembly`). The Module
     /// ROW is still compared — pass 2/2b realizes it from the warm unit.
     ///
-    /// Fixture shape (the live win-B shape): a warm `FactStore` holds ONE file's
+    /// Fixture shape: a warm `FactStore` holds ONE file's
     /// resolved fact unit; the spool re-emits an UNRELATED target file plus the
     /// four `planned_node` records (and their parent `contains` edges). The file
     /// whose facts are warm is NOT a re-emission target, so only the cache
@@ -2934,7 +2933,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// csharp-projects phase-06 task-27: a cached Struct `csharp.Acme.Foo`
+    /// A cached Struct `csharp.Acme.Foo`
     /// shadows the fresh Module `Acme.Foo` a re-streamed sibling file emits,
     /// exactly as Pass B2's "type beats module" does on a full ingest.
     #[test]
@@ -3080,7 +3079,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// csharp-projects phase-11 task-4: a Struct beats a Function at the same
+    /// A Struct beats a Function at the same
     /// FQN whichever side is cached — global type `Acme`'s method `Foo` and
     /// namespace `Acme`'s type `Foo` both render `csharp.Acme.Foo`.
     #[test]
@@ -3280,11 +3279,10 @@ mod e2e {
         assert_eq!(edges(&got), full_edges, "A cached");
     }
 
-    /// Task-59 regression for task-58 (34c6b1e1): a COBOL `kind=copy` uses
-    /// target is an absolute copybook path. Pass A must leave it unrooted. The
-    /// fixture makes the root module `""` known for `cobol`, which arms the
-    /// root-level fallback (`cobol..` + path) that used to rewrite the target to
-    /// `cobol../abs/...` and drop the edge.
+    /// A COBOL `kind=copy` uses target is an absolute copybook path. Pass A must
+    /// leave it unrooted. The fixture makes the root module `""` known for
+    /// `cobol`, which arms the root-level fallback (`cobol..` + path) that would
+    /// otherwise rewrite the target to `cobol../abs/...` and drop the edge.
     #[test]
     #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
     fn cobol_copy_uses_target_survives_root_module_fallback() {
@@ -3354,7 +3352,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// Task-53 negative (moved from the int tier, feedback-25): a Struct→File
+    /// A Struct→File
     /// `Uses` without `kind=copy` (absent, or any other kind) is dropped, while
     /// an ordinary Struct→Struct `Uses` is kept.
     #[test]
@@ -3845,7 +3843,7 @@ mod e2e {
         );
     }
 
-    /// csharp-projects task-20: global-namespace C# types (empty parent) root
+    /// Global-namespace C# types (empty parent) root
     /// at the bare `csharp` Language id — in a full stream, through a
     /// target-filtered stream's canonical-FQN edges, and beside
     /// collision-qualified project modules.

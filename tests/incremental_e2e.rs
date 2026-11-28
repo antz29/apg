@@ -306,7 +306,7 @@ mod e2e {
         }
     }
 
-    /// phase-04 task-21: an incremental scan records ONLY the target files'
+    /// An incremental scan records ONLY the target files'
     /// fact units, while a full-scan control records every located file's
     /// unit and the baseline writes (manifest / ScanRecord / portable
     /// index/state) still land. Real temp-dir FactStore — e2e by the
@@ -499,7 +499,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// phase-05 task-4: an incremental `record` merges the target-only delta
+    /// An incremental `record` merges the target-only delta
     /// graph into the full baseline's persisted index — the merged
     /// `deps.json`/`signatures.json`/`overloads.json` reproduce a full-graph
     /// `State::from_graph` rebuild — and merges each TOUCHED language's stored
@@ -993,7 +993,7 @@ mod e2e {
         }
     }
 
-    /// phase-04 task-12: a fresh worktree with no scan row of its own warm-
+    /// A fresh worktree with no scan row of its own warm-
     /// assembles the graph from the FIRST worktree's committed scan row — the
     /// same tree, zero frontend spawns — while a worktree whose tree differs
     /// does not take the warm path and runs the frontends.

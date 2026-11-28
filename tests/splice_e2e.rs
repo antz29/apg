@@ -358,7 +358,7 @@ fn previous_graph(a: &str, b: &str, c: &str) -> Graph {
     g
 }
 
-/// The new tree — the win-B assembled graph: `a.go` re-emitted with a new
+/// The new tree — the assembled graph: `a.go` re-emitted with a new
 /// body (same FQNs) plus a new function `m.A.h`, now referencing `ext.New`
 /// instead of `ext.Old`; `b.go` is a cached (unchanged) unit; `c.go` (and its
 /// module `m.C`) is gone, so `m.C` is not in the graph. The new `Scan` row is
@@ -408,7 +408,7 @@ fn assembled_graph(a: &str, b: &str) -> Graph {
     g
 }
 
-/// A wide fixture tree for the batched-DML regression (phase-04 task-22):
+/// A wide fixture tree for the batched-DML regression:
 /// one module `w`, `n` `/w/f{i}.go` file/struct/function triples, a chain of
 /// `Calls` between the functions, a `Uses` per function, and one shared
 /// external `UnresolvedTarget` per file. `drop` omits file index `drop` and
@@ -493,7 +493,7 @@ fn seed_or_panic(prev: &Path) -> SeededDb {
     }
 }
 
-/// One wide-tree splice run's oracle data (phase-04 task-22): the splice
+/// One wide-tree splice run's oracle data: the splice
 /// report, the spliced DB's code snapshot / per-table counts / unresolved
 /// set / Scan row, the full rebuild's counterparts, and whether the abandon
 /// path left the previous DB byte-identical.
@@ -728,13 +728,13 @@ fn multi_lang_previous(changed: &str, skipped: &str) -> Graph {
     g
 }
 
-/// The win-B ASSEMBLED graph a partial scan produces when the changed
+/// The ASSEMBLED graph a partial scan produces when the changed
 /// language spawns and the skipped language does not: the changed language's
 /// full hierarchy is re-emitted, and the skipped language's cached per-file
 /// facts arrive (its leaf module is the reused File's direct parent) but its
 /// global scaffolding — the two pure-intermediate modules and every
 /// `Module -> Module` hierarchy edge — is MISSING. This is exactly the
-/// assembled graph the feedback names.
+/// assembled graph the partial-skip oracle expects.
 fn multi_lang_assembled(changed: &str, skipped: &str) -> Graph {
     let module = |_: &str| Node {
         kind: NodeKind::Module,
@@ -1699,7 +1699,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// feedback-101: the splice seeds the LOCAL `db.lbug` while the
+    /// The splice seeds the LOCAL `db.lbug` while the
     /// manifest/delta live in the shared redb store
     /// (`<git-common-dir>/apg/facts.db`), scoped to this worktree's id. When
     /// another worktree scans in between, this worktree's store scan row
@@ -1833,16 +1833,16 @@ mod e2e {
 
     /// A spec-only change-set: the assembled graph carries the SAME code as the
     /// seed DB but DIFFERENT authored/transient rows (an extra `Requirement`).
-    /// The win-C splice writes no authored row, so seeding this DB would
-    /// publish a `db.lbug` that diverges from the assembled authored rows the
-    /// full load projects. The phase-01 authored-identity
-    /// guard must refuse the seed and hand the caller to the full load, which
+    /// The splice writes no authored row, so seeding this DB would publish a
+    /// `db.lbug` that diverges from the assembled authored rows the full load
+    /// projects. The authored-identity guard must refuse the seed and hand the
+    /// caller to the full load, which
     /// projects exactly the assembled authored/transient tables — so a spec-only
     /// splice can never diverge from a full rebuild.
     ///
-    /// Pre-fix `seed_checked` had no authored-identity parameter; with a matching
-    /// content key it returned `Seed`, so the step-3 assertion below (an
-    /// `UnrepresentedAuthored` fallback) could not hold.
+    /// The guard keys on the assembled authored identity: a matching content
+    /// key alone does not return `Seed`, so the step-3 assertion below (an
+    /// `UnrepresentedAuthored` fallback) holds.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn spec_only_delta_cannot_diverge_from_full_rebuild() {
@@ -1920,14 +1920,14 @@ mod e2e {
     }
 
     /// The recovery proof for
-    /// `requirements.requirement.freshness-fast-path-cannot-mask-divergence` (and
-    /// the observable completion of feedback-3): a re-anchored, agreeing
-    /// `Scan`-row pair cannot declare a DB that dropped an authored row fresh.
+    /// `requirements.requirement.freshness-fast-path-cannot-mask-divergence`: a
+    /// re-anchored, agreeing `Scan`-row pair cannot declare a DB that dropped an
+    /// authored row fresh.
     ///
     /// 1. A scratch project worktree carries an authored `Requirement` under
     ///    `apg/layers/**`; a hermetic scan builds `db.lbug` in sync with it.
     /// 2. A durable commit through a live-session save re-anchors the DB's own
-    ///    `Scan` row to the current state — the pre-fix trap.
+    ///    `Scan` row to the current state — the trap the guard must catch.
     /// 3. Re-anchoring done, the authored row is dropped from `db.lbug` ONLY
     ///    (the tree still carries it), producing a DB the tree contradicts while
     ///    the re-anchored Scan row still names the current git state. The drop must
@@ -1937,9 +1937,9 @@ mod e2e {
     ///    compared to the on-disk tree, never to the refreshed Scan row — so the
     ///    next scan does NOT fast-path: it rebuilds and restores the row.
     ///
-    /// Pre-fix (before the authored/transient reconciliation) step 4's
-    /// `!is_fresh` assertion fails: the re-anchored, agreeing Scan-row pair made
-    /// the diverged DB look fresh and it was reused.
+    /// Without the authored/transient reconciliation, step 4's `!is_fresh`
+    /// assertion fails: the re-anchored, agreeing Scan-row pair would make the
+    /// diverged DB look fresh and it would be reused.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/db.lbug/git/live-session process); run via cargo test-e2e"]
     fn diverged_authored_rows_are_not_fast_pathed() {
@@ -2149,15 +2149,15 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// The win-C spawn skip must not delete a skipped language's global module
-    /// scaffolding (feedback-100). The assembled graph is MISSING the skipped
-    /// language's pure-intermediate modules and every `Module -> Module`
-    /// hierarchy edge — exactly what a partial scan that skips that language
-    /// produces — yet the spliced DB must equal a full rebuild of the TRUE tree
-    /// (same node set incl. modules, per-rel-type Contains counts, the
-    /// UnresolvedTarget set, and the Scan row). Before the fix the splice
-    /// treated every seeded module as in scope and `DETACH DELETE`d the
-    /// scaffolding the assembled graph could not vouch for.
+    /// The spawn skip must not delete a skipped language's global module
+    /// scaffolding. The assembled graph is MISSING the skipped language's
+    /// pure-intermediate modules and every `Module -> Module` hierarchy edge —
+    /// exactly what a partial scan that skips that language produces — yet the
+    /// spliced DB must equal a full rebuild of the TRUE tree (same node set
+    /// incl. modules, per-rel-type Contains counts, the UnresolvedTarget set,
+    /// and the Scan row). Treating every seeded module as in scope would
+    /// `DETACH DELETE` the scaffolding the assembled graph could not vouch for;
+    /// the splice must keep it.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn module_scaffolding_survives_a_partial_scan_that_skips_a_language() {
@@ -2232,15 +2232,14 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The DATABASE half of the partial-skip oracle (feedback-102): the win-B
-    /// assembly a partial scan produces — one language spawned, another
-    /// skipped — must carry the skipped language's global scaffolding —
-    /// pure-intermediate modules and every `Module -> Module` edge, which no
-    /// per-file fact unit carries — so a database built from it has the same
-    /// tables and rows as a full rebuild of the TRUE tree. The scaffolding must
-    /// be replayed from the store into that assembly. Before the fix the
-    /// assembled graph structurally could not carry it and the database
-    /// diverged.
+    /// The DATABASE half of the partial-skip oracle: the assembly a partial scan
+    /// produces — one language spawned, another skipped — must carry the
+    /// skipped language's global scaffolding — pure-intermediate modules and
+    /// every `Module -> Module` edge, which no per-file fact unit carries — so a
+    /// database built from it has the same tables and rows as a full rebuild of
+    /// the TRUE tree. The scaffolding must be replayed from the store into that
+    /// assembly; without the replay the assembled graph cannot carry it and the
+    /// database diverges.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn partial_scan_export_matches_a_full_rebuild() {
@@ -2398,7 +2397,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// feedback-103: a **spawned** language's global `Module -> Module`
+    /// A **spawned** language's global `Module -> Module`
     /// scaffolding must reach the DATABASE even when its per-file facts are
     /// filtered to a target set. `partial_scan_export_matches_a_full_rebuild`
     /// covers the SKIPPED language (its scaffolding is replayed from the store);
@@ -2407,10 +2406,10 @@ mod e2e {
     /// stream. The condition is Java's: a multi-package tree (`pkg`, `pkg.a`
     /// unchanged, `pkg.b` changed, `pkg.c` unchanged) where the targeted scan
     /// re-emits only `pkg.b`'s per-file facts, yet the walk covers every package.
-    /// The fixed scanner emits the global package hierarchy for every walked
-    /// package; before the fix it emitted only the target package's, so the
-    /// assembled graph lacked `pkg -> pkg.a` while Java was not in
-    /// `skipped_langs`, and the database diverged from a full rebuild.
+    /// The scanner emits the global package hierarchy for every walked package;
+    /// emitting only the target package's would leave the assembled graph
+    /// without `pkg -> pkg.a` while Java is not in `skipped_langs`, and the
+    /// database would diverge from a full rebuild.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn java_targeted_scan_scaffolding_reaches_the_export() {
@@ -2938,14 +2937,12 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// phase-04 task-22 — the splice applies its delta in a BOUNDED number
-    /// of DML statements that does NOT grow with the delta's node/edge
-    /// count, while equivalence to a full rebuild is NOT weakened. The
-    /// pre-fix per-row implementation issued one statement per node and per
-    /// edge (`plan.note-87`: ~82 298 on the jgrapht scenario), so it fails
-    /// the bound; the batched implementation reports a small constant, and
-    /// the existing enumerated splice equivalence + rollback oracles stay
-    /// green beside it.
+    /// The splice applies its delta in a BOUNDED number of DML statements that
+    /// does NOT grow with the delta's node/edge count, while equivalence to a
+    /// full rebuild is NOT weakened. A per-row implementation would issue one
+    /// statement per node and per edge (~82 298 on the jgrapht scenario), so it
+    /// fails the bound; the batched implementation reports a small constant, and
+    /// the enumerated splice equivalence + rollback oracles stay green beside it.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn batched_dml_statement_count_is_bounded_and_size_independent() {
@@ -3023,7 +3020,7 @@ mod e2e {
         );
     }
 
-    /// feedback-90 — the incoming-edge invariant. A body-only change to a
+    /// The incoming-edge invariant. A body-only change to a
     /// widely-referenced unit whose CALLERS ARE NOT re-emitted must keep every
     /// incoming Calls/Uses edge from those callers (the persisting FQN is
     /// UPSERTed, never DETACH DELETEd); a removed FQN disappears and leaves no
@@ -3281,7 +3278,7 @@ mod e2e {
 
     /// The DATABASE leg: the published `db.lbug` equals a full rebuild's (both
     /// are the same assembled graph loaded whole), and its single `Scan` row
-    /// records the delta's `ScanRow` (feedback-91).
+    /// records the delta's `ScanRow`.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
     fn published_database_equals_a_full_rebuild() {
@@ -3319,14 +3316,13 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// feedback-118 (phase-03 task-2): an ADD is the mirror of a removal. A
-    /// scan that adds a NEW FILE to an existing package AND a NEW PACKAGE (a
-    /// Module absent from the seed) must land exactly what a full rebuild
-    /// lands. The previous revision gated the module re-decide on the SEED
-    /// subtree (`reached`), so a module absent from the seed was never
-    /// inserted and the `Contains` edges a SEEDED module authors to the added
-    /// children (`Module -> File`, `Module -> Module`) were silently skipped —
-    /// the spliced DB then missed a `Module` row and `Contains` rels a full
+    /// An ADD is the mirror of a removal. A scan that adds a NEW FILE to an
+    /// existing package AND a NEW PACKAGE (a Module absent from the seed) must
+    /// land exactly what a full rebuild lands. Gating the module re-decide on
+    /// the SEED subtree (`reached`) would leave a module absent from the seed
+    /// uninserted and silently skip the `Contains` edges a SEEDED module authors
+    /// to the added children (`Module -> File`, `Module -> Module`) — the
+    /// spliced DB would then miss a `Module` row and `Contains` rels a full
     /// rebuild keeps (`domain.constraint.db-splice-equivalence`).
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/fs); run via cargo test-e2e"]
@@ -3481,7 +3477,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// schema-alignment phase-03 task-17: a spliced incremental scan carries
+    /// A spliced incremental scan carries
     /// exactly the tier-4 `Agent` row set a full rebuild produces — a persisting
     /// definition re-emitted with a changed span, a removed definition gone, and
     /// a new definition added — in the database's `Agent` table.
@@ -3547,17 +3543,17 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-01 task-2 / phase-06 task-2 (e2e): the SPLICE realization matrix
+    /// The SPLICE realization matrix
     /// for a ROOT crate and a NESTED non-root cargo package. A planned `File`,
     /// `Struct` and `Function` each declared at its own FQN must be REALIZED by
     /// the next incremental splice — the
     /// seeded placeholder replaced by the scanned declaration: `status` cleared,
     /// the location filled, and the FQN kept. The location-less planned `Module`
-    /// (SPEC §4) realizes through the Phase-7 seed-row heal
-    /// (plan.phase-07.task-4): the assembled graph holds the real declaration
-    /// and the heal upserts the seed row, so it too clears its status — while a
+    /// (SPEC §4) realizes through the seed-row heal: the assembled graph holds
+    /// the real declaration and the heal upserts the seed row, so it too clears
+    /// its status — while a
     /// planned Module with NO code keeps its row and `planned` status verbatim
-    /// under the Phase-4 exclusion gate
+    /// under the exclusion gate
     /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`).
     ///
     /// The nested package sits at `src/agentlib` with cargo PACKAGE name
@@ -3850,7 +3846,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-03 task-1 (e2e): the INCIDENT-EDGE realization matrix. Every
+    /// The INCIDENT-EDGE realization matrix. Every
     /// FQN-keyed edge family incident to a planned Implementation node must
     /// still resolve at that FQN after the incremental splice:
     ///
@@ -3867,13 +3863,13 @@ mod e2e {
     /// post-splice miss is a DROP, never a fixture that never authored it) and
     /// after: every kind's node is realized (`status: planned` cleared) — the
     /// located kinds through the path-based selection, the location-less Module
-    /// through the Phase-7 seed-row heal once the assembled graph holds the real
+    /// through the seed-row heal once the assembled graph holds the real
     /// declaration — so each family must resolve to the REAL node, never to a
     /// leftover placeholder.
     /// The kept-vs-dropped verdict is printed per family per kind; a dropping
-    /// family fails with the whole matrix in the panic message, so the Phase-3
-    /// source tasks (filter_task_ops / finalize_graph) decide what to fix from
-    /// evidence rather than suspicion.
+    /// family fails with the whole matrix in the panic message, so the
+    /// filter_task_ops / finalize_graph seam decides what to fix from evidence
+    /// rather than suspicion.
     ///
     /// The transient plan rows are authored through the candidate binary's
     /// `apg plan add` surface (which projects them into the branch DB exactly as
@@ -4306,7 +4302,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-04 task-3 (e2e): a still-planned node the graph never realizes is
+    /// A still-planned node the graph never realizes is
     /// not touched by EITHER build path. A planned `Module` at an FQN with no
     /// code anywhere (`rust.never-landed.ghost`) holds every incident
     /// family — `Language —Contains→ Module`, `Task —ModuleCreate→ Module`,
@@ -4328,12 +4324,12 @@ mod e2e {
     /// proving the still-planned exclusion did not overreach into the
     /// location-based kinds.
     ///
-    /// Phase-7 task-4 landed the seed-row heal: a planned `Module` whose code
-    /// DOES land now realizes (the assembled graph holds the real declaration),
-    /// so the landing FQN here stays a `Function` (a located kind) to keep this
-    /// test's subject — a Module NO code ever realizes — unambiguous. THIS
-    /// test's no-code still-planned Module assertion stays asserted verbatim
-    /// and is never weakened by the heal.
+    /// The seed-row heal realizes a planned `Module` whose code DOES land (the
+    /// assembled graph holds the real declaration), so the landing FQN here
+    /// stays a `Function` (a located kind) to keep this test's subject — a
+    /// Module NO code ever realizes — unambiguous. THIS test's no-code
+    /// still-planned Module assertion stays asserted verbatim and is never
+    /// weakened by the heal.
     ///
     /// Scratch /tmp repo + candidate binary only
     /// (`global.constraint.no-real-project-test`); a real rust-frontend build +
@@ -4762,17 +4758,17 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-07 task-5 (e2e): the SPLICE-side seed-row heal — the assembled
+    /// The SPLICE-side seed-row heal — the assembled
     /// graph holds the real declaration in a NON-target file, and the splice
     /// realizes the planned seed row anyway.
     ///
-    /// The heal arm (`rust.apg.splice.apply.apply`, phase-07 task-4) selects a
+    /// The heal arm (`rust.apg.splice.apply.apply`) selects a
     /// seeded `status: planned` row by FQN when the assembled graph carries the
     /// REAL declaration at that FQN (`assembled_real` plus a filled location for
     /// the located kinds); the path-based selection can never reach a
     /// location-less placeholder, so this is the only arm that can heal one. A
     /// still-planned FQN with no code keeps its row and every incident edge
-    /// under the Phase-4 exclusion gate
+    /// under the exclusion gate
     /// (`requirements.requirement.still-planned-node-keeps-node-and-edges`), and
     /// a FQN the assembled graph lacks entirely is left to `removed_fqns` —
     /// which never deletes a `planned` row either (`db_code_label` excludes the
@@ -4786,7 +4782,7 @@ mod e2e {
     /// through the normal path-based selection; and a sibling worktree that
     /// warms the shared facts first leaves THIS worktree's seed DB on the
     /// previous content key, which `splice::seed_checked` refuses (StaleSeed) in
-    /// favour of the full-load assembly (the realization task-2's matrix pins).
+    /// favour of the full-load assembly (the realization matrix pins).
     /// The heal is therefore the legacy-seed defense-in-depth arm, and its exact
     /// input is constructed over a real scratch `db.lbug` with the same
     /// `build_db`/`seed`/`apply`/`publish` machinery every other splice e2e
@@ -5279,7 +5275,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Task-55 (e2e): a re-scan SPLICE keeps a program Struct's Struct-to-File
+    /// A re-scan SPLICE keeps a program Struct's Struct-to-File
     /// `copy` Uses edge to a statement-only copybook. `lib/STMTS.cpy` holds
     /// procedure statements only (no declarations), so `CODE_REL_PAIRS` must
     /// admit the Struct→File pair for the edge to survive the splice. Both
@@ -5459,7 +5455,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Task 8.14 (e2e): a program Struct's Struct-to-File `copy` Uses edge to
+    /// A program Struct's Struct-to-File `copy` Uses edge to
     /// a statement-only copybook survives the cached-fact reassembly: a
     /// spec-only delta skips the cobol frontend, the splice guard refuses, and
     /// the full-load fallback (`ingest_with_reuse` → `splice_cached`) restores
@@ -5564,7 +5560,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Task 8.13 (e2e): SQL Uses-edge `kind` properties survive a splice
+    /// SQL Uses-edge `kind` properties survive a splice
     /// re-scan and the warm cached-fact reassembly (`splice_cached` behind a
     /// missing seed db.lbug), each equal to the full scan and a `--force`
     /// rebuild; and a property-less Rust Uses edge stores exactly `"{}"`
@@ -5726,7 +5722,7 @@ mod e2e {
         }
     }
 
-    /// Phase-01 task-13 (e2e): the CROSS-CUT reference lifecycle. A delta scan
+    /// The CROSS-CUT reference lifecycle. A delta scan
     /// re-emits only the changed crate, so a re-emitted unit's call to a symbol
     /// that lives only in the seeded (unchanged) crate is emitted by the
     /// frontend as a `Calls`/`UnresolvedCall` naming the target's canonical FQN.
@@ -6123,7 +6119,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-01 task-14 (e2e): an UNCHANGED authored spec that targets
+    /// An UNCHANGED authored spec that targets
     /// SEED-ONLY code must survive the target-only delta splice, with no full
     /// load.
     ///
@@ -6513,7 +6509,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-03 task-1 (e2e): applying a **target-only** delta graph to a
+    /// Applying a **target-only** delta graph to a
     /// seeded copy must equal a full rebuild of the same tree **row by row on
     /// every table** — every code, authored and transient node table and every
     /// rel table, a lost or duplicated row included.
@@ -6959,7 +6955,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-03 task-8 (e2e): the module re-decide gate (`fully_reached`). A
+    /// The module re-decide gate (`fully_reached`). A
     /// seeded Module whose file subtree is only PARTIALLY re-emitted keeps its
     /// seed row and every outgoing `Module -> File` / `Module -> Module`
     /// `Contains` rel: re-emitting one child file must merge additively, never
@@ -7202,7 +7198,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-03 task-6 (e2e): a DELETED agent definition on a one-file delta
+    /// A DELETED agent definition on a one-file delta
     /// rescan must publish the same graph a full rebuild does, once the
     /// full-load fallback re-assembles the full graph.
     ///
@@ -7490,7 +7486,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-04 task-5 (e2e): the SEED-SIDE unresolved lifecycle.
+    /// The SEED-SIDE unresolved lifecycle.
     ///
     /// The splice copies the previous scan's `db.lbug` whole and applies the
     /// target-only delta as DML. An UNCHANGED file the delta never re-emits
@@ -7512,7 +7508,7 @@ mod e2e {
     ///   keeping its `UnresolvedTarget` row;
     /// * the delta graph carries NO unresolved reference and no `b.go` row, so
     ///   every flipped edge above is SEED-resident, never delta-emitted — the
-    ///   delta-emitted case is phase-1's
+    ///   delta-emitted case is covered by
     ///   `delta_cross_cut_reference_publishes_a_resolved_calls_edge`.
     ///
     /// Real `db.lbug` files (seed copy → DML → publish) are real I/O, so this is
@@ -7768,7 +7764,7 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// csharp-projects task-26: a namespace-less csharp file's `Language ⊃
+    /// A namespace-less csharp file's `Language ⊃
     /// File` rel loads, survives a reuse splice that takes the file's unit from
     /// the FactStore, and never goes stale when a file gains or loses its
     /// namespace — each spliced DB equals a full rebuild of the same tree.
@@ -7921,10 +7917,10 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Task 8.22: `function ps1.C` in `f/b.ps1` holds `ps.f.b.ps1.ps1.C`;
-    /// the new `f/b.ps1.ps1` declares `class C`, so the FQN becomes a Struct
-    /// and the function re-renders to its `//f/b.ps1` form. The splice must
-    /// drop the old Function row (the pre-task-21 splice kept it).
+    /// `function ps1.C` in `f/b.ps1` holds `ps.f.b.ps1.ps1.C`; the new
+    /// `f/b.ps1.ps1` declares `class C`, so the FQN becomes a Struct and the
+    /// function re-renders to its `//f/b.ps1` form. The splice must drop the old
+    /// Function row.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
     fn ps_function_to_struct_label_change_splices_like_a_full_rebuild() {
@@ -7938,10 +7934,9 @@ mod e2e {
         );
     }
 
-    /// Task 8.22: script `s/b.ps1` is Struct `ps.s.b.ps1`; a `.ps1` in the new
-    /// directory `s.b.ps1/` renders directory Module `ps.s.b.ps1`, and the
-    /// script Struct takes its unique `//` form. The splice must drop the old
-    /// Struct row (the pre-task-21 splice kept it).
+    /// Script `s/b.ps1` is Struct `ps.s.b.ps1`; a `.ps1` in the new directory
+    /// `s.b.ps1/` renders directory Module `ps.s.b.ps1`, and the script Struct
+    /// takes its unique `//` form. The splice must drop the old Struct row.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo, spawned apg/psfrontend, db.lbug); run via cargo test-e2e"]
     fn ps_struct_to_module_label_change_splices_like_a_full_rebuild() {
@@ -7955,7 +7950,7 @@ mod e2e {
         );
     }
 
-    /// phase-04 task-13: the delta re-emits a target file whose function was
+    /// The delta re-emits a target file whose function was
     /// RENAMED AWAY, so a CACHED (non-re-emitted) unit's `Calls` edge names a
     /// vanished FQN. The splice closes the graph: the vanished node is detached
     /// with its incoming edge, no `UnresolvedTarget` is fabricated for it, and
@@ -8146,18 +8141,18 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-01 task-1 (e2e oracle): the `SeedFallback::UnrepresentedAuthored`
+    /// The `SeedFallback::UnrepresentedAuthored`
     /// full-load fallback must publish the TREE's authored/transient rows —
     /// `seed_authored_identity(db) == tree_authored_identity(apg_root)` — and
     /// leave the worktree mutable.
     ///
-    /// The bug this pins: after a source commit and a plain `apg scan` that
-    /// lands on the full-load fallback, the NEXT bookkeeping mutation refused
+    /// The failure this pins: after a source commit and a plain `apg scan` that
+    /// lands on the full-load fallback, the NEXT bookkeeping mutation is refused
     /// with `differing: authored digest` at a matching HEAD, while a
-    /// `--force` rebuild cleared it. The fixture reproduces the bug's observed
-    /// order: a plan mutation plus a durable authored row the last scan never
-    /// saw, then a source commit, then a plain `apg scan`. The scratch `/tmp`
-    /// project worktree carries real Go code, one `.opencode/agents/`
+    /// `--force` rebuild clears it. The fixture reproduces the failure's
+    /// observed order: a plan mutation plus a durable authored row the last scan
+    /// never saw, then a source commit, then a plain `apg scan`. The scratch
+    /// `/tmp` project worktree carries real Go code, one `.opencode/agents/`
     /// definition, durable Components whose `implemented-by` and a Note's
     /// `details` name a real Function, and a branch-local plan with two
     /// assigned tasks, a real-code `function modify`, and a planned `function
@@ -8172,16 +8167,16 @@ mod e2e {
     /// then vanish from the published DB, so `tree_authored_identity` cannot
     /// reconcile the orphaned `implemented-by` (spec drift) and the freshness
     /// check reports `authored digest`; `--force` re-runs every frontend and
-    /// recovers. The splice path keeps the seed's code, which is why the bug
-    /// tracked the fallback.
+    /// recovers. The splice path keeps the seed's code, so the failure tracks
+    /// the fallback.
     ///
     /// Mechanism-agnostic in its verdict — the oracle captures the fallback DB's
     /// digest, the TREE digest (an `Err` names the lost code ref), the
     /// freshness verdict, then a `--force` rebuild's digest and ROW SET, and
     /// prints the diverging authored/transient rows (the digest functions fold
     /// only a value) plus the fallback DB's plan rows against the plan JSONL.
-    /// On the unfixed tree this is RED by design; phase 2 fixes the assembly and
-    /// phase 3 adds the refusal-preserving verification.
+    /// The oracle fails on an assembly gap in the fallback and passes once the
+    /// fallback assembly carries the tree's authored/transient rows.
     ///
     /// Scratch `/tmp` repo + candidate binary only
     /// (`global.constraint.no-real-project-test`); a real Go frontend scan, real
@@ -8557,9 +8552,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// Phase-03 task-1: the guard-preserving e2e verification of the
+    /// The guard-preserving e2e verification of the
     /// `SeedFallback::UnrepresentedAuthored` authored-digest guard and the
-    /// phase-2 assembly fix.
+    /// assembly fix.
     ///
     /// Three things are pinned on a scratch `/tmp` repo, never this one:
     ///
@@ -8567,13 +8562,13 @@ mod e2e {
     ///    that does not represent the tree's authored/transient rows,
     ///    `seed_checked` returns `UnrepresentedAuthored` — asserted directly at
     ///    the seed seam on the REAL seed DB and the tree's own digest, so the
-    ///    phase-2 assembly change cannot have weakened the comparison.
+    ///    assembly change cannot have weakened the comparison.
     /// 2. BOTH reuse paths publish a DB equal to a `--force` rebuild of the
     ///    same tree, in the authored DIGEST and the authored/transient ROW SET:
     ///    a content-key-aligned splice (`[load] splice: … full load skipped`)
     ///    and an `UnrepresentedAuthored` full-load fallback — the latter with
     ///    the shared store's units reclaimed for the unchanged files (the
-    ///    phase-1 bug's assembly gap), so the fix's promotion is exercised.
+    ///    assembly gap), so the fallback's promotion is exercised.
     /// 3. A diverged DB is still declared stale. Dropping one authored row from
     ///    `db.lbug` alone makes `freshness_differences` name `authored digest`,
     ///    and the next plain scan restores it so the DB equals the tree and the
