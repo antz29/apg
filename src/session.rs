@@ -156,6 +156,34 @@ impl Session {
         self.db = ArtifactDb::open(&self.apg_root)?;
         Ok(WriteGuard { _lock: lock })
     }
+
+    /// Writes a durable change's node files, commits it once, and projects it
+    /// into the worktree database — the whole sequence inside the caller's held
+    /// write critical section.
+    ///
+    /// `guard` is the [`WriteGuard`] from [`upgrade_to_write`](Self::upgrade_to_write):
+    /// passing it makes the critical section explicit, so the write runs only
+    /// while the blocking worktree lock is held and the handle is
+    /// write-capable. The sequence is the shared durable-mutation orchestrator
+    /// ([`layers::write::write_project_with`]) — membership guard, staleness
+    /// gate, full-change validation, one atomic `apg/layers/**` write plus
+    /// exactly one git commit, and then the projection delta — with the
+    /// projection re-ingested through this session's **held** handle
+    /// ([`ArtifactDb::reingest_layers_on`]) instead of a second
+    /// independently-opened one.
+    ///
+    /// The handle stays write-capable on return (the guard is still alive);
+    /// dropping back to the read-only class belongs to `Session::release_write`.
+    pub fn write_through(
+        &mut self,
+        _guard: &WriteGuard,
+        writes: &[layers::NodeFile],
+        deletes: &[PathBuf],
+    ) -> anyhow::Result<()> {
+        layers::write::write_project_with(&self.apg_root, writes, deletes, &|deletes, records| {
+            self.db.reingest_layers_on(deletes, records)
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

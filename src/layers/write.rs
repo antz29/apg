@@ -3,13 +3,14 @@
 //! node file (and delete the removed ones) in one logical mutation, commit
 //! once, and re-merge the exact delta into the live DB.
 //!
-//! Durable `apg node` / `apg edge` mutations require a live session and are
-//! **not** committed per mutation: each admission applies to the worktree
-//! database and marks exactly the node files it changes dirty, so only
-//! `apg session save` reaches [`write_through_with_deletes`] — one atomic write
-//! of the marked rows and the pending-deletion identities plus exactly ONE git
-//! commit. The per-mutation orchestrator ([`write_project`]) remains the
-//! direct/test path for a single logical mutation.
+//! Durable `apg node` / `apg edge` mutations run as one critical section: the
+//! per-invocation [`crate::session::Session`] holds the blocking worktree lock,
+//! and [`write_project`] validates the complete change, writes every affected
+//! node file (and deletes the removed ones) in one commit, and re-merges the
+//! exact delta into the database through that session's held write handle. The
+//! still-compiled daemon's `apg session save` also reaches
+//! [`write_through_with_deletes`], with its whole pending set — one atomic write
+//! plus exactly ONE git commit.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -669,9 +670,21 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 
 /// The durable-mutation orchestrator (SPEC §2.2/§4.1/§4.2): one logical
 /// node/edge mutation — the full set of affected node files `writes` plus the
-/// paths `deletes` to remove — guarded, validated, written atomically, and
-/// re-merged into the live DB. Mirrors `artifacts::write_jsonl_and_reingest`'s
-/// envelope for node files:
+/// paths `deletes` to remove — run as **one critical section over a
+/// per-invocation [`crate::session::Session`]**.
+///
+/// The session opens the worktree database read-only, upgrades to the
+/// write-capable class under the blocking worktree lock
+/// ([`crate::session::Session::upgrade_to_write`]), and
+/// [`crate::session::Session::write_through`] runs the sequence below, with the
+/// projection re-ingested through the session's held write handle rather than a
+/// second independently-opened one. The guard is released when this call
+/// returns. The membership guard runs here BEFORE the session opens the
+/// database, so a write from the default branch keeps its project-context
+/// refusal even on a checkout with no `db.lbug` (a project-context write with
+/// no database then refuses naming `apg scan`, the direct path's scan-first
+/// error). Mirrors `artifacts::write_jsonl_and_reingest`'s envelope for node
+/// files:
 ///
 /// 1. **Membership guard** — node files have no project segment, so any
 ///    project context satisfies the guard (`git::require_project_context`).
@@ -707,17 +720,21 @@ pub fn write_project(
     writes: &[NodeFile],
     deletes: &[PathBuf],
 ) -> anyhow::Result<()> {
-    write_project_with(apg_root, writes, deletes, &|deletes, records| {
-        artifacts::reingest_layers(apg_root, deletes, records)
-    })
+    // The membership guard precedes the session's database open, so a write
+    // from the default branch refuses with the project-context wording even on
+    // a checkout with no `db.lbug`.
+    git::require_project_context(apg_root)?;
+    let mut session = crate::session::Session::open(apg_root)?;
+    let guard = session.upgrade_to_write()?;
+    session.write_through(&guard, writes, deletes)
 }
 
-/// [`write_project`] with an injectable projection apply. The direct path uses
-/// the default (open `db.lbug`, apply the delta, close); the session
-/// coordinator passes a closure that applies the delta through the DB handle it
-/// already owns, so the session amortizes ONE open/parse across N mutations
-/// while every mutation's projection delta still lands synchronously as the
-/// mutation completes (the open is amortized, visibility never is).
+/// [`write_project`]'s shared sequence with an injectable projection apply.
+/// [`Session::write_through`](crate::session::Session::write_through) passes a
+/// closure that applies the delta through the session's held write handle, so a
+/// durable write projects on the one handle its critical section already owns
+/// (the write, the single commit and the projection land while the blocking
+/// worktree lock is held).
 pub fn write_project_with(
     apg_root: &Path,
     writes: &[NodeFile],
