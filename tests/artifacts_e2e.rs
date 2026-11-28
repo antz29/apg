@@ -439,7 +439,11 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
             "role",
             "app-service",
             "the application service role",
-            props(&[("tier", "app"), ("empty-meta", "")]),
+            props(&[
+                ("tier", "app"),
+                ("applies-to", "component"),
+                ("empty-meta", ""),
+            ]),
             vec![],
             vec![
                 inc("is-role", "solution.container.api", props(&[])),
@@ -461,19 +465,9 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
     ]
 }
 
-/// The exact FQN delete set for `nodes` (`<layer>.<type>.<name>`) — every
-/// node's identity rendered as its FQN, sorted and deduplicated by the
-/// `BTreeSet`.
-fn touched_fqns(nodes: &[layers::NodeFile]) -> BTreeSet<String> {
-    nodes
-        .iter()
-        .map(|n| format!("{}.{}.{}", n.layer, n.node_type, n.name))
-        .collect()
-}
-
-/// Normalize a node set the way `ArtifactDb::node_files_from_db` renders it:
-/// nodes by `(layer, node_type, name)`, each node's out edges by
-/// `(kind, target)` and in edges by `(kind, source)`.
+/// Normalize a node set into the durable read order: nodes by
+/// `(layer, node_type, name)`, each node's out edges by `(kind, target)` and in
+/// edges by `(kind, source)`.
 fn normalize_node_files(mut nodes: Vec<layers::NodeFile>) -> Vec<layers::NodeFile> {
     for node in &mut nodes {
         node.out
@@ -485,15 +479,15 @@ fn normalize_node_files(mut nodes: Vec<layers::NodeFile>) -> Vec<layers::NodeFil
     nodes
 }
 
-/// `node_files_from_db` must reconstruct `expected` exactly: bodies, every
-/// property key (arbitrary, empty-valued, and an `Entity`'s `kind`), and both
-/// edge halves with their properties.
+/// The durable node-file read must round-trip `expected` exactly, in canonical
+/// order: bodies, every property key (arbitrary, empty-valued, and an
+/// `Entity`'s `kind`), and both edge halves with their properties.
 fn assert_lossless_round_trip(reconstructed: &[layers::NodeFile], expected: &[layers::NodeFile]) {
+    let reconstructed = normalize_node_files(reconstructed.to_vec());
     let expected = normalize_node_files(expected.to_vec());
     assert_eq!(
-        reconstructed,
-        expected.as_slice(),
-        "node_files_from_db must round-trip the authored node set exactly"
+        reconstructed, expected,
+        "the durable node-file read must round-trip the authored node set exactly"
     );
 }
 
@@ -1231,60 +1225,69 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// A routed durable write through a live session is projected into the
-    /// session-held `db.lbug` IMMEDIATELY — a separate
-    /// routed reader sees the mutation before any save — but it is BUFFERED,
-    /// not durable. `apg/layers/**` stays untouched and no commit lands until
-    /// `apg session save`. Save is the single durability point: it writes the
-    /// buffered node file(s) and lands exactly ONE commit, then clears the
-    /// buffer (a second save over the now-clean buffer creates no commit). The
-    /// session stays live throughout and ends cleanly.
+    /// A durable write is ONE per-invocation critical section: the invocation
+    /// upgrades its read-only session under the blocking worktree lock, writes
+    /// its node file, lands exactly ONE commit and projects the mutation into
+    /// the worktree `db.lbug` before it returns — there is no daemon, no buffer
+    /// and no save step. A separate read-only invocation sees the mutation as
+    /// soon as the writer exits, and a later read-only invocation commits
+    /// nothing and leaves the node file byte-identical.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn session_routed_write_is_committed_once_and_immediately_projected() {
-        let (wt_apg, repo, wt) = project_fixture("session-routed-buffer");
+    fn per_invocation_write_is_committed_once_and_immediately_projected() {
+        let (wt_apg, repo, wt) = project_fixture("per-invocation-write");
         let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
+        std::fs::create_dir_all(&home).unwrap();
 
         let before = testutil::commit_count(&wt);
 
-        // The routed mutation is admitted into the live session's write-back
-        // buffer and projected into the session-held DB — but it is NOT durable
-        // yet: the node file is absent and no commit landed. The anchor is a
-        // lone `global.constraint` (an unconstrained type, so the buffered model
-        // is whole-model-valid at the SPEC §8.1 save).
-        let add = testutil::ApgCommand::new(&["node", "add", "global", "constraint", "buffered"])
-            .cwd(&wt)
-            .env("HOME", home.to_str().unwrap())
-            .output();
+        // The write invocation performs node-file write -> exactly one commit ->
+        // database projection in one critical section. The anchor is a lone
+        // `global.constraint` (an unconstrained type, so the written model is
+        // whole-model-valid at the SPEC §8.1 boundary).
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "written-through",
+            "--body",
+            "lands in one invocation",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
         assert!(
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
-        let node_file = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "buffered");
+
+        // Durable immediately: the node file is on disk and exactly one commit
+        // landed — no save step exists to defer either.
+        let node_file =
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "written-through");
         assert!(
-            !node_file.exists(),
-            "a routed write must be buffered, not written to apg/layers/** before save"
+            node_file.exists(),
+            "the write invocation must write its node file to apg/layers/**"
         );
         assert_eq!(
             testutil::commit_count(&wt),
-            before,
-            "a buffered routed write must not commit before save"
+            before + 1,
+            "the write invocation must land exactly one commit"
         );
 
-        // (a) Immediately projected: a NEW routed reader (separate process)
-        // sees the still-unsaved mutation BEFORE save/end.
+        // Immediately projected: a SEPARATE read-only invocation sees it.
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Constraint {fqn: 'global.constraint.buffered'}) RETURN count(n)",
+                "MATCH (n:Constraint {fqn: 'global.constraint.written-through'}) RETURN count(n)",
             ],
             &wt,
         );
         assert!(
             q.status.success(),
-            "routed read: {}",
+            "read-only query: {}",
             String::from_utf8_lossy(&q.stderr)
         );
         assert_eq!(
@@ -1293,57 +1296,39 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "the routed write must be queryable immediately, before save"
+            "the write must be queryable as soon as its invocation returns"
         );
 
-        // (b) The single durability point: save writes the buffered node file
-        // and lands exactly ONE commit.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
+        // A later read-only invocation commits nothing and leaves the durable
+        // write byte-identical — there is no buffer left to flush.
+        let bytes = std::fs::read(&node_file).unwrap();
+        let again = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Constraint {fqn: 'global.constraint.written-through'}) RETURN count(n)",
+            ],
+            &wt,
         );
         assert!(
-            node_file.exists(),
-            "save must write the buffered node file to apg/layers/**"
+            again.status.success(),
+            "{}",
+            String::from_utf8_lossy(&again.stderr)
         );
         assert_eq!(
             testutil::commit_count(&wt),
             before + 1,
-            "the whole buffered set must land in exactly one commit"
-        );
-
-        // The buffer is cleared: a second save over the now-clean buffer is a
-        // no-op — no further commit.
-        let resave = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            resave.status.success(),
-            "{}",
-            String::from_utf8_lossy(&resave.stderr)
+            "a read-only invocation must make no commit"
         );
         assert_eq!(
-            testutil::commit_count(&wt),
-            before + 1,
-            "a save over the cleared buffer must make no commit"
+            std::fs::read(&node_file).unwrap(),
+            bytes,
+            "a read-only invocation must leave the node file byte-identical"
         );
 
-        // The session stayed live through save, then ends cleanly.
+        // No daemon, socket or pending set is left behind.
         assert!(
-            apg::session::live_session(&wt_apg),
-            "session save must not end the live session"
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
@@ -1756,11 +1741,11 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// `ArtifactDb::node_files_from_db` reconstructs the durable node-file set
-    /// from a REAL `db.lbug` — the metadata nodes were
-    /// written as node files, projected into the DB by a real scan (the
-    /// canonical `layers::ingest_tree` → `create_schema`/`build_load_files`
-    /// path), and read back.
+    /// The durable node-file set projected into a REAL `db.lbug`: the metadata
+    /// nodes are written as node files, committed and projected by a real scan
+    /// (the canonical `layers::ingest_tree` → `create_schema`/`build_load_files`
+    /// path), and read back through the surviving per-invocation read
+    /// (`layers::read_existing_nodes`) plus direct database reads.
     ///
     /// This pins the subset the CURRENT columns carry: `body`, the projected
     /// typed property keys (`Requirement` `id`/`feature`, `Note` `kind`,
@@ -1769,23 +1754,22 @@ mod e2e {
     /// BOTH halves of every AUTHORED-pair edge. The code-targeted edge kinds
     /// (`implemented-by`, `details`) carry only the source's out half — a code
     /// identity has no node file. The serialized-properties column carries the
-    /// authored `driven-by` edge property on both halves; the exact
-    /// full-fidelity round-trip (arbitrary keys, `Entity` `kind`, the session's
-    /// incremental merge path) is pinned by the round-trip tests below.
+    /// authored `driven-by` edge property; the exact full-fidelity round-trip
+    /// (arbitrary keys, `Entity` `kind`, the incremental projection path) is
+    /// pinned by the round-trip tests below.
     ///
-    /// The database working state the next save reads is pinned over the same
-    /// real `db.lbug`: the pending-removal ledger (`record_pending_removal` →
-    /// `pending_removals`, with the identity's durable row left in place but
-    /// omitted from the reconstruction), the `updated` dirty mark landing on
-    /// exactly the rows the real change builders name — an authored edge's two
-    /// endpoints, a code-target edge's source alone, and a delete's rewritten
-    /// authored neighbours — and the mark never projecting into a node file.
-    /// "Exactly" is measured from the database (every label's `updated = 1`
-    /// rows), never from a change's own `writes` roster, so a marking that
-    /// widened to another row fails here.
+    /// The per-invocation write-through contract is pinned over the same real
+    /// `db.lbug`: each write is ONE invocation that writes exactly the affected
+    /// node files, lands exactly ONE commit and projects the delta — a
+    /// code-target edge rewrites its source node file alone, an authored edge
+    /// rewrites both endpoints, and a delete removes the removed identity's node
+    /// file and rewrites exactly its authored neighbours. "Exactly" is measured
+    /// from the durable tree (a before/after `apg/layers/**` snapshot), never
+    /// from a change's own `writes` roster, so a write that reached another file
+    /// fails here.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn node_files_from_db_reconstructs_the_projected_columns() {
+    fn durable_node_files_reconstruct_the_projected_columns_and_write_through_exactly() {
         let (repo, wt, wt_apg) = testutil::project_with_db("node-files-from-db");
 
         let props = |pairs: &[(&str, &str)]| -> layers::NodeProperties {
@@ -1921,12 +1905,15 @@ mod e2e {
         ] {
             layers::write_node(&wt_apg, node).unwrap();
         }
+        // The seeded tree is committed so the worktree database the scan records
+        // is fresh: the write-through contract below refuses a stale database.
+        wt_commit_paths(&wt, &["apg/layers"], "seed the projected node set");
         // Project the durable tree into a real db.lbug through the real scan
         // path (the canonical schema/load projection).
         testutil::scan_checkout(&wt).unwrap();
 
-        let db = ArtifactDb::open(&wt_apg).unwrap();
-        let nodes = db.node_files_from_db().unwrap();
+        // The surviving per-invocation read: the durable node-file set on disk.
+        let nodes = layers::read_existing_nodes(&wt_apg).unwrap();
 
         // Only the durable authored nodes are reconstructed — the scanned code
         // and the transient rows are not durable node files.
@@ -1938,7 +1925,7 @@ mod e2e {
                 .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
                 .cloned()
                 .unwrap_or_else(|| {
-                    panic!("node_files_from_db is missing `{layer}.{node_type}.{name}`")
+                    panic!("the durable node-file read is missing `{layer}.{node_type}.{name}`")
                 })
         };
         let out = |n: &layers::NodeFile, kind: &str, target: &str| -> layers::OutEdge {
@@ -2030,68 +2017,193 @@ mod e2e {
         let details_out = out(&n, "details", "go.fixture.mod.Store");
         assert!(details_out.properties.is_empty());
 
-        // ------------------------------------------------------------------
-        // The database working state a save reads: the dirty mark and the
-        // pending-removal ledger.
-        //
-        // "Exactly the named rows" is measured from the DATABASE: every label
-        // the schema declares is asked which of its rows carries `updated = 1`,
-        // so a marking that widened to a neighbour row (or another table) fails
-        // here even when the code believed its write set was the named one.
-        // Only the durable node tables can answer that property read; a code or
-        // transient table refuses it at bind time, which is how the probe finds
-        // the roster (one connection per label, so a refusal poisons nothing).
-        let dirty_rows = |db: &ArtifactDb| -> Vec<(String, String)> {
-            let mut rows = Vec::new();
-            for label in load::node_labels() {
-                let Ok(conn) = db.conn() else { continue };
-                let Ok(result) = conn.query(&format!(
-                    "MATCH (n:{label}) WHERE n.updated = 1 RETURN n.fqn"
-                )) else {
-                    continue;
-                };
-                for row in result {
-                    rows.push((label.to_string(), row[0].to_string()));
-                }
-            }
-            rows.sort();
-            rows
-        };
-        // A mark is session state, not node-file data, so each case is measured
-        // from a clean database (the roster probe again: a table without the
-        // `updated` column refuses the SET).
-        let clear_marks = |db: &ArtifactDb| {
-            for label in load::node_labels() {
-                let Ok(conn) = db.conn() else { continue };
-                let _ = conn.query(&format!("MATCH (n:{label}) SET n.updated = 0"));
-            }
-        };
-        let named = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
-            let mut rows: Vec<(String, String)> = pairs
-                .iter()
-                .map(|(label, fqn)| (label.to_string(), fqn.to_string()))
-                .collect();
-            rows.sort();
-            rows
-        };
-        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // The session's own change builder, over the DB-reconstructed base: the
-        // `writes` it folds are exactly the node files `apply_mutation` marks.
-        let change = |base: &[layers::NodeFile], kind: &str, argv: &[&str]| {
-            apg::node_cmd::build_change_over(base, &[], &wt_apg, kind, &args(argv)).unwrap()
-        };
-
-        assert_eq!(
-            dirty_rows(&db),
-            named(&[]),
-            "no row carries `updated = 1` before an admission marks one"
+        // The database projection describes the same durable set: the typed
+        // columns carry the authored metadata, and the serialized-properties
+        // column carries the authored edge property.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        for fqn in [
+            "requirements.requirement.checkout",
+            "requirements.stakeholder.customer",
+            "implementation.note.note-1",
+            "domain.group.core",
+            "domain.service.billing",
+            "solution.container.api",
+            "solution.component.worker",
+            "requirements.constraint.local-rule",
+        ] {
+            assert!(db.has_node(fqn), "the database must describe `{fqn}`");
+        }
+        let row = db
+            .q("MATCH (r:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN r.body, r.id, r.feature")
+            .unwrap();
+        assert!(
+            row.contains("the checkout flow")
+                && row.contains("REQ-1")
+                && row.contains("feature-checkout"),
+            "Requirement projection: {row}"
         );
+        let row = db
+            .q("MATCH (n:Note {fqn: 'implementation.note.note-1'}) RETURN n.body, n.kind")
+            .unwrap();
+        assert!(
+            row.contains("a note") && row.contains("background"),
+            "Note projection: {row}"
+        );
+        let row = db
+            .q("MATCH (g:DomainGroup {fqn: 'domain.group.core'}) RETURN g.body, g.attribute, g.root")
+            .unwrap();
+        assert!(
+            row.contains("the core domain") && row.contains("core") && row.contains("checkout"),
+            "DomainGroup projection: {row}"
+        );
+        let row = db
+            .q("MATCH (c:Container {fqn: 'solution.container.api'}) RETURN c.body, c.kind")
+            .unwrap();
+        assert!(
+            row.contains("the api service") && row.contains("service"),
+            "Container projection: {row}"
+        );
+        // A key with no dedicated column (`Constraint.scope`) rides the
+        // serialized-properties column.
+        let row = db
+            .q("MATCH (k:Constraint {fqn: 'requirements.constraint.local-rule'}) RETURN k.body, k.properties")
+            .unwrap();
+        assert!(
+            row.contains("the local rule") && row.contains("\"scope\":\"local\""),
+            "Constraint projection: {row}"
+        );
+        // The authored `driven-by` rel row carries the edge property, and both
+        // endpoint rows resolve (the one DB row feeds both halves).
+        let row = db
+            .q("MATCH (:Service {fqn: 'domain.service.billing'})-[r:DrivenBy]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN r.properties")
+            .unwrap();
+        assert!(
+            row.contains("\"flavor\":\"context-map\""),
+            "DrivenBy projection: {row}"
+        );
+        let row = db
+            .q("MATCH (:Stakeholder {fqn: 'requirements.stakeholder.customer'})-[:Requires]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(row.lines().last().map(str::trim), Some("1"), "{row}");
+        let row = db
+            .q("MATCH (:Container {fqn: 'solution.container.api'})-[:Contains]->(:Component {fqn: 'solution.component.worker'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(row.lines().last().map(str::trim), Some("1"), "{row}");
+        let row = db
+            .q("MATCH (:Component {fqn: 'solution.component.worker'})-[:SpecImplementedBy]->(x) RETURN x.fqn")
+            .unwrap();
+        assert!(row.contains("go.fixture.mod.Store"), "{row}");
+        let row = db
+            .q("MATCH (:Note {fqn: 'implementation.note.note-1'})-[:Details]->(x) RETURN x.fqn")
+            .unwrap();
+        assert!(row.contains("go.fixture.mod.Store"), "{row}");
+        drop(db);
 
-        // A code-target write (`implemented-by` → a scanned code identity)
+        // ------------------------------------------------------------------
+        // The per-invocation write-through contract: ONE invocation writes
+        // exactly the affected node files, lands exactly ONE commit, projects
+        // the delta and re-anchors the DB `Scan` row in one critical section.
+        //
+        // "Exactly the named files" is measured from the durable tree: a
+        // before/after `apg/layers/**` snapshot, so a write that reached a
+        // neighbour file fails here even when the code believed its write set
+        // was the named one.
+        let layers_root = wt_apg.join(layers::LAYERS_DIR);
+        let snap =
+            |root: &Path| -> BTreeMap<String, Vec<u8>> { snapshot(root).into_iter().collect() };
+        let rel = |path: PathBuf| -> String {
+            path.strip_prefix(&layers_root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let change = |kind: &str, argv: &[&str]| {
+            let base = layers::read_existing_nodes(&wt_apg).unwrap();
+            let args: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            apg::node_cmd::build_change_over(&base, &[], &wt_apg, kind, &args).unwrap()
+        };
+
+        // One write-through invocation: apply the change, then assert exactly
+        // the named files changed and exactly one single-parent commit landed
+        // carrying that delta.
+        let apply = |kind: &str, argv: &[&str], changed: &[String], removed: &[String]| {
+            let before = snap(&layers_root);
+            let commits_before = testutil::commit_count(&wt);
+            let head_before = git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string();
+            let built = change(kind, argv);
+            layers::write_project(&wt_apg, &built.writes, &built.deletes).unwrap();
+            let after = snap(&layers_root);
+            let changed_set: BTreeSet<String> = after
+                .iter()
+                .filter(|(p, b)| before.get(*p) != Some(*b))
+                .map(|(p, _)| p.clone())
+                .collect();
+            assert_eq!(
+                changed_set,
+                changed.iter().cloned().collect::<BTreeSet<_>>(),
+                "the write must rewrite exactly the named node files"
+            );
+            let removed_set: BTreeSet<String> = before
+                .keys()
+                .filter(|p| !after.contains_key(*p))
+                .cloned()
+                .collect();
+            assert_eq!(
+                removed_set,
+                removed.iter().cloned().collect::<BTreeSet<_>>(),
+                "the write must remove exactly the named node files"
+            );
+            assert_eq!(
+                testutil::commit_count(&wt),
+                commits_before + 1,
+                "one write-through invocation must land exactly one commit"
+            );
+            let repo = git2::Repository::open(&wt).unwrap();
+            let new_head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(
+                new_head.parent_count(),
+                1,
+                "the write commit is a normal single-parent commit"
+            );
+            assert_eq!(
+                new_head.parent(0).unwrap().id().to_string(),
+                head_before,
+                "the write commit's parent must be the prior HEAD"
+            );
+            let prefix = format!("{}/{}", specs::LAYOUT, layers::LAYERS_DIR);
+            let committed: BTreeSet<String> = repo
+                .diff_tree_to_tree(
+                    Some(&new_head.parent(0).unwrap().tree().unwrap()),
+                    Some(&new_head.tree().unwrap()),
+                    None,
+                )
+                .unwrap()
+                .deltas()
+                .filter_map(|delta| {
+                    let path = delta.new_file().path()?;
+                    let rel = path.strip_prefix(&prefix).ok()?;
+                    Some(rel.to_string_lossy().into_owned())
+                })
+                .collect();
+            let expected: BTreeSet<String> =
+                changed.iter().chain(removed.iter()).cloned().collect();
+            assert_eq!(
+                committed, expected,
+                "the one write commit must carry exactly the named files"
+            );
+        };
+
+        // (1) A code-target write (`implemented-by` → a scanned code identity)
         // rewrites the source's node file alone: the code endpoint has no node
-        // file, so exactly the source row is marked and no code row ever is.
-        let code_target = change(
-            &nodes,
+        // file.
+        apply(
             "edge",
             &[
                 "add",
@@ -2099,33 +2211,18 @@ mod e2e {
                 "solution.component.worker",
                 "go.fixture.mod",
             ],
-        );
-        db.mark_dirty(&code_target.writes).unwrap();
-        assert_eq!(
-            dirty_rows(&db),
-            named(&[("Component", "solution.component.worker")]),
-            "a code-target write marks its source alone"
+            &[rel(layers::node_file_path(
+                &wt_apg,
+                Layer::Solution,
+                "component",
+                "worker",
+            ))],
+            &[],
         );
 
-        // The flag never leaks into the reconstruction: the mark is database
-        // working state, so the node files are identical and no properties map
-        // carries an `updated` key.
-        let marked = db.node_files_from_db().unwrap();
-        assert_eq!(
-            marked, nodes,
-            "a dirty mark must not change what the node files reconstruct to"
-        );
-        assert!(
-            marked.iter().all(|n| !n.properties.contains_key("updated")),
-            "the session's `updated` flag must never project into a node file"
-        );
-        clear_marks(&db);
-        assert_eq!(dirty_rows(&db), named(&[]), "the marks clear");
-
-        // An authored-edge write (`realises` Component → Service) rewrites BOTH
-        // endpoint node files, so exactly both endpoint rows are marked.
-        let authored_edge = change(
-            &nodes,
+        // (2) An authored-edge write (`realises` Component → Service) rewrites
+        // BOTH endpoint node files.
+        apply(
             "edge",
             &[
                 "add",
@@ -2133,88 +2230,129 @@ mod e2e {
                 "solution.component.worker",
                 "domain.service.billing",
             ],
+            &[
+                rel(layers::node_file_path(
+                    &wt_apg,
+                    Layer::Solution,
+                    "component",
+                    "worker",
+                )),
+                rel(layers::node_file_path(
+                    &wt_apg,
+                    Layer::Domain,
+                    "service",
+                    "billing",
+                )),
+            ],
+            &[],
         );
-        db.mark_dirty(&authored_edge.writes).unwrap();
-        assert_eq!(
-            dirty_rows(&db),
-            named(&[
-                ("Component", "solution.component.worker"),
-                ("Service", "domain.service.billing"),
-            ]),
-            "an authored edge marks both endpoints and nothing else"
-        );
-        clear_marks(&db);
 
-        // A delete marks every authored neighbour `node_rm_change` folds into
-        // `writes` — the nodes whose edge halves name the removed identity —
-        // and the removed identity's own row is not marked (its file is
-        // deleted, so there is nothing to write).
-        let delete = change(
-            &nodes,
+        // (3) A delete removes the removed identity's node file and rewrites
+        // every authored neighbour whose edge half names it — and nothing else.
+        apply(
             "node",
             &["rm", "requirements", "requirement", "checkout"],
+            &[
+                rel(layers::node_file_path(
+                    &wt_apg,
+                    Layer::Requirements,
+                    "stakeholder",
+                    "customer",
+                )),
+                rel(layers::node_file_path(
+                    &wt_apg,
+                    Layer::Domain,
+                    "service",
+                    "billing",
+                )),
+            ],
+            &[rel(layers::node_file_path(
+                &wt_apg,
+                Layer::Requirements,
+                "requirement",
+                "checkout",
+            ))],
         );
-        db.mark_dirty(&delete.writes).unwrap();
-        assert_eq!(
-            dirty_rows(&db),
-            named(&[
-                ("Stakeholder", "requirements.stakeholder.customer"),
-                ("Service", "domain.service.billing"),
-            ]),
-            "a delete marks exactly its rewritten authored neighbours"
-        );
-        clear_marks(&db);
-        assert_eq!(dirty_rows(&db), named(&[]), "no mark survives the reset");
 
-        // Record-then-read: the ledger holds one removed identity, idempotently,
-        // and `node_files_from_db` omits that identity's node file from the base
-        // while the durable row itself is untouched (the omission is the
-        // ledger's, not a delete), so the neighbour keeps the edge half the save
-        // boundary's pairing check has to refuse.
+        // The tree is the base minus exactly the removed identity, and the
+        // neighbour lost its dangling out half.
+        let deleted = rel(layers::node_file_path(
+            &wt_apg,
+            Layer::Requirements,
+            "requirement",
+            "checkout",
+        ));
+        let after = snap(&layers_root);
         assert!(
-            db.pending_removals().unwrap().is_empty(),
-            "the ledger starts empty"
+            !after.contains_key(&deleted),
+            "the delete must remove the identity's node file"
         );
-        db.record_pending_removal("requirements.stakeholder.customer")
-            .unwrap();
-        db.record_pending_removal("requirements.stakeholder.customer")
-            .unwrap();
         assert_eq!(
-            db.pending_removals().unwrap(),
-            vec![PendingRemoval {
-                fqn: "requirements.stakeholder.customer".to_string()
-            }],
-            "the ledger holds the identity exactly once"
+            after.len(),
+            7,
+            "the delete leaves the seven other node files: {after:?}"
+        );
+        let customer =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "stakeholder", "customer")
+                .unwrap();
+        assert!(
+            !customer
+                .out
+                .iter()
+                .any(|e| e.kind == "requires" && e.target == "requirements.requirement.checkout"),
+            "the delete rewrites the neighbour's dangling out half"
+        );
+
+        // The database projection converged atomically with disk: the removed
+        // row and its edge are gone, the rewritten neighbour stays.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        assert!(
+            !db.has_node("requirements.requirement.checkout"),
+            "the deleted identity must be projected away"
+        );
+        assert_eq!(
+            count(
+                &db.db,
+                "MATCH (:Stakeholder)-[:Requires]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN count(*)"
+            ),
+            0,
+            "the deleted identity's edge must be projected away"
         );
         assert!(
             db.has_node("requirements.stakeholder.customer"),
-            "the ledger omits the node file; the durable row stays"
+            "the rewritten neighbour row stays"
         );
-        let held = db.node_files_from_db().unwrap();
+        // No session state is left behind: no dirty mark and no pending-removal
+        // identity — a write-through invocation has no pending set to flush.
+        let mut dirty = 0i64;
+        for label in load::node_labels() {
+            let Ok(out) = db.q(&format!(
+                "MATCH (n:{label}) WHERE n.updated = 1 RETURN count(*)"
+            )) else {
+                continue;
+            };
+            dirty += out
+                .lines()
+                .last()
+                .map(str::trim)
+                .and_then(|n| n.parse::<i64>().ok())
+                .unwrap_or(0);
+        }
+        assert_eq!(dirty, 0, "a write-through invocation leaves no dirty mark");
         assert_eq!(
-            held.len(),
-            nodes.len() - 1,
-            "the ledger-held identity is gone from the reconstruction: {held:#?}"
+            count(&db.db, "MATCH (n:PendingRemoval) RETURN count(*)"),
+            0,
+            "a write-through invocation leaves no pending-removal identity"
         );
+        drop(db);
+
+        // A completed write re-anchored the DB `Scan` row to its commit, so the
+        // worktree is fresh with no rescan.
         assert!(
-            !held.iter().any(|n| n.layer == "requirements"
-                && n.node_type == "stakeholder"
-                && n.name == "customer"),
-            "a ledger-held identity never reconstructs into the base"
-        );
-        let held_requirement = held
-            .iter()
-            .find(|n| n.layer == "requirements" && n.node_type == "requirement")
-            .unwrap();
-        assert!(
-            held_requirement
-                .in_edges
-                .iter()
-                .any(|e| e.kind == "requires" && e.source == "requirements.stakeholder.customer"),
-            "the omission drops the node file alone: the neighbour keeps its half"
+            git::is_fresh(&wt_apg),
+            "a completed write must leave the worktree fresh"
         );
 
-        drop(db);
         testutil::remove(&repo);
     }
 
@@ -2224,8 +2362,9 @@ mod e2e {
     /// REAL `db.lbug` (a hermetic scan of real source,
     /// `testutil::project_with_db`, plus a plan-writer-authored planned
     /// Implementation node the scan projects as a `status = planned` code row).
-    /// A database carrying pending state (an admitted-but-unsaved ledger
-    /// identity) captures as absent, never as a partial snapshot.
+    /// A completed per-invocation write leaves no pending state behind, so the
+    /// capture still succeeds over a database that just took a durable write —
+    /// never a partial snapshot.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn previous_scan_capture_yields_a_real_scan_snapshot() {
@@ -2330,15 +2469,41 @@ mod e2e {
         );
         drop(db);
 
-        // Pending state: an admitted-but-unsaved ledger identity never seeds a
-        // rebuild — the capture fails closed.
-        ArtifactDb::open(&wt_apg)
-            .unwrap()
-            .record_pending_removal("requirements.stakeholder.customer")
-            .unwrap();
+        // A completed per-invocation write leaves no pending state to fail the
+        // capture closed: the node-file write, exactly one commit and the
+        // projection happen in one critical section, so a committed write never
+        // seeds a rebuild from a partial snapshot.
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "global",
+            "constraint",
+            "captured",
+            "--body",
+            "a committed write",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
         assert!(
-            PreviousScan::capture(&wt_apg).is_none(),
-            "a database carrying pending state does not capture"
+            add.status.success(),
+            "per-invocation write: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let captured =
+            PreviousScan::capture(&wt_apg).expect("a committed write leaves no pending state");
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let (db_scanned, db_planned) = db.code_universes_from_db().unwrap();
+        drop(db);
+        assert_eq!(
+            captured.scanned, db_scanned,
+            "a committed write leaves the capture the database's own universes"
+        );
+        assert_eq!(
+            captured.planned, db_planned,
+            "a committed write leaves the capture the database's own planned set"
         );
 
         // An absent database has no previous scan either.
@@ -2352,14 +2517,15 @@ mod e2e {
     }
 
     /// Full-scan path: author a node set carrying arbitrary and empty-valued
-    /// property keys, an `Entity` with `kind = event`, edge
-    /// properties, and both edge halves; project it through a REAL scan
+    /// property keys, an `Entity` with `kind = event`, edge properties, and both
+    /// edge halves; project it through a REAL scan
     /// (`create_schema`/`build_load_files`, the `layers::ingest_tree` leg); then
-    /// assert `ArtifactDb::node_files_from_db` reconstructs it exactly and that
-    /// the database describes the authored nodes by identity.
+    /// assert the durable node-file read reconstructs it exactly and that the
+    /// database describes the authored nodes by identity, carrying each node's
+    /// full property map through the serialized-properties column.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn node_files_from_db_round_trips_every_property_through_a_full_scan() {
+    fn durable_node_files_round_trip_every_property_through_a_full_scan() {
         let (repo, wt, wt_apg) = testutil::project_with_db("lossless-full-scan");
         let expected = lossless_authored_nodes();
 
@@ -2370,71 +2536,145 @@ mod e2e {
         // durable tree (the canonical schema/load projection).
         testutil::scan_checkout(&wt).unwrap();
 
+        let reconstructed = layers::read_existing_nodes(&wt_apg).unwrap();
+        assert_lossless_round_trip(&reconstructed, &expected);
+
         let db = ArtifactDb::open(&wt_apg).unwrap();
-        let reconstructed = db.node_files_from_db().unwrap();
         assert!(
             db.has_node("domain.entity.order"),
             "the database must describe the authored entity"
         );
+        // The `Entity`'s `kind = event` has no dedicated column, so only the
+        // serialized-properties column can carry it — together with the
+        // arbitrary and empty-valued keys.
+        let mut entity_props = layers::NodeProperties::new();
+        entity_props.insert("kind".into(), "event".into());
+        entity_props.insert("owner".into(), String::new());
+        entity_props.insert("empty-meta".into(), String::new());
+        let row = db
+            .q("MATCH (n:Entity {fqn: 'domain.entity.order'}) RETURN n.properties")
+            .unwrap();
+        assert!(
+            row.contains(&layers::properties_json(&entity_props)),
+            "the Entity's full property map must project: {row}"
+        );
+        // An authored edge's property map rides its rel row.
+        let mut drive = layers::NodeProperties::new();
+        drive.insert("flavor".into(), "context-map".into());
+        drive.insert("empty-prop".into(), String::new());
+        let row = db
+            .q("MATCH (:Service {fqn: 'domain.service.billing'})-[r:DrivenBy]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN r.properties")
+            .unwrap();
+        assert!(
+            row.contains(&layers::properties_json(&drive)),
+            "the authored edge property must project: {row}"
+        );
+        // The code-targeted `implemented-by` keeps its authored properties and
+        // resolves to the scanned code node.
+        let mut impl_props = layers::NodeProperties::new();
+        impl_props.insert("version".into(), "1".into());
+        impl_props.insert("empty-prop".into(), String::new());
+        let row = db
+            .q("MATCH (:Component {fqn: 'solution.component.worker'})-[r:SpecImplementedBy]->(x) RETURN x.fqn, r.properties")
+            .unwrap();
+        assert!(row.contains("go.fixture.mod.Store"), "{row}");
+        assert!(
+            row.contains(&layers::properties_json(&impl_props)),
+            "the code-target edge property must project: {row}"
+        );
         drop(db);
-
-        assert_lossless_round_trip(&reconstructed, &expected);
 
         testutil::remove(&repo);
     }
 
-    /// Session incremental path: the same authored node set, projected through
-    /// the session's incremental reingest/merge path
-    /// (`ArtifactDb::reingest_layers_on`, the `merge_records` write-through the
-    /// live coordinator applies at admission) against a real `db.lbug`, must
-    /// reconstruct exactly — the serialized-properties column carries the full
-    /// map through `merge_node`/`merge_edge` (both halves).
+    /// The per-invocation write-through path: the same authored node set,
+    /// written and projected by ONE `write_project` invocation (node files,
+    /// exactly one commit, and the incremental projection) must round-trip
+    /// exactly — the serialized-properties column carries the full map through
+    /// the projection's node/edge merge.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn node_files_from_db_round_trips_every_property_through_the_session_merge() {
-        let (repo, _wt, wt_apg) = testutil::project_with_db("lossless-session-merge");
+    fn durable_node_files_round_trip_every_property_through_the_write_through() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("lossless-write-through");
         let expected = lossless_authored_nodes();
 
-        // The in-memory effective node set the session holds: build the
-        // validated ingest records and the exact touched-FQN delete set, then
-        // apply them through the already-held DB handle — the same call the
-        // coordinator makes at admission.
-        let db = ArtifactDb::open(&wt_apg).unwrap();
-        let (scanned, planned) = db.code_universes_from_db().unwrap();
-        let records = layers::ingest_nodes(&expected, &scanned, &planned).unwrap();
-        db.reingest_layers_on(&touched_fqns(&expected), &records)
-            .unwrap();
+        // One invocation writes every node file, lands exactly ONE commit and
+        // projects the whole set into its write handle.
+        let commits_before = testutil::commit_count(&wt);
+        layers::write_project(&wt_apg, &expected, &[]).unwrap();
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the whole authored set must land in exactly one commit"
+        );
 
-        let reconstructed = db.node_files_from_db().unwrap();
-        drop(db);
-
+        // The durable node files are the authored set, exactly.
+        let reconstructed = layers::read_existing_nodes(&wt_apg).unwrap();
         assert_lossless_round_trip(&reconstructed, &expected);
+
+        // The projection carries the full map: the serialized-properties column
+        // decodes each node map, and the authored edge property rides the rel
+        // row for both halves.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let mut entity_props = layers::NodeProperties::new();
+        entity_props.insert("kind".into(), "event".into());
+        entity_props.insert("owner".into(), String::new());
+        entity_props.insert("empty-meta".into(), String::new());
+        let row = db
+            .q("MATCH (n:Entity {fqn: 'domain.entity.order'}) RETURN n.properties")
+            .unwrap();
+        assert!(
+            row.contains(&layers::properties_json(&entity_props)),
+            "the Entity's full property map must project: {row}"
+        );
+        let mut drive = layers::NodeProperties::new();
+        drive.insert("flavor".into(), "context-map".into());
+        drive.insert("empty-prop".into(), String::new());
+        let row = db
+            .q("MATCH (:Service {fqn: 'domain.service.billing'})-[r:DrivenBy]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN r.properties")
+            .unwrap();
+        assert!(
+            row.contains(&layers::properties_json(&drive)),
+            "the authored edge property must project: {row}"
+        );
+        let mut impl_props = layers::NodeProperties::new();
+        impl_props.insert("version".into(), "1".into());
+        impl_props.insert("empty-prop".into(), String::new());
+        let row = db
+            .q("MATCH (:Component {fqn: 'solution.component.worker'})-[r:SpecImplementedBy]->(x) RETURN x.fqn, r.properties")
+            .unwrap();
+        assert!(row.contains("go.fixture.mod.Store"), "{row}");
+        assert!(
+            row.contains(&layers::properties_json(&impl_props)),
+            "the code-target edge property must project: {row}"
+        );
+        drop(db);
 
         testutil::remove(&repo);
     }
 
-    /// Partial-delta path: the lossless projection survives the session's
-    /// PARTIAL delta. A routed mutation projects only the
-    /// delta it changed — the written node's node+out-edge records via
-    /// `layers::tree::records_for_nodes`, extended with the in-edges read back
-    /// from the held DB (`ArtifactDb::incident_edge_records_from_db`) — through
-    /// `layers::write::project_only`.
+    /// Partial-delta path: the lossless projection survives the per-invocation
+    /// PARTIAL delta. A write-through `node update` rewrites only the node file
+    /// it changed (edge-preserving: the mutated node keeps both its own edges
+    /// and every incoming durable edge from a source the mutation does NOT
+    /// touch) and projects that delta into the worktree database.
     ///
     /// The authored set carries arbitrary/unknown AND empty-valued property keys
     /// on every node, an authored `driven-by` edge with its own property map on
     /// BOTH halves, and an incoming durable `contains` edge on the mutated node
-    /// from a source the mutation does NOT touch — so the incident-restore seam is
-    /// exercised with real edge properties. After a routed `node update` over the
-    /// property-carrying node through the live session, the held DB (read once the
-    /// session releases it) reconstructs the WHOLE node-file set exactly: the
-    /// updated body, the full properties map (arbitrary + empty-valued keys), the
-    /// `driven-by` properties on both halves, and the restored `contains` in-edge
-    /// with its properties.
+    /// from a source the mutation does NOT touch — so the edge-preserving merge
+    /// is exercised with real edge properties. After one `node update`
+    /// invocation over the property-carrying node, the durable node-file read
+    /// reconstructs the WHOLE node-file set exactly: the updated body, the full
+    /// properties map (arbitrary + empty-valued keys), the `driven-by`
+    /// properties on both halves, and the preserved `contains` in-edge with its
+    /// properties.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn node_files_from_db_round_trips_every_property_through_the_partial_delta() {
+    fn durable_node_files_round_trip_every_property_through_the_partial_delta() {
         let (repo, wt, wt_apg) = testutil::project_with_db("lossless-partial-delta");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
 
         let props = |pairs: &[(&str, &str)]| -> layers::NodeProperties {
             pairs
@@ -2463,7 +2703,7 @@ mod e2e {
 
         // The mutated node: arbitrary + empty-valued property keys, an out-edge
         // with properties, and an incoming durable edge from a source the
-        // mutation will NOT touch (so `incident_edge_records_from_db` restores it).
+        // mutation will NOT touch (so the edge-preserving update must keep it).
         let checkout = layers::NodeFile {
             layer: "requirements".to_string(),
             node_type: "requirement".to_string(),
@@ -2499,7 +2739,7 @@ mod e2e {
             )],
             in_edges: vec![
                 // Owned by the leaf Group below — the whole-model ownership
-                // minimum the SPEC §8.1 save boundary enforces.
+                // minimum (SPEC §8.1).
                 in_edge("contains", "domain.group.ordering", props(&[])),
                 // Realised by the worker Component — the §6 coverage minimum.
                 in_edge("realises", "solution.component.worker", props(&[])),
@@ -2587,15 +2827,13 @@ mod e2e {
             layers::write_node(&wt_apg, node).unwrap();
         }
         wt_commit_paths(&wt, &["apg/layers"], "seed the lossless node set");
-        // Project the durable tree through the canonical full scan; the session
-        // then owns this DB and reconstructs its base from it.
+        // Project the durable tree through the canonical full scan — the base
+        // the per-invocation update below starts from.
         testutil::scan_checkout(&wt).unwrap();
 
         // Precondition: the base full-scan projection already round-trips exactly.
         {
-            let db = ArtifactDb::open(&wt_apg).unwrap();
-            let base = db.node_files_from_db().unwrap();
-            drop(db);
+            let base = layers::read_existing_nodes(&wt_apg).unwrap();
             assert_lossless_round_trip(
                 &base,
                 &[
@@ -2611,16 +2849,11 @@ mod e2e {
             );
         }
 
-        // A routed `node update` through the live session: edge-preserving, so the
-        // delta is `records_for_nodes` (checkout + its `driven-by` out-edge) plus
-        // `incident_edge_records_from_db` (the `contains` in-edge from the
-        // untouched customer), applied via `project_only`.
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the session must be live"
-        );
-
+        // One per-invocation `node update`: edge-preserving, so the changed node
+        // file keeps its own `driven-by` out-edge and the incoming `requires`
+        // half from the untouched customer, and the projection applies that
+        // delta to the worktree database in the same critical section.
+        let commits_before = testutil::commit_count(&wt);
         let update = testutil::ApgCommand::new(&[
             "node",
             "update",
@@ -2635,37 +2868,18 @@ mod e2e {
         .output();
         assert!(
             update.status.success(),
-            "routed update must admit through the partial-delta path: {}",
+            "the update must admit through the partial-delta path: {}",
             String::from_utf8_lossy(&update.stderr)
         );
-
-        // The single durability point (the DB projection already landed at
-        // admission), then release the DB so the direct Rust read can take the
-        // lbug file lock a live session holds exclusively.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the update invocation must land exactly one commit"
         );
 
-        // The partial admission projection survives: the held DB reconstructs the
+        // The partial projection survives: the durable node-file read serves the
         // full authored set exactly, with the mutated body.
-        let db = ArtifactDb::open(&wt_apg).unwrap();
-        let reconstructed = db.node_files_from_db().unwrap();
-        drop(db);
+        let reconstructed = layers::read_existing_nodes(&wt_apg).unwrap();
 
         let expected_checkout = layers::NodeFile {
             body: "updated through the partial delta".to_string(),
@@ -2692,7 +2906,7 @@ mod e2e {
                 .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
                 .cloned()
                 .unwrap_or_else(|| {
-                    panic!("node_files_from_db is missing `{layer}.{node_type}.{name}`")
+                    panic!("the durable node-file read is missing `{layer}.{node_type}.{name}`")
                 })
         };
         let r = find("requirements", "requirement", "checkout");
@@ -2745,34 +2959,61 @@ mod e2e {
             props(&[("kind", "event"), ("owner", ""), ("empty-meta", "")])
         );
 
+        // The database projection carries the mutated body and both edge halves
+        // with their properties — the write-through projection converged with
+        // disk in the same critical section.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let row = db
+            .q("MATCH (r:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN r.body, r.properties")
+            .unwrap();
+        assert!(row.contains("updated through the partial delta"), "{row}");
+        assert!(row.contains("\"owner\":\"\""), "{row}");
+        let mut drive = NodeProperties::new();
+        drive.insert("flavor".into(), "context-map".into());
+        drive.insert("empty-prop".into(), String::new());
+        let row = db
+            .q("MATCH (:Service {fqn: 'domain.service.billing'})-[r:DrivenBy]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN r.properties")
+            .unwrap();
+        assert!(row.contains(&layers::properties_json(&drive)), "{row}");
+        let row = db
+            .q("MATCH (:Stakeholder {fqn: 'requirements.stakeholder.customer'})-[:Requires]->(:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(row.lines().last().map(str::trim), Some("1"), "{row}");
+        drop(db);
+
+        // No daemon, socket or pending set is left behind.
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
+        );
+
         testutil::remove(&repo);
     }
 
-    /// Live-session admission resolves the durable node set and the
-    /// `implemented-by` code universes SOLELY from the held `db.lbug`.
+    /// A per-invocation write's admission resolves the durable node set from the
+    /// system of record (`apg/layers/**`, read inside its own blocking write
+    /// critical section) and the `implemented-by` code universe from the branch
+    /// database — there is no daemon-held state and no `graph.jsonl` export.
     ///
-    /// While the session is live, BOTH disk-side sources the admission path
-    /// used to lean on are unavailable: the mutated node's
-    /// own `apg/layers/**` file (deleted) and the database's own path on disk
-    /// (`db.lbug` renamed aside — the session keeps serving the handle it
-    /// already holds). A routed mutation touching the node still admits — it
-    /// resolves the node's base content from the held DB, not the gone file —
-    /// and its `implemented-by` target validates against the DB's scanned code
-    /// universe: the REAL target (`go.fixture.mod.Store`, the scanned struct)
-    /// admits, while a bogus target is refused as spec drift, never silently
-    /// recorded unchecked/pending (which is what an empty universe would do). A
-    /// routed query then sees the projected change.
+    /// The whole-model-valid base (SPEC §4) carries an `implemented-by` claim on
+    /// its Component (`order-handler`) whose target is REAL scanned code from the
+    /// fixture payload (`go.fixture.mod.Store`). (1) An edge-preserving update of
+    /// the node re-validates that existing REAL target and is projected as soon
+    /// as the invocation returns. (2) A bogus `implemented-by` target is refused
+    /// as spec drift, never silently recorded unchecked/pending (which is what an
+    /// empty universe would do) — and lands no commit. (3) A separate reader sees
+    /// exactly the REAL implemented-by target, and only it.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn session_admission_resolves_the_node_set_and_code_universes_from_the_held_db() {
-        let (repo, wt, wt_apg) = testutil::project_with_db("db-only-admission");
+    fn per_invocation_admission_resolves_the_node_set_and_code_universes_from_the_branch_db() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("branch-db-admission");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
 
         // The whole-model-valid base (SPEC §4), plus an `implemented-by` claim on
         // its Component (`order-handler`) whose target is REAL scanned code from
-        // the fixture payload (`go.fixture.mod.Store`). The scan projects both
-        // into `db.lbug`, so the session holds them when the node file and the
-        // database path are later destroyed.
+        // the fixture payload (`go.fixture.mod.Store`). The write-through writes
+        // and projects the base; the scan rebuilds the branch database.
         let mut model = testutil::valid_model();
         model
             .iter_mut()
@@ -2787,9 +3028,16 @@ mod e2e {
         layers::write_project(&wt_apg, &model, &[]).unwrap();
         testutil::scan_checkout(&wt).unwrap();
 
-        // The DB precondition admission relies on: the Component is a durable
-        // node and the real target is in its scanned code universe.
+        // Admission's two sources: the system of record carries the Component's
+        // node file, and the branch database carries the scanned code universe.
         {
+            let nodes = layers::read_existing_nodes(&wt_apg).unwrap();
+            assert!(
+                nodes.iter().any(|n| n.layer == "solution"
+                    && n.node_type == "component"
+                    && n.name == "order-handler"),
+                "the system of record must carry the component"
+            );
             let db = ArtifactDb::open(&wt_apg).unwrap();
             assert!(db.has_node("solution.component.order-handler"));
             let (scanned, _planned) = db.code_universes_from_db().unwrap();
@@ -2798,42 +3046,10 @@ mod e2e {
                 "fixture scanned code: {scanned:?}"
             );
         }
+        let commits_before = testutil::commit_count(&wt);
 
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the session must be live"
-        );
-
-        // Destroy BOTH disk-side sources while the session is live: the mutated
-        // node's file and the database path. The database is renamed aside (an
-        // open handle keeps its inode/mmap live on macOS), never written with
-        // garbage — the session must serve what it already holds.
-        let node_file =
-            layers::node_file_path(&wt_apg, Layer::Solution, "component", "order-handler");
-        assert!(
-            node_file.exists(),
-            "the node file must exist before it is deleted"
-        );
-        std::fs::remove_file(&node_file).unwrap();
-        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
-        assert!(
-            db_path.exists(),
-            "the database must exist before it is moved aside"
-        );
-        std::fs::rename(
-            &db_path,
-            wt_apg.join(specs::TRANS).join("db.lbug.held-aside"),
-        )
-        .unwrap();
-        assert!(
-            !db_path.exists(),
-            "the database path must be gone while the session holds the handle"
-        );
-
-        // (1) A routed mutation touching the (file-deleted) node still admits:
-        // its base content and its `implemented-by` ref resolve from the held DB.
-        // The edge-preserving update re-validates the existing REAL target.
+        // (1) The edge-preserving update admits and re-validates the existing
+        // REAL target, landing its node file and exactly one commit.
         let update = testutil::ApgCommand::new(&[
             "node",
             "update",
@@ -2841,30 +3057,35 @@ mod e2e {
             "component",
             "order-handler",
             "--body",
-            "updated against the held db",
+            "updated against the branch db",
         ])
         .cwd(&wt)
         .env("HOME", home.to_str().unwrap())
         .output();
         assert!(
             update.status.success(),
-            "a routed mutation touching a node whose file is gone must admit from the DB: {}",
+            "the update must resolve its base and REAL implemented-by target: {}",
             String::from_utf8_lossy(&update.stderr)
         );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the update invocation must land exactly one commit"
+        );
 
-        // The projected update is visible to a routed reader while the session is
-        // still live and nothing has been saved.
+        // The projected update is visible to a separate reader as soon as the
+        // invocation returns.
         let body = testutil::spawn_apg(
             &[
                 "query",
                 "MATCH (n:Component {fqn: 'solution.component.order-handler'}) \
-                 WHERE n.body = 'updated against the held db' RETURN count(*)",
+                 WHERE n.body = 'updated against the branch db' RETURN count(*)",
             ],
             &wt,
         );
         assert!(
             body.status.success(),
-            "routed body read: {}",
+            "body read: {}",
             String::from_utf8_lossy(&body.stderr)
         );
         assert_eq!(
@@ -2873,13 +3094,16 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "the routed update must be projected into the live DB at admission"
+            "the update must be projected inside its own invocation"
         );
 
-        // (2) The held DB's scanned universe drives validation: a bogus
+        // (2) The branch database's scanned universe drives validation: a bogus
         // `implemented-by` target is refused as drift, NOT recorded
         // unchecked/pending (an empty universe would classify it Pending and
-        // admit it).
+        // admit it) — and the refusal lands no commit and no file.
+        let component_file =
+            layers::node_file_path(&wt_apg, Layer::Solution, "component", "order-handler");
+        let bytes_before = std::fs::read(&component_file).unwrap();
         let bogus = testutil::ApgCommand::new(&[
             "edge",
             "add",
@@ -2904,9 +3128,19 @@ mod e2e {
             bogus_err.contains("go.fixture.mod.Absent"),
             "the refusal must name the bogus target: {bogus_err}"
         );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "a refused edge must not commit"
+        );
+        assert_eq!(
+            std::fs::read(&component_file).unwrap(),
+            bytes_before,
+            "a refused edge must not rewrite the node file"
+        );
 
-        // (3) The routed read sees the projected change: the REAL implemented-by
-        // target, and only it (the refused bogus edge was never recorded).
+        // (3) A separate read sees exactly the REAL implemented-by target (the
+        // refused bogus edge was never recorded).
         let query = testutil::spawn_apg(
             &[
                 "query",
@@ -2917,7 +3151,7 @@ mod e2e {
         );
         assert!(
             query.status.success(),
-            "routed edge read: {}",
+            "edge read: {}",
             String::from_utf8_lossy(&query.stderr)
         );
         let stdout = String::from_utf8_lossy(&query.stdout);
@@ -2929,57 +3163,38 @@ mod e2e {
         assert_eq!(
             rows,
             vec!["c.fqn", "go.fixture.mod.Store"],
-            "the routed read must see exactly the projected REAL implemented-by target"
+            "the read must see exactly the projected REAL implemented-by target"
         );
 
-        // Clean release: save is the single durability point (a dirty `session
-        // end` would refuse), then end the session.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        // No daemon, socket or pending set is left behind.
         assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
     }
 
-    /// `apg session save` is the database delta contract over the held
-    /// `db.lbug`. Each admission applies its projection to the worktree
-    /// database at once, marks exactly the node rows it changed dirty, and
-    /// records each removed identity on the pending-removal ledger — while
-    /// `apg/layers/**` and git stay at the last saved state. One
-    /// `apg session save` then:
-    ///   * writes exactly the marked rows at their `apg/layers` node-file paths;
-    ///   * removes exactly the ledger identity's node file;
-    ///   * leaves every untouched node file byte-identical; and
-    ///   * lands the whole set in exactly ONE git commit,
-    ///
-    /// then drains the pending state — no marked row and no ledger identity —
-    /// so the database a following save reads is clean.
-    ///
-    /// A routed read afterwards agrees: the held DB reports the same admitted
-    /// bodies and the deleted node is gone, so disk and DB converge.
+    /// A durable write is ONE per-invocation critical section: each invocation
+    /// writes its node file, lands exactly ONE commit and projects the change
+    /// into the worktree database before it returns — there is no save step, no
+    /// buffer and no pending set. Across a run of two adds, an update and a
+    /// delete:
+    ///   * every written node file appears with its admitted body;
+    ///   * the deleted identity's node file is removed and exactly its authored
+    ///     neighbours are rewritten;
+    ///   * every untouched node file stays byte-identical;
+    ///   * each invocation lands exactly one normal single-parent commit whose
+    ///     delta is exactly that mutation's files; and
+    ///   * a read-only invocation afterwards agrees with disk.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
-    fn session_save_flushes_buffered_writes_and_delete_as_is_in_one_commit() {
-        let (repo, wt, wt_apg) = testutil::project_with_db("session-save-flush");
+    fn per_invocation_writes_and_delete_land_one_commit_each_and_project_atomically() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("per-invocation-flush");
         let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
+        std::fs::create_dir_all(&home).unwrap();
 
-        // Runs one routed mutation through the live session, asserting success.
+        // Runs one durable mutation as its own invocation, asserting success.
         let run = |args: &[&str]| {
             let out = testutil::ApgCommand::new(args)
                 .cwd(&wt)
@@ -2992,32 +3207,11 @@ mod e2e {
             );
         };
 
-        // Reads a routed query's data rows through the live session (the CSV
-        // header dropped, sorted so the comparison is order-independent).
-        let routed_rows = |cypher: &str| -> Vec<String> {
-            let out = testutil::spawn_apg(&["query", cypher], &wt);
-            assert!(
-                out.status.success(),
-                "routed read `{cypher}`: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            let mut rows: Vec<String> = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .skip(1)
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect();
-            rows.sort();
-            rows
-        };
-
         // A durable baseline: `survivor` (a later update target), `doomed` (a
         // later delete target) and `bystander` (which the run never touches, so
-        // the save must leave its node file byte-identical), added through the
-        // session and saved. Lone `global.constraint` anchors keep the model
-        // whole-model-valid (SPEC §8.1): the Constraint type carries no
-        // cardinality minimums.
+        // every later invocation must leave its node file byte-identical). Lone
+        // `global.constraint` anchors keep the model whole-model-valid (SPEC
+        // §8.1): the Constraint type carries no cardinality minimums.
         for name in ["survivor", "doomed", "bystander"] {
             run(&[
                 "node",
@@ -3029,16 +3223,10 @@ mod e2e {
                 &format!("{name} baseline"),
             ]);
         }
-        let seed_save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            seed_save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&seed_save.stderr)
-        );
 
-        // The save is measured against the saved base: a node file's path
-        // relative to `apg/layers/` (the snapshot key, and the same path the
-        // save commit records), the base's bytes, commit count and HEAD.
+        // The base is measured as a node file's path relative to `apg/layers/`
+        // (the snapshot key, and the same path each write commit records), and
+        // its bytes.
         let layers_root = wt_apg.join(layers::LAYERS_DIR);
         let layer_path = |name: &str| -> String {
             layers::node_file_path(&wt_apg, Layer::Global, "constraint", name)
@@ -3053,21 +3241,10 @@ mod e2e {
         assert_eq!(
             saved.len(),
             3,
-            "the three-node base must be on disk before the run: {saved:?}"
+            "the three-node base must be on disk: {saved:?}"
         );
-        let commits_before = testutil::commit_count(&wt);
-        let saved_head = git2::Repository::open(&wt)
-            .unwrap()
-            .head()
-            .unwrap()
-            .peel_to_commit()
-            .unwrap()
-            .id()
-            .to_string();
-
-        // The run's write set — two adds and an update over a durable node —
-        // plus an accepted delete of a durable node. The expected node files are
-        // the rows the database holds once admission has projected them.
+        // The expected node files each write must land: the rows the invocation
+        // serialises.
         let bare = |name: &str, body: &str| layers::NodeFile {
             layer: "global".to_string(),
             node_type: "constraint".to_string(),
@@ -3081,136 +3258,153 @@ mod e2e {
         let kept_b = bare("kept-b", "kept b");
         let updated_survivor = bare("survivor", "survivor updated");
 
-        run(&[
-            "node",
-            "add",
-            "global",
-            "constraint",
-            "kept-a",
-            "--body",
-            "kept a",
-        ]);
-        run(&[
-            "node",
-            "add",
-            "global",
-            "constraint",
-            "kept-b",
-            "--body",
-            "kept b",
-        ]);
-        run(&[
-            "node",
-            "update",
-            "global",
-            "constraint",
-            "survivor",
-            "--body",
-            "survivor updated",
-        ]);
-        run(&["node", "rm", "global", "constraint", "doomed"]);
-
-        // Before save nothing is durable: `apg/layers/**` is still the saved
-        // base and no commit landed.
-        assert_eq!(
-            snap(&layers_root),
-            saved,
-            "an admission must not write a node file before save"
-        );
-        assert_eq!(
-            testutil::commit_count(&wt),
-            commits_before,
-            "an admission must not create a commit before save"
-        );
-        assert_eq!(
-            git2::Repository::open(&wt)
+        // One durable mutation as its own invocation: assert exactly the named
+        // node files changed and exactly one normal single-parent commit landed
+        // carrying that delta — the per-invocation durability point.
+        let mutate = |args: &[&str], changed: &[String], removed: &[String]| {
+            let before = snap(&layers_root);
+            let commits_before = testutil::commit_count(&wt);
+            let head_before = git2::Repository::open(&wt)
                 .unwrap()
                 .head()
                 .unwrap()
                 .peel_to_commit()
                 .unwrap()
                 .id()
-                .to_string(),
-            saved_head,
-            "git history must stay at the last saved state until save"
-        );
+                .to_string();
+            run(args);
+            let after = snap(&layers_root);
+            let changed_set: BTreeSet<String> = after
+                .iter()
+                .filter(|(path, bytes)| before.get(*path) != Some(*bytes))
+                .map(|(path, _)| path.clone())
+                .collect();
+            assert_eq!(
+                changed_set,
+                changed.iter().cloned().collect::<BTreeSet<_>>(),
+                "apg {args:?} must rewrite exactly the named node files"
+            );
+            let removed_set: BTreeSet<String> = before
+                .keys()
+                .filter(|path| !after.contains_key(*path))
+                .cloned()
+                .collect();
+            assert_eq!(
+                removed_set,
+                removed.iter().cloned().collect::<BTreeSet<_>>(),
+                "apg {args:?} must remove exactly the named node files"
+            );
+            assert_eq!(
+                testutil::commit_count(&wt),
+                commits_before + 1,
+                "apg {args:?} must land exactly one commit"
+            );
+            let repo = git2::Repository::open(&wt).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(
+                head.parent_count(),
+                1,
+                "the write commit is a normal single-parent commit"
+            );
+            let parent = head.parent(0).unwrap();
+            assert_eq!(
+                parent.id().to_string(),
+                head_before,
+                "the write commit's parent must be the prior HEAD"
+            );
+            let prefix = format!("{}/{}", specs::LAYOUT, layers::LAYERS_DIR);
+            let committed: BTreeSet<String> = repo
+                .diff_tree_to_tree(
+                    Some(&parent.tree().unwrap()),
+                    Some(&head.tree().unwrap()),
+                    None,
+                )
+                .unwrap()
+                .deltas()
+                .filter_map(|delta| {
+                    let path = delta.new_file().path()?;
+                    let rel = path.strip_prefix(&prefix).ok()?;
+                    Some(rel.to_string_lossy().into_owned())
+                })
+                .collect();
+            let expected: BTreeSet<String> =
+                changed.iter().chain(removed.iter()).cloned().collect();
+            assert_eq!(
+                committed, expected,
+                "apg {args:?} must carry exactly the named files in its one commit"
+            );
+        };
 
-        // The held database's pending state IS save's write and delete set: the
-        // run marked exactly the three rows it changed, and left exactly the
-        // removed identity on the pending-removal ledger.
-        assert_eq!(
-            routed_rows("MATCH (n:Constraint) WHERE n.updated = 1 RETURN n.fqn"),
-            vec![
-                "global.constraint.kept-a",
-                "global.constraint.kept-b",
-                "global.constraint.survivor",
+        mutate(
+            &[
+                "node",
+                "add",
+                "global",
+                "constraint",
+                "kept-a",
+                "--body",
+                "kept a",
             ],
-            "the run must mark exactly the rows it changed"
+            &[layer_path("kept-a")],
+            &[],
         );
-        assert_eq!(
-            routed_rows("MATCH (n:PendingRemoval) RETURN n.fqn"),
-            vec!["global.constraint.doomed"],
-            "the delete must leave exactly the removed identity on the ledger"
+        mutate(
+            &[
+                "node",
+                "add",
+                "global",
+                "constraint",
+                "kept-b",
+                "--body",
+                "kept b",
+            ],
+            &[layer_path("kept-b")],
+            &[],
+        );
+        mutate(
+            &[
+                "node",
+                "update",
+                "global",
+                "constraint",
+                "survivor",
+                "--body",
+                "survivor updated",
+            ],
+            &[layer_path("survivor")],
+            &[],
+        );
+        mutate(
+            &["node", "rm", "global", "constraint", "doomed"],
+            &[],
+            &[layer_path("doomed")],
         );
 
-        // The single durability point: exactly the marked rows at their
-        // `apg/layers` paths plus the ledger identity's file, in ONE commit.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-
-        // EXACTLY the marked rows were written: the tree differs from the saved
-        // base at those paths alone, so every untouched node file is still
-        // byte-identical and no file appeared for an untouched identity.
+        // Each written node file is exactly its admitted body; the delete's file
+        // is gone; every untouched file (the bystander) stayed byte-identical.
+        for expected in [&kept_a, &kept_b, &updated_survivor] {
+            assert_eq!(
+                layers::read_node_file(&wt_apg, Layer::Global, "constraint", &expected.name)
+                    .unwrap(),
+                *expected,
+                "the on-disk node file for `{}` must be its admitted row",
+                expected.name
+            );
+        }
         let after = snap(&layers_root);
-        let marked: BTreeSet<String> = ["kept-a", "kept-b", "survivor"]
-            .iter()
-            .map(|name| layer_path(name))
-            .collect();
-        let changed: BTreeSet<String> = after
-            .iter()
-            .filter(|(node_path, bytes)| saved.get(*node_path) != Some(*bytes))
-            .map(|(node_path, _)| node_path.to_string())
-            .collect();
-        assert_eq!(
-            changed, marked,
-            "save must write exactly the marked rows at their apg/layers paths"
-        );
-
-        // … and the ledger identity's file alone was removed.
-        let removed: BTreeSet<String> = saved
-            .keys()
-            .filter(|node_path| !after.contains_key(*node_path))
-            .cloned()
-            .collect();
-        assert_eq!(
-            removed,
-            BTreeSet::from([layer_path("doomed")]),
-            "save must remove exactly the ledger identity's node file"
+        assert!(
+            !after.contains_key(&layer_path("doomed")),
+            "the delete must remove the identity's node file"
         );
         assert_eq!(
             after.get(&layer_path("bystander")),
             saved.get(&layer_path("bystander")),
             "every untouched node file must stay byte-identical"
         );
+        assert_eq!(after.len(), 4, "the run leaves four node files: {after:?}");
 
-        // Each written node file is the row save serialised: the admitted body
-        // lands at its path verbatim.
-        for expected in [&kept_a, &kept_b, &updated_survivor] {
-            assert_eq!(
-                layers::read_node_file(&wt_apg, Layer::Global, "constraint", &expected.name)
-                    .unwrap(),
-                *expected,
-                "the on-disk node file for `{}` must be its database row",
-                expected.name
-            );
-        }
-
-        // The held DB agrees with disk: routed reads report the admitted bodies
-        // and the deleted node is gone.
+        // A read-only invocation agrees with disk: the admitted bodies are
+        // projected and the deleted node is gone.
         let assert_body = |fqn: &str, body: &str| {
             let query = format!(
                 "MATCH (n:Constraint {{fqn: '{fqn}'}}) WHERE n.body = '{body}' RETURN count(*)"
@@ -3218,7 +3412,7 @@ mod e2e {
             let out = testutil::spawn_apg(&["query", &query], &wt);
             assert!(
                 out.status.success(),
-                "routed read of {fqn}: {}",
+                "read of {fqn}: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
             assert_eq!(
@@ -3227,7 +3421,7 @@ mod e2e {
                     .last()
                     .map(str::trim),
                 Some("1"),
-                "the held DB must report the admitted body for {fqn}"
+                "the database must report the admitted body for {fqn}"
             );
         };
         assert_body("global.constraint.kept-a", "kept a");
@@ -3243,7 +3437,7 @@ mod e2e {
         );
         assert!(
             gone.status.success(),
-            "routed read: {}",
+            "read: {}",
             String::from_utf8_lossy(&gone.stderr)
         );
         assert_eq!(
@@ -3252,120 +3446,83 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("0"),
-            "the held DB must agree the deleted node is gone"
+            "the database must agree the deleted node is gone"
         );
 
-        // The whole pending set landed in ONE commit: exactly one new
-        // single-parent commit whose delta is the marked rows plus the removed
-        // file — nothing else.
-        assert_eq!(
-            testutil::commit_count(&wt),
-            commits_before + 1,
-            "the whole pending set must land in exactly one commit"
-        );
-        let head_repo = git2::Repository::open(&wt).unwrap();
-        let head = head_repo.head().unwrap().peel_to_commit().unwrap();
-        assert_eq!(
-            head.parent_count(),
-            1,
-            "the save commit is a normal single-parent commit"
-        );
-        let parent = head.parent(0).unwrap();
-        assert_eq!(
-            parent.id().to_string(),
-            saved_head,
-            "the save commit's parent must be the last saved state"
-        );
-        let layers_prefix = format!("{}/{}", specs::LAYOUT, layers::LAYERS_DIR);
-        let committed: BTreeSet<String> = head_repo
-            .diff_tree_to_tree(
-                Some(&parent.tree().unwrap()),
-                Some(&head.tree().unwrap()),
-                None,
-            )
-            .unwrap()
-            .deltas()
-            .filter_map(|delta| {
-                let path = delta.new_file().path()?;
-                let rel = path.strip_prefix(&layers_prefix).ok()?;
-                Some(rel.to_string_lossy().into_owned())
-            })
-            .collect();
-        let mut expected_commit = marked.clone();
-        expected_commit.insert(layer_path("doomed"));
-        assert_eq!(
-            committed, expected_commit,
-            "the one save commit must carry exactly the marked rows and the removed file"
-        );
-
-        // Clean release: save drained the pending state (a pending `end` would
-        // refuse).
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
-        // The database's pending state is empty afterwards: both the dirty
-        // marks and the pending-removal ledger, read back through the same two
-        // reads save consumes.
+        // The database carries no session state after the run: no dirty mark and
+        // no pending-removal identity — a per-invocation write has no pending set
+        // to drain.
         let db = ArtifactDb::open(&wt_apg).unwrap();
-        assert!(
-            db.dirty_node_files_from_db().unwrap().is_empty(),
-            "save must clear every dirty mark"
-        );
-        assert!(
-            db.pending_removals().unwrap().is_empty(),
-            "save must empty the pending-removal ledger"
+        let mut dirty = 0i64;
+        for label in load::node_labels() {
+            let Ok(out) = db.q(&format!(
+                "MATCH (n:{label}) WHERE n.updated = 1 RETURN count(*)"
+            )) else {
+                continue;
+            };
+            dirty += out
+                .lines()
+                .last()
+                .map(str::trim)
+                .and_then(|n| n.parse::<i64>().ok())
+                .unwrap_or(0);
+        }
+        assert_eq!(dirty, 0, "a per-invocation write leaves no dirty mark");
+        assert_eq!(
+            count(&db.db, "MATCH (n:PendingRemoval) RETURN count(*)"),
+            0,
+            "a per-invocation write leaves no pending-removal identity"
         );
         drop(db);
+
+        // Each write re-anchored the DB `Scan` row to its own commit, so the
+        // worktree is fresh with no rescan; and no daemon/socket exists.
+        assert!(
+            git::is_fresh(&wt_apg),
+            "a completed write must leave the worktree fresh"
+        );
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
+        );
 
         testutil::remove(&repo);
     }
 
-    /// After `apg session save` over a NON-EMPTY buffer, the durability commit
-    /// moves HEAD and save's DB `Scan`-row refresh is
-    /// observable:
+    /// A per-invocation durable write commits ONCE, which moves HEAD, and its
+    /// DB `Scan`-row refresh is observable as soon as the invocation returns:
     ///   * the database's own `Scan` row names the NEW HEAD, with the new
-    ///     state's cleanliness / content-identity key, read through a routed
-    ///     query while the session still owns `db.lbug`;
-    ///   * exactly one `Scan` row carries the SAME sha — read through a routed
-    ///     query while the session still owns `db.lbug`; and
+    ///     state's cleanliness / content-identity key, read through a separate
+    ///     read-only query invocation;
+    ///   * exactly one `Scan` row carries the SAME sha; and
     ///   * the worktree is NOT stale: the full freshness check (DB `Scan` row +
-    ///     authored/transient digest vs the tree) succeeds after the session
-    ///     releases, with no rescan.
+    ///     authored/transient digest vs the tree) succeeds with no rescan.
     ///
-    /// This pins save's EXISTING refresh — no new mechanism, no `graph.jsonl`
-    /// lead is read or written, and no `apg scan` is run to reach the fresh
-    /// state.
+    /// This pins the write-through's refresh — the commit and the `Scan`-row
+    /// re-anchor happen in the SAME critical section; no new mechanism, no
+    /// `graph.jsonl` lead is read or written, and no `apg scan` is run to reach
+    /// the fresh state.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/git/process); run via cargo test-e2e"]
-    fn session_save_reanchors_scan_meta_to_the_new_head() {
-        let (repo, wt, wt_apg) = testutil::project_with_db("session-save-reanchor");
+    fn per_invocation_write_reanchors_scan_meta_to_the_new_head() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("write-reanchor");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
 
-        // The scan that built the DB recorded the pre-save HEAD in the DB's own
-        // `Scan` row (read before a live session takes the database's lock).
-        let before = git::db_recorded_scan(&wt_apg).expect("pre-save DB Scan row");
-        let before_head = git::git_state(&wt_apg).sha.expect("pre-save HEAD");
+        // The scan that built the DB recorded the pre-write HEAD in the DB's own
+        // `Scan` row.
+        let before = git::db_recorded_scan(&wt_apg).expect("pre-write DB Scan row");
+        let before_head = git::git_state(&wt_apg).sha.expect("pre-write HEAD");
         assert_eq!(
             before.sha, before_head,
-            "the fixture scan's DB Scan row must name the pre-save HEAD"
+            "the fixture scan's DB Scan row must name the pre-write HEAD"
         );
         let commits_before = testutil::commit_count(&wt);
 
-        let session = testutil::start_session_process(&wt, &home);
-
-        // Route one durable mutation: applied to the worktree database at
-        // admission (projected) but NOT durable until save. A lone
-        // `global.constraint` keeps the model whole-model-valid (SPEC §8.1).
+        // One durable mutation as its own invocation: its write and exactly one
+        // commit land, then the projection and the Scan-row re-anchor follow in
+        // the same critical section. A lone `global.constraint` keeps the model
+        // whole-model-valid (SPEC §8.1).
         let add = testutil::ApgCommand::new(&[
             "node",
             "add",
@@ -3373,52 +3530,38 @@ mod e2e {
             "constraint",
             "reanchored",
             "--body",
-            "a buffered durable node",
+            "a written-through durable node",
         ])
         .cwd(&wt)
         .env("HOME", home.to_str().unwrap())
         .output();
         assert!(
             add.status.success(),
-            "routed node add: {}",
+            "node add: {}",
             String::from_utf8_lossy(&add.stderr)
         );
         assert_eq!(
             testutil::commit_count(&wt),
-            commits_before,
-            "a buffered mutation must not commit before save"
-        );
-
-        // The single durability point: one commit, which moves HEAD.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "session save: {}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            testutil::commit_count(&wt),
             commits_before + 1,
-            "save must land exactly one durability commit"
+            "the write invocation must land exactly one commit"
         );
 
-        // The commit moved HEAD; capture the new state save re-anchored to.
+        // The commit moved HEAD; capture the state the write re-anchored to.
         let new_state = git::git_state(&wt_apg);
-        let new_head = new_state.sha.clone().expect("post-save HEAD");
-        assert_ne!(new_head, before_head, "save's commit must move HEAD");
+        let new_head = new_state.sha.clone().expect("post-write HEAD");
+        assert_ne!(new_head, before_head, "the write's commit must move HEAD");
 
         // (1) The database's own `Scan` row names the NEW HEAD (and the new
-        // state's cleanliness / content-identity key), read through a routed
-        // query while the session still owns db.lbug — no `graph.jsonl` lead is
-        // read or written.
+        // state's cleanliness / content-identity key), read through a separate
+        // read-only query invocation — no `graph.jsonl` lead is read or written.
         let row_query = "MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key";
-        let routed_row = testutil::spawn_apg(&["query", row_query], &wt);
+        let row_read = testutil::spawn_apg(&["query", row_query], &wt);
         assert!(
-            routed_row.status.success(),
-            "routed Scan-row read: {}",
-            String::from_utf8_lossy(&routed_row.stderr)
+            row_read.status.success(),
+            "Scan-row read: {}",
+            String::from_utf8_lossy(&row_read.stderr)
         );
-        let stdout = String::from_utf8_lossy(&routed_row.stdout);
+        let stdout = String::from_utf8_lossy(&row_read.stdout);
         let mut stdout_lines = stdout.lines();
         let _header = stdout_lines.next();
         let cells: Vec<&str> = stdout_lines
@@ -3442,76 +3585,64 @@ mod e2e {
             "the database's Scan row must re-anchor its content-identity key"
         );
 
-        // (2) The HELD DB's own Scan row names the SAME sha, read through a
-        // routed query while the session still owns db.lbug.
+        // (2) Exactly one `Scan` row carries the SAME sha.
         let scan_query = format!("MATCH (s:Scan) WHERE s.git_sha = '{new_head}' RETURN count(*)");
-        let routed = testutil::spawn_apg(&["query", &scan_query], &wt);
+        let scan = testutil::spawn_apg(&["query", &scan_query], &wt);
         assert!(
-            routed.status.success(),
-            "routed Scan read: {}",
-            String::from_utf8_lossy(&routed.stderr)
+            scan.status.success(),
+            "Scan read: {}",
+            String::from_utf8_lossy(&scan.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
+            String::from_utf8_lossy(&scan.stdout)
                 .lines()
                 .last()
                 .map(str::trim),
             Some("1"),
-            "the held DB's Scan row must carry the new HEAD"
+            "exactly one Scan row must carry the new HEAD"
         );
 
-        // (3) Release the session, then the FULL freshness check (DB `Scan` row +
-        // authored/transient digest vs the tree) succeeds — the worktree is not
-        // stale and needs no rescan.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "session end: {}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let coord = session.child.wait_with_output().unwrap();
-        assert!(
-            coord.status.success(),
-            "session process: {}",
-            String::from_utf8_lossy(&coord.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "the session must have released the DB"
-        );
+        // (3) The FULL freshness check (DB `Scan` row + authored/transient digest
+        // vs the tree) succeeds — the worktree is fresh and needs no rescan.
         assert!(
             git::is_fresh(&wt_apg),
-            "a saved worktree must not be stale after the re-anchor"
+            "a completed write must leave the worktree fresh"
         );
         assert!(
             !git::is_stale(&wt_apg),
-            "the staleness gate must not report the saved worktree stale"
+            "the staleness gate must not report the written worktree stale"
+        );
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         testutil::remove(&repo);
     }
 
-    /// The session's PARTIAL DELTA converges to the state a FULL SCAN REBUILD
-    /// produces — no residue, no lost incident edge.
+    /// The per-invocation PARTIAL DELTA converges to the state a FULL SCAN
+    /// REBUILD produces — no residue, no lost incident edge.
     ///
-    /// A live session is seeded with durable authored nodes (one carrying an
+    /// The branch is seeded with durable authored nodes (one carrying an
     /// incoming durable edge from an untouched source and one reviewed by a
     /// `Feedback -[:Reviews]->` pair, plus a plan whose `Gates`/`Satisfies` rows
-    /// the start seed projects), then admits N routed mutations spanning every
-    /// mutation shape: two adds, an update of the reviewed node, an `edge add`,
-    /// an `edge rm`, and a `node rm`. A set of ROUTED queries captures the full
-    /// session DB state; `session save` + `session end` make the buffer durable
-    /// and a full scan rebuilds `db.lbug` from source. The SAME queries against
-    /// the rebuilt DB must return the identical rows — every authored durable
-    /// table, their durable edges, and the transient `Feedback`/`Reviews`/
-    /// `Gates`/`Satisfies` rows. The named assertions pin the two failure modes:
-    /// the `rm` left no residue, and the untouched `requires`/`Reviews` in-edges
-    /// on a mutated node survived the partial delta.
+    /// the seed projects), then N separate write invocations span every mutation
+    /// shape: two adds, an update of the reviewed node, an `edge add`, an
+    /// `edge rm`, and a `node rm`. Each invocation writes its node files, commits
+    /// once and projects, so a set of read-only queries captures the projected
+    /// database state; a full scan then rebuilds `db.lbug` from source. The SAME
+    /// queries against the rebuilt DB must return the identical rows — every
+    /// authored durable table, their durable edges, and the transient
+    /// `Feedback`/`Reviews`/`Gates`/`Satisfies` rows. The named assertions pin the
+    /// two failure modes: the `rm` left no residue, and the untouched
+    /// `requires`/`Reviews` in-edges on a mutated node survived the partial
+    /// delta.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/git/process); run via cargo test-e2e"]
-    fn session_partial_delta_converges_to_a_full_rebuild() {
-        let (repo, wt, wt_apg) = testutil::project_with_db("session-db-only-convergence");
+    fn per_invocation_partial_delta_converges_to_a_full_rebuild() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("write-through-convergence");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
 
         let props = |pairs: &[(&str, &str)]| -> NodeProperties {
             pairs
@@ -3651,7 +3782,7 @@ mod e2e {
                 NodeProperties::default(),
             )],
         );
-        // An Entity requires `kind` (SPEC §4 node rule), and the routed `rm`
+        // An Entity requires `kind` (SPEC §4 node rule), and the `rm` below
         // rewrites `order`'s file, so it must carry one.
         order
             .properties
@@ -3691,7 +3822,7 @@ mod e2e {
                 NodeProperties::default(),
             )],
         );
-        // doomed — owned by `order`; its routed `rm` rewrites `order` to drop
+        // doomed — owned by `order`; its `rm` rewrites `order` to drop
         // the incident `contains` half: the no-residue half.
         let doomed = nf(
             "domain",
@@ -3755,9 +3886,9 @@ mod e2e {
         }
 
         // The transient review pair + the plan's Gates/Satisfies rows are
-        // written into `.trans` BEFORE the session starts, so the start seed
-        // projects them into the held DB (and the full rebuild re-projects the
-        // same records).
+        // written into `.trans` BEFORE the scan, so the scan projects them into
+        // the branch DB (and every write invocation re-merges them, so the full
+        // rebuild reproduces the same records).
         let feedback_path = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
         specs::write_jsonl(
             &feedback_path,
@@ -3821,14 +3952,13 @@ mod e2e {
         .unwrap();
 
         // Commit + scan: the branch DB carries the durable nodes and the
-        // transient rows the session's held DB starts from.
+        // transient rows the write-through invocations start from.
         wt_commit_paths(&wt, &["apg/layers"], "seed the convergence node set");
         testutil::scan_checkout(&wt).unwrap();
 
-        // The routed queries whose FULL results the session state and the
-        // rebuilt state must agree on: every authored durable table, their
-        // durable edges, and the transient Feedback/Reviews/Gates/Satisfies
-        // rows.
+        // The queries whose FULL results the projected state and the rebuilt
+        // state must agree on: every authored durable table, their durable edges,
+        // and the transient Feedback/Reviews/Gates/Satisfies rows.
         let queries: &[&str] = &[
             "MATCH (n:Requirement) RETURN n.fqn, n.body ORDER BY n.fqn",
             "MATCH (n:Stakeholder) RETURN n.fqn, n.body ORDER BY n.fqn",
@@ -3842,7 +3972,7 @@ mod e2e {
             "MATCH (a:PlanPhase)-[r:Satisfies]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
         ];
 
-        // One routed durable mutation, asserting success.
+        // One durable mutation, as its own invocation, asserting success.
         let run = |args: &[&str]| {
             let out = testutil::ApgCommand::new(args)
                 .cwd(&wt)
@@ -3855,8 +3985,7 @@ mod e2e {
             );
         };
         // Runs one query, returning its full result rows (header included, empty
-        // lines dropped). While the session is live this routes to the held DB;
-        // after `end` it reads the rebuilt DB directly — the same query text.
+        // lines dropped) — a read-only invocation over the projected DB.
         let read = |q: &str| -> Vec<String> {
             let out = testutil::spawn_apg(&["query", q], &wt);
             assert!(
@@ -3871,15 +4000,9 @@ mod e2e {
                 .collect()
         };
 
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&wt_apg),
-            "the session must be live"
-        );
-
-        // (1) N routed mutations: adds, an update of the reviewed node (which
-        // also carries the untouched incoming `contains`), an `edge add`, an
-        // `edge rm`, and a `node rm`.
+        // (1) N separate write invocations: adds, an update of the reviewed node
+        // (which also carries the untouched incoming `requires`), an `edge add`,
+        // an `edge rm`, and a `node rm`.
         run(&[
             "node",
             "add",
@@ -3915,7 +4038,7 @@ mod e2e {
             "requirements.requirement.checkout",
         ]);
         // Keep the added requirement rooted and the added service owned, so the
-        // assembled model satisfies the whole-model minimums at save (SPEC §8.1).
+        // assembled model satisfies the whole-model minimums (SPEC §8.1).
         run(&[
             "edge",
             "add",
@@ -3954,38 +4077,15 @@ mod e2e {
         ]);
         run(&["node", "rm", "domain", "value", "doomed"]);
 
-        // Capture the live session DB state through ROUTED queries.
+        // Capture the projected database state through read-only queries.
         let captured: Vec<(&str, Vec<String>)> = queries.iter().map(|q| (*q, read(q))).collect();
 
-        // (2) The single durability point, the session release, then a full scan
-        // rebuild of `db.lbug` from source.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&wt_apg),
-            "the session must have released the DB"
-        );
-
+        // (2) A full scan rebuild of `db.lbug` from source — every write above is
+        // already durable and projected, so the rebuild observes the same state.
         testutil::scan_checkout(&wt).unwrap();
 
         // (3) The SAME queries against the rebuilt DB must equal the captured
-        // session state, row for row: the partial delta converged to the full
+        // projected state, row for row: the partial delta converged to the full
         // rebuild on every durable table and every transient Reviews/Gates/
         // Satisfies row.
         for (q, before) in &captured {
@@ -4010,7 +4110,7 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("0"),
-            "the routed rm must leave no residue after the rebuild"
+            "the rm must leave no residue after the rebuild"
         );
         let incident = testutil::spawn_apg(
             &[
