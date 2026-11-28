@@ -140,7 +140,7 @@ fn orphan_notes(db: &ArtifactDb) -> i64 {
     total - with_edge
 }
 
-/// The authored node set the phase-4 lossless round-trip pins.
+/// The authored node set the lossless round-trip pins.
 ///
 /// One node of every durable type, each carrying arbitrary *unknown* property
 /// keys and empty-valued keys; the `Entity` carries `kind = event` (a durable
@@ -1003,8 +1003,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-7: the central write funnel keeps its guard (defence in
-    /// depth). On the MAIN checkout both the project-scoped plan target
+    /// The central write funnel keeps its guard (defence in depth). On the
+    /// MAIN checkout both the project-scoped plan target
     /// (membership guard) and the shared `_invariants.jsonl` target (universal
     /// guard) refuse, naming branch `main`, and neither file is created.
     #[test]
@@ -1054,9 +1054,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-08 task-2: `code_universes` classifies Real (the branch
-    /// database's scanned code) / Pending (a planned FQN the plan store
-    /// declares but the scanned universe lacks) / Drift (present in neither).
+    /// `code_universes` classifies Real (the branch database's scanned code) /
+    /// Pending (a planned FQN the plan store declares but the scanned universe
+    /// lacks) / Drift (present in neither).
     ///
     /// The database is the one code-identity source: the fixture is a real
     /// hermetic scan (`testutil::project_with_db`) whose plan store declares a
@@ -1115,8 +1115,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-23: the four Implementation kinds a code FQN **records in
-    /// `db.lbug`** are what a caller materialises it at — one row of each kind
+    /// The four Implementation kinds a code FQN **records in `db.lbug`** are
+    /// what a caller materialises it at — one row of each kind
     /// (module, file, struct, function) is present, and the recorded kinds are
     /// exactly those four (no other kind is invented).
     ///
@@ -1171,8 +1171,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-08 task-1: the Implementation kind a code FQN **records in the
-    /// previous `db.lbug`** is what a caller materialises it at — a planned
+    /// The Implementation kind a code FQN **records in the previous
+    /// `db.lbug`** is what a caller materialises it at — a planned
     /// row keeps its own label's kind (`struct`) and never falls back to
     /// `module` — and an FQN the database does not record stays **absent** from
     /// the map, so no `module` kind is invented for it.
@@ -1231,8 +1231,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-19: a routed durable write through a live session is
-    /// projected into the session-held `db.lbug` IMMEDIATELY — a separate
+    /// A routed durable write through a live session is projected into the
+    /// session-held `db.lbug` IMMEDIATELY — a separate
     /// routed reader sees the mutation before any save — but it is BUFFERED,
     /// not durable. `apg/layers/**` stays untouched and no commit lands until
     /// `apg session save`. Save is the single durability point: it writes the
@@ -1349,8 +1349,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-7: pin the three planned-node states against the exact-FQN
-    /// projection delta.
+    /// Pin the three planned-node states against the exact-FQN projection
+    /// delta.
     ///
     /// (1) A planned-only FQN with NO `<project>/` prefix disappears immediately
     /// when the plan's planned declaration is removed, and the code graph is
@@ -1485,8 +1485,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-8: the projection delta converges with no residue —
-    /// add-then-remove and remove-then-add of the same node both converge, with
+    /// The projection delta converges with no residue — add-then-remove and
+    /// remove-then-add of the same node both converge, with
     /// no duplicate/stale rows and no orphan edges.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
@@ -1598,8 +1598,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-10 (int): a forced mid-apply re-ingest failure rolls the
-    /// projection back to the prior state and the mutation reports failure. The
+    /// Int: a forced mid-apply re-ingest failure rolls the projection back to
+    /// the prior state and the mutation reports failure. The
     /// durable file write landed FIRST (commit-then-project), so the committed
     /// JSONL holds the new state while the projection stays prior — the DB is
     /// deliberately behind the tree, which the corrected staleness model refuses
@@ -1688,8 +1688,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-3 (acceptance): the next scan rebuilds `db.lbug` from
-    /// source and every metadata mutation stays visible in the query index.
+    /// Acceptance: the next scan rebuilds `db.lbug` from source and every
+    /// metadata mutation stays visible in the query index.
     ///
     /// The mutation is projected write-through first (immediately queryable),
     /// then the index is deleted and the real post-code scan leg re-run: the
@@ -1756,8 +1756,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-5: `ArtifactDb::node_files_from_db` reconstructs the
-    /// durable node-file set from a REAL `db.lbug` — the metadata nodes were
+    /// `ArtifactDb::node_files_from_db` reconstructs the durable node-file set
+    /// from a REAL `db.lbug` — the metadata nodes were
     /// written as node files, projected into the DB by a real scan (the
     /// canonical `layers::ingest_tree` → `create_schema`/`build_load_files`
     /// path), and read back.
@@ -1768,11 +1768,10 @@ mod e2e {
     /// authored metadata (`scope`) serialized in the properties column), and
     /// BOTH halves of every AUTHORED-pair edge. The code-targeted edge kinds
     /// (`implemented-by`, `details`) carry only the source's out half — a code
-    /// identity has no node file. Phase 4 added the serialized-properties
-    /// column, so the authored `driven-by` edge property now round-trips
-    /// on both halves; the exact full-fidelity round-trip (arbitrary keys,
-    /// `Entity` `kind`, the session's incremental merge path) is pinned by
-    /// phase 4's own e2e task.
+    /// identity has no node file. The serialized-properties column carries the
+    /// authored `driven-by` edge property on both halves; the exact
+    /// full-fidelity round-trip (arbitrary keys, `Entity` `kind`, the session's
+    /// incremental merge path) is pinned by the round-trip tests below.
     ///
     /// The database working state the next save reads is pinned over the same
     /// real `db.lbug`: the pending-removal ledger (`record_pending_removal` →
@@ -2219,8 +2218,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-06 task-9: `PreviousScan::capture` is the previous database's
-    /// snapshot over **one** read — the scanned and planned code universes,
+    /// `PreviousScan::capture` is the previous database's snapshot over
+    /// **one** read — the scanned and planned code universes,
     /// every code FQN's recorded kind, and the `Agent` roster — captured from a
     /// REAL `db.lbug` (a hermetic scan of real source,
     /// `testutil::project_with_db`, plus a plan-writer-authored planned
@@ -2352,8 +2351,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-17 (full-scan path): author a node set carrying arbitrary
-    /// and empty-valued property keys, an `Entity` with `kind = event`, edge
+    /// Full-scan path: author a node set carrying arbitrary and empty-valued
+    /// property keys, an `Entity` with `kind = event`, edge
     /// properties, and both edge halves; project it through a REAL scan
     /// (`create_schema`/`build_load_files`, the `layers::ingest_tree` leg); then
     /// assert `ArtifactDb::node_files_from_db` reconstructs it exactly and that
@@ -2384,8 +2383,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-17 (session incremental path): the same authored node set,
-    /// projected through the session's incremental reingest/merge path
+    /// Session incremental path: the same authored node set, projected through
+    /// the session's incremental reingest/merge path
     /// (`ArtifactDb::reingest_layers_on`, the `merge_records` write-through the
     /// live coordinator applies at admission) against a real `db.lbug`, must
     /// reconstruct exactly — the serialized-properties column carries the full
@@ -2414,8 +2413,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-14 (partial-delta path): phase-4's lossless projection
-    /// survives the session's PARTIAL delta. A routed mutation projects only the
+    /// Partial-delta path: the lossless projection survives the session's
+    /// PARTIAL delta. A routed mutation projects only the
     /// delta it changed — the written node's node+out-edge records via
     /// `layers::tree::records_for_nodes`, extended with the in-edges read back
     /// from the held DB (`ArtifactDb::incident_edge_records_from_db`) — through
@@ -2749,11 +2748,11 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-3: live-session admission resolves the durable node set and
-    /// the `implemented-by` code universes SOLELY from the held `db.lbug`.
+    /// Live-session admission resolves the durable node set and the
+    /// `implemented-by` code universes SOLELY from the held `db.lbug`.
     ///
-    /// While the session is live, BOTH disk-side sources the pre-phase-2
-    /// admission path could have leaned on are unavailable: the mutated node's
+    /// While the session is live, BOTH disk-side sources the admission path
+    /// used to lean on are unavailable: the mutated node's
     /// own `apg/layers/**` file (deleted) and the database's own path on disk
     /// (`db.lbug` renamed aside — the session keeps serving the handle it
     /// already holds). A routed mutation touching the node still admits — it
@@ -2957,8 +2956,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-15: `apg session save` is the database delta contract over
-    /// the held `db.lbug`. Each admission applies its projection to the worktree
+    /// `apg session save` is the database delta contract over the held
+    /// `db.lbug`. Each admission applies its projection to the worktree
     /// database at once, marks exactly the node rows it changed dirty, and
     /// records each removed identity on the pending-removal ledger — while
     /// `apg/layers/**` and git stay at the last saved state. One
@@ -3331,8 +3330,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-6: after `apg session save` over a NON-EMPTY buffer, the
-    /// durability commit moves HEAD and save's DB `Scan`-row refresh is
+    /// After `apg session save` over a NON-EMPTY buffer, the durability commit
+    /// moves HEAD and save's DB `Scan`-row refresh is
     /// observable:
     ///   * the database's own `Scan` row names the NEW HEAD, with the new
     ///     state's cleanliness / content-identity key, read through a routed
@@ -3492,8 +3491,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-15: the session's PARTIAL DELTA converges to the state a
-    /// FULL SCAN REBUILD produces — no residue, no lost incident edge.
+    /// The session's PARTIAL DELTA converges to the state a FULL SCAN REBUILD
+    /// produces — no residue, no lost incident edge.
     ///
     /// A live session is seeded with durable authored nodes (one carrying an
     /// incoming durable edge from an untouched source and one reviewed by a
@@ -4047,9 +4046,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// scan-force phase-01 task-4 (acceptance, scratch /tmp repo, CANDIDATE
-    /// binary only — `global.constraint.no-real-project-test`): `apg scan
-    /// --force` is a TRUE REBUILD. It discards `db.lbug` (with its `.wal`/`.shm`
+    /// Scan-force acceptance (scratch /tmp repo, CANDIDATE binary only —
+    /// `global.constraint.no-real-project-test`): `apg scan --force` is a TRUE
+    /// REBUILD. It discards `db.lbug` (with its `.wal`/`.shm`
     /// sidecars) through the one shared discard and rebuilds it from freshly
     /// emitted facts, while every `apg/layers/**` node file and every source
     /// file stays byte-identical and the shared fact store's per-worktree
@@ -4193,8 +4192,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// phase-05 task-2: the pre-scan ordering regression. A fresh project
-    /// worktree seeds only the `.trans` marker and has no `db.lbug`. The
+    /// The pre-scan ordering regression. A fresh project worktree seeds only
+    /// the `.trans` marker and has no `db.lbug`. The
     /// validated multi-file `write_project` refuses there (its code-identity
     /// source is the database), while the single-file `write_node` authors
     /// `apg/layers/**` without one — and that authored node must survive into

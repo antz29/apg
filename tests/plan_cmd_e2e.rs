@@ -1,5 +1,4 @@
-//! Relocated e2e tests for `apg plan` (from `src/plan_cmd.rs`'s inline
-//! `#[cfg(test)] mod tests`). Real I/O only; every test is `#[ignore]`d and
+//! E2E tests for `apg plan`. Real I/O only; every test is `#[ignore]`d and
 //! runs through `cargo test-e2e`.
 
 mod common;
@@ -738,7 +737,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// feedback-4: while a live session owns the worktree `db.lbug`, `is_fresh`
+    /// While a live session owns the worktree `db.lbug`, `is_fresh`
     /// SHORT-CIRCUITS its DB reads and evaluates only the `recorded_scan`/git
     /// half. The reason is concrete: a routed durable mutation is projected into
     /// the session-held DB at admission but is NOT durable until `apg session
@@ -4627,7 +4626,7 @@ mod e2e {
     /// `--force` (its details edge and an orphaned Note go with it, while a
     /// `Feedback` record and its `Reviews` reference survive the removal of the
     /// node it reviews — a review item is closed by a reviewer, never dropped
-    /// by target removal, so `feedback-persists-across-target-loss`). A plan
+    /// by target removal). A plan
     /// `--force` cascade removes every plan-family record but leaves the store
     /// file in place while surviving Feedback exists.
     #[test]
@@ -4992,7 +4991,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-7 task-3 (E2E, top-level dispatch): `apg plan update` preservation
+    /// E2E, top-level dispatch: `apg plan update` preservation
     /// — a phase title/deliverable update keeps its task `Contains` edges and
     /// replaces `Satisfies`/`Gates` with set-semantics (cycle-refusing); a task
     /// update keeps `status` + incident `Reviews` and re-validates its stored
@@ -5490,7 +5489,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-7 task-4 (E2E, top-level dispatch): a mid-cascade failure during
+    /// E2E, top-level dispatch: a mid-cascade failure during
     /// `apg plan rm --force` leaves the on-disk plan file byte-identical — the
     /// whole-record rewrite is atomic, never a half-deleted plan.
     #[test]
@@ -5523,7 +5522,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-2 (E2E): on the MAIN checkout — with the invoked project
+    /// E2E: on the MAIN checkout — with the invoked project
     /// absent from main's own `.trans/plans` store — every mutating plan verb
     /// refuses with the project-context refusal, never `no plan for project`,
     /// because the dispatcher guards BEFORE any verb core loads the store. The
@@ -5609,11 +5608,11 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-3 (E2E): on the MAIN checkout `apg plan render <project>
+    /// E2E: on the MAIN checkout `apg plan render <project>
     /// --out -` reads MAIN's own `.trans/plans` store and prints its content —
     /// the strategy, the phase-table row, the phase heading and the grouped
-    /// task line — the content remainder beyond phase-3 task-2's exit-0 read
-    /// control. Seeded with the plain JSONL primitive
+    /// task line — the content remainder beyond the earlier main-checkout
+    /// exit-0 read control. Seeded with the plain JSONL primitive
     /// (`write_jsonl_and_reingest` refuses on main by design); no `mutation
     /// refused` text.
     #[test]
@@ -5682,7 +5681,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-3 (E2E), half (a): `apg plan verify` stays branch-scoped —
+    /// E2E, half (a): `apg plan verify` stays branch-scoped —
     /// on the main checkout it refuses through the `require_membership` inside
     /// `plan_verify_at` (which precedes `load_plan`), naming the branch framing
     /// and never `no plan for project`.
@@ -5711,7 +5710,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-3 (E2E), half (b): the merge half needs no second green
+    /// E2E, half (b): the merge half needs no second green
     /// round-trip (project_cmd's e2e owns the happy path and the merge-strength
     /// refusal). The non-duplicating proof is a merge refused by the plan-store
     /// blocker class: an open Feedback in the WORKTREE's plan store makes
@@ -5790,8 +5789,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-06 task-1 (e2e): the verify gate's planned-node realization
-    /// verdict across a SEPARATE, non-root cargo package.
+    /// E2E: the verify gate's planned-node realization verdict across a
+    /// SEPARATE, non-root cargo package.
     ///
     /// Fixture (agentfrontend-shaped): root crate `rootcrate` plus a nested
     /// non-root package at `src/agentlib` whose cargo `[package] name` is
@@ -5817,8 +5816,8 @@ mod e2e {
     ///
     /// The planned records are realized through a DIFFERENT FQN than their
     /// placeholder (bare authored vs rooted scanned), and the newly landed
-    /// file carries fresh facts in the delta, so the known Phase-7
-    /// cached-fact masking defect (a placeholder admitted ahead of a cached
+    /// file carries fresh facts in the delta, so the known cached-fact
+    /// masking defect (a placeholder admitted ahead of a cached
     /// real declaration at the SAME FQN) cannot apply here.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch git repo/spawned apg/rust frontend/db.lbug/plan store); run via cargo test-e2e"]
@@ -6123,8 +6122,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-2 (e2e): a `modifies` of a planned Implementation node is
-    /// licensed only by another task's `creates` of the same FQN in a STRICTLY
+    /// E2E: a `modifies` of a planned Implementation node is licensed only by
+    /// another task's `creates` of the same FQN in a STRICTLY
     /// earlier phase, and the licensed plan passes only once the node is
     /// realized in the branch graph.
     ///
@@ -6420,8 +6419,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-21 (e2e): `plan verify` opens the branch database in the
-    /// **read-only** class — it coexists with a read-only handle already held in
+    /// E2E: `plan verify` opens the branch database in the **read-only** class
+    /// — it coexists with a read-only handle already held in
     /// this process (a read-write open would fail or conflict) — and against a
     /// present-but-unreadable branch database it refuses naming the database and
     /// the underlying cause, with no waited/budget or another-process contention
@@ -6512,7 +6511,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-1 (acceptance): on one scratch `/tmp` branch checkout, soak
+    /// Acceptance: on one scratch `/tmp` branch checkout, soak
     /// `apg plan verify` for 20 rounds beside a **looped**, read-only `apg query`
     /// reader — never a one-shot. The reader starts before verify, is joined
     /// only after verify returns, and every round must show an observed overlap

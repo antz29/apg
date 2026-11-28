@@ -1,6 +1,5 @@
-//! Relocated e2e tests for the `layers` module (from `src/layers.rs`'s inline
-//! `#[cfg(test)] mod tests`). Real I/O only; every test is `#[ignore]`d and
-//! runs through `cargo test-e2e`.
+//! E2E tests for the `layers` module. Real I/O only; every test is
+//! `#[ignore]`d and runs through `cargo test-e2e`.
 
 mod common;
 
@@ -898,8 +897,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-6: the node-file write path keeps its guard (defence in
-    /// depth) — `write_project` from the MAIN checkout refuses with the
+    /// The node-file write path keeps its guard (defence in depth) —
+    /// `write_project` from the MAIN checkout refuses with the
     /// project-context wording naming branch `main`, and writes neither a node
     /// file nor a commit.
     #[test]
@@ -1145,8 +1144,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// R16 AC: an in/out edge in one node file without the matching out/in
-    /// edge in the other endpoint's file FAILS the scan — the pairing
+    /// An in/out edge in one node file without the matching out/in edge in the
+    /// other endpoint's file FAILS the scan — the pairing
     /// mismatch is caught at ingestion, not silently tolerated.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
@@ -1189,9 +1188,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// R16 AC (edge properties): the SAME endpoints with DIFFERENT edge
-    /// properties is a mismatch — a match requires identical properties —
-    /// and fails the scan.
+    /// The SAME endpoints with DIFFERENT edge properties is a mismatch — a
+    /// match requires identical properties — and fails the scan.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_same_endpoints_with_different_edge_properties() {
@@ -1400,8 +1398,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-7: decoupled validation at the MUTATION level — the
-    /// worktree database is the ONE code-identity source.
+    /// Decoupled validation at the MUTATION level — the worktree database is
+    /// the ONE code-identity source.
     ///
     /// - With no `db.lbug`, a mutation is refused with its own scan-first error
     ///   and nothing is written: there is no unvalidated-record path.
@@ -1528,8 +1526,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-1: the dedicated MULTI-file home of the scan-first
-    /// refusal. A freshly started project worktree has no `db.lbug`; a
+    /// The dedicated MULTI-file home of the scan-first refusal. A freshly
+    /// started project worktree has no `db.lbug`; a
     /// two-node-file validated model (a component `implemented-by` scanned code
     /// plus the service it `realises`) must refuse through `write_project`'s
     /// `validate_change` → `artifacts::code_universes` read, naming the missing
@@ -1580,10 +1578,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-14 (int): commit-then-project ordering — the SINGLE
-    /// ordering-test home (phase-02 task-5 points here). An injectable one-shot
-    /// hook fires at the commit→project boundary; a returned `Err` stands in
-    /// for a crash at that boundary.
+    /// Int: commit-then-project ordering — the SINGLE ordering-test home. An
+    /// injectable one-shot hook fires at the commit→project boundary; a
+    /// returned `Err` stands in for a crash at that boundary.
     ///
     /// **Window 2 — die BEFORE the commit**: the mutation appears in NEITHER
     /// the durable store NOR the projection, and no commit lands.
@@ -1661,8 +1658,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-9: projection-equals-sources as a TWO-WAY equality over
-    /// NODES AND EDGES — `db − sources = ∅` AND `sources − db = ∅` — covering
+    /// Projection-equals-sources as a TWO-WAY equality over NODES AND EDGES —
+    /// `db − sources = ∅` AND `sources − db = ∅` — covering
     /// every authored edge kind (Contains/Requires/DrivenBy/Realises/
     /// SpecImplementedBy/Uses/Represents/IsRole/Reads/Writes/Details) plus the
     /// transient Satisfies/Gates/Reviews, with no duplicate rows per
