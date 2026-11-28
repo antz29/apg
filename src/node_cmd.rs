@@ -137,33 +137,34 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
     };
     let apg_root = require_apg_root()?;
     // Every edge mutation is a project-context act (R3). The guard runs BEFORE
-    // the live-session requirement and before either endpoint is looked up, so
-    // on a main checkout `edge add`, `edge update` and `edge rm` refuse as a
-    // context error — never as the session requirement or a missing node/edge.
+    // the session opens and before either endpoint is looked up, so on a main
+    // checkout `edge add`, `edge update` and `edge rm` refuse as a context
+    // error — never as a missing-database or absent-node/edge error.
     crate::git::require_project_context(&apg_root)?;
-    // Durable mutations are mandatory-session (spec
-    // `requirements.requirement.cli-session-required-for-durable-mutations` /
-    // `requirements.constraint.cli-session-mandatory`): when a session is live
-    // it owns the DB and the database working state it admits mutations into,
-    // and performs the whole durable write in receive order, so the mutation is
-    // forwarded and the flock is never acquired here (the session holds it for
-    // its life). A failed forward is an ERROR — there is no silent mid-flight
-    // fallback, which could double-apply a mutation that already landed. With no
-    // live session we REFUSE: the direct path is gone, and the caller must open
-    // a session.
-    if !session::live_session(&apg_root) {
-        anyhow::bail!(
-            "a live session is required for durable mutations — run `apg session start` first"
-        );
-    }
-    let forwarded = session::Coordinator::forward_mutation(&apg_root, "edge", args)?;
-    let out = forwarded.output;
-    println!("{out}");
-    // Write-time warnings ride back in the session reply; print them on the
-    // caller's stderr after the output (one per line, verbatim — the strings
-    // already begin `apg: warning: …`). They are advisory only and never block
-    // or alter the write's result.
-    for warning in &forwarded.warnings {
+    // A durable mutation runs through one per-invocation session: open the
+    // worktree database read-only, upgrade under the blocking worktree lock
+    // (waiting behind a concurrent writer, never `EAGAIN`), build the
+    // read-modify-write over the committed node set INSIDE that critical
+    // section, write → commit → project through the held write handle, then
+    // release back to read-only. There is no liveness probe, no routed forward
+    // and no at-most-once client id: the blocking lock serialises writers.
+    let mut session = session::Session::open(&apg_root)?;
+    let guard = session.upgrade_to_write()?;
+    let applied = build_change(&apg_root, "edge", args).and_then(|change| {
+        session.write_through(&guard, &change.writes, &change.deletes)?;
+        Ok(change)
+    });
+    // Release the lock even when the change failed to build or write, keeping
+    // the original error primary; a release failure only surfaces on a write
+    // that otherwise succeeded.
+    let released = session.release_write(guard);
+    let change = applied?;
+    released?;
+    println!("{}", change.message);
+    // Write-time advisories print on the caller's stderr after the output —
+    // one per line, verbatim, already beginning `apg: warning: …`. They are
+    // advisory only and never block or alter the write's result.
+    for warning in &change.warnings {
         eprintln!("{warning}");
     }
     Ok(())
