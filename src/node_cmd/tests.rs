@@ -59,4 +59,47 @@ mod unit {
         assert!(err.contains("present: [owner-team]"), "{err}");
         assert!(!err.contains("did you mean"), "{err}");
     }
+
+    /// `node update` admission resolves existence against the supplied committed
+    /// model and validates the merged candidate with the write funnel's per-node
+    /// rules: a merge that breaks an `Entity`'s `kind` is refused in the builder,
+    /// before anything is written, and the node's own presence in the model never
+    /// trips the uniqueness rule an in-place overwrite must not.
+    #[test]
+    fn node_update_change_validates_the_merged_candidate_against_the_model() {
+        let base = vec![NodeFile {
+            layer: "domain".to_string(),
+            node_type: "entity".to_string(),
+            name: "order".to_string(),
+            body: "The order aggregate.".to_string(),
+            properties: BTreeMap::from([("kind".to_string(), "entity".to_string())]),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        }];
+        let err = node_update_change(
+            &base,
+            &av(&["domain", "entity", "order", "--property", "kind=bogus"]),
+        )
+        .err()
+        .expect("an invalid merged candidate is refused")
+        .to_string();
+        assert!(
+            err.contains("Entity `kind` `bogus` is invalid"),
+            "the kind rule refuses the merged candidate: {err}"
+        );
+
+        let change = node_update_change(
+            &base,
+            &av(&["domain", "entity", "order", "--body", "The placed order."]),
+        )
+        .unwrap();
+        assert_eq!(change.writes.len(), 1, "one node file is written");
+        assert_eq!(change.writes[0].body, "The placed order.");
+        assert_eq!(
+            change.writes[0].properties.get("kind").map(String::as_str),
+            Some("entity"),
+            "an omitted property is preserved"
+        );
+        assert_eq!(change.message, "Updated node domain.entity.order");
+    }
 }

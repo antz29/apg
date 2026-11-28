@@ -352,14 +352,23 @@ fn node_add_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change>
 /// identity (`layer`/`type`/`name`) and every out/in edge are immutable;
 /// properties MERGE with an explicit unset. Refuses an absent node.
 ///
-/// The node's existence and base content resolve against the caller-supplied
-/// `base` node set alone (the session's
-/// `ArtifactDb::node_files_from_db`-reconstructed database working state, or the
-/// direct path's on-disk node set): an identity is present exactly when the base
-/// carries it, and the refusal and the edge-preserving body/properties merge are
-/// applied over that node rather than a fresh disk read. Pure list logic — it
-/// never reads `apg/layers/**` and never probes `node_file_path`, so it cannot
-/// observe a node file the caller's base does not carry.
+/// The node's existence and base content resolve against the supplied
+/// **committed model** — the node set a per-invocation write reads from
+/// `apg/layers/**` (the system of record) inside its write critical section —
+/// never a live session's database working state or an earlier admission's
+/// pending rows
+/// (`requirements.requirement.admission-checks-the-model-not-persistence`): an
+/// identity is present exactly when the model carries it, and the refusal and
+/// the edge-preserving body/properties merge are applied over that node rather
+/// than a fresh disk read. The merged candidate then passes the same per-node
+/// structural rules the write funnel applies ([`layers::validate_node`]: name
+/// allowlist, type-in-layer, kind attributes, uniqueness) against that model —
+/// an update overwrites its identity in place, so its own presence is removed
+/// from the uniqueness universe rather than tripping it. The whole-model
+/// minimums stay with `apg spec lint` and the merge gate
+/// (`domain.constraint.admission-holds-no-persistence-invariant`). Pure list
+/// logic — it never reads `apg/layers/**` and never probes `node_file_path`, so
+/// it cannot observe a node file the model does not carry.
 fn node_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
@@ -371,8 +380,8 @@ fn node_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Chan
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
     let body = p.get("body");
-    // Resolve the node's existence and base content from the caller-supplied base
-    // alone: the identity is present exactly when the base carries it, and the
+    // Resolve the node's existence and base content from the committed model
+    // alone: the identity is present exactly when the model carries it, and the
     // refusal and the edge-preserving body/properties merge are applied over that
     // node rather than a fresh disk read.
     let Some(mut updated) = base_node(base, layer, &pos[1], &pos[2]) else {
@@ -382,6 +391,25 @@ fn node_update_change(base: &[NodeFile], args: &[String]) -> anyhow::Result<Chan
         updated.body = body.to_string();
     }
     updated.properties = edit_properties(&updated.properties, &p)?;
+    // The model's identity universe the shared node rules resolve uniqueness
+    // over — the updated identity is removed because an in-place overwrite must
+    // not trip its own uniqueness rule (mirrors `validate_change_over`).
+    let mut universe: BTreeSet<(Layer, String, String)> = base
+        .iter()
+        .map(|n| {
+            Ok((
+                resolve_layer(&n.layer)?,
+                n.node_type.clone(),
+                n.name.clone(),
+            ))
+        })
+        .collect::<anyhow::Result<_>>()?;
+    universe.remove(&(layer, pos[1].clone(), pos[2].clone()));
+    // Structural admission against that same model — the identical rule set and
+    // wording the write funnel's `validate_change_over` applies, so an invalid
+    // merged candidate (e.g. an `--property kind=…` that breaks a node's kind
+    // attribute) is refused before anything is written.
+    layers::validate_node(layer, &pos[1], &pos[2], &updated.properties, &universe)?;
     // Advisory-only wording warning (R1/R5): when the supplied `--body` carries
     // likely-flagged wording, carry the shared advisory in the returned
     // [`Change`] but let the update proceed unchanged — the author decides. Only
