@@ -9,10 +9,10 @@ use crate::find_apg_root;
 use crate::session;
 use crate::specs;
 
-/// `apg query "<cypher>"`: open `apg/.trans/db.lbug` read-only and print the
-/// result as CSV with a header row. When `APG_PROJECT` binds a registry row the
-/// read targets that project's worktree database; otherwise it is the database
-/// found by walking up from cwd.
+/// `apg query "<cypher>"`: hold a read-only per-invocation session on
+/// `apg/.trans/db.lbug` and print the result as CSV with a header row. When
+/// `APG_PROJECT` binds a registry row the read targets that project's worktree
+/// database; otherwise it is the database found by walking up from cwd.
 pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let json = args.first().is_some_and(|a| a == "--json");
     let query = if json {
@@ -44,43 +44,36 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
         format!("{query};")
     };
 
-    // Read routing: while a session owns db.lbug, route the read
-    // through it so a separate reader sees the current state with no lock error
-    // and without waiting for the session to end. With no live session the DB
-    // file is not held and a normal (read-only) direct open serves the read —
-    // that is the read-your-writes guarantee.
-    if session::live_session(&read_apg) {
-        let output = session::forward_query(&read_apg, &query, json)?;
-        println!("{output}");
-        return Ok(());
+    // A bound read targets the registered project's own worktree and nothing
+    // else, so a missing database there is refused rather than served from
+    // another checkout. The pre-check mirrors `open_project_db`'s wording, the
+    // refusal its project-bound callers have always reported.
+    if let Some(row) = &bound {
+        let db_path = read_apg.join(specs::TRANS).join("db.lbug");
+        if !db_path.exists() {
+            anyhow::bail!(
+                "refused: project `{}` at worktree `{}` has no database `{}`. Fix: run `apg scan` inside `{}`.",
+                row.name,
+                row.worktree.display(),
+                db_path.display(),
+                row.worktree.display()
+            );
+        }
     }
 
-    // Recovery: with no live session, run the shared reclaim
-    // unconditionally before the read-only open. It reclaims a dead socket and
-    // classifies the database: one carrying pending state (an
-    // admitted-but-unsaved row, or a pending-removal identity) or a table shape
-    // this binary does not recognise is UNCLEAN, and is discarded and rebuilt
-    // from the durable `apg/layers/**` node files by the full scan (the same
-    // recovery `abort` drives) rather than served. A clean, shape-compatible
-    // database falls through to the direct read below with no scan, and an
-    // absent database is still refused there. A session that appears after the
-    // routing check makes the reclaim refuse — the fail-closed outcome.
-    session::Coordinator::reclaim_stale_socket(&read_apg)?;
-
-    let db = match &bound {
-        Some(row) => crate::artifacts::db::open_project_db(&row.name, &row.worktree, true)?,
-        None => {
-            let db_path = read_apg.join(specs::TRANS).join("db.lbug");
-            if !db_path.exists() {
-                anyhow::bail!(
-                    "{} does not exist — run `apg scan` first",
-                    db_path.display()
-                );
-            }
-            Database::new(&db_path, crate::artifacts::db::system_config(true)?)?
-        }
-    };
-    println!("{}", render_query(&db, &query, json)?);
+    // The read runs on the invocation's own read-only handle: no session
+    // daemon, no liveness probe and no routed forward, and the read-only class
+    // takes no exclusive lock a concurrent writer needs.
+    let session = session::Session::open(&read_apg).map_err(|err| match &bound {
+        Some(row) => anyhow::anyhow!(
+            "project `{}` at worktree `{}`: opening `{}`: {err}",
+            row.name,
+            row.worktree.display(),
+            read_apg.join(specs::TRANS).join("db.lbug").display()
+        ),
+        None => err,
+    })?;
+    println!("{}", render_query(session.db(), &query, json)?);
     Ok(())
 }
 
