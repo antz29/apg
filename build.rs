@@ -395,17 +395,6 @@ fn stage_go(out_dir: &str, stage_dir: &Path) -> Vec<String> {
 
 /// Rust frontend (rust-analyzer engine, compiled in isolation).
 fn stage_rust(stage_dir: &Path) -> Vec<String> {
-    // Compile rustlib with cargo into its own isolated target dir
-    // (src/rustlib/target). The frontend is ALWAYS built with `--release`,
-    // independent of the outer cargo profile: rust-analyzer's startup cost
-    // dominates every Rust scan, and the unoptimized debug frontend is ~7x
-    // slower than the optimized one. The optimized artifact is staged into
-    // the ACTIVE outer profile's frontends dir
-    // (`target/<outer-profile>/frontends`), so a debug-profile `apg` spawns
-    // the fast frontend instead of the debug sibling. Deps resolve from
-    // src/rustlib/Cargo.lock; bump the pinned rust-analyzer rev in
-    // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
-    // than aborting the whole build (like the other frontends).
     let rustfrontend = frontend_artifact("rustlib", "rustfrontend");
     if frontend_rebuild_requested() {
         let _ = std::fs::remove_file(&rustfrontend);
