@@ -191,6 +191,10 @@ fn print_help() {
 /// database's pending state and release the session; `end` signals the running
 /// session — the server-side shutdown releases the DB/socket and `serve` exits.
 /// Admission already applied every projection, so `end` performs no flush.
+#[expect(
+    dead_code,
+    reason = "retired dispatcher kept compiled until Phase 4 task 15 deletes it"
+)]
 fn session_cmd(args: &[String]) -> anyhow::Result<()> {
     let apg_root = session::require_apg_root()?;
     match args.first().map(|s| s.as_str()) {
@@ -206,8 +210,7 @@ fn session_cmd(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// The `apg` entry point: dispatches the CLI subcommands (`init`, `query`,
-/// `scan`, `plan`, `review`, `spec`, `project`, `node`, `edge`, `session`),
-/// prints help
+/// `scan`, `plan`, `review`, `spec`, `project`, `node`, `edge`), prints help
 /// for `--help`/no args, and turns a returned error into a non-zero exit. The
 /// binary embeds the apg opencode suite — the tool set (`SUITE_TOOLS`) and the
 /// nine distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
@@ -230,7 +233,6 @@ pub fn main() {
         "project" => project_cmd::cmd_project(&raw[2..]),
         "node" => node_cmd::cmd_node(&raw[2..]),
         "edge" => node_cmd::cmd_edge(&raw[2..]),
-        "session" => session_cmd(&raw[2..]),
         "--version" | "-V" => {
             println!("apg {}", env!("CARGO_PKG_VERSION"));
             Ok(())
