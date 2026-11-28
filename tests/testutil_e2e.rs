@@ -1,53 +1,96 @@
+//! e2e tier -- real I/O: both tests spawn the candidate `apg` binary, create
+//! scratch repos and inspect `apg/layers/**` and `db.lbug` on disk. Each is
+//! `#[ignore]`d, so a plain `cargo test` never runs one; the only entry point is
+//! the named guard `cargo test-e2e` (= `cargo test e2e:: -- --ignored`).
+//! apg.testutil's own non-`#[test]` items (Repo, ApgCommand, spawn_apg,
+//! scan_checkout, payload helpers) are the E2E HARNESS and live at module
+//! level, never inside a tier. PIN: testutil's I/O harness (the git/process/db
+//! fixtures) is e2e-only — it must not be used by a unit/int test; the pure
+//! graph-fixture builder `located` performs no I/O and may be shared by any
+//! tier.
+
 mod common;
 
 use apg::layers::{self, Layer};
+use apg::specs;
 use apg::testutil::*;
+use std::path::Path;
 
-/// e2e tier -- real I/O: both tests spawn the candidate `apg` binary,
-/// create scratch repos and inspect the socket/`db.lbug` on disk. Each is
-/// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
-/// point is the named guard `cargo test-e2e`
-/// (= `cargo test tests::e2e:: -- --ignored`). apg.testutil's own
-/// non-`#[test]` items (Repo, ApgCommand, spawn_apg, start_session_process,
-/// scan_checkout, payload helpers) are the E2E HARNESS and live at module
-/// level, never inside a tier. PIN: testutil's I/O harness (the
-/// git/process/db fixtures) is e2e-only — it must not be used by a
-/// unit/int test; the pure graph-fixture builder `located` performs no I/O
-/// and may be shared by any tier.
+/// Spawns one durable-write invocation and SIGKILLs it while it waits for the
+/// blocking worktree lock this process holds. The lock keeps the writer out of
+/// its critical section, so this is the pre-commit half of a per-invocation
+/// write, deterministically: the invocation opened and queued on the lock, and
+/// the kill lands before its node-file write. `while_blocked` runs while the
+/// writer is still queued (an independent observation of the committed state);
+/// a write that completes while the lock is held is a real failure — a
+/// per-invocation write must take the blocking worktree lock.
+fn kill_write_blocked_on_the_worktree_lock(
+    wt: &Path,
+    wt_apg: &Path,
+    home: &Path,
+    args: &[&str],
+    while_blocked: impl FnOnce(),
+) {
+    let held = apg::artifacts::acquire_spec_lock(wt_apg).unwrap();
+    let mut child = ApgCommand::new(args)
+        .cwd(wt)
+        .env("HOME", home.to_str().unwrap())
+        .spawn();
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait().unwrap() {
+            Some(status) => panic!(
+                "the write completed while the worktree lock was held ({status}) — a \
+                 per-invocation write must take the blocking worktree lock"
+            ),
+            None if started.elapsed() >= std::time::Duration::from_millis(500) => break,
+            None => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+    while_blocked();
+    let pid = child.id() as i32;
+    unsafe { libc::kill(pid, libc::SIGKILL) };
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        !out.status.success(),
+        "the writer was killed, not completed"
+    );
+    drop(held);
+}
+
 mod e2e {
     use super::*;
 
-    /// The killed-session contract at the testutil level, all three triggers.
+    /// The per-invocation durability contract at the testutil level.
     ///
-    /// A live `apg session start` owns `db.lbug` and BUFFERS its durable
-    /// mutations; `apg session save` is the single durability point (the node
-    /// files plus exactly one commit). A SIGKILL is an UNCLEAN EXIT: it leaves
-    /// the socket file behind with no live process, and whatever the session
-    /// admitted but never saved stays in the derived index as a phantom
-    /// projection the durable `apg/layers/**` store never saw.
+    /// Every database access opens the worktree `db.lbug` read-only in its own
+    /// invocation; a durable write upgrades the SAME invocation under the
+    /// blocking worktree lock and performs node-file write -> exactly one
+    /// commit -> database projection in one critical section. There is no
+    /// daemon, socket, save step or pending set, so a SIGKILL can only ever lose
+    /// an uncommitted attempt:
     ///
-    /// (1) CLEAN state loses nothing. A node saved before the kill is durable;
-    ///     after the SIGKILL the next `apg session start` reclaims the stale
-    ///     socket, has `reclaim_stale_socket` detect the present-but-unreachable
-    ///     socket as an unclean exit, discards and rebuilds `db.lbug` from
-    ///     `apg/layers/**`, and still serves the saved node.
-    /// (2) DIRTY state is discarded, never served. A mutation buffered AFTER
-    ///     that save (its phantom projection sits in the held index, its node
-    ///     file is not on disk) is thrown away by the same rebuild: the
-    ///     recovered DB serves ONLY the last-saved state, and the durable node
-    ///     files, commits and HEAD stay put.
-    /// (3) The SAME discard+rebuild is triggered by `apg session save` (NOT
-    ///     `session start`) against the stale socket: the save must reclaim the
-    ///     socket AND repair the derived DB rather than merely deleting the
-    ///     socket and stranding the phantom projection for the next reader.
-    ///
-    /// The stale socket is reclaimed in all three; no partial file, no
-    /// `db.lbug` holder and socket reclaim hold in every case.
+    /// (1) A COMPLETED write loses nothing. The invocation that returns has its
+    ///     node file on disk, exactly one commit and the projection; a later
+    ///     read-only invocation serves it and lands no commit of its own.
+    /// (2) A WRITE KILLED MID-INVOCATION loses nothing committed. While this
+    ///     test holds the blocking worktree lock, an independent read-only
+    ///     invocation already serves only the committed state (an uncommitted
+    ///     write is never observable), and the killed writer leaves no node
+    ///     file, no commit and no phantom projection; the next read opens
+    ///     exactly the last committed state.
+    /// (3) The killed attempt leaves `apg/layers/**`, commits and HEAD at their
+    ///     last committed state and the store pairing-consistent, and a direct
+    ///     read-write open succeeds — no process holds `db.lbug`. The next
+    ///     durable write then proceeds normally, landing exactly one commit: the
+    ///     atomic-write guarantee replaces the daemon's stale-socket reclaim,
+    ///     which has no per-invocation counterpart.
     #[test]
     #[ignore = "e2e tier: real I/O (spawned apg/scratch repo/db.lbug); run via cargo test-e2e"]
-    fn killed_session_loses_nothing_and_its_stale_socket_is_reclaimed() {
+    fn killed_write_loses_nothing_committed_and_leaves_no_phantom_projection() {
         let (repo, wt, wt_apg) = project_with_db("session-crash");
         let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
         let head_sha = |dir: &std::path::Path| {
             git2::Repository::open(dir)
                 .unwrap()
@@ -59,8 +102,8 @@ mod e2e {
                 .to_string()
         };
 
-        // --- (1) CLEAN RUN: a node saved before the kill loses nothing. -----
-        let session = start_session_process(&wt, &home);
+        // --- (1) COMPLETED WRITE: durable on return. -------------------------
+        let before_commits = commit_count(&wt);
         let saved_add = ApgCommand::new(&["node", "add", "global", "constraint", "saved"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
@@ -70,44 +113,25 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&saved_add.stderr)
         );
-        // The single durability point: `save` flushes the buffer — one node
-        // file, one commit.
-        let save = spawn_apg(&["session", "save"], &wt);
+        // The one invocation wrote its node file, landed its one commit and
+        // projected — there is no save step to defer any of it.
+        let saved_file = layers::node_file_path(&wt_apg, Layer::Global, "constraint", "saved");
         assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-        assert!(
-            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "saved").exists(),
-            "save must write the saved node file"
+            saved_file.exists(),
+            "the write invocation must write its node file"
         );
         let saved_commits = commit_count(&wt);
         let saved_head = head_sha(&wt);
-
-        // SIGKILL over a CLEAN buffer — deliberately NOT a graceful `end`.
-        // The stale socket is the unclean-exit signal.
-        let pid = session.child.id() as i32;
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            !out.status.success(),
-            "the session was killed, not ended cleanly"
+        assert_eq!(
+            saved_commits,
+            before_commits + 1,
+            "the write invocation must land exactly one commit"
         );
-        let socket = apg::session::socket_path(&wt_apg);
-        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
-        assert!(
-            !apg::session::live_session_at(&socket),
-            "the socket is present but unreachable — the unclean-exit signal"
-        );
+        let saved_bytes = std::fs::read(&saved_file).unwrap();
 
-        // The next start reclaims the stale socket (discard + rebuild from
-        // `apg/layers/**`) and still serves the saved node: nothing was lost.
-        let session2 = start_session_process(&wt, &home);
+        // A SEPARATE read-only invocation sees the projection as soon as the
+        // writer exits, and commits/HEAD/node file stay put: a read has no
+        // durability point of its own and leaves no state behind.
         let q_saved = spawn_apg(
             &[
                 "query",
@@ -126,134 +150,101 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "the rebuilt index must keep the saved node"
-        );
-        assert!(
-            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "saved").exists(),
-            "the recovery must not lose the saved node file"
+            "the completed write must be queryable as soon as its invocation returns"
         );
         assert_eq!(
             commit_count(&wt),
             saved_commits,
-            "the recovery must not add or drop a commit"
-        );
-        assert_eq!(head_sha(&wt), saved_head, "the recovery must not move HEAD");
-        let end = spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out2 = session2.child.wait_with_output().unwrap();
-        assert!(
-            out2.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out2.stderr)
-        );
-        let stderr2 = String::from_utf8_lossy(&out2.stderr);
-        assert!(
-            stderr2.contains("reclaimed stale socket"),
-            "the next start must reclaim the stale socket: {stderr2}"
-        );
-
-        // --- (2) DIRTY RUN: an unsaved buffered mutation is discarded. -------
-        let session = start_session_process(&wt, &home);
-
-        // One routed mutation is admitted into the live session's write-back
-        // buffer and projected into the held index, so it must NOT touch
-        // `apg/layers/**` before a save — but a routed read DOES see it.
-        let add = ApgCommand::new(&["node", "add", "global", "constraint", "survivor"])
-            .cwd(&wt)
-            .env("HOME", home.to_str().unwrap())
-            .output();
-        assert!(
-            add.status.success(),
-            "{}",
-            String::from_utf8_lossy(&add.stderr)
-        );
-        let routed = spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Constraint {fqn: 'global.constraint.survivor'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(
-            routed.status.success(),
-            "{}",
-            String::from_utf8_lossy(&routed.stderr)
+            "a read-only invocation must make no commit"
         );
         assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "the live session's index must carry the buffered projection"
+            head_sha(&wt),
+            saved_head,
+            "a read-only invocation must not move HEAD"
+        );
+        assert_eq!(
+            std::fs::read(&saved_file).unwrap(),
+            saved_bytes,
+            "a read-only invocation must leave the node file byte-identical"
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "survivor").exists(),
-            "a buffered add must not write a node file before save"
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
+        // --- (2) WRITE KILLED MID-INVOCATION: loses nothing committed. -------
         // Baseline for the durable-state assertions: commits, HEAD, and the
-        // whole on-disk node-file store (still exactly the CLEAN run's save).
+        // whole on-disk node-file store (exactly the COMPLETED run above).
         let before_commits = commit_count(&wt);
         let before_head = head_sha(&wt);
         let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
 
-        // SIGKILL — deliberately NOT a graceful `end`. The unsaved buffer dies
-        // with the process while its phantom projection stays in `db.lbug`.
-        let pid = session.child.id() as i32;
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            !out.status.success(),
-            "the session was killed, not ended cleanly"
-        );
-        let socket = apg::session::socket_path(&wt_apg);
-        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
-        assert!(
-            !apg::session::live_session_at(&socket),
-            "the socket is present but unreachable — the unclean-exit signal"
+        // Hold the blocking worktree lock and let the writer queue on it: while
+        // it waits, an independent read-only invocation already serves the last
+        // committed state — an uncommitted write is never observable. The
+        // SIGKILL then lands inside its invocation, before its critical
+        // section, so there is no buffer whose phantom projection could survive
+        // it.
+        kill_write_blocked_on_the_worktree_lock(
+            &wt,
+            &wt_apg,
+            &home,
+            &["node", "add", "global", "constraint", "survivor"],
+            || {
+                let during = spawn_apg(
+                    &[
+                        "query",
+                        "MATCH (n:Constraint {fqn: 'global.constraint.survivor'}) RETURN count(n)",
+                    ],
+                    &wt,
+                );
+                assert!(
+                    during.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&during.stderr)
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&during.stdout)
+                        .lines()
+                        .last()
+                        .map(str::trim),
+                    Some("0"),
+                    "a read while the writer waits must see only the committed state"
+                );
+            },
         );
 
-        // (a) no half-written node file: the buffered `survivor` never became
-        // durable, so the store is still exactly its last saved state.
+        // Nothing partial: no node file, no commit, HEAD put, store untouched
+        // and still pairing cleanly.
         assert!(
             !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "survivor").exists(),
-            "the killed session left a durable node file it should not have"
+            "a killed pre-commit write must not write a node file"
         );
-        // (b) no paired edge half mismatched (the store still pairs cleanly).
         layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
-        // (c) no process holds db.lbug: a direct read-write open succeeds now,
-        // and the STALE index it opens still carries the phantom projection the
-        // kill left behind (so the rebuild below is a real discard).
-        {
-            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
-            assert!(
-                db.has_node("global.constraint.saved"),
-                "the stale index must carry the last-saved node"
-            );
-            assert!(
-                db.has_node("global.constraint.survivor"),
-                "the stale index must carry the phantom buffered projection"
-            );
-        }
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            before_store,
+            "the killed write must leave apg/layers/** at its last committed state"
+        );
+        assert_eq!(
+            commit_count(&wt),
+            before_commits,
+            "a killed write must not create a commit"
+        );
+        assert_eq!(
+            head_sha(&wt),
+            before_head,
+            "a killed write must not move HEAD"
+        );
 
-        // (d) the SIGKILL left the socket file behind; the next start reclaims
-        // it (no live process behind it), detects the present-but-unreachable
-        // socket as an unclean exit, discards the stale index (+ `db.lbug.wal`)
-        // and rebuilds it from `apg/layers/**`, then serves normally — the
-        // phantom projection is never served.
-        let session2 = start_session_process(&wt, &home);
+        // The next read opens exactly the last committed state, never a phantom.
         let q = spawn_apg(
             &["query", "MATCH (n:Constraint) RETURN n.fqn ORDER BY n.fqn"],
             &wt,
         );
         assert!(
             q.status.success(),
-            "the recovery `apg query` failed: {}",
+            "the next read failed: {}",
             String::from_utf8_lossy(&q.stderr)
         );
         let stdout = String::from_utf8_lossy(&q.stdout);
@@ -265,161 +256,63 @@ mod e2e {
         assert_eq!(
             rows,
             vec!["n.fqn", "global.constraint.saved"],
-            "the recovered query must serve only the last-saved state"
+            "the next read must open the last committed state"
         );
         assert!(
             !stdout.contains("survivor"),
-            "the recovered query must never serve the phantom projection"
-        );
-        assert!(
-            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "survivor").exists(),
-            "the discarded buffer must never write a node file"
-        );
-        assert_eq!(
-            layers::read_existing_nodes(&wt_apg).unwrap(),
-            before_store,
-            "the discarded buffer must leave apg/layers/** at its last-saved state"
-        );
-        assert_eq!(
-            commit_count(&wt),
-            before_commits,
-            "a discarded buffer creates no commit"
-        );
-        assert_eq!(
-            head_sha(&wt),
-            before_head,
-            "a discarded buffer must not move HEAD"
+            "the next read must never serve a phantom projection"
         );
 
-        // The recovery leaves no live session behind once ended cleanly.
-        let end2 = spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end2.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end2.stderr)
-        );
-        let out3 = session2.child.wait_with_output().unwrap();
-        assert!(
-            out3.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out3.stderr)
-        );
-        let stderr3 = String::from_utf8_lossy(&out3.stderr);
-        assert!(
-            stderr3.contains("reclaimed stale socket"),
-            "the next start must reclaim the stale socket: {stderr3}"
-        );
-
-        // --- (3) DIRTY RUN + `apg session save` (NOT `start`): the save
-        // trigger must reclaim AND repair, not silently delete. ---------------
-        let session = start_session_process(&wt, &home);
-
-        // One routed mutation is admitted into the live session's write-back
-        // buffer and projected into the held index — a routed read sees it,
-        // but it never reaches `apg/layers/**` before a save.
-        let add = ApgCommand::new(&["node", "add", "global", "constraint", "phantom"])
-            .cwd(&wt)
-            .env("HOME", home.to_str().unwrap())
-            .output();
-        assert!(
-            add.status.success(),
-            "{}",
-            String::from_utf8_lossy(&add.stderr)
-        );
-        let routed = spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Constraint {fqn: 'global.constraint.phantom'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(
-            routed.status.success(),
-            "{}",
-            String::from_utf8_lossy(&routed.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "the live session's index must carry the buffered projection"
-        );
-        assert!(
-            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "phantom").exists(),
-            "a buffered add must not write a node file before save"
-        );
-
-        // Baseline for the durable-state assertions: commits, HEAD, and the
-        // whole on-disk node-file store.
-        let before_commits = commit_count(&wt);
-        let before_head = head_sha(&wt);
-        let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
-
-        // SIGKILL — deliberately NOT a graceful `end`. The unsaved buffer dies
-        // with the process while its phantom projection stays in `db.lbug`.
-        let pid = session.child.id() as i32;
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            !out.status.success(),
-            "the session was killed, not ended cleanly"
-        );
-        let socket = apg::session::socket_path(&wt_apg);
-        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
-        assert!(
-            !apg::session::live_session_at(&socket),
-            "the socket is present but unreachable — the unclean-exit signal"
-        );
-
-        // The stale index it opens still carries the phantom projection, so the
-        // save-triggered rebuild below is a real discard.
+        // No process holds `db.lbug`: a direct read-write open succeeds now (the
+        // SIGKILL released the OS lock) and the index carries only the
+        // committed node.
         {
             let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
             assert!(
                 db.has_node("global.constraint.saved"),
-                "the stale index must carry the last-saved node"
+                "the index must carry the last committed node"
             );
             assert!(
-                db.has_node("global.constraint.phantom"),
-                "the stale index must carry the phantom buffered projection"
+                !db.has_node("global.constraint.survivor"),
+                "the index must not carry the killed write's phantom projection"
             );
         }
 
-        // `apg session save` (NOT `session start`) against the stale socket: it
-        // must reclaim the socket AND discard+rebuild the derived DB from
-        // `apg/layers/**`, reporting the reclaimed stale socket — a bare
-        // `remove_file(socket)` would strand the phantom projection with no
-        // later socket for the crash-detection guard to trip on.
-        let save = spawn_apg(&["session", "save"], &wt);
+        // --- (3) ATOMIC WRITE AFTER THE CRASH: one commit, one projection. ---
+        let after = ApgCommand::new(&["node", "add", "global", "constraint", "after-crash"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
         assert!(
-            save.status.success(),
+            after.status.success(),
             "{}",
-            String::from_utf8_lossy(&save.stderr)
+            String::from_utf8_lossy(&after.stderr)
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "after-crash").exists(),
+            "the next write must write its node file"
         );
         assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "no live session to save (reclaimed stale socket)",
-            "the save over a stale socket must report the reclaim, not a silent delete"
+            commit_count(&wt),
+            before_commits + 1,
+            "the next write must land exactly one commit"
         );
-        assert!(
-            !socket.exists(),
-            "the save trigger must reclaim the stale socket file"
+        assert_ne!(
+            head_sha(&wt),
+            before_head,
+            "the next write must create a commit"
         );
 
-        // The rebuilt index serves only the last-saved durable state: the
-        // phantom is gone, the saved node survives.
-        let q = spawn_apg(
+        let q_after = spawn_apg(
             &["query", "MATCH (n:Constraint) RETURN n.fqn ORDER BY n.fqn"],
             &wt,
         );
         assert!(
-            q.status.success(),
-            "the post-save read failed: {}",
-            String::from_utf8_lossy(&q.stderr)
+            q_after.status.success(),
+            "{}",
+            String::from_utf8_lossy(&q_after.stderr)
         );
-        let stdout = String::from_utf8_lossy(&q.stdout);
+        let stdout = String::from_utf8_lossy(&q_after.stdout);
         let rows: Vec<&str> = stdout
             .lines()
             .map(str::trim)
@@ -427,63 +320,63 @@ mod e2e {
             .collect();
         assert_eq!(
             rows,
-            vec!["n.fqn", "global.constraint.saved"],
-            "the save-triggered rebuild must serve only the last-saved state"
+            vec![
+                "n.fqn",
+                "global.constraint.after-crash",
+                "global.constraint.saved"
+            ],
+            "the next write must project onto the committed state"
         );
         assert!(
-            !stdout.contains("phantom"),
-            "the save-triggered rebuild must never serve the phantom projection"
+            !stdout.contains("survivor"),
+            "the killed write must never resurface"
         );
-
-        // The durable store, commits and HEAD stay at their last-saved state.
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "phantom").exists(),
-            "the discarded buffer must never write a node file"
-        );
-        assert_eq!(
-            layers::read_existing_nodes(&wt_apg).unwrap(),
-            before_store,
-            "the discarded buffer must leave apg/layers/** at its last-saved state"
-        );
-        assert_eq!(
-            commit_count(&wt),
-            before_commits,
-            "a discarded buffer creates no commit"
-        );
-        assert_eq!(
-            head_sha(&wt),
-            before_head,
-            "a discarded buffer must not move HEAD"
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "no invocation in this scenario may leave a session socket"
         );
 
         remove(&repo);
     }
 
-    /// A REAL long-running `apg session start` BUFFERS its durable mutations —
-    /// writing NOTHING to `apg/layers/**` and
-    /// making NO commit until the single save — and a SIGKILL (NOT a graceful
-    /// `end`) after that save loses nothing durable and leaves no partial store:
+    /// Every write in the burst is its OWN per-invocation critical section —
+    /// node-file write -> exactly one commit -> projection — so the durable
+    /// store is never a half-written intermediate between mutations, and a
+    /// writer killed mid-invocation loses nothing committed:
     ///
-    /// (a) no partial `apg/layers/**` file and no commit BEFORE save — the
-    ///     buffered adds/edge leave the durable store exactly at its last saved
-    ///     state (no half-written file, no commit);
-    /// (b) `apg session save` is the single durability point: both node files
-    ///     and BOTH halves of the routed edge land in exactly one commit;
-    /// (c) no half-written node file after the crash — every expected file
-    ///     parses with the right identity, and the store still pairs;
-    /// (d) no process holds `db.lbug` — a direct read-write open succeeds;
-    /// (e) the stale socket is reclaimed by the next `apg session start` with
-    ///     no live process behind it.
-    ///
-    /// The routed mutations deliberately write a node AND an edge (both
-    /// endpoint files), so a crash between the two halves of the edge would be
-    /// caught by (c) — a node-only check cannot see that.
+    /// (a) two node adds and five edge adds each land exactly ONE commit, with
+    ///     their node files written: there is no buffer, so the daemon's "no
+    ///     partial file and no commit BEFORE save" case cannot exist;
+    /// (b) every committed node file parses with its identity, the store still
+    ///     pairs, and BOTH halves of the routed edge are present — the burst
+    ///     deliberately writes a node AND an edge (both endpoint files), so a
+    ///     crash between the two halves of the edge would be caught here;
+    /// (c) a writer killed while blocked on the worktree lock leaves no partial
+    ///     file, no commit and no HEAD move — the store is exactly its last
+    ///     committed state;
+    /// (d) no process holds `db.lbug` — a direct read-write open succeeds — and
+    ///     the index carries the committed nodes, never the killed write's
+    ///     phantom projection;
+    /// (e) the next read opens the last committed state, and the next write
+    ///     then lands exactly one commit: the atomic-write guarantee replaces
+    ///     the daemon's stale-socket reclaim, which has no per-invocation
+    ///     counterpart.
     #[test]
     #[ignore = "e2e tier: real I/O (spawned apg/scratch repo/db.lbug); run via cargo test-e2e"]
-    fn acceptance_crash_durability_no_partial_files_no_db_holder_and_socket_reclaim() {
+    fn acceptance_crash_durability_no_partial_files_no_db_holder_and_last_committed_state() {
         let (repo, wt, wt_apg) = project_with_db("accept-crash");
         let home = repo.root.join("home");
-        let session = start_session_process(&wt, &home);
+        std::fs::create_dir_all(&home).unwrap();
+        let head_sha = |dir: &std::path::Path| {
+            git2::Repository::open(dir)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string()
+        };
 
         let run = |args: &[&str]| -> std::process::Output {
             ApgCommand::new(args)
@@ -492,10 +385,12 @@ mod e2e {
                 .output()
         };
 
-        // Two routed node adds and the routed edge between them, plus the
-        // minimal whole-model-valid spine (SPEC §8.1/§3.4): a Stakeholder
-        // `requires` a Requirement that a leaf Group's Service is `driven-by`,
-        // and that Service is `realises`'d by a Component that `is-role`s a Role.
+        // --- (a) One atomic invocation per mutation: exactly one commit each.
+        // Two node adds and the edge between them, plus the minimal
+        // whole-model-valid spine (SPEC §8.1/§3.4): a Stakeholder `requires` a
+        // Requirement that a leaf Group's Service is `driven-by`, and that
+        // Service is `realises`'d by a Component that `is-role`s a Role.
+        let mut expected_commits = commit_count(&wt);
         for node in [
             &["node", "add", "requirements", "stakeholder", "crash-a"][..],
             &["node", "add", "requirements", "requirement", "crash-b"][..],
@@ -517,6 +412,12 @@ mod e2e {
                 out.status.success(),
                 "{node:?}: {}",
                 String::from_utf8_lossy(&out.stderr)
+            );
+            expected_commits += 1;
+            assert_eq!(
+                commit_count(&wt),
+                expected_commits,
+                "{node:?} must land exactly one commit"
             );
         }
         for edge in [
@@ -562,82 +463,19 @@ mod e2e {
                 "{edge:?}: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
-        }
-
-        // (a) the buffer leaves `apg/layers/**` at its last saved state: no
-        // partial node file for either buffered node and no commit before save.
-        let head_sha = |dir: &std::path::Path| {
-            git2::Repository::open(dir)
-                .unwrap()
-                .head()
-                .unwrap()
-                .peel_to_commit()
-                .unwrap()
-                .id()
-                .to_string()
-        };
-        let before_commits = commit_count(&wt);
-        let before_head = head_sha(&wt);
-        for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
-            assert!(
-                !layers::node_file_path(&wt_apg, Layer::Requirements, node_type, name).exists(),
-                "a buffered add must not write a node file for `{name}` before save"
+            expected_commits += 1;
+            assert_eq!(
+                commit_count(&wt),
+                expected_commits,
+                "{edge:?} must land exactly one commit"
             );
         }
-        assert_eq!(
-            commit_count(&wt),
-            before_commits,
-            "a buffered mutation must not create a commit before save"
-        );
-        assert_eq!(
-            head_sha(&wt),
-            before_head,
-            "git history must stay at the last saved state until save"
-        );
 
-        // (b) the single durability point: one `session save` flushes the whole
-        // buffer — both node files, both edge halves, exactly one commit.
-        let save = spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-        for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
-            assert!(
-                layers::node_file_path(&wt_apg, Layer::Requirements, node_type, name).exists(),
-                "save must write the `{name}` node file"
-            );
-        }
-        assert_eq!(
-            commit_count(&wt),
-            before_commits + 1,
-            "the whole buffered set must land in exactly one commit"
-        );
-        assert_ne!(head_sha(&wt), before_head, "save must create a commit");
-
-        // SIGKILL — deliberately NOT a graceful `end`.
-        let pid = session.child.id() as i32;
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            !out.status.success(),
-            "the session was killed, not ended cleanly"
-        );
-
-        // (c) no half-written node file after the crash: every expected file
-        // parses with its identity intact.
+        // --- (b) The whole burst is durable and complete. --------------------
         for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
             let nf = layers::read_node_file(&wt_apg, Layer::Requirements, node_type, name).unwrap();
             assert_eq!(nf.name, name, "node file {name} must be complete");
         }
-
-        // (d) no paired edge half mismatched: the store pairs cleanly AND both
-        // halves of the routed edge are present.
         let all = layers::read_existing_nodes(&wt_apg).unwrap();
         layers::check_edge_pairing(&all).unwrap();
         let a =
@@ -657,35 +495,106 @@ mod e2e {
             "the target in-half must be present and match the out-half"
         );
 
-        // (e) no process holds db.lbug: a direct read-write open succeeds now
-        // (the SIGKILL released the OS lock) and the derived DB is consistent
-        // with the saved store.
-        let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
-        assert!(db.has_node("requirements.stakeholder.crash-a"));
-        assert!(db.has_node("requirements.requirement.crash-b"));
-        drop(db);
+        // --- (c) A writer killed mid-invocation loses nothing committed. -----
+        let before_commits = commit_count(&wt);
+        let before_head = head_sha(&wt);
+        let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
 
-        // (f) the SIGKILL left the socket file behind; the next start reclaims
-        // it (no live process behind it) and serves normally.
-        let socket = apg::session::socket_path(&wt_apg);
-        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
-        let session2 = start_session_process(&wt, &home);
-        let end = spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
+        kill_write_blocked_on_the_worktree_lock(
+            &wt,
+            &wt_apg,
+            &home,
+            &["node", "add", "global", "constraint", "crash-killed"],
+            || {},
         );
-        let out2 = session2.child.wait_with_output().unwrap();
+
+        // No half-written node file, no commit, no HEAD move: the durable store
+        // is exactly its last committed state and still pairs.
         assert!(
-            out2.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out2.stderr)
+            !layers::node_file_path(&wt_apg, Layer::Global, "constraint", "crash-killed").exists(),
+            "the killed writer left a durable node file it should not have"
         );
-        let stderr2 = String::from_utf8_lossy(&out2.stderr);
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            before_store,
+            "the killed write must leave apg/layers/** at its last committed state"
+        );
+        layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
+        assert_eq!(
+            commit_count(&wt),
+            before_commits,
+            "a killed write must not create a commit"
+        );
+        assert_eq!(
+            head_sha(&wt),
+            before_head,
+            "a killed write must not move HEAD"
+        );
+
+        // --- (d) No process holds `db.lbug`; no phantom projection. ---------
+        {
+            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("requirements.stakeholder.crash-a"));
+            assert!(db.has_node("requirements.requirement.crash-b"));
+            assert!(db.has_node("domain.service.svc"));
+            assert!(
+                !db.has_node("global.constraint.crash-killed"),
+                "the killed write must leave no phantom projection"
+            );
+        }
+
+        // --- (e) The next read opens the last committed state; the next write
+        // is atomic on its own. ----------------------------------------------
+        let q = spawn_apg(
+            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &wt,
+        );
         assert!(
-            stderr2.contains("reclaimed stale socket"),
-            "the next start must reclaim the stale socket: {stderr2}"
+            q.status.success(),
+            "the next read failed: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&q.stdout);
+        let rows: Vec<&str> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            rows,
+            vec!["n.fqn", "requirements.requirement.crash-b"],
+            "the next read must open the last committed state"
+        );
+        assert!(
+            !stdout.contains("crash-killed"),
+            "the killed write must never be served"
+        );
+
+        let next = run(&["node", "add", "global", "constraint", "crash-next"]);
+        assert!(
+            next.status.success(),
+            "{}",
+            String::from_utf8_lossy(&next.stderr)
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Global, "constraint", "crash-next").exists(),
+            "the next write must write its node file"
+        );
+        assert_eq!(
+            commit_count(&wt),
+            before_commits + 1,
+            "the next write must land exactly one commit"
+        );
+        assert_ne!(
+            head_sha(&wt),
+            before_head,
+            "the next write must create a commit"
+        );
+
+        // No socket, no daemon and no pending set anywhere in the scenario.
+        assert!(
+            !wt_apg.join(specs::TRANS).join("session.sock").exists(),
+            "a per-invocation write must leave no session socket"
         );
 
         remove(&repo);
