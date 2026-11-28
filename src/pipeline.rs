@@ -1,9 +1,8 @@
 //! The ingest → cleanup → DB-build pipeline: `run_pipeline` (assembly, fact
-//! recording, and the full-load reference) plus the win-C splice dispatch.
+//! recording, and the full-load reference) plus the splice dispatch.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — the same ingested graph, the
-//! same recorded facts, and the same derived `db.lbug` database.
+//! A cohesive single-responsibility module: the ingested graph, the recorded
+//! facts, and the derived `db.lbug` database.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -19,14 +18,14 @@ use crate::{cache, classify, graph, incremental, ingest, load, schema, session, 
 /// Consumes the merged scanner JSONL stream, ingests it, and loads the derived
 /// `db.lbug` database (SPEC §6).
 ///
-/// `input` carries the win-B incremental state when the scan is incremental
-/// (phase-02 task-7/task-8): the cached fact units to splice into the assembly
-/// and the store to record the completed scan back into. `None` on the full
-/// path (and for the hermetic test harness), where assembly is spool-only.
+/// `input` carries the incremental state when the scan is incremental: the
+/// cached fact units to splice into the assembly and the store to record the
+/// completed scan back into. `None` on the full path (and for the hermetic test
+/// harness), where assembly is spool-only.
 ///
 /// `progress` streams one symbol per admitted code node through the whole
-/// assembly (the spool and, on the win-B path, the cached-fact splice); the
-/// caller supplies the emitter, or `None` for a silent assembly.
+/// assembly (the spool and, on the incremental path, the cached-fact splice);
+/// the caller supplies the emitter, or `None` for a silent assembly.
 ///
 /// Production always opens the derived database at the engine default (see
 /// [`run_pipeline_with`]); an in-process caller that needs a different
@@ -78,24 +77,24 @@ pub(crate) fn run_pipeline_with(
     progress: Option<&mut Progress<'_>>,
     db_config: Option<SystemConfig>,
 ) -> anyhow::Result<timing::PipelineTimings> {
-    // Phase-04 task-4: this function owns two reported phases. Ingest-assembly
+    // This function owns two reported phases. Ingest-assembly
     // covers the ingestor passes, cleanup, and the fact-store recording from
     // entry to the DB dispatch below; db-load covers that dispatch (splice OR
     // parquet/Database::new/create_schema/copy_from).
     let assembly_start = std::time::Instant::now();
-    // The assembly dispatch (phase-01 task-9): `warm` is the cached-fact splice,
+    // The assembly dispatch: `warm` is the cached-fact splice,
     // `delta` the target-only delta graph, and everything else the full scan.
     let warm = input.is_some_and(|i| i.warm);
     let delta = !warm && input.is_some_and(|i| i.reuse.is_some());
     // The incremental path's target-only spool, materialised here ONCE. It
-    // survives the whole function because the phase-3 full re-assembly fallback
+    // survives the whole function because the full re-assembly fallback
     // replays it; the delta ingest only borrows it.
     let mut delta_spool: Vec<schema::Record> = Vec::new();
     let (mut graph, report) = {
         // Stream the scanner JSONL straight into the ingestor. On the WARM path
         // the target-only spool is ingested here and the unaffected files'
         // cached fact units are spliced into the SAME in-memory graph
-        // (phase-02 task-7). The incremental path must NOT splice: the
+        // The incremental path must NOT splice: the
         // unaffected facts stay in the seed `db.lbug` and land as splice DML.
         let reuse_holder;
         let reuse = match input.and_then(|i| i.reuse.as_ref()).filter(|_| warm) {
@@ -179,7 +178,7 @@ pub(crate) fn run_pipeline_with(
 
     // The delta graph carries only the target files' nodes, so its cleanup must
     // recognise the far endpoints that still live in the seed `db.lbug` —
-    // `previous.scanned` ∪ `previous.planned` (phase-01 task-7). The warm and
+    // `previous.scanned` ∪ `previous.planned`. The warm and
     // full paths' graphs are not delta-shaped, so they keep the empty universe.
     let universe: BTreeSet<String> = if delta {
         input
@@ -218,7 +217,7 @@ pub(crate) fn run_pipeline_with(
         graph.unresolved_uses.len(),
     ));
 
-    // Win-B: record the just-assembled graph back into the shared
+    // Record the just-assembled graph back into the shared
     // content-addressed store (manifest, scan record, per-file fact units, the
     // portable dep/signature/overload indexes). Recording is a best-effort
     // cache write — a failure downgrades the next scan to a full scan, never
@@ -233,10 +232,10 @@ pub(crate) fn run_pipeline_with(
             &graph,
             &input.manifest,
             &input.sha,
-            // The SAME phase-2 re-emission target set that drove the frontend
-            // hand-off and the win-C splice, threaded through — never re-derived.
+            // The SAME re-emission target set that drove the frontend
+            // hand-off and the splice, threaded through — never re-derived.
             // Empty on the full-scan fallback, so `record` keeps its full-scan
-            // behaviour (phase-04 task-28 / task-13 AC (b)).
+            // behaviour.
             &input.targets_rel,
         ) {
             Ok(()) => log.ln("[scan] content-addressed facts recorded"),
@@ -246,7 +245,7 @@ pub(crate) fn run_pipeline_with(
     }
 
     // Ingest-assembly ends here; the DB build dispatch below is the db-load
-    // phase (phase-04 task-4).
+    // phase.
     let ingest_assembly = assembly_start.elapsed();
     let db_start = std::time::Instant::now();
 
@@ -257,7 +256,7 @@ pub(crate) fn run_pipeline_with(
         .ok()
         .and_then(|cwd| cwd.parent().map(Path::to_path_buf));
 
-    // Defense in depth (phase-03 lifecycle exclusivity): never unlink — or seed
+    // Defense in depth (lifecycle exclusivity): never unlink — or seed
     // from — a DB a live session holds. `cmd_scan` refuses earlier; this guard
     // catches a session that started mid-scan before the projected DB is
     // replaced.
@@ -269,8 +268,7 @@ pub(crate) fn run_pipeline_with(
         );
     }
 
-    // Crash recovery (phase-02 task-8, cli-session-crash-recovery; phase-04
-    // task-7 adds the pending-state cause): there are two UNCLEAN EXITS, and
+    // Crash recovery: there are two UNCLEAN EXITS, and
     // both disable the `db.lbug`-reuse (splice-seed) fast path.
     //
     // 1. A session socket that is present but fails a connect + `Ping`: the
@@ -328,17 +326,17 @@ pub(crate) fn run_pipeline_with(
         session::discard_derived_index(Path::new("."));
     }
 
-    // ---- DB build dispatch (win C, phase-03 task-4) ------------------------
+    // ---- DB build dispatch --------------------------------------------------
     //
-    // On the win-B incremental path the previous `db.lbug` already holds every
-    // unaffected row, so seed a copy of it, apply the phase-2 delta as DML
+    // On the incremental path the previous `db.lbug` already holds every
+    // unaffected row, so seed a copy of it, apply the delta as DML
     // (`splice`), and publish the database atomically instead of rebuilding
     // from scratch. The existing full load (remove + create_schema + copy_from)
     // stays the correctness reference and runs whenever the splice is ineligible
     // or fails mid-sequence. `input.reuse` is `Some`
     // exactly on the incremental path (it is `None` on every correctness
     // full-scan fallback), and `input.targets_rel`/`removed_fqns` are the SAME
-    // phase-2 sets that drove the frontend target hand-off.
+    // sets that drove the frontend target hand-off.
     let splice_report = match (input, apg_root.as_deref()) {
         (Some(input), Some(apg_root)) if !force_full_load => {
             try_splice_build(&graph, input, apg_root, log)
@@ -354,12 +352,12 @@ pub(crate) fn run_pipeline_with(
             report.unresolved_gc,
             report.scan_refreshed,
         ));
-        // Publish (phase-03 task-7; the publish cut narrows it to one artifact):
+        // Publish (the publish narrows it to one artifact):
         // the target state flips ONE artifact — the database — atomically, so
-        // the P2-assembled full in-memory graph lands as `db.lbug` alone, with
+        // the assembled full in-memory graph lands as `db.lbug` alone, with
         // no export argument left to carry.
     } else {
-        // Phase-03 task-5: EVERY full-load branch of the incremental path must
+        // EVERY full-load branch of the incremental path must
         // load the FULL graph. `graph` is the target-only delta graph above, so
         // re-assemble the full graph from the buffered spool plus the
         // unchanged-file reuse plan — covering both causes: `try_splice_build`
@@ -436,8 +434,8 @@ pub(crate) fn run_pipeline_with(
     })
 }
 
-/// The win-C DB-build dispatch (phase-03 task-4): try to seed the working
-/// `db.lbug` from the previous scan and apply the phase-2 delta as DML, then
+/// The DB-build dispatch: try to seed the working
+/// `db.lbug` from the previous scan and apply the delta as DML, then
 /// publish `db.lbug` atomically (`splice::publish`).
 ///
 /// Returns the splice report on success; `None` on any ineligibility or
@@ -449,10 +447,10 @@ pub(crate) fn run_pipeline_with(
 /// re-emitted target files' units, the ingested `scan_meta`/authored/transient
 /// rows, and the cross-cut rels whose far endpoint lives only in the seed. The
 /// unaffected code stays in the seed `db.lbug` and lands only as splice DML.
-/// `input` carries the same phase-2 target/removed sets that drove the frontend
+/// `input` carries the same target/removed sets that drove the frontend
 /// hand-off — the delete scope is never re-derived.
 ///
-/// The seed is EQUIVALENCE-GUARDED (feedback-101): the delta/manifest are
+/// The seed is EQUIVALENCE-GUARDED: the delta/manifest are
 /// shared across worktrees while `db.lbug` is local, so the splice is refused
 /// unless this worktree's seed was built from the same tree content the shared
 /// [`incremental::Prepared::recorded_content_key`] names — see
@@ -464,7 +462,7 @@ pub fn try_splice_build(
     apg_root: &Path,
     log: &mut Log,
 ) -> Option<splice::SpliceReport> {
-    // Eligibility: the win-B incremental path (a phase-2 delta/manifest exists)
+    // Eligibility: the incremental path (a delta/manifest exists)
     // with a previous DB to seed from. A full-scan fallback must never splice —
     // it has no target/removed set and its graph is the full universe.
     input.reuse.as_ref()?;
@@ -476,7 +474,7 @@ pub fn try_splice_build(
     // The seed is a WHOLE-FILE copy, so a previous DB that was not
     // checkpointed/closed cleanly (a leftover WAL/SHM sidecar) could lose its
     // unflushed rows in the copy. Fall back to the full load rather than
-    // publish an incomplete database (task-1 checkpoint guard).
+    // publish an incomplete database (the checkpoint guard).
     for suffix in [".wal", ".shm"] {
         let sidecar = PathBuf::from(format!("{}{suffix}", db.display()));
         if sidecar.exists() {
@@ -492,7 +490,7 @@ pub fn try_splice_build(
         log.ln("[load] splice: delta graph carries no Scan row — full load");
         return None;
     };
-    // The delete scope is the FINAL phase-2 target set (stage-1 ∪ the signature
+    // The delete scope is the FINAL target set (stage-1 ∪ the signature
     // cascade). The delta graph carries repo-relative identities now, so the
     // delete scope includes each target's repo-relative identity verbatim;
     // the absolute spelling is also included so a graph built from absolute
@@ -505,7 +503,7 @@ pub fn try_splice_build(
 
     // The content key guards cross-worktree drift; the assembled authored
     // identity additionally requires the seed DB to represent the delta
-    // graph's authored/transient rows (the win-C splice writes none), so a
+    // graph's authored/transient rows (the splice writes none), so a
     // spec-only change-set is refused here and the full load runs. The captured
     // snapshot resolves an authored→code edge whose target lives only in the
     // seed, so a delta graph's digest equals `seed_authored_identity(previous)`

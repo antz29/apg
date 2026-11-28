@@ -1,4 +1,4 @@
-//! The seed half of the splice (phase-03 task-1): resolve and validate the
+//! The seed half of the splice: resolve and validate the
 //! previous `db.lbug`, whole-file copy it to a same-directory temp sibling, and
 //! open the copy read-write — the [`SeedDecision`] surface the pipeline
 //! dispatches on.
@@ -28,9 +28,9 @@ pub fn db_path(apg_root: &Path) -> PathBuf {
 /// the caller runs the existing full load. The previous DB is only ever read (it
 /// is opened read-only during validation) and is never modified.
 ///
-/// The caller (task-4) owns the disposition of the returned copy: pass it to
-/// task-2/task-3, or [`discard`](SeededDb::discard) it when abandoning the
-/// splice.
+/// The caller owns the disposition of the returned copy: pass it to the delta
+/// application and publish, or [`discard`](SeededDb::discard) it when abandoning
+/// the splice.
 pub fn seed(previous: &Path) -> SeedDecision {
     if !previous.exists() {
         return SeedDecision::FullLoad(SeedFallback::MissingPrevious);
@@ -58,7 +58,7 @@ pub fn seed(previous: &Path) -> SeedDecision {
             target_path: previous.to_path_buf(),
         }),
         Err(e) => {
-            // Never leave a half-seeded temp behind for task-3 to publish.
+            // Never leave a half-seeded temp behind for the publish to pick up.
             let _ = std::fs::remove_file(&temp_path);
             SeedDecision::FullLoad(SeedFallback::SeededCopyUnreadable(e.to_string()))
         }
@@ -82,7 +82,7 @@ pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
     Ok(rows.first().map(|r| cell(r, 0)).filter(|s| !s.is_empty()))
 }
 
-/// The equivalence-guarded seed (feedback-101).
+/// The equivalence-guarded seed.
 ///
 /// The delta/manifest are **shared** across worktrees
 /// (`<git-common-dir>/apg`, holding `facts.db` and `facts.lock`) while the
@@ -103,7 +103,7 @@ pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
 ///
 /// `assembled` is the assembled graph's authored/transient identity
 /// ([`assembled_authored_identity`]). Once the content key matches, the seed DB
-/// must ALSO represent the assembled authored/transient rows: the win-C splice
+/// must ALSO represent the assembled authored/transient rows: the splice
 /// writes no authored row, so a same-content seed that lacks those rows would
 /// publish a DB that cannot answer like a full rebuild. When the seed's own
 /// digest ([`seed_authored_identity`]) differs, the seed is refused with
@@ -143,10 +143,10 @@ pub fn seed_checked(previous: &Path, expected: Option<&str>, assembled: &str) ->
     seed(previous)
 }
 
-/// The pure content-key equivalence the seed guard applies (task-10): the seed
+/// The pure content-key equivalence the seed guard applies: the seed
 /// is current iff BOTH sides carry a key and they are equal. A missing key on
 /// either side is never equivalent — a seed DB or a shared record written before
-/// the phase-01 content key cannot be verified as the same tree, so the caller
+/// the content key cannot be verified as the same tree, so the caller
 /// runs the full load (the correctness reference) rather than publish a
 /// divergence. No filesystem, no database.
 pub fn seed_key_matches(seed: Option<&str>, expected: Option<&str>) -> bool {
@@ -161,7 +161,7 @@ pub fn seed_key_matches(seed: Option<&str>, expected: Option<&str>) -> bool {
 /// equivalence guard ([`seed_checked`]) compares against a seed DB's own
 /// authored/transient set.
 ///
-/// The win-C splice writes no authored/transient row (it applies only the code
+/// The splice writes no authored/transient row (it applies only the code
 /// delta), so a spec-only change-set would publish a DB that cannot answer like
 /// a full rebuild. The caller threads this digest — and a seed DB digest
 /// computed the same way (`seed_authored_identity`) — into the guard; an
@@ -513,7 +513,7 @@ fn snapshot_code_kind(label: &str) -> Option<NodeKind> {
 /// `seed_authored_identity(seed) == assembled_authored_identity(graph)` iff the
 /// seed DB already represents the assembled graph's authored/transient rows —
 /// the equivalence the seed guard ([`seed_checked`]) requires before letting the
-/// code-only win-C splice publish a DB that must answer like a full rebuild.
+/// code-only splice publish a DB that must answer like a full rebuild.
 ///
 /// Pure of side effects on the DB (read-only; no writes and no schema changes)
 /// and never panics: a missing, locked, or corrupt DB — or one missing a table —
@@ -967,7 +967,7 @@ pub(super) fn cypher_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
-/// The temp sibling of `target`, in the SAME directory as `target` so task-3's
+/// The temp sibling of `target`, in the SAME directory as `target` so the
 /// publish is an atomic, same-filesystem `rename`.
 fn temp_sibling(target: &Path) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -987,29 +987,30 @@ fn temp_sibling(target: &Path) -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// A seeded working DB: the whole-file copy of the previous DB, open and ready
-/// for task-2's DML delta.
+/// for the DML delta.
 pub struct SeededDb {
-    /// The open copy. Task-2 opens a [`Connection`] on it and applies the delta.
+    /// The open copy. The delta application opens a [`Connection`] on it and
+    /// applies the delta.
     ///
-    /// This handle must be DROPPED before task-3 renames `temp_path` over
+    /// This handle must be DROPPED before the publish renames `temp_path` over
     /// `target_path`: a live handle keeps the old inode open, so the rename
     /// would swap the directory entry without the open handle writing to the
     /// published file.
     pub db: Database,
-    /// The temp sibling holding the copy; task-3 renames it over `target_path`.
+    /// The temp sibling holding the copy; the publish renames it over `target_path`.
     pub temp_path: PathBuf,
     /// The previous `db.lbug` the copy was seeded from, and the rename target.
     pub target_path: PathBuf,
 }
 
 impl SeededDb {
-    /// A fresh connection to the seeded copy — task-2's DML surface.
+    /// A fresh connection to the seeded copy — the delta's DML surface.
     pub fn conn(&self) -> anyhow::Result<Connection<'_>> {
         Ok(Connection::new(&self.db)?)
     }
 
     /// Removes the temp copy — the abandon path when the splice is dropped
-    /// before the task-3 publish (e.g. a delta-application failure falls back to
+    /// before the publish (e.g. a delta-application failure falls back to
     /// the full load). A missing temp is not an error.
     pub fn discard(&self) -> std::io::Result<()> {
         match std::fs::remove_file(&self.temp_path) {
@@ -1038,11 +1039,11 @@ pub enum SeedFallback {
     /// in between, so the shared manifest no longer describes this LOCAL DB.
     /// Seeding it and applying the delta would publish a DB that is not a full
     /// rebuild, so the caller runs the full load. Carries the seed's recorded
-    /// content-identity key and the expected (shared) one (feedback-101).
+    /// content-identity key and the expected (shared) one.
     StaleSeed { seed: String, recorded: String },
     /// The previous DB was built from the same tree content the delta was
     /// derived from, but its **authored/transient rows** are not the assembled
-    /// graph's — the win-C splice writes no authored/transient row, so seeding
+    /// graph's — the splice writes no authored/transient row, so seeding
     /// it would publish a DB that cannot answer like a full rebuild.
     /// Distinct from [`StaleSeed`](Self::StaleSeed), which is a content-key /
     /// worktree drift: this is the assembled identity's authored/transient
@@ -1082,7 +1083,7 @@ impl SeedFallback {
 /// The seed half's decision: splice from the seeded copy, or fall back to the
 /// existing full load.
 pub enum SeedDecision {
-    /// The previous DB was copied, opened, and is ready for task-2's delta.
+    /// The previous DB was copied, opened, and is ready for the delta application.
     Seed(SeededDb),
     /// The seed was invalidated — run the existing full load.
     FullLoad(SeedFallback),

@@ -1,16 +1,15 @@
 //! Warm-cache seed preparation and the reused-fact code-FQN universes.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — the same warm verdict, the
-//! same reused-universe derivation.
+//! A cohesive single-responsibility module: the warm verdict and the
+//! reused-universe derivation.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::{cache, delta, git, graph, incremental};
 
-/// The warm-cache seed preparation (phase-06 tasks 3/4/6; cross-worktree
-/// selection in phase-04 task 5): when the shared store holds a COMPLETE
+/// The warm-cache seed preparation, cross-worktree selection included: when
+/// the shared store holds a COMPLETE
 /// committed scan row whose content identity equals this checkout's tree under
 /// the current cache key, build the [`incremental::Prepared`] state from that
 /// row's worktree's **refs rows alone** — the row no longer embeds a manifest,
@@ -144,7 +143,7 @@ pub fn warm_universe(
 
 /// The code-FQN universe contributed by this scan's **reused** fact units: each
 /// reused file's re-based fragment FQNs plus every skipped language's replayed
-/// module scaffolding — exactly the code nodes the win-B assembly splices in
+/// module scaffolding — exactly the code nodes the cached-fact assembly splices in
 /// from the shared store (the incremental sibling of [`warm_universe`]).
 ///
 /// The incremental full-universe seam ([`incremental::full_universe`]) derives

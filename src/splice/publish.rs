@@ -1,4 +1,4 @@
-//! The atomic-publish half of the splice (phase-03 task-3): checkpoint+close
+//! The atomic-publish half of the splice: checkpoint+close
 //! the spliced copy and flip `db.lbug` into place with a same-filesystem
 //! rename, its backup, and the directory fsync that makes it durable.
 
@@ -9,7 +9,7 @@ use lbug::{Connection, Database};
 use super::seed::SeededDb;
 
 // ---------------------------------------------------------------------------
-// Atomic publish of the database (phase-03 task-3)
+// Atomic publish of the database
 // ---------------------------------------------------------------------------
 //
 // The splice publishes ONE artifact: `apg/.trans/db.lbug` (the query index).
@@ -17,7 +17,7 @@ use super::seed::SeededDb;
 // *reported* failure:
 //
 // 1. **Nothing published yet** — the delta has already been applied to the
-//    seeded temp copy (task-2); an earlier failure (seed / delta) leaves the
+//    seeded temp copy; an earlier failure (seed / delta) leaves the
 //    previous `db.lbug` byte-identical.
 // 2. **Checkpoint + close the spliced copy**, then fsync it. `CHECKPOINT`
 //    flushes the WAL into the main file; dropping the handle closes it so no
@@ -29,7 +29,7 @@ use super::seed::SeededDb;
 // 4. **fsync the containing directory** so the rename is durable, then remove
 //    the backup.
 
-/// Publishes the splice's single artifact atomically (phase-03 task-3).
+/// Publishes the splice's single artifact atomically.
 ///
 /// Consumes the [`SeededDb`] (whose delta must already be applied). On success
 /// `target_path` holds the spliced `db.lbug`; on a reported failure it is left

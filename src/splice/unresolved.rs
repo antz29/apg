@@ -1,4 +1,4 @@
-//! Post-apply re-resolution of the seed's unresolved edges (phase-04 task-3).
+//! Post-apply re-resolution of the seed's unresolved edges.
 //!
 //! The splice seeds the working DB from the previous scan's `db.lbug` and then
 //! applies the target-only delta as DML ([`super::apply`]). An **unchanged**

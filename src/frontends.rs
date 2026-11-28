@@ -1,8 +1,7 @@
 //! Scanner frontend discovery, selection, target-set hand-off, and spawning.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — the same detection, the same
-//! command lines, the same spawn argv, and the same emitted graph.
+//! A cohesive single-responsibility module: detection, the command lines, the
+//! spawn argv, and the emitted graph.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -368,9 +367,9 @@ pub fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec
             DEFAULT_DETECTOR_SKIP,
             true,
         ),
-        // Markdown's skip set is `domain.entity.scan-exclusion`
-        // (task-8): a markdown-only file under `vendor/` (or another excluded
-        // tree) must not trigger md detection.
+        // Markdown's skip set is `domain.entity.scan-exclusion`: a
+        // markdown-only file under `vendor/` (or another excluded tree) must
+        // not trigger md detection.
         ("md", &[".md", ".markdown"], 5, MD_DETECTOR_SKIP, false),
         // Python's skip set is `domain.constraint.python-exclusions`: a tree
         // whose only Python lives under a venv / site-packages / `*.egg-info` /
@@ -475,8 +474,8 @@ pub fn id_prefix_for(language: &str) -> &'static str {
     }
 }
 
-/// The **target-set handoff protocol** (phase-02 task-9, PINNED INTERFACE —
-/// feedback-85), the ONE contract every language frontend consumes.
+/// The **target-set handoff protocol** (PINNED INTERFACE), the ONE contract
+/// every language frontend consumes.
 ///
 /// CHANNEL: argv flags appended to each language's frontend command at the
 /// spawn site, beside the existing `--module`/`--id-prefix`. `stdin` stays
@@ -485,7 +484,7 @@ pub fn id_prefix_for(language: &str) -> &'static str {
 /// * `--targets <file>`: the absolute path to a UTF-8, newline-delimited file
 ///   of absolute source-file paths, one per line, no header, blanks ignored. An
 ///   absent flag or an empty file means "no emission filter". A language whose
-///   target set is unchanged and empty is skipped entirely (phase-03 task-5).
+///   target set is unchanged and empty is skipped entirely.
 ///   For `sql` the list is ALWAYS present (full scan and no-store scan alike)
 ///   and is the emission universe: an empty list emits no `.sql` file.
 /// * `--cache-dir <abs dir>`: the per-worktree toolchain cache root,
@@ -513,8 +512,8 @@ impl FrontendHandoff {
     /// Writes the per-language target file for `lang` from the absolute target
     /// paths of that language's emission granularity, returning the path. A
     /// language with no targets writes an EMPTY file (the frontend treats
-    /// "absent flag or empty file" as no filter; the spawn skip is phase-03
-    /// task-5, not this filter).
+    /// "absent flag or empty file" as no filter; the spawn skip is
+    /// [`should_spawn_language`]'s, not this filter).
     pub fn write_targets(&self, tmp: &Path, lang: &str, targets: &[String]) -> PathBuf {
         let path = tmp.join(format!("{lang}.targets"));
         let mut body = String::new();
@@ -544,7 +543,8 @@ pub fn passes_targets_flag(lang: &str, targets_enabled: bool) -> bool {
     targets_enabled || lang == "sql"
 }
 
-/// The `incremental::language_of` bucket a **scan language id** belongs to.///
+/// The `incremental::language_of` bucket a **scan language id** belongs to.
+///
 /// The unified JS/TS frontend runs under TWO scan ids (`ts` and `js`) for ONE
 /// artifact (`frontend_cmd` maps both to the same `tsfrontend`; the detector
 /// returns `js` for a JS-only repo and `ts` for a TS-containing one, never
@@ -615,8 +615,8 @@ pub fn whole_language_targets<'a>(
         .collect()
 }
 
-/// sqlfrontend's `--targets` universe on every spawn (full, incremental phase 1
-/// and phase 2 alike): sorted absolute paths (the `targets_for_language` form)
+/// sqlfrontend's `--targets` universe on every spawn (full, incremental stage 1
+/// and stage 2 alike): sorted absolute paths (the `targets_for_language` form)
 /// of every manifest path whose `language_of` is `"sql"` or whose extension is
 /// `sqlproj` in any letter case. The git-based `Manifest::build` lists only
 /// git-visible paths (tracked, or untracked and not ignored), so a gitignored
@@ -639,21 +639,21 @@ pub fn sql_stream_targets<'a>(
     out
 }
 
-/// The win-C per-language frontend spawn verdict (phase-03 task-5).
+/// The per-language frontend spawn verdict.
 ///
-/// On the win-B incremental path (`full_scan == false`):
+/// On the incremental path (`full_scan == false`):
 ///
 /// * a language with a **non-empty** target set spawns — it has changed files
 ///   to re-emit;
 /// * a language with an **empty** target set is skipped **entirely** — not
-///   merely emission-filtered (phase-02 task-8/-9, where an empty target set
-///   still spawns) — and its per-file facts arrive through the win-B cached-fact
-///   reuse path (`reuse_plan` below carries every file outside the target set).
+///   merely emission-filtered (where an empty target set still spawns) — and
+///   its per-file facts arrive through the cached-fact reuse path (`reuse_plan`
+///   below carries every file outside the target set).
 ///
-/// The skip applies only to the **PARTIAL** case the task names: the scan as a
+/// The skip applies only to the **PARTIAL** case: the scan as a
 /// whole has a non-empty target set and *this* language is one of the unchanged
-/// ones. When the whole target set is empty, phase-02 deliberately runs every
-/// frontend **UNFILTERED** — an empty/absent `--targets` list means "no filter"
+/// ones. When the whole target set is empty, every frontend runs
+/// **UNFILTERED** — an empty/absent `--targets` list means "no filter"
 /// (`incremental.rs` "an EMPTY target set emits every fact (no filter), so the
 /// full spool is already the universe and reuse stays available"). That is not
 /// merely an optimisation: the frontends emit their **global module
@@ -664,12 +664,12 @@ pub fn sql_stream_targets<'a>(
 /// a File's parent, so skipping when nothing changed would drop, say, Go's
 /// `scratch/a` package module and make the incremental graph differ from a full
 /// scan (the cross-worktree reuse acceptance). The whole-tree FRESH fast-path
-/// (phase-01 task-7) is the separate, earlier path for "the entire tree is
+/// is the separate, earlier path for "the entire tree is
 /// unchanged".
 ///
-/// **Warm-cache completeness (phase-06 task-1).** When the shared store holds a
+/// **Warm-cache completeness.** When the shared store holds a
 /// COMPLETE recorded scan for exactly this HEAD (`warm_complete`), every
-/// language — including its global module scaffolding (feedback-102) — is
+/// language — including its global module scaffolding — is
 /// reconstructible from the store, so NO language spawns on the empty-target
 /// case the paragraph above reserves for the unfiltered path. The flag is
 /// derived from the same recorded manifest + store completeness that drives the
@@ -680,8 +680,8 @@ pub fn sql_stream_targets<'a>(
 /// of work.
 ///
 /// This is the **single source of truth** for the per-language verdict: it is
-/// derived from the very phase-2 target set that drives the win-C DB splice
-/// (`PipelineInput { targets_rel, .. }`, phase-03 task-4), never from a fresh
+/// derived from the very target set that drives the DB splice
+/// (`PipelineInput { targets_rel, .. }`), never from a fresh
 /// `auto_detect_languages` walk, so a language skipped here is exactly a
 /// language the splicer treats as unchanged and the two can never disagree.
 pub fn should_spawn_language(
@@ -922,16 +922,15 @@ pub fn spawn_frontend_args(
     if classify::is_structural_language(lang) {
         child.arg("--stream").arg(lang);
     }
-    // Win-B target-set hand-off (task-9) plus the pinned cache hand-off on the
-    // full-scan path (phase-04 tasks 33/34): append whenever ANY part of the
-    // hand-off is present. `--targets` is still emitted only when
-    // `targets_enabled`, while `--cache-dir` is appended whenever set — so a
-    // full scan (`targets_enabled == false`) passes the cache dir and NO
-    // `--targets`, and the incremental argv is unchanged in flags AND order
-    // (AC (b)). With no hand-off at all (no cache dir / `NotAGitRepo`) nothing
-    // is appended (AC (c)) — except for `sql`, whose `--targets` list is always
-    // present (even empty, even with no cache dir) as its emission universe: an
-    // empty list emits no `.sql` file.
+    // The target-set hand-off plus the pinned cache hand-off on the full-scan
+    // path: append whenever ANY part of the hand-off is present. `--targets` is
+    // still emitted only when `targets_enabled`, while `--cache-dir` is
+    // appended whenever set — so a full scan (`targets_enabled == false`)
+    // passes the cache dir and NO `--targets`, and the incremental argv is
+    // unchanged in flags AND order. With no hand-off at all (no cache dir /
+    // `NotAGitRepo`) nothing is appended — except for `sql`, whose `--targets`
+    // list is always present (even empty, even with no cache dir) as its
+    // emission universe: an empty list emits no `.sql` file.
     if passes_targets_flag(lang, handoff.targets_enabled) || handoff.cache_dir.is_some() {
         handoff.append(&mut child, tmp, lang, targets);
     }

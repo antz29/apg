@@ -4,7 +4,7 @@ use super::*;
 mod unit {
     use super::*;
 
-    /// schema-alignment phase-02 task-16: the agent frontend's stream is
+    /// The agent frontend's stream is
     /// merged with every other language's, and each frontend restarts its
     /// opaque-id counter at `n1`, so the agent prefix must be distinct from
     /// every other language's prefix and never the unknown-id fallback `x`.
@@ -48,7 +48,7 @@ mod unit {
         );
     }
 
-    /// cobol-frontend phase-02 task-22: the cobol stream's opaque-id prefix is
+    /// The cobol stream's opaque-id prefix is
     /// `cb`, distinct from every other language's, so a merged COBOL stream
     /// cannot collide ids; COBOL needs no scan-time tool on PATH.
     #[test]
@@ -81,7 +81,7 @@ mod unit {
         assert!(scan_time_tools("cobol").is_empty());
     }
 
-    /// csharp-projects phase-03 task-13: every structural stream id (`sln`
+    /// Every structural stream id (`sln`
     /// included) is a language root and classified structural; the `sln`
     /// stream's opaque-id prefix collides with no other root's nor the `x`
     /// fallback, and it needs no scan-time tool on PATH.
@@ -103,7 +103,7 @@ mod unit {
         assert!(scan_time_tools("sln").is_empty());
     }
 
-    /// cobol-frontend phase-02 task-22: only the COBOL candidate matches its
+    /// Only the COBOL candidate matches its
     /// extensions in any letter case; every other language stays exact-case,
     /// so `Main.JAVA` is not a java source.
     #[test]
@@ -117,7 +117,7 @@ mod unit {
         assert!(!ext_matches("JAVA", &java, false));
     }
 
-    /// sql-frontend phase-06 task-19: `sql` is a language root whose `sq`
+    /// `sql` is a language root whose `sq`
     /// opaque-id prefix collides with no other root's nor the `x` fallback, it
     /// needs no scan-time tool on PATH, and `.sql` matches in any letter case
     /// only when the candidate asks for it.
@@ -137,7 +137,7 @@ mod unit {
         assert!(!ext_matches("SQL", &[".sql"], false));
     }
 
-    /// powershell-frontend phase-07 task-10: `ps` is a language root whose
+    /// `ps` is a language root whose
     /// `ps` opaque-id prefix collides with no other root's (sql's `sq`
     /// included) nor the `x` fallback, it needs no scan-time tool on PATH,
     /// uses the default `--targets` hand-off, and matches `.ps1`/`.psm1`/
@@ -163,7 +163,7 @@ mod unit {
         assert!(!ext_matches("ps1xml", &ps, true));
     }
 
-    /// sql-frontend phase-06 task-30: `sql` always carries `--targets` (its
+    /// `sql` always carries `--targets` (its
     /// list is its emission universe); every other language only when enabled.
     #[test]
     fn passes_targets_flag_is_always_on_for_sql() {
@@ -175,7 +175,7 @@ mod unit {
         assert!(passes_targets_flag("go", true));
     }
 
-    /// sql-frontend phase-06 task-20: any `.sql`/`.sqlproj` change (any case)
+    /// Any `.sql`/`.sqlproj` change (any case)
     /// widens to every tracked `.sql` path; the sql target list carries `.sql`
     /// and `.sqlproj` paths only, while `.sqlproj` stays in the xml list too.
     #[test]
@@ -232,7 +232,7 @@ mod unit {
         }
     }
 
-    /// sql-frontend phase-06 task-29: the sqlfrontend `--targets` universe is
+    /// The sqlfrontend `--targets` universe is
     /// every manifest `.sql`/`.sqlproj` path (any case), absolute and sorted;
     /// non-sql keys contribute nothing.
     #[test]
@@ -265,7 +265,7 @@ mod unit {
         assert!(sql_stream_targets(set(&["main.go", "Db/x.xml"]).iter(), root).is_empty());
     }
 
-    /// schema-alignment phase-02 task-17: the agent frontend is self-contained
+    /// The agent frontend is self-contained
     /// (it reads `.opencode/agents/` itself), so its scan-time preflight set is
     /// empty through the explicit tool-less `agent` arm beside the structural
     /// ids, while a tool-requiring language such as `go` still reports its tool.
@@ -302,7 +302,7 @@ mod unit {
         );
     }
 
-    /// module-flag-resolution phase-01 task-18: `honours_module_flag` admits a
+    /// `honours_module_flag` admits a
     /// shipped code frontend, the agent frontend and a structural stream, and
     /// refuses a language the driver ships no frontend for — so a `--module`
     /// selection can never spawn a frontend that would accept and ignore the

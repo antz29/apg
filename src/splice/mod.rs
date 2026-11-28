@@ -1,22 +1,22 @@
-//! Win-C DB seed (phase-03 task-1): seed the working database from the previous
-//! scan's `apg/.trans/db.lbug` by a **whole-file copy**.
+//! The splice: seed the working database from the previous scan's
+//! `apg/.trans/db.lbug` by a **whole-file copy**.
 //!
 //! The splice mechanism is deliberately unambiguous — copy file → open copied
 //! DB → apply the delta as DML → atomically publish:
 //!
-//! 1. **this module (task-1)** — resolve/validate the previous DB, copy it as a
-//!    whole file to a temp sibling in the SAME directory (so the eventual
-//!    publish is a same-filesystem `rename`, never a cross-device copy), and
-//!    open the copy read-write;
-//! 2. **task-2** — apply the delta to the copy as DML only (delete-then-insert
-//!    of the affected rows). No parquet build and no `COPY` of the unaffected
-//!    data: the whole-file copy already preserves every unaffected node/rel row,
-//!    so the splice path runs no full-load pass;
-//! 3. **task-3** — checkpoint+close the spliced copy, then atomically publish
+//! 1. **seeding** — resolve/validate the previous DB, copy it as a whole file
+//!    to a temp sibling in the SAME directory (so the eventual publish is a
+//!    same-filesystem `rename`, never a cross-device copy), and open the copy
+//!    read-write;
+//! 2. **delta application** — apply the delta to the copy as DML only
+//!    (delete-then-insert of the affected rows). No parquet build and no
+//!    `COPY` of the unaffected data: the whole-file copy already preserves
+//!    every unaffected node/rel row, so the splice path runs no full-load pass;
+//! 3. **publish** — checkpoint+close the spliced copy, then atomically publish
 //!    the single `db.lbug` — a same-filesystem rename over `target_path` with
 //!    a backup and rollback, so a failed swap leaves the previous database
 //!    byte-identical;
-//! 4. **task-4** — the pipeline dispatch that decides seed-vs-full-load.
+//! 4. **dispatch** — the pipeline's `try_splice_build` decides seed-vs-full-load.
 //!
 //! This is seed-from-previous, not overlay-on-empty, per
 //! `domain.note.cache-store-and-splice`.
@@ -44,10 +44,6 @@
 //! introspecting the result, so any future schema change automatically
 //! invalidates seeds written by an older/newer binary with no list to update.
 
-// The phase-03 surface is staged: the delta (task-2), the publish (task-3), and
-// the pipeline dispatch (task-4) consume these entry points. Until they land the
-// module is compiled but not yet wired into `run_pipeline` — the same staging
-// `incremental` (phase-02) used before task-4.
 #![allow(dead_code)]
 
 // The seam is split into its cohesive halves — the seed ([`seed`]), the delta

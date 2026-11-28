@@ -1,9 +1,8 @@
 //! The `apg scan` orchestration: the scan temp dir, the merged scanner-record
 //! stream, and the `cmd_scan` pipeline driver.
 //!
-//! Extracted from the crate root as a cohesive single-responsibility module
-//! (phase-04 decomposition); no behaviour change — the same detection, spawn
-//! loop, pre-ingest universe derivation, and pipeline dispatch.
+//! Detection, the spawn loop, pre-ingest universe derivation, and the pipeline
+//! dispatch all live here.
 
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, IsTerminal};
@@ -85,7 +84,7 @@ fn canonical_modules(modules: &[String]) -> String {
 /// whole stream with the git state the scan ran under (recorded as the DB's
 /// `Scan` row).
 pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
-    // Per-phase timing (phase-04): `scan_start` is taken before any work so the
+    // Per-phase timing: `scan_start` is taken before any work so the
     // startup/overhead phase spans argument parsing onward.
     let scan_start = std::time::Instant::now();
     let mut timing = timing::TimingReport::new();
@@ -270,7 +269,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         session::discard_derived_index(&trans_dir);
     }
 
-    // Win-A fast path (scan-freshness): when the pre-scan DB's recorded content
+    // The fast path (scan-freshness): when the pre-scan DB's recorded content
     // identity matches the tree exactly, the existing DB is reusable and every
     // language frontend is skipped — reuse the DB and return BEFORE any
     // frontend spawn or DB rebuild. The predicate is content identity (never
@@ -282,7 +281,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         log.ln(
             "[scan] fast-path: tree unchanged since the recorded scan — reusing db.lbug (frontends skipped)",
         );
-        // Phase-04 task-3: the whole-tree fast path runs no frontend and
+        // The whole-tree fast path runs no frontend and
         // rebuilds nothing, so all the elapsed time is startup/overhead and the
         // frontend phase is reported `frontend-skipped` (with ingest-assembly
         // and db-load at zero, every phase key still present).
@@ -353,8 +352,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let config = classify::ApgConfig::load(&project_dir);
 
-    // The scan config identity shared by the warm-cache probe and the win-B
-    // preparation: the exact languages/excludes/modules this scan runs with,
+    // The scan config identity shared by the warm-cache probe and the
+    // incremental preparation: the exact languages/excludes/modules this scan runs with,
     // plus the classification-config identity (`apg/config.json`) — the
     // ingestor folds that config into every record's `code_type`, so a config
     // change must invalidate the incremental splice and force a full load.
@@ -399,13 +398,13 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         log.ln(&format!("[scan] scan intent unavailable: {err:#}"));
     }
 
-    // Win-B incremental preparation (phase-02 task-8): the content manifest,
+    // Incremental preparation: the content manifest,
     // git delta + correctness fallbacks, impact target set, and the fact-reuse
     // candidates. `full_scan: Some(reason)` falls through to the full pipeline
     // (the correctness reference). The target set drives the frontend
-    // `--targets` hand-off (task-9) and the fact splice in `run_pipeline`.
+    // `--targets` hand-off and the fact splice in `run_pipeline`.
     //
-    // Warm-cache seed (phase-06 task-4): when the shared store already holds a
+    // Warm-cache seed: when the shared store already holds a
     // COMPLETE recorded scan for exactly this HEAD, prepare from the recorded
     // manifest and assemble from its re-based facts — no `Manifest::build`, so
     // no full-tree walk, and zero frontends. The ordinary `prepare` runs only
@@ -430,16 +429,16 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut reuse_plan: Option<incremental::ReusePlan> = None;
     if let Some(reason) = &incremental.full_scan {
         log.ln(&format!("[scan] {}", reason.describe()));
-        // Phase-04 task-33: carry the pinned cache hand-off on the FULL-scan
+        // Carry the pinned cache hand-off on the FULL-scan
         // path too, so each frontend's full-scan native-artifact seeding (the
-        // Java class surface behind tasks 17/32) is reachable through the CLI.
+        // Java class surface) is reachable through the CLI.
         // `targets_enabled` stays FALSE — a full scan emits everything and must
-        // carry NO `--targets` (phase-02 task-9). The hand-off value is the
+        // carry NO `--targets`. The hand-off value is the
         // checkout's per-worktree toolchain cache root
         // (`<checkout>/apg/.trans/cache`), never the shared fact-store root. A
         // tree outside a git repository has no `apg/` root to resolve against
         // (`FullScanReason::NotAGitRepo`), so the hand-off stays unset — never
-        // a fabricated or defaulted cache path (AC (c)).
+        // a fabricated or defaulted cache path.
         if !matches!(reason, delta::FullScanReason::NotAGitRepo) {
             handoff.cache_dir = Some(cache::cache_root(&apg_root));
         }
@@ -471,7 +470,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             incremental.targets_rel.len(),
             incremental.reuse_candidates.len(),
         ));
-        // The pinned target-set hand-off contract (task-9): `--targets` and
+        // The pinned target-set hand-off contract: `--targets` and
         // `--cache-dir` on every language's argv. The target files live in the
         // scan's own temp dir (removed with it).
         handoff.targets_enabled = true;
@@ -495,9 +494,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // exit the tail is also reported to the terminal (SPEC 0.9.1 R1).
     log.ln("Frontend progress -> apg-frontend.log");
 
-    // Startup/overhead ends where the frontend work begins (phase-04 task-2):
+    // Startup/overhead ends where the frontend work begins:
     // argument parsing, git state, the version gate, layout discovery, and the
-    // win-B incremental preparation all fall in this phase.
+    // incremental preparation all fall in this phase.
     timing.record(timing::Phase::Startup, scan_start.elapsed());
     let frontend_start = std::time::Instant::now();
 
@@ -513,11 +512,11 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut spools: Vec<(String, PathBuf)> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
 
-    // Phase 1: the changed files ∪ overload peers (the stage-1 target set).
-    // The signature early-cutoff (phase-02 task-6) is applied AFTER this pass:
-    // the phase-1 stream yields the changed files' new exported signatures, and
+    // Stage 1: the changed files ∪ overload peers (the stage-1 target set).
+    // The signature early-cutoff is applied AFTER this pass:
+    // the stage-1 stream yields the changed files' new exported signatures, and
     // only a genuine signature change pulls the reverse-dependency closure into
-    // phase 2. A body-only change ends after phase 1, so its dependents are
+    // stage 2. A body-only change ends after stage 1, so its dependents are
     // reused.
     let full_scan_path = incremental.full_scan.is_some();
     let mut phase = 1u32;
@@ -528,17 +527,17 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         crate::frontends::sql_stream_targets(incremental.manifest.entries.keys(), &project_dir);
     loop {
         // The scan as a whole has work to re-emit (the PARTIAL case). When it
-        // does not, phase-02 runs every frontend unfiltered instead of skipping
+        // does not, every frontend runs unfiltered instead of skipping
         // (see `should_spawn_language`).
         let any_targets = !targets_rel.is_empty();
         for lang in &languages {
             let targets = targets_for_language(&targets_rel, &project_dir, lang);
-            // Win-C per-language spawn skip (phase-03 task-5): on the
+            // The per-language spawn skip: on the
             // incremental path an unchanged language (empty target set while
             // the scan has other changed languages) has its frontend process
-            // skipped entirely; its per-file facts arrive via the win-B
+            // skipped entirely; its per-file facts arrive via the
             // cached-fact reuse path. On a full scan every language spawns. A
-            // phase-2 language whose only targets are its phase-1 ones still
+            // stage-2 language whose only targets are its stage-1 ones still
             // has them in the final (stage-1 ∪ cascade) set, so it re-runs and
             // replaces its spool; only a language with no targets at all is
             // skipped here.
@@ -580,7 +579,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 &mut log,
             )? {
                 Some(spool) => {
-                    // A phase-2 re-run replaces the language's phase-1 spool, so
+                    // A stage-2 re-run replaces the language's stage-1 spool, so
                     // each language contributes exactly one stream (no duplicate
                     // emission / FQN collision).
                     spools.retain(|(l, _)| l != lang);
@@ -592,7 +591,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         if phase == 2 || incremental.full_scan.is_some() {
             break;
         }
-        // Apply the signature early-cutoff using the phase-1 stream.
+        // Apply the signature early-cutoff using the stage-1 stream.
         let extra = {
             let phase1_lang = if languages.len() == 1 {
                 languages[0].clone()
@@ -629,14 +628,14 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             incremental.manifest.entries.keys(),
         );
         targets_rel.extend(whole_sql);
-        // Phase 2 re-spawns the languages that gained targets over the UNION
+        // Stage 2 re-spawns the languages that gained targets over the UNION
         // (stage-1 ∪ cascade), with the spools accumulated above: a language
         // that gained targets is dropped and re-spawned so its stream covers
         // the union exactly once.
         phase = 2;
     }
     // The frontend phase covers the whole spawn loop — both the stage-1 pass
-    // and any signature-cascade stage-2 re-runs (phase-04 task-2).
+    // and any signature-cascade stage-2 re-runs.
     timing.record(timing::Phase::Frontend, frontend_start.elapsed());
     // The final re-emission target set (stage 1 ∪ the signature cascade).
     let targets_rel = targets_rel;
@@ -656,7 +655,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // disagree; a language with any target is spawned and emits its own
         // (fresh) scaffolding.
         //
-        // Warm-cache completeness (phase-06 task-1/4): every configured language
+        // Warm-cache completeness: every configured language
         // was skipped, so EVERY language's scaffolding must be replayed from the
         // store — the empty-target-set case below.
         let skipped_langs: BTreeSet<String> = if warm_complete {
@@ -694,7 +693,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // it can be read twice: once for a pre-ingest that computes the scanned
     // code-FQN universe (the honest renderer reuse for `ingest_tree`'s
     // `implemented-by` validation), and once for the real pipeline.
-    // Ingest-assembly (phase-04 task-4) starts at the pre-ingest/universe work
+    // Ingest-assembly starts at the pre-ingest/universe work
     // below and continues through `run_pipeline`'s own ingestion; the DB build
     // after that in `run_pipeline` is the db-load phase.
     let assembly_start = std::time::Instant::now();
@@ -713,7 +712,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // Pre-ingest the scanner stream to compute the scanned code-FQN universe
     // `ingest_tree` validates `implemented-by` refs against (real → real).
     //
-    // FULL-UNIVERSE SEAM (feedback-92): on the win-B incremental path the spool
+    // FULL-UNIVERSE SEAM: on the incremental path the spool
     // holds only the re-emitted target facts, so a language skipped/emission-
     // filtered this scan would vanish from the universe and `validate_code_refs`
     // would falsely bail `spec drift`. Derive the FULL universe instead from the
@@ -722,7 +721,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // FQNs — never the target-only spool. On a full scan the full spool IS the
     // universe.
     //
-    // Warm-cache path (phase-06 task-4): the spool is EMPTY (zero frontends) and
+    // Warm-cache path: the spool is EMPTY (zero frontends) and
     // a fresh worktree has no local database, so derive the universe from the
     // shared store's re-based facts + module scaffolding — exactly the nodes the
     // warm assembly produces.
@@ -861,7 +860,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let records = records.chain(layers_records).chain(transient_records);
 
-    // The win-B pipeline input: the store to splice cached facts from and to
+    // The pipeline input: the store to splice cached facts from and to
     // record the completed scan back into THIS worktree's store rows. The store
     // is ALWAYS recorded (a full scan records the cold baseline the next scan
     // diffs against); only `reuse` is `None` on the full path.
@@ -877,22 +876,22 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             reuse: reuse_plan.clone(),
             warm: warm_complete,
             previous: incremental.previous,
-            // The win-C splice's delete scope and subtraction set are the SAME
-            // phase-2 state that drove the frontend target hand-off: the FINAL
+            // The splice's delete scope and subtraction set are the SAME
+            // state that drove the frontend target hand-off: the FINAL
             // target set (stage-1 ∪ the signature cascade) and the delta's
-            // removed FQNs. Threaded, never re-derived (phase-03 task-4).
+            // removed FQNs. Threaded, never re-derived.
             targets_rel: targets_rel.clone(),
             removed_fqns: incremental.removed_fqns.clone(),
             // The shared recorded content identity the delta was derived from,
             // captured before the completed scan replaced THIS worktree's store
-            // scan row — the splice's equivalence guard (feedback-101).
+            // scan row — the splice's equivalence guard.
             recorded_content_key: incremental.recorded_content_key.clone(),
         })
     };
 
     timing.add(timing::Phase::IngestAssembly, assembly_start.elapsed());
-    // Phase-03 task-1: the live progress stream belongs to the tree-scanning
-    // path, so the emitter exists only past the Win-A fast-path return above —
+    // The live progress stream belongs to the tree-scanning
+    // path, so the emitter exists only past the fast-path return above —
     // a fresh tree admits no node and prints no start line or summary. It
     // writes to stderr alone (never `apg-frontend.log`), gated on stderr being
     // a terminal and the run carrying no `--no-progress`.
@@ -940,7 +939,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     timing.record(timing::Phase::DbLoad, pipeline_timings.db_load);
     let _ = std::fs::remove_dir_all(&tmp);
     log.ln("[scan] spool temp dir removed");
-    // The per-phase report is first-class scan output (phase-04 task-2): it is
+    // The per-phase report is first-class scan output: it is
     // emitted on every non-panicking path, including a partial graph after a
     // frontend failure.
     emit_timing(&mut log, &timing);

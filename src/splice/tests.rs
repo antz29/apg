@@ -25,7 +25,7 @@ mod int {
     use std::cell::Cell;
     use std::sync::OnceLock;
 
-    /// fix-module-identity phase-06 task-10: the seed guard's content-key
+    /// The seed guard's content-key
     /// equivalence (`seed_key_matches`) is the same rule `seed_checked`
     /// applies — equal keys both present is the ONLY eligible combination.
     #[test]
@@ -321,8 +321,8 @@ mod unit {
     /// status-bearing kind, not only the Module arm: a `planned` row can never
     /// re-mark a realized (non-`planned`) Struct, Function or File, while a
     /// realized row still writes its own cleared status and location. Selection
-    /// only ever hands this writer an assembled-REAL row — the Phase-7 seed-row
-    /// heal selects a planned seed placeholder by FQN only when the assembled
+    /// only ever hands this writer an assembled-REAL row — the seed-row heal
+    /// selects a planned seed placeholder by FQN only when the assembled
     /// graph holds the real declaration — so the writer's own guarantee is what
     /// pins the invariant against a future selection change.
     #[test]

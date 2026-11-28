@@ -1,4 +1,4 @@
-//! The delta-application half of the splice (phase-03 task-2): apply the
+//! The delta-application half of the splice: apply the
 //! **target-only delta graph** to the seeded copy as DML only — upsert the
 //! re-emitted units, detach the disappeared ones, lifecycle the shared
 //! `UnresolvedTarget` rows, and refresh the single `Scan` row.
@@ -14,11 +14,12 @@ use crate::schema::SCAN_HEAD;
 use super::seed::{SeededDb, cell, cypher_escape, query_rows};
 
 // ---------------------------------------------------------------------------
-// Delta application (phase-03 task-2)
+// Delta application
 // ---------------------------------------------------------------------------
 //
 // The seeded DB is the previous scan's `db.lbug`, whole-file copied and opened
-// read-write (task-1). Task-2 applies **only the delta** as DML: the re-emitted
+// read-write by the seed. The delta application applies **only the delta** as
+// DML: the re-emitted
 // target units are upserted in place, the units whose FQN disappears are
 // detached, the shared `UnresolvedTarget` rows are lifecycle-managed by
 // reference, and the single `Scan` row (SCAN_HEAD) is refreshed. No parquet
@@ -50,7 +51,7 @@ use super::seed::{SeededDb, cell, cypher_escape, query_rows};
 // declared-pair rule a full load does. The seeded copy supplies every unchanged
 // row — node and rel — the delta graph never mentions.
 //
-// ## Scheme (feedback-90, option (i): upsert in place + replace outgoing rels)
+// ## Scheme (upsert in place + replace outgoing rels)
 //
 // For a **persisting** FQN (body-only or signature change):
 //   1. delete every rel it AUTHORS (outgoing Calls/Uses/UnresolvedCall/
@@ -79,13 +80,13 @@ use super::seed::{SeededDb, cell, cypher_escape, query_rows};
 // authored/transient records only so the seed-equivalence digest can judge them
 // (see `splice::seed_checked`), never as insert candidates — so a planned node
 // can never be re-marked over a realized one. A missing/incompatible previous
-// DB falls back to the full load (task-1/task-4).
+// DB falls back to the full load.
 
 /// The single `Scan` row (SCAN_HEAD) a spliced DB must carry. Mirrors the
 /// `scan_meta` control record (`schema::Record::ScanMeta`) and the columns
 /// `build_load_files` writes from a `Scan` node: `git_sha`/`git_clean` are
 /// `None` outside a git repo (stored as empty strings), and `content_key` is
-/// the phase-01 content-identity key.
+/// the content-identity key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanRow {
     pub git_sha: Option<String>,
@@ -97,7 +98,7 @@ pub struct ScanRow {
 /// The delta a spliced DB must apply, expressed against the seeded copy.
 ///
 /// `graph` is the target-only delta graph (`ingest::ingest_delta`'s output — see
-/// the module comment); `targets` is the FULL phase-2 re-emission target set —
+/// the module comment); `targets` is the FULL re-emission target set —
 /// changed files ∪ reverse-dependency closure ∪ overload-group peers — and is
 /// the **delete scope**; `removed_fqns` is the subtraction half of the
 /// full-universe seam (`incremental::Prepared::removed_fqns`); `scan` is the new
@@ -127,17 +128,16 @@ pub struct SpliceReport {
     /// Whether the SCAN_HEAD row was refreshed.
     pub scan_refreshed: bool,
     /// DML statements executed by [`apply`] — each BATCHED statement counted
-    /// ONCE, never per row (phase-04 task-30). The batching claim of task-14:
-    /// a jgrapht-scale delta (the pre-fix ~82 298 per-row statements,
-    /// `plan.note-87`) must report a small constant instead of a number that
-    /// grows with the delta's node/edge count.
+    /// ONCE, never per row. The count stays a small constant rather than a
+    /// number that grows with the delta's node/edge count, however large the
+    /// delta is.
     pub dml_statements: u64,
 }
 
 impl SeededDb {
-    /// Applies `delta` to the seeded copy (task-2's DML half) on a fresh
+    /// Applies `delta` to the seeded copy (the DML half) on a fresh
     /// connection. Drop the returned report; the seeded DB is then ready for
-    /// task-3's atomic publish.
+    /// the atomic publish.
     pub fn apply(&self, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
         let conn = self.conn()?;
         apply(&conn, delta)
@@ -147,9 +147,9 @@ impl SeededDb {
 // A test-only one-shot injection fired inside a delta application, after the
 // node delete/upsert stage and before the edge re-merge. Tests use it to force
 // a genuine mid-sequence DML failure (the seeded copy is then partially
-// mutated) and assert the caller discards it and falls back to the full load
-// (phase-03 task-3). Compiled unconditionally — never installed outside tests,
-// so it is a no-op — so the relocated `tests/main_e2e.rs` integration crate can
+// mutated) and assert the caller discards it and falls back to the full load.
+// Compiled unconditionally — never installed outside tests,
+// so it is a no-op — so the `tests/main_e2e.rs` integration crate can
 // reach `install_apply_hook`.
 type ApplyHook = Box<dyn FnOnce() -> anyhow::Result<()>>;
 
@@ -174,7 +174,7 @@ fn fire_apply_hook() -> anyhow::Result<()> {
 /// delta: an upsert re-sets the same props and a re-merge of a present rel is a
 /// no-op. Runs as a sequence of DML statements; a mid-sequence failure leaves
 /// the seed partially mutated, which the caller abandons via
-/// `SeededDb::discard` and re-runs through the full load (task-4).
+/// `SeededDb::discard` and re-runs through the full load.
 pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
     let mut report = SpliceReport::default();
 
@@ -209,18 +209,17 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // its outgoing Contains rels, so re-deciding it would clear the planned
     // status and drop edges a full rebuild keeps
     // (`requirements.requirement.still-planned-node-keeps-node-and-edges`).
-    // Phase-07 task-4's seed-row heal is the exact complement: when the
-    // ASSEMBLED graph holds the REAL declaration at the FQN, the placeholder is
-    // upserted so the DB row realizes — the still-planned case above is
-    // untouched.
+    // The seed-row heal is the exact complement: when the ASSEMBLED graph holds
+    // the REAL declaration at the FQN, the placeholder is upserted so the DB
+    // row realizes — the still-planned case above is untouched.
     let seeded_modules = seed_modules(conn)?;
     // The located-kind half of the seed's planned placeholders. A planned
     // `File`/`Struct`/`Function` row carries no location, so the path-based
-    // selection below can never reach it; the seed-row heal (phase-07 task-4)
-    // selects it by FQN when the ASSEMBLED graph holds the real declaration —
-    // the cached declaration task-2 lets supersede the placeholder. Strictly
+    // selection below can never reach it; the seed-row heal selects it by FQN
+    // when the ASSEMBLED graph holds the real declaration — the cached
+    // declaration the delta application lets supersede the placeholder. Strictly
     // gated on assembled-real: a still-planned FQN with no code keeps its seed
-    // row and every incident edge (phase-4), and a FQN the assembled graph lacks
+    // row and every incident edge, and a FQN the assembled graph lacks
     // entirely is left to `removed_fqns`.
     let seeded_planned_located = seed_planned_located(conn)?;
     let healed_located = |fqn: &str, node: &crate::graph::Node, label: &'static str| {
@@ -233,7 +232,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     let mut delta_agents: Vec<String> = Vec::new();
     let mut delta_files: Vec<String> = Vec::new();
     let mut delta_modules: Vec<String> = Vec::new();
-    // PHASE_09: the language roots the delta's assembled graph carries (one per
+    // The language roots the delta's assembled graph carries (one per
     // spawned stream plus the replayed scaffolding of a skipped language).
     let mut delta_languages: Vec<String> = Vec::new();
     // FQN -> label for every node the delta owns (code units + modules).
@@ -267,7 +266,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
                 // plan store's `planned` placeholder) is upserted so the DB row
                 // realizes. A still-planned Module with no code keeps its
                 // assembled `planned` node, so the heal gate stays closed and
-                // the Phase-4 exclusion is unchanged.
+                // the exclusion is unchanged.
                 let healed =
                     seeded_modules.get(fqn).is_some_and(|planned| *planned) && assembled_real(node);
                 if (fully_reached(fqn) && seed_owns_real)
@@ -401,7 +400,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // Every node the pre-fix per-row helper upserted (delta_funcs, delta_structs,
     // delta_files, delta_modules, delta_unresolved) is still upserted with the
     // same properties; the DML is now grouped per label into ONE multi-row
-    // `UNWIND … MERGE … SET` (task-29), so ~tens of thousands of node statements
+    // `UNWIND … MERGE … SET`, so ~tens of thousands of node statements
     // become ≤5.
     for (label, fqns) in [
         ("Function", &delta_funcs),
@@ -451,7 +450,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // delete (step 3) and upsert (steps 4-5) has landed on the seeded copy and
     // no replacement rel has been merged yet, so a failure here leaves the seed
     // genuinely half-applied — the caller's `discard` + full-load path
-    // (phase-03 tasks 3-5) is what recovers it.
+    // is what recovers it.
     fire_apply_hook()?;
     //
     // Resolve every delta edge exactly as the pre-fix per-row `merge` closure
@@ -459,7 +458,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // declared-pair guard), but COLLECT the survivors into `(table, from_label,
     // to_label)` groups and emit ONE multi-row `UNWIND … MATCH … MERGE` per
     // group — so ~tens of thousands of per-edge statements become one per
-    // declared `(table, label-pair)` the delta actually uses (task-14).
+    // declared `(table, label-pair)` the delta actually uses.
     let mut resolved: HashMap<String, Option<&'static str>> = HashMap::new();
     type RelGroup =
         BTreeMap<(&'static str, &'static str, &'static str), Vec<(String, String, String)>>;
@@ -468,7 +467,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
         let mut stage =
             |table: &'static str, from: &str, to: &str, payload: &str| -> anyhow::Result<()> {
                 // The delta authors an edge when it owns the SOURCE unit.
-                // `Contains` is the one exception (feedback-118): a seeded
+                // `Contains` is the one exception: a seeded
                 // Module the delta did NOT re-decide still authors `Module ->
                 // File` / `Module -> Module` to a child the delta ADDED — a full
                 // rebuild carries that edge and the seed cannot, so it must be
@@ -710,7 +709,7 @@ fn seed_modules(conn: &Connection) -> anyhow::Result<BTreeMap<String, bool>> {
 
 /// Every seeded `File`/`Struct`/`Function` FQN holding a `planned` placeholder,
 /// with its label. The located planned row carries no location, so the
-/// path-based delta selection can never reach it; phase-07 task-4's seed-row
+/// path-based delta selection can never reach it; the seed-row
 /// heal selects it by FQN instead — and only when the assembled graph holds the
 /// real declaration.
 fn seed_planned_located(conn: &Connection) -> anyhow::Result<BTreeMap<String, &'static str>> {
@@ -908,8 +907,8 @@ fn delete_authored_rels(
     Ok((n as u64, 1))
 }
 
-/// Batched in-place node upsert (phase-04 task-29; the node-DML half of
-/// task-14): `MERGE (n:Label {fqn: row.fqn}) SET props` over ONE multi-row
+/// Batched in-place node upsert (the node-DML half of the apply):
+/// `MERGE (n:Label {fqn: row.fqn}) SET props` over ONE multi-row
 /// `UNWIND … AS row` statement PER LABEL, in place of the pre-fix helper's one
 /// `conn.query` per node. The semantics are identical to the per-row helper it
 /// replaces:
@@ -929,7 +928,7 @@ fn delete_authored_rels(
 /// A node whose FQN is absent from `graph` is not upserted (the pre-fix guard).
 /// Returns `(rows, statements)`: the row count (the caller's `nodes_upserted`
 /// increment) and the DML statement count (0 for an empty group, else 1) for
-/// the task-30 counter.
+/// the DML-statement counter.
 fn upsert_node(
     conn: &Connection,
     label: &str,
