@@ -17,8 +17,7 @@ use apg::testutil::*;
 mod e2e {
     use super::*;
 
-    /// Phase-02 task-13 (cli-session-crash-recovery) + task-24: the
-    /// killed-session contract at the testutil level, all three triggers.
+    /// The killed-session contract at the testutil level, all three triggers.
     ///
     /// A live `apg session start` owns `db.lbug` and BUFFERS its durable
     /// mutations; `apg session save` is the single durability point (the node
@@ -42,9 +41,8 @@ mod e2e {
     ///     socket AND repair the derived DB rather than merely deleting the
     ///     socket and stranding the phantom projection for the next reader.
     ///
-    /// The stale socket is reclaimed in all three. The phase-01 assertions
-    /// that still hold — no partial file, no `db.lbug` holder, socket reclaim —
-    /// are kept.
+    /// The stale socket is reclaimed in all three; no partial file, no
+    /// `db.lbug` holder and socket reclaim hold in every case.
     #[test]
     #[ignore = "e2e tier: real I/O (spawned apg/scratch repo/db.lbug); run via cargo test-e2e"]
     fn killed_session_loses_nothing_and_its_stale_socket_is_reclaimed() {
@@ -461,8 +459,8 @@ mod e2e {
         remove(&repo);
     }
 
-    /// Phase-01 task-35 (acceptance): a REAL long-running `apg session start`
-    /// BUFFERS its durable mutations — writing NOTHING to `apg/layers/**` and
+    /// A REAL long-running `apg session start` BUFFERS its durable mutations —
+    /// writing NOTHING to `apg/layers/**` and
     /// making NO commit until the single save — and a SIGKILL (NOT a graceful
     /// `end`) after that save loses nothing durable and leaves no partial store:
     ///
@@ -479,7 +477,7 @@ mod e2e {
     ///
     /// The routed mutations deliberately write a node AND an edge (both
     /// endpoint files), so a crash between the two halves of the edge would be
-    /// caught by (c) — the node-only phase-03 regression cannot see that.
+    /// caught by (c) — a node-only check cannot see that.
     #[test]
     #[ignore = "e2e tier: real I/O (spawned apg/scratch repo/db.lbug); run via cargo test-e2e"]
     fn acceptance_crash_durability_no_partial_files_no_db_holder_and_socket_reclaim() {

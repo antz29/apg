@@ -373,10 +373,10 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-11: a durable `node`/`edge` mutation with NO live session
-    /// REFUSES and names `apg session start` — durable mutations are
-    /// mandatory-session (the direct path is gone), so the CLI must tell the
-    /// caller how to open one rather than silently writing to disk. A refused
+    /// A durable `node`/`edge` mutation with NO live session REFUSES and names
+    /// `apg session start` — durable mutations are mandatory-session, so the
+    /// CLI must tell the caller how to open one rather than silently writing
+    /// to disk. A refused
     /// mutation leaves the durable store (`apg/layers/**`) and the git history
     /// untouched: no node file written, no `apg/layers` directory created, and
     /// no commit.
@@ -589,8 +589,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Regression (`session-serve-crash`): a client that disconnects before its
-    /// reply is delivered must NOT kill the live session. The serve loop
+    /// A client that disconnects before its reply is delivered must NOT kill
+    /// the live session. The serve loop
     /// confines a broken-pipe reply write to that one connection, so a liveness
     /// probe that timed out — or any client killed mid-request — can never
     /// orphan a healthy coordinator behind a stale socket (which would then
@@ -651,9 +651,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-16: `apg edge add` (the command shape) through a LIVE
-    /// session writes BOTH endpoint files at the session's single durability
-    /// point (`apg session save`) — the out half in the source's file, the
+    /// `apg edge add` (the command shape) through a LIVE session writes BOTH
+    /// endpoint files at the session's single durability point (`apg session
+    /// save`) — the out half in the source's file, the
     /// matching in half in the target's, with identical properties — keeping
     /// the store pairing-consistent and landing the edge in the branch DB.
     ///
@@ -871,8 +871,8 @@ mod e2e {
     /// Authored `uses` (Person→Component) and `calls` (Service→Service) edges
     /// survive the write-through re-merge: `artifacts::edge_merge` maps both
     /// record kinds and the merge guard admits their rel pairs, so the branch
-    /// DB shows them exactly like a full scan would. Regression for the
-    /// `_ => None` arm that used to drop them.
+    /// DB shows them exactly like a full scan would. Neither record kind is
+    /// dropped.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn edge_add_lands_authored_uses_and_calls_in_the_branch_db() {
@@ -1266,19 +1266,18 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-30 (rewritten from the phase-02 direct-path taxonomy):
-    /// under mandatory-session admission the extended whole-durable-sequence
+    /// Under mandatory-session admission the extended whole-durable-sequence
     /// flock and the DB open belong to a **live session**, not to a direct
     /// `cmd_node`/`cmd_edge` path.
     ///
-    /// What still holds, and is asserted below:
+    /// Asserted below:
     ///
     /// - The extended `apg/.trans/specs.lock` flock is taken by the SESSION
     ///   (`Coordinator::start` → `acquire_spec_lock`) and held for the session's
     ///   life, so the lock file exists while the session is live (and does not
-    ///   exist before a session — no direct command takes it any more).
+    ///   exist before a session — no direct command takes it).
     /// - With NO live session, a durable `node`/`edge` mutation REFUSES and names
-    ///   `apg session start` (the direct path is gone).
+    ///   `apg session start`.
     /// - A routed durable mutation forwards to the session and is admitted into
     ///   the write-back buffer; it does NOT open `db.lbug` itself.
     /// - The read-write DB class is exclusive: while the session holds the DB, a
@@ -1287,15 +1286,12 @@ mod e2e {
     /// - The read-only class coexists: a routed `apg query` succeeds while the
     ///   session holds the read-write handle.
     ///
-    /// Dropped from the old direct-path taxonomy (no longer a real system
-    /// property under the session contract): the assertion that a direct `apg
-    /// node add` **fails** on the lbug lock while a read-write handle is held —
-    /// `cmd_node`/`cmd_edge` no longer open the DB at all (they forward to the
-    /// session), and with no session they refuse before any DB open. The control
-    /// step ("the same mutation succeeds once the handle is released") is
-    /// likewise dropped: there is no direct mutation left; after `session end` a
-    /// direct read-write open succeeds instead, and a durable mutation still
-    /// refuses (mandatory session).
+    /// Not asserted here: a direct `apg node add` **failing** on the lbug lock
+    /// while a read-write handle is held. `cmd_node`/`cmd_edge` never open the
+    /// DB (they forward to the session), and with no session they refuse before
+    /// any DB open. There is no direct mutation; after `session end` a direct
+    /// read-write open succeeds, and a durable mutation still refuses
+    /// (mandatory session).
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_edge_entry_takes_extended_spec_lock_and_db_open_taxonomy() {
@@ -1535,10 +1531,10 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-31: the strict node/edge UPDATE sweep through the top-level
+    /// The strict node/edge UPDATE sweep through the top-level
     /// `cmd_node`/`cmd_edge` DISPATCH, under mandatory-session admission.
     ///
-    /// The durable mutations now route through a live session's write-back
+    /// The durable mutations route through a live session's write-back
     /// buffer (no `apg/layers/**` write, no commit until save), so the test
     /// SETS UP the r0 -> r1 -> r2 fixture directly (the layer primitive, as
     /// `setup_hub_and_leaves` does — setup is not the subject), opens a live
@@ -1849,7 +1845,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-23: with a live session, a parallel burst of N separate
+    /// With a live session, a parallel burst of N separate
     /// routed `apg edge add` processes is applied by the ONE coordinator in
     /// receive order — zero failures, and no lost update. The write-back buffer
     /// is projected into the live DB at admission but stays NON-durable (no node
@@ -1983,7 +1979,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-17: the session amortizes ONE DB open across N routed
+    /// The session amortizes ONE DB open across N routed
     /// durable mutations (the observable open counter is materially fewer than
     /// N), every mutation is visible to a separate routed reader as soon as it
     /// returns (the session projects it into the live `db.lbug` at admission —
@@ -2133,7 +2129,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-22: a forwarded mutation carries an explicit client id and
+    /// A forwarded mutation carries an explicit client id and
     /// is applied AT MOST ONCE — replaying the same id returns the cached reply
     /// with no second apply (the buffered state is unchanged) — and nothing it
     /// buffers is durable until `apg session save` lands it in exactly ONE
@@ -2258,8 +2254,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Session lifecycle exclusivity (phase-03 task-21, extended phase-02
-    /// task-12): one session per worktree DB; a second start refuses; `apg scan`
+    /// Session lifecycle exclusivity: one session per worktree DB; a second
+    /// start refuses; `apg scan`
     /// and `apg project merge` refuse while a session is live, naming the fix
     /// (`apg session save`, then `apg session end`); a dirty `session end`
     /// refuses — it reports the pending change, releases nothing, and the
@@ -2459,7 +2455,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-18 (e2e): genuine cross-process read-your-writes under the
+    /// Genuine cross-process read-your-writes under the
     /// buffered session contract. A routed `apg node add` is admitted into the
     /// live session's write-back buffer and projected into the session-held
     /// `db.lbug`; a SEPARATE `apg query` process (a different binary) routed
@@ -2576,7 +2572,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-29 (acceptance): the cross-process parallel burst of N
+    /// The cross-process parallel burst of N
     /// SEPARATE `apg edge add` binaries routes through ONE live session — the
     /// single writer — and completes with ZERO lock errors on every named lock:
     /// the lbug `apg/.trans/db.lbug` read-write open, the
@@ -2723,7 +2719,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-13: `apg node rm` on a node reviewed by outstanding
+    /// `apg node rm` on a node reviewed by outstanding
     /// (open/actioned) Feedback PROCEEDS — the writer decides — and the
     /// write-time warning naming each unresolved item
     /// (`apg: warning: removing `<fqn>` — it is reviewed by unresolved
@@ -2987,7 +2983,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-12: the live session's write-back buffer COMPOSES across
+    /// The live session's write-back buffer COMPOSES across
     /// mutations — a later routed mutation is built over the cumulative buffered
     /// state, not just the on-disk store. With a live session, an add followed
     /// by an UPDATE of the just-added node (over its buffered base) and then an
@@ -3226,7 +3222,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-10: `apg session save` is the single durability point for
+    /// `apg session save` is the single durability point for
     /// the database's pending state. Each admitted mutation projects into the
     /// held `db.lbug` and marks exactly the node rows it changes dirty, so a run
     /// of mutations followed by one save writes EXACTLY those marked rows under
@@ -3625,7 +3621,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-13: `apg session save` is the structure-and-edge-pairing
+    /// `apg session save` is the structure-and-edge-pairing
     /// boundary, not a whole-model one. A model with a Component that has no
     /// Role — and no `implemented-by` claim — saves successfully: the boundary
     /// validates the dirty rows' structure and the held set's edge pairing,
@@ -3748,7 +3744,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-11: `apg session save` reads the session's pending state
+    /// `apg session save` reads the session's pending state
     /// from the held database — the marked rows plus the pending-removal ledger
     /// — never a buffer, so a session carrying none saves nothing. A live
     /// session that has admitted NO durable mutation writes no node file,
@@ -3963,8 +3959,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-10 (cli-session-crash-recovery): a SIGKILLed session is an
-    /// UNCLEAN EXIT. After the kill the `db.lbug` on disk still carries the
+    /// A SIGKILLed session is an UNCLEAN EXIT. After the kill the `db.lbug` on
+    /// disk still carries the
     /// phantom projection of the buffer's admitted-but-unsaved mutation, and the
     /// process died before it could checkpoint, leaving a `db.lbug.wal` sidecar
     /// beside a present-but-unconnectable session socket. The next `apg query`
@@ -4169,7 +4165,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-14: `apg session end` is gated on the HELD DATABASE's
+    /// `apg session end` is gated on the HELD DATABASE's
     /// pending state, never an in-memory buffer: a dirty row or a
     /// pending-removal ledger identity is an admitted mutation whose projection
     /// landed in `db.lbug` while no `apg/layers/**` node file backs it, so
@@ -4510,13 +4506,13 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-11: `apg scan` and `apg project merge` are exclusive with
-    /// a live session — each REFUSES while the session owns the worktree DB,
-    /// naming the fix (`apg session save`, then `apg session end`). Once the
-    /// session is saved and ended, the exclusivity gate is gone: `apg scan`
-    /// RUNS (the unchanged tree hits the freshness fast path and the scan
-    /// succeeds without a frontend spawn), and the merge path is no longer
-    /// refused by the session gate (it proceeds past exclusivity to the
+    /// `apg scan` and `apg project merge` are exclusive with a live session —
+    /// each REFUSES while the session owns the worktree DB, naming the fix
+    /// (`apg session save`, then `apg session end`). Once the session is saved
+    /// and ended, the exclusivity gate is gone: `apg scan` RUNS (the unchanged
+    /// tree hits the freshness fast path and the scan succeeds without a
+    /// frontend spawn), and the merge path is not refused by the session gate
+    /// (it proceeds past exclusivity to the
     /// fixture's unrelated missing-plan refusal). No refusal, save, end or
     /// post-end scan creates a commit.
     #[test]
@@ -4627,7 +4623,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-11: a durable `apg node add` routed through a live session
+    /// A durable `apg node add` routed through a live session
     /// returns its write-time wording advisory in the session reply, and the
     /// caller prints it on ITS OWN stderr at the mutation (`apg: warning: …`)
     /// while the write's result is left intact — the add succeeds, prints its
@@ -4794,7 +4790,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-4: a worktree with no `apg/.trans/db.lbug` cannot host a
+    /// A worktree with no `apg/.trans/db.lbug` cannot host a
     /// session — a spawned candidate `apg session start` refuses, naming
     /// `apg scan` as the remedy, and the refusal leaves nothing behind: no
     /// socket bound and no extended `specs.lock` flock held. The proof is that
@@ -4803,11 +4799,10 @@ mod e2e {
     /// The refusal is raised by the DB open, which precedes the socket bind, so
     /// a refused start is a side-effect-free no-op on the worktree.
     ///
-    /// project-context-guard phase-07.task-6: the project-context guard ADMITS
-    /// this project worktree, so the refusal is pinned to the DB cause ALONE —
-    /// its stderr carries NEITHER the guard's `mutation refused` prefix NOR the
-    /// `project context` wording, proving the absent-`db.lbug` refusal still
-    /// follows the (admitting) guard unchanged.
+    /// The project-context guard ADMITS this project worktree, so the refusal
+    /// is pinned to the DB cause ALONE — its stderr carries NEITHER the
+    /// guard's `mutation refused` prefix NOR the `project context` wording,
+    /// proving the absent-`db.lbug` refusal follows the admitting guard.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_start_refuses_without_db_naming_scan() {
@@ -4895,9 +4890,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// project-context-guard phase-07.task-3 (E2E): `apg session start` on the
-    /// MAIN checkout refuses for project context BEFORE it reclaims a stale
-    /// socket or takes `db.lbug`.
+    /// `apg session start` on the MAIN checkout refuses for project context
+    /// BEFORE it reclaims a stale socket or takes `db.lbug`.
     ///
     /// (i) With NO `db.lbug` the refusal carries the project-context wording —
     /// naming branch `main` (the repo's default branch) and the `apg project
@@ -4982,8 +4976,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// project-context-guard phase-07.task-4 (E2E): `apg session start`
-    /// refuses a checkout with no project context, and binds no socket.
+    /// `apg session start` refuses a checkout with no project context, and
+    /// binds no socket.
     ///
     /// (i) A DETACHED HEAD (at the scanned commit) holds no branch, so the
     /// refusal states exactly that and carries the one `apg project start` fix
@@ -5092,9 +5086,9 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// feedback-18 / phase-01 task-8: a DURABLE node that is first updated and
-    /// then removed in the same unsaved run keeps its identity on the
-    /// pending-removal ledger, so `save` removes its node file. Durability is
+    /// A DURABLE node that is first updated and then removed in the same
+    /// unsaved run keeps its identity on the pending-removal ledger, so `save`
+    /// removes its node file. Durability is
     /// keyed on FIRST admission — the earlier update cannot make the remove
     /// drop the delete — and admission detaches the row at once, so BEFORE the
     /// save a routed read reports the node absent while the ledger holds its
@@ -5105,7 +5099,7 @@ mod e2e {
     /// `session_save_flushes_buffered_writes_and_delete_as_is_in_one_commit` —
     /// deliberately not asserted here.
     ///
-    /// phase-01 task-15: the update admission's dirty mark is pinned POSITIVELY
+    /// The update admission's dirty mark is pinned POSITIVELY
     /// as well — between the routed update and the remove, the held DB's own
     /// `Constraint` row for the updated identity reads `updated = 1` while the
     /// untouched neighbour's row still reads the clean base's `0` — so dropping
@@ -5304,9 +5298,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// feedback-18 (negative half) / phase-01 task-12: a node CREATED and then
-    /// REMOVED in the same unsaved run was never durable, so it must net to
-    /// nothing on the identity-only pending set — no node file, no
+    /// A node CREATED and then REMOVED in the same unsaved run was never
+    /// durable, so it must net to nothing on the identity-only pending set — no
+    /// node file, no
     /// `PendingRemoval` ledger identity and no dirty row. The save reads its
     /// write set from the database's dirty rows and its delete set from the
     /// ledger, so that empty set short-circuits: nothing is written and no
@@ -5316,7 +5310,7 @@ mod e2e {
     ///
     /// A session read BEFORE and AFTER the save reports the node absent.
     ///
-    /// phase-01 task-14: the mirror arm — a node that was SAVED, then removed
+    /// The mirror arm — a node that was SAVED, then removed
     /// and re-added in one unsaved run. The re-add clears the removed
     /// identity's ledger row at admission, so the pending set is the re-added
     /// write alone: the save writes the re-added file (last admitted content)
@@ -5588,7 +5582,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-12: a routed durable mutation touches ONLY its own rows.
+    /// A routed durable mutation touches ONLY its own rows.
     ///
     /// With two committed-and-scanned durable requirements (`keep` and `move`)
     /// in the held DB, plus a pre-existing transient
@@ -5825,9 +5819,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-13 (make-or-break for feedback-20): DB-only admission
-    /// restores a transient `Feedback -[:Reviews]-> durable-node` pairing FROM
-    /// THE HELD DB with `.trans` destroyed.
+    /// DB-only admission restores a transient `Feedback -[:Reviews]-> durable-node`
+    /// pairing FROM THE HELD DB with `.trans` destroyed.
     ///
     /// A committed-and-scanned durable requirement (`reviewed`) plus a
     /// `Feedback` record and its `Reviews` edge seeded into the requirements
@@ -5851,16 +5844,15 @@ mod e2e {
     /// `.trans/plans/foo.jsonl`, because `node rm`'s best-effort
     /// outstanding-feedback warning reads only the project's six transient
     /// files (`project_transient_files`) — a corrupt `foo.jsonl` would fail
-    /// that advisory read and refuse an otherwise-valid rm. The probe still
-    /// proves the admission path performs no `.trans` enumeration: the removed
-    /// `append_transient_records` read globbed `.trans/plans/*.jsonl`, so it
-    /// would have read the probe and failed.
+    /// that advisory read and refuse an otherwise-valid rm. The probe
+    /// proves the admission path performs no `.trans` enumeration: a
+    /// `.trans`-enumerating read globs `.trans/plans/*.jsonl`, so it would
+    /// read the probe and fail.
     ///
     /// A rebuild-equivalence leg is deliberately omitted: with `.trans`
     /// destroyed, a full scan reads an empty transient leg and cannot re-project
     /// the Feedback record at all, so it could not reproduce the live-DB final
-    /// state (Reviews gone, Feedback present). The task permits this omission
-    /// when it materially complicates the test.
+    /// state (Reviews gone, Feedback present).
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn admission_restores_reviews_from_the_db_with_trans_destroyed() {
@@ -6035,7 +6027,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-24 (a)+(b): a routed `node rm`'s outstanding-feedback
+    /// A routed `node rm`'s outstanding-feedback
     /// warning is sourced from the held DB, so it survives the session's OWN
     /// `.trans/<project>.jsonl` mirrors being CORRUPT and then ABSENT.
     ///
@@ -6055,9 +6047,8 @@ mod e2e {
     ///       files stay absent (admission did not recreate them).
     ///
     /// The corrupt plan file is a strong probe: it is a `.trans/plans/*.jsonl`
-    /// file the removed per-admission plan-store enumeration
-    /// (`append_transient_records` / `plan_files`) used to glob, so any
-    /// surviving `.trans` read at admission would fail loud on it.
+    /// file a `.trans`-enumerating read globs, so any `.trans` read at
+    /// admission would fail loud on it.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn routed_rm_warns_from_the_db_with_corrupt_and_absent_own_trans() {
@@ -6274,7 +6265,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-24 (c): a routed `node rm`'s DB-sourced warning is SCOPED
+    /// A routed `node rm`'s DB-sourced warning is SCOPED
     /// to the session's own project, matching the direct path's
     /// `specs::project_transient_files(project)` scope.
     ///
@@ -6433,9 +6424,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-24 (d), updated for the phase-04 project-context guard and
-    /// trimmed by project-context-guard phase-07.task-8: a DETACHED HEAD is not
-    /// a project context, so the CLI refuses the rm, and the direct-path builder
+    /// A DETACHED HEAD is not a project context, so the CLI refuses the rm,
+    /// and the direct-path builder
     /// (`node_cmd::build_change`) over the intact `.trans` warns on NOTHING —
     /// exactly the `git::repo_identity(...).branch` `None` case.
     ///
@@ -6444,9 +6434,9 @@ mod e2e {
     /// direct-path builder runs, so the builder sees the outstanding feedback.
     /// HEAD is then detached at the scanned commit.
     ///
-    /// COVERAGE NOTE: the routed half is unreachable by construction once a live
-    /// session requires a project context — `apg session start` on a detached
-    /// checkout now refuses before binding, so no detached-HEAD session exists
+    /// COVERAGE NOTE: the routed half is unreachable by construction because a
+    /// live session requires a project context — `apg session start` on a
+    /// detached checkout refuses before binding, so no detached-HEAD session
     /// to forward a mutation to. The `Some(project)` warning path (the shape that
     /// warns about a same-project outstanding feedback) stays covered by
     /// `routed_rm_feedback_warning_is_scoped_to_the_session_project`.
@@ -6531,8 +6521,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-17 (1): a CORRUPT `.trans` plan file refuses `apg session
-    /// start` before any socket is bound, naming the offending file and the
+    /// A CORRUPT `.trans` plan file refuses `apg session start` before any
+    /// socket is bound, naming the offending file and the
     /// remedy, and leaves the held `db.lbug` untouched.
     ///
     /// `project_with_db` leaves `.trans` with only `db.lbug`, so a
@@ -6743,9 +6733,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-17 (2): ABSENT `.trans` plan files leave `apg session
-    /// start` a clean no-op — the seed enumerates only EXISTING files, so with
-    /// no `plans/*.jsonl` and no tier mirrors start succeeds normally and the
+    /// ABSENT `.trans` plan files leave `apg session start` a clean no-op —
+    /// the seed enumerates only EXISTING files, so with no `plans/*.jsonl` and
+    /// no tier mirrors start succeeds normally and the
     /// live session serves a routed read and a routed mutation.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
@@ -6835,9 +6825,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-3 (E2E): on the MAIN checkout with no live session, every
-    /// node mutation refuses for project context — BEFORE the live-session
-    /// requirement and before any existence resolution — so `node add`,
+    /// On the MAIN checkout with no live session, every node mutation refuses
+    /// for project context — BEFORE the live-session requirement and before
+    /// any existence resolution — so `node add`,
     /// `node update` and `node rm` never read as `apg session start` or an
     /// absent-node error, and no node file or commit lands.
     #[test]
@@ -6876,9 +6866,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-4 (E2E): on the MAIN checkout with no live session, every
-    /// edge mutation refuses for project context BEFORE either endpoint is
-    /// resolved — so `edge add`, `edge update` and `edge rm` over endpoints
+    /// On the MAIN checkout with no live session, every edge mutation refuses
+    /// for project context BEFORE either endpoint is resolved — so `edge add`,
+    /// `edge update` and `edge rm` over endpoints
     /// absent from that DB never report the absent node/edge, and no node file
     /// or commit lands.
     #[test]
@@ -6921,8 +6911,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-5, repaired by project-context-guard phase-07.task-7: the
-    /// live-session-in-main premise is now impossible, so the pair proven here
+    /// The live-session-in-main premise is impossible, so the pair proven here
     /// is the START refusal plus the CLIENT refusal.
     ///
     /// `apg session start` on the scanned main checkout exits non-zero with the
@@ -7020,9 +7009,9 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// project-context-guard phase-07.task-5 (E2E): the two checkouts of one
-    /// repo have distinct session sockets, so a session started in the project
-    /// worktree is the one ITS checkout's durable mutations reach.
+    /// The two checkouts of one repo have distinct session sockets, so a
+    /// session started in the project worktree is the one ITS checkout's
+    /// durable mutations reach.
     ///
     /// An `apg node add` spawned with cwd inside the worktree (no directory
     /// override) is admitted by the live worktree session — its row is visible
@@ -7145,8 +7134,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-6 (E2E): inside the PROJECT worktree on the project branch
-    /// the guard admits a genuine project context, so all six mutations —
+    /// Inside the PROJECT worktree on the project branch the guard admits a
+    /// genuine project context, so all six mutations —
     /// `node add`/`update`/`rm` and `edge add`/`update`/`rm` — still succeed
     /// through ONE live session and land durably (one commit) on
     /// `apg session save`; the mandatory-session requirement is unchanged.
@@ -7347,8 +7336,8 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-12 (session-start-recovery): with **no session socket**,
-    /// `apg session start` classifies the database it is about to own and, when
+    /// With **no session socket**, `apg session start` classifies the database
+    /// it is about to own and, when
     /// it carries pending state — a dirty durable row
     /// ([`apg::artifacts::db::db_has_pending_state`]) or a pending-removal
     /// ledger identity — discards it and rebuilds it from the durable
