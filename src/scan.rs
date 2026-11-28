@@ -226,21 +226,20 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // there (the committed `apg/` data — config,
     // specs, notes — stays in the root).
     let apg_root = find_or_create_apg_root(&project_dir);
-    // Lifecycle exclusivity: a scan replaces `db.lbug` (it unlinks and rebuilds
-    // it), which would silently diverge the graph a live session holds open.
-    // Refuse BEFORE any of that work — the caller must save the buffered state
-    // (`apg session save`) and end the session (`apg session end`) first.
-    if session::live_session(&apg_root) {
-        anyhow::bail!(
-            "refused: a live `apg session` owns {} — save its buffered changes and end it first (`apg session save`, then `apg session end`, inside the project worktree) before scanning",
-            apg_root.join(specs::TRANS).join("db.lbug").display()
-        );
-    }
-    // Hold the extended spec/plan/review write lock across the whole rebuild:
-    // a staleness-gated reader (plan verify, a mutation) takes the same flock,
-    // so it waits for this scan instead of judging a half-rebuilt DB. Taken
-    // after the refusals above so a refusing scan never holds it, and dropped
-    // when this function returns (the fast path included).
+    // A scan replaces `db.lbug` (it unlinks and rebuilds it), so under the
+    // per-invocation session model it is a write: it takes the blocking
+    // worktree lock for its read-only previous-database read and the whole
+    // rebuild, so an in-flight durable write's critical section (node files,
+    // commit, projection) closes first and a later reader, write, scan or merge
+    // waits for this rebuild. There is no live-session refusal — the blocking
+    // lock queues the work instead of failing — and the previous database is
+    // read through one read-only handle (`PreviousScan::capture`), released
+    // before the replacement.
+    //
+    // The same extended lock is held across the whole rebuild: a
+    // staleness-gated reader (plan verify, a mutation) takes the same flock, so
+    // it waits for this scan instead of judging a half-rebuilt DB. Dropped when
+    // this function returns (the fast path included).
     let _lock = artifacts::acquire_spec_lock(&apg_root)?;
     let trans_dir = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans_dir)?;
@@ -422,8 +421,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut incremental =
         warm.unwrap_or_else(|| incremental::prepare(&project_dir, &apg_root, &scan_config, force));
     // Capture the previous database's snapshot once, past the fast-path return
-    // and under the spec lock: `capture` releases its read-only handle before
-    // returning, so the rebuild below can replace `db.lbug` uncontended.
+    // and inside the blocking worktree lock: the read-only handle `capture`
+    // opens is released before it returns, so the rebuild below can replace
+    // `db.lbug` uncontended and no consumer holds a second handle on it.
     incremental.previous = crate::artifacts::PreviousScan::capture(&apg_root);
     let mut handoff = FrontendHandoff::default();
     let mut reuse_plan: Option<incremental::ReusePlan> = None;
