@@ -5,20 +5,17 @@
 /// The durable node-file root: `layers/` under the layout root (SPEC §4.1) —
 /// one file per node at `<layer>/<type>/<name>.json`, the file name IS the
 /// identity.
-// (Unused until the phase-3 write/ingest tasks join this onto a layout root.)
 #[allow(dead_code)]
 pub const LAYERS_DIR: &str = "layers";
 
 /// The gitignored transient root: `.trans/` under the layout root (SPEC
 /// §4.1/§5) — the per-branch plan store plus the transient mirrors of the
 /// layer tree.
-// (Unused until the phase-3 write/ingest tasks join this onto a layout root.)
 #[allow(dead_code)]
 pub const TRANS_DIR: &str = ".trans";
 
 /// Where a layer's authored nodes serialize (SPEC §3.1, storage policy —
 /// separate from the catalog itself).
-// (Unused until the phase-3 write/ingest tasks consult the catalog.)
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoragePolicy {
@@ -52,7 +49,6 @@ pub enum Layer {
     Global,
 }
 
-// (Unused until the phase-3/4 write/ingest tasks consult the catalog.)
 #[allow(dead_code)]
 impl Layer {
     /// All six layers in catalog order: requirements, domain, solution,
@@ -127,7 +123,6 @@ impl Layer {
 /// The durable `apg/layers/` tree (SPEC §4.1): the file-backed layer dirs in
 /// layout order — requirements, domain, solution, implementation, global
 /// (plans has no durable dir) — each with its per-type node dirs.
-// (Unused until the phase-3 write/ingest tasks join this onto a layout root.)
 #[allow(dead_code)]
 pub const LAYERS_TREE: &[(&str, &[&str])] = &[
     (
@@ -157,7 +152,6 @@ pub const LAYERS_TREE: &[(&str, &[&str])] = &[
 /// root — `plans/` first (the per-branch plan store; also the tier dir of
 /// plan nodes), then the five feedback mirrors in the tier dir of the
 /// attached node. All six tiers, incl. implementation and global.
-// (Unused until the phase-3/4 write/ingest tasks join this onto a layout root.)
 #[allow(dead_code)]
 pub const TRANS_MIRRORS: [Layer; 6] = [
     Layer::Plans,

@@ -17,7 +17,7 @@ use super::project::{assembled_records, reingest_project_with, transient_delta};
 /// The four Implementation labels a plan can declare as a **planned** node. A
 /// planned placeholder carries `status = 'planned'`; when a branch scan realizes
 /// the FQN as real code the row loses that marker (`status IS NULL`), and it
-/// must never be detached by a metadata-mutation delete (phase-05 task-1).
+/// must never be detached by a metadata-mutation delete.
 pub(crate) const PLANNED_CODE_LABELS: [&str; 4] = ["Module", "File", "Struct", "Function"];
 
 /// Code-graph labels that are never metadata: the four Implementation labels
@@ -162,7 +162,7 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
 /// landed, and the staleness gate will demand a scan before the next one (the
 /// same degradation as a hand-committed change).
 ///
-/// **Commit-then-project** (phase-05 tasks 3/12): the durable/transient file
+/// **Commit-then-project**: the durable/transient file
 /// write and its commit land FIRST — the system-of-record durability point —
 /// and only then is the exact projection delta applied to `db.lbug` in one
 /// transaction. The delta is computed HERE, inside the funnel, from the
@@ -275,7 +275,7 @@ fn node_exists(db: &Database, fqn: &str) -> bool {
     ) > 0
 }
 
-/// Runs `RETURN count(*)` and returns the number. Public so the relocated e2e
+/// Runs `RETURN count(*)` and returns the number. Public so the e2e
 /// integration crate (`tests/artifacts_e2e.rs`) reaches it as
 /// `apg::artifacts::count`.
 pub fn count(db: &Database, q: &str) -> i64 {
@@ -468,7 +468,7 @@ impl ArtifactDb {
     }
 
     /// Runs a query and returns its formatted output. Used by the test suite
-    /// (the relocated e2e crates reach it as `apg::artifacts::ArtifactDb::q`);
+    /// (the e2e integration crates reach it as `apg::artifacts::ArtifactDb::q`);
     /// the shipping CLI paths use label-typed queries via
     /// [`count`](Self::count) or the query subcommand.
     pub fn q(&self, query: &str) -> anyhow::Result<String> {
@@ -533,9 +533,8 @@ impl ArtifactDb {
     }
 
     /// True when `fqn` is a `planned` Implementation node (a plan-writer-authored
-    /// placeholder awaiting realization — GraphModel-SPEC.md). The placeholder
-    /// node is gone (PHASE_02); pending anchors are detected by `status: planned`,
-    /// never a separate kind.
+    /// placeholder awaiting realization — GraphModel-SPEC.md). Pending anchors
+    /// are detected by `status: planned`, never a separate kind.
     /// The label of a `planned` Implementation node at `fqn`, or `None`.
     pub fn is_planned(&self, fqn: &str) -> bool {
         for l in ["Struct", "Function", "File", "Module"] {
@@ -1141,7 +1140,7 @@ impl PreviousScan {
     /// `apg/.trans/db.lbug`: the scanned and planned code universes (via
     /// [`ArtifactDb::code_universes_from_db`]), every code row's label as its
     /// kind, and every `Agent` row. This is the scan's snapshot of the database
-    /// it is about to replace — the phase-6 source for the previous-database
+    /// it is about to replace — the source for the previous-database
     /// read, splice eligibility, the kind map a rebuild carries for planned
     /// nodes, and the Agent records it re-emits.
     ///

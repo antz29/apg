@@ -571,7 +571,7 @@ mod unit {
     }
 
     /// `implemented-by` accepts a code-FQN target (exempt — `validate_code_refs`
-    /// owns it, task-10) and refuses any non-Component source (SPEC §4.4).
+    /// owns it) and refuses any non-Component source (SPEC §4.4).
     #[test]
     fn implemented_by_accepts_code_fqn_target_and_refuses_non_component_source() {
         assert!(
@@ -1656,11 +1656,11 @@ mod unit {
     /// Transient edges can never reach a committed durable node file: the §5
     /// plan/review/feedback kinds (`reviews`, `gates`, `satisfies`) live
     /// ENTIRELY under `.trans` (both halves there) — [`validate_edges`]
-    /// (task-4) refuses them upstream of any durable write, so a durable node
+    /// refuses them upstream of any durable write, so a durable node
     /// file whose `out` or `in` carries a transient kind is refused at
     /// validation and can never reach a committed file. The full `.trans`-side
-    /// pairing (both halves in `.trans`) is phase-4/task-15 — NOT built here;
-    /// this asserts only the durable-side refusal gate.
+    /// pairing (both halves in `.trans`) is the `.trans`-side job — NOT built
+    /// here; this asserts only the durable-side refusal gate.
     #[test]
     fn durable_node_file_carrying_a_transient_edge_is_refused() {
         for kind in ["reviews", "gates", "satisfies"] {
@@ -1703,8 +1703,8 @@ mod unit {
         }
     }
 
-    /// [`ingest_nodes`] is the in-memory core [`ingest_tree`] delegates to
-    /// (phase-00 task-2): handed a `Vec<NodeFile>` directly — no disk walk — it
+    /// [`ingest_nodes`] is the in-memory core [`ingest_tree`] delegates to:
+    /// handed a `Vec<NodeFile>` directly — no disk walk — it
     /// sorts the set, runs the same validation pipeline, and emits one node
     /// record per node plus one edge record per **out**-edge (out is canonical;
     /// the paired in-edge emits nothing). A pairing-inconsistent set (an
@@ -1770,8 +1770,8 @@ mod unit {
         assert!(msg.contains("BOTH endpoint files"), "{msg}");
     }
 
-    /// [`records_for_nodes`] is the **partial-delta record seam** (phase-05
-    /// task-1): handed a `NodeFile` subset whose authored edge counterpart is
+    /// [`records_for_nodes`] is the **partial-delta record seam**: handed a
+    /// `NodeFile` subset whose authored edge counterpart is
     /// deliberately ABSENT (the exact shape [`check_edge_pairing`] rejects), it
     /// performs **no** full-set validation — it succeeds and emits the node
     /// record followed by exactly one record per out-edge (out is canonical).
@@ -1835,7 +1835,7 @@ mod unit {
     }
 
     /// [`records_for_nodes`] carries the authored node's full `properties` map
-    /// into the emitted `Record` unchanged (phase-05 task-1): a known key, an
+    /// into the emitted `Record` unchanged: a known key, an
     /// arbitrary key, and an empty-valued key all survive the partial builder
     /// verbatim. Pure in-memory.
     #[test]
@@ -1875,7 +1875,7 @@ mod unit {
     /// [`properties_json`] / [`properties_from_json`] are exact inverses over
     /// the full properties map: unknown keys and keys carrying an **empty
     /// value** survive the round-trip verbatim, and the canonical encoding is
-    /// the sorted-key JSON object (phase-04 task-16). Pure in-memory.
+    /// the sorted-key JSON object. Pure in-memory.
     #[test]
     fn properties_json_round_trips_unknown_and_empty_valued_keys() {
         let mut properties = NodeProperties::new();
@@ -1898,7 +1898,7 @@ mod unit {
 
     /// Equal maps encode to byte-identical canonical strings regardless of
     /// insertion order — [`NodeProperties`] is a [`BTreeMap`], whose iteration
-    /// order is sorted, so the encoding is deterministic (phase-04 task-16).
+    /// order is sorted, so the encoding is deterministic.
     /// Pure in-memory.
     #[test]
     fn properties_json_is_deterministic_for_equal_maps() {
@@ -1920,8 +1920,8 @@ mod unit {
 
     /// The empty map encodes as the canonical `"{}"`, and both `"{}"` and the
     /// empty (or whitespace-only) column value decode back to the empty map —
-    /// the projection's representation of an absent/unset property set
-    /// (phase-04 task-16). Pure in-memory.
+    /// the projection's representation of an absent/unset property set.
+    /// Pure in-memory.
     #[test]
     fn properties_json_and_from_json_agree_on_the_empty_map() {
         assert_eq!(properties_json(&NodeProperties::new()), "{}");
@@ -1942,7 +1942,7 @@ mod unit {
     /// [`properties_from_json`] refuses malformed input rather than silently
     /// dropping keys: invalid JSON and valid JSON that is **not** a
     /// `string -> string` object (array, number, `null`, string, non-string
-    /// value) are each an `Err` (phase-04 task-16). Pure in-memory.
+    /// value) are each an `Err`. Pure in-memory.
     #[test]
     fn properties_from_json_rejects_malformed_and_non_string_maps() {
         for raw in [

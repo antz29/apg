@@ -28,7 +28,7 @@ use super::validate::{
 use super::{layer_of, validate_assembled_rules};
 
 // ---------------------------------------------------------------------------
-// SPEC §4.1 — atomic multi-file write-through (phase-3 task-11)
+// SPEC §4.1 — atomic multi-file write-through
 // ---------------------------------------------------------------------------
 
 /// Write a SET of node files atomically (SPEC §4.1 "renames / deletions are
@@ -51,8 +51,8 @@ use super::{layer_of, validate_assembled_rules};
 ///
 /// The FULL semantic validation — [`validate_node`] uniqueness against the
 /// whole store, [`check_edge_pairing`], the edge matrix ([`validate_edges`]) —
-/// is the caller's job: `write_project` (task-16) runs validate_node/
-/// validate_edges before this, and `ingest_tree` (task-15) runs pairing.
+/// is the caller's job: `write_project` runs validate_node/
+/// validate_edges before this, and `ingest_tree` runs pairing.
 ///
 /// Atomicity: for every path, the pre-existing bytes are recorded
 /// (`None` when the file did not exist) BEFORE any write; then all files are
@@ -63,7 +63,6 @@ use super::{layer_of, validate_assembled_rules};
 /// back too. Outside a git repo there is no commit — the mutation still lands
 /// on disk (keeps non-git temp-dir tests working; real mutations run in a
 /// project worktree).
-// (Unused until write_project, phase-3 task-16, calls it.)
 #[allow(dead_code)]
 pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()> {
     // --- Structural pre-check (before any filesystem touch) ---
@@ -164,7 +163,6 @@ pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()>
 /// the recorded bytes, or delete the file when it did not previously exist.
 /// Best-effort — the caller returns the primary failure; a rollback step that
 /// cannot be applied (e.g. a path blocked by a directory) is left as-is.
-// (Unused until write_project, phase-3 task-16, wires write_through.)
 #[allow(dead_code)]
 fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
     for (path, prev) in paths.iter().zip(prior.iter()) {
@@ -180,14 +178,14 @@ fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
 }
 
 // ---------------------------------------------------------------------------
-// SPEC §4.1/§4.2 — the durable mutation orchestrator (phase-3 task-16)
+// SPEC §4.1/§4.2 — the durable mutation orchestrator
 // ---------------------------------------------------------------------------
 
 /// Read every durable node file under `apg/layers/` into a [`NodeFile`] vector
 /// (no validation) — the identity universe `validate_change` and `write_project`
 /// resolve writes against. The FQN is derived from the path, never read.
 ///
-/// Public so the relocated e2e crates reach it as
+/// Public so the e2e integration crates reach it as
 /// `apg::layers::read_existing_nodes` (e.g. the `testutil` crash-durability
 /// test pairs the read store with [`check_edge_pairing`]).
 pub fn read_existing_nodes(apg_root: &Path) -> anyhow::Result<Vec<NodeFile>> {
@@ -472,7 +470,7 @@ pub fn validate_save_model(dirty_rows: &[NodeFile], held_rows: &[NodeFile]) -> a
 /// write-throughs"): snapshot the prior state of every affected path, write
 /// the writes, remove the deletes, and on any failure restore every path —
 /// never leave mismatched endpoint files. Commits once. `write_through` (the
-/// write-only primitive, task-11) delegates here with an empty delete list.
+/// write-only primitive) delegates here with an empty delete list.
 /// An already-absent delete path is success, not a failure (a retried save or
 /// a partial earlier write), so the removal stays idempotent.
 /// `apg session save` reaches this once with the database's marked rows and its
@@ -598,7 +596,7 @@ pub fn write_through_with_deletes(
 }
 
 /// A test-only failure-injection point on the durable mutation path, at the
-/// commit→project boundary (phase-05 task-14). The durable file write + its
+/// commit→project boundary. The durable file write + its
 /// single commit land FIRST; the projection apply follows. A test installs a
 /// one-shot hook to force a failure at exactly one boundary — not a normal
 /// projection error path.
@@ -645,7 +643,7 @@ fn fire_mutation_hook(point: MutationBoundary) -> anyhow::Result<()> {
 }
 
 /// The exact FQN delete set a durable node/edge mutation applies to the
-/// projection (phase-05 tasks 4/6): every written FQN (removed ∪ changed —
+/// projection: every written FQN (removed ∪ changed —
 /// detaching a written node drops its old incident edges, so the MERGE-only
 /// re-merge cannot leave a vanished edge) plus every deleted FQN. Never a
 /// whole layer-dir prefix.
@@ -717,7 +715,7 @@ pub fn write_project(
 }
 
 /// [`write_project`] with an injectable projection apply. The direct path uses
-/// the default (open `db.lbug`, apply the delta, close); the phase-03 session
+/// the default (open `db.lbug`, apply the delta, close); the session
 /// coordinator passes a closure that applies the delta through the DB handle it
 /// already owns, so the session amortizes ONE open/parse across N mutations
 /// while every mutation's projection delta still lands synchronously as the
@@ -741,8 +739,8 @@ pub fn write_project_with(
     // 3. Validate the complete change before anything is written.
     validate_change(apg_root, writes, deletes)?;
 
-    // Test-only injection at the BEFORE-COMMIT boundary (phase-05 task-14,
-    // window 2): a failure here must leave the mutation in neither the durable
+    // Test-only injection at the BEFORE-COMMIT boundary (the before-commit
+    // window): a failure here must leave the mutation in neither the durable
     // store nor the projection.
     fire_mutation_hook(MutationBoundary::BeforeCommit)?;
 
@@ -757,8 +755,8 @@ pub fn write_project_with(
     //    `Scan` row to this state.
     let state = git::git_state(apg_root);
 
-    // Test-only injection at the commit→project boundary (phase-05 task-14,
-    // window 1): the durable write is committed by now; a failure here leaves
+    // Test-only injection at the commit→project boundary (the
+    // projection window): the durable write is committed by now; a failure here leaves
     // the projection prior and the committed state reproducible by a rebuild.
     fire_mutation_hook(MutationBoundary::BeforeProject)?;
 

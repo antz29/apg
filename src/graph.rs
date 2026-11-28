@@ -24,7 +24,7 @@ pub struct Graph {
     pub reviews: HashSet<(String, String)>,
     pub gates: HashSet<(String, String)>,
     pub satisfies: HashSet<(String, String)>,
-    /// Spine edges (GraphModel-SPEC.md; PHASE_01): end-to-end why-to-code
+    /// Spine edges (GraphModel-SPEC.md): end-to-end why-to-code
     /// traceability through the Domain and Solution tiers. `driven-by`
     /// (Service → Requirement), `represents` (Actor → User, Person → Actor).
     pub driven_by: HashSet<(String, String)>,
@@ -36,8 +36,7 @@ pub struct Graph {
     pub spec_implemented_by: HashSet<(String, String)>,
     pub publishes: HashSet<(String, String)>,
     pub subscribes: HashSet<(String, String)>,
-    /// Target-model relationships (schema-rework SPEC §4): authored edge kinds,
-    /// endpoint-validated by a later phase.
+    /// Target-model relationships (schema-rework SPEC §4): authored edge kinds.
     pub requires: HashSet<(String, String)>,
     pub reads: HashSet<(String, String)>,
     pub writes: HashSet<(String, String)>,
@@ -111,7 +110,7 @@ pub enum NodeKind {
     /// every module FQN is rooted `<language-id>.<module-identity>` and the
     /// Language node is attached to each of its modules via
     /// `Language -Contains-> Module`. Carries no location, `code_type`, or
-    /// category (PHASE_09 language rooting).
+    /// category.
     Language,
     Requirement,
     Note,
@@ -162,7 +161,7 @@ pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
     /// The erased parameter list of a Function node (the declaration surface
-    /// the win-B signature early-cutoff compares). Empty for every other kind
+    /// the signature early-cutoff compares). Empty for every other kind
     /// and for a function with no params. Not part of the DB/export schema — it
     /// exists so the signature cutoff is exact even when the FQN carries no
     /// `(params)` suffix (a unique function), and is skipped on serialization.
@@ -200,8 +199,8 @@ pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
     /// `Note.kind` string (background/design/...); distinct from the
-    /// `NodeKind` enum. (The placeholder `kind`-alignment is gone — planned
-    /// Implementation nodes carry their kind as a DB label, not a string.)
+    /// `NodeKind` enum. Planned Implementation nodes carry their kind as a DB
+    /// label, not a string.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

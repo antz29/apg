@@ -10,7 +10,7 @@ use super::db::{ArtifactDb, system_config};
 use super::merge::{edge_merge, node_fqn};
 
 /// The exact set of node FQNs a transient metadata mutation must detach before
-/// re-merging (phase-05 task-3): every FQN present before but gone now
+/// re-merging: every FQN present before but gone now
 /// (removed), every FQN whose node record changed (changed), and the source of
 /// every edge that vanished — a MERGE-only re-merge never deletes a vanished
 /// edge, so its surviving source is detached and re-merged with its current
@@ -76,8 +76,8 @@ pub(crate) fn reingest_project_with(
     let result = (|| -> anyhow::Result<()> {
         db.detach_delete_project(&conn, deletes)?;
         // Test-only injection: prove a mid-apply failure rolls the projection
-        // back to its prior state (phase-05 task-10). Compiled unconditionally
-        // (a no-op unless a test installs a hook) so the relocated
+        // back to its prior state. Compiled unconditionally
+        // (a no-op unless a test installs a hook) so the
         // `tests/artifacts_e2e.rs` integration crate can reach
         // `install_projection_hook`.
         fire_projection_hook()?;
@@ -102,8 +102,8 @@ pub(crate) fn reingest_project_with(
 // A test-only one-shot injection fired inside a transient projection apply,
 // after the delete set is detached and before the records are re-merged.
 // Tests use it to force a mid-apply failure and assert the transaction rolls
-// back to the prior projection (phase-05 task-10). Compiled unconditionally
-// (never installed outside tests, so the hook is a no-op) so the relocated
+// back to the prior projection. Compiled unconditionally
+// (never installed outside tests, so the hook is a no-op) so the
 // `tests/artifacts_e2e.rs` integration crate can reach
 // `install_projection_hook`.
 type ProjectionHook = Box<dyn FnOnce() -> anyhow::Result<()>>;
@@ -249,7 +249,7 @@ impl ArtifactDb {
     /// incident in-edges a changed node's DETACH would otherwise drop are read
     /// back from the DB and appended to `records` by the caller; this seam
     /// gives them no special path. That is what makes it reusable beyond
-    /// authoring mutations: the phase-03 session's admission path projects each
+    /// authoring mutations: the session's admission path projects each
     /// buffered mutation through it, and a future core-scan-into-session apply
     /// reuses this same partial-delta entry point — it is **not** an
     /// authoring-mutation-specific path.
@@ -258,7 +258,7 @@ impl ArtifactDb {
     /// prior committed state (never a half-applied delta).
     ///
     /// Split from the free [`reingest_layers`](crate::artifacts::reingest_layers)
-    /// so the phase-03 session coordinator can amortize ONE DB open across N
+    /// so the session coordinator can amortize ONE DB open across N
     /// routed mutations: the coordinator owns the handle for the session's life
     /// and applies every mutation's projection delta synchronously through it —
     /// the open is amortized, visibility never is.

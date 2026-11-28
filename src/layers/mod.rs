@@ -14,10 +14,9 @@
 //!
 //! This module ships the catalog + layout as **data/constants**, plus the
 //! SPEC §3.3 node-rule validation ([`validate_node`], [`validate_trees_acyclic`]).
-//! The write/ingest and path/identity helpers are later phase-3/4 tasks. Every
-//! layout constant is a
+//! Every layout constant is a
 //! directory name relative to the layout root (the `apg/` dir — `specs::LAYOUT`
-//! from the repo root); later consumers join them onto the root they resolve:
+//! from the repo root); consumers join them onto the root they resolve:
 //!
 //! ```text
 //! apg/layers/                         (durable — one file per node)
@@ -67,9 +66,9 @@ pub(crate) use validate::{
 #[cfg(test)]
 pub(crate) use validate::{EDGE_KINDS, MATRIX, validate_edge};
 
-// The relocated unit/int tests reach `std`'s collections through `use super::*`
-// (they were declared in this module before the split); keep them reachable in
-// test builds only, so a non-test build carries no unused import.
+// The unit/int tests reach `std`'s collections through `use super::*`; keep
+// them reachable in test builds only, so a non-test build carries no unused
+// import.
 #[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -10,7 +10,7 @@ use super::code_refs::LANGUAGE_ROOTS;
 use super::node_file::{NodeFile, NodeProperties, fqn};
 
 // ---------------------------------------------------------------------------
-// SPEC §4 node rules — write-time validation (phase-3 task-2)
+// SPEC §4 node rules — write-time validation
 // ---------------------------------------------------------------------------
 
 /// Property keys the tier model validates (SPEC §4). A key is validated
@@ -146,7 +146,7 @@ pub fn parse_fqn(fqn: &str) -> anyhow::Result<(Layer, String, String)> {
 /// contain every node of the change (existing nodes plus the node being
 /// validated and any co-proposed nodes), so a dangling endpoint is refused
 /// here too. Pure structure check — the edge-kind matrix is
-/// [`validate_edges`]'s job (phase-3 task-4).
+/// [`validate_edges`]'s job.
 ///
 /// Run over the assembled post-mutation edge set by
 /// [`validate_assembled_rules`]: the write path (`validate_change`, behind
@@ -213,7 +213,7 @@ pub fn validate_trees_acyclic(
 }
 
 // ---------------------------------------------------------------------------
-// SPEC §4 edge-kind matrix — write-time validation (phase-3 task-4)
+// SPEC §4 edge-kind matrix — write-time validation
 // ---------------------------------------------------------------------------
 
 /// The SPEC §4 durable edge kinds — the complete list. Plan edges
@@ -1196,7 +1196,7 @@ pub(crate) fn validate_cardinalities(
 }
 
 // ---------------------------------------------------------------------------
-// SPEC §3.1 — group coupling, derived never stored (phase-3 task-5)
+// SPEC §3.1 — group coupling, derived never stored
 // ---------------------------------------------------------------------------
 
 /// Derive the group-coupling relation from a set of domain service/event edges
@@ -1229,7 +1229,6 @@ pub(crate) fn validate_cardinalities(
 /// FQNs, each normalized so the lower FQN sorts first (a pair is unordered).
 /// Purely derived data — nothing is stored and no Group→Group edge or coupling
 /// node is produced.
-// (Unused until a later phase surfaces the derived coupling relation.)
 #[allow(dead_code)]
 pub fn derive_coupling(
     edges: &[(&str, &str, &str)],
@@ -1277,7 +1276,7 @@ pub fn derive_coupling(
 }
 
 // ---------------------------------------------------------------------------
-// SPEC §7 — constraints are prose, review-only (phase-3 task-6)
+// SPEC §7 — constraints are prose, review-only
 // ---------------------------------------------------------------------------
 
 /// Validate a proposed `constraint` node at write time (SPEC §7): constraints
@@ -1317,7 +1316,7 @@ pub fn eval_constraint(
 }
 
 // ---------------------------------------------------------------------------
-// SPEC §4.1 — in/out edge pairing (phase-3 task-9)
+// SPEC §4.1 — in/out edge pairing
 // ---------------------------------------------------------------------------
 
 /// Verify the SPEC §4.1 pairwise edge invariant over the node files the
@@ -1326,7 +1325,7 @@ pub fn eval_constraint(
 /// matching out/in edge in the other endpoint's file is an ERROR (caught at
 /// ingestion). A match means the **same source, kind, target, AND edge
 /// properties** — not merely endpoint existence. **Outgoing edges are the
-/// canonical source** for building the graph (task-15's [`ingest_tree`]);
+/// canonical source** for building the graph ([`ingest_tree`]);
 /// this function only VERIFIES symmetry — it builds nothing.
 ///
 /// Authored vs code endpoints (SPEC §4.1 "code endpoints are exempt"): a code
@@ -1346,13 +1345,12 @@ pub fn eval_constraint(
 /// only §4 edges ([`validate_edges`] refuses the transient kinds
 /// upstream), and a transient-to-durable relationship lives ENTIRELY in
 /// `.trans` (both halves there — §4.1: committed files never hold transient
-/// references). Transient pair validation is the `.trans`-side job
-/// (phase-4), never this function.
+/// references). Transient pair validation is the `.trans`-side job,
+/// never this function.
 ///
 /// Pure — no I/O; the caller supplies the node files to check. Builds the
 /// FQN → node-file map with [`fqn`] (the file name IS the identity), then
 /// verifies every edge half against its counterpart.
-// (Unused until ingest_tree, phase-3 task-15, calls it.)
 #[allow(dead_code)]
 pub fn check_edge_pairing(nodes: &[NodeFile]) -> anyhow::Result<()> {
     // FQN → node file: the identity universe the pairing check resolves

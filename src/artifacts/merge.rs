@@ -10,11 +10,11 @@ use super::db::{ArtifactDb, CODE_GRAPH_LABELS, PLANNED_CODE_LABELS, count, lit};
 
 impl ArtifactDb {
     /// Deletes exactly the FQNs in `fqns`, together with their incident edges,
-    /// guarded so a **realized** code FQN survives (phase-05 task-1).
+    /// guarded so a **realized** code FQN survives.
     ///
-    /// The name is retained from the pre-phase-05 prefix delete (`modifies`
+    /// The name is a misnomer kept for compatibility (`modifies`
     /// target `apg.artifacts.ArtifactDb.detach_delete_project`); the BEHAVIOR is
-    /// the exact-FQN delta below, no longer a `<project>/`-prefix delete.
+    /// the exact-FQN delta below, not a `<project>/`-prefix delete.
     ///
     /// The delete set a metadata mutation passes is its removed ∪ changed FQNs
     /// (see [`transient_delta`] and `layers::projection_deletes`), never a
@@ -217,7 +217,7 @@ impl ArtifactDb {
     ///
     /// This is the general partial-set apply seam, not an authoring-mutation
     /// special case: `reingest_layers_on` and `reingest_project_with` both drive
-    /// it with a delta, and the phase-03 session's admission path reuses it.
+    /// it with a delta, and the session's admission path reuses it.
     pub fn merge_records(&self, conn: &Connection, records: &[Record]) -> anyhow::Result<()> {
         // A PlannedNode record must never overwrite a **present** (realized)
         // Implementation node: the plan JSONL keeps its planned records until
@@ -304,7 +304,7 @@ pub(crate) fn applies_to_missing_languages<'a>(
 /// serialized-properties column payload when the table has one.
 ///
 /// The last element is `Some` for the durable authored node tables (which gain
-/// the serialized-properties column, phase-4 task 12) and `None` for the code
+/// the serialized-properties column) and `None` for the code
 /// node tables and the transient plan/feedback node tables, which have no such
 /// column.
 #[allow(clippy::type_complexity)]
@@ -580,7 +580,7 @@ fn node_merge(
 /// reach this merge (they come from the load path, not a record set).
 ///
 /// The last element is `Some` for every durable authored rel table (the
-/// serialized-properties column, phase-4 task 13) and `None` for the transient
+/// serialized-properties column) and `None` for the transient
 /// `Reviews`/`Gates`/`Satisfies` rels and the task edges, which carry no column.
 pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeProperties>)> {
     match r {
@@ -662,7 +662,7 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
             to,
             properties,
         } => Some(("Realises", from, to, Some(properties))),
-        // Task edges (SCHEMA.md, phase 4): rel tables created by the projection
+        // Task edges (SCHEMA.md): rel tables created by the projection
         // task, PascalCase of each wire name. Safe before the tables exist —
         // `merge_edge` skips every pair `rel_table_pairs` does not declare.
         Record::AssignedTo { from, to } => Some(("AssignedTo", from, to, None)),
@@ -732,7 +732,7 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
 }
 
 /// The DB label and FQN of a node record — the exact pair [`merge_records`]
-/// MERGEs. The projection-equals-sources check (phase-05 task-9) uses it to
+/// MERGEs. The projection-equals-sources check uses it to
 /// derive the expected node set from the source record stream.
 pub fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
     node_merge(r).map(|(label, fqn, _, _)| (label, fqn))

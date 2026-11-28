@@ -93,7 +93,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut task_title = Vec::new();
     let mut task_status = Vec::new();
 
-    // Tier-1/2/3 node tables (GraphModel-SPEC.md; PHASE_01).
+    // Tier-1/2/3 node tables (GraphModel-SPEC.md).
     let mut stakeholder_fqn = Vec::new();
     let mut stakeholder_name = Vec::new();
     let mut stakeholder_body = Vec::new();
@@ -985,9 +985,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
     use NodeKind::*;
     vec![
-        // The Language root ⊃ its modules (PHASE_09 language rooting).
+        // The Language root ⊃ its modules (language-rooted FQNs).
         (Language, Module),
-        // A Language root ⊃ a module-less File (csharp-projects).
+        // A Language root ⊃ a module-less File (a namespace-less C# file).
         (Language, File),
         (Module, Module),
         (Module, File),
@@ -1022,7 +1022,7 @@ fn contains_pair_name(a: NodeKind, b: NodeKind) -> Option<String> {
 /// A `Graph` edge-set accessor for one task-edge rel table.
 pub(crate) type TaskEdgeSet = fn(&Graph) -> &HashSet<(String, String)>;
 
-/// The transient task-edge rel tables (SCHEMA.md, phase 4) and the `Graph`
+/// The transient task-edge rel tables (SCHEMA.md) and the `Graph`
 /// edge set each projects, in spool-tag order. Shared by the load files, the
 /// schema DDL and the seed digest so the table set is single-sourced. A
 /// `target` row names the renames/moves (or creates)
@@ -1141,7 +1141,7 @@ pub(crate) fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     // binds. `Language` is a code-graph node table, materialised at admission
     // for a target no scanned stream produced.
     v.push(("AppliesTo", Constraint, Language));
-    // Transient task edges (SCHEMA.md, phase 4): the assigned Agent, the
+    // Transient task edges (SCHEMA.md): the assigned Agent, the
     // implemented Component and the per-kind operation rows (whose `target`
     // pair is the renames/moves/create destination, any code kind).
     v.push(("AssignedTo", Task, Agent));
@@ -1293,9 +1293,9 @@ pub fn node_labels() -> &'static [&'static str] {
 }
 
 /// Whether a DB node label is a *code* label (Module/Struct/Function/File/
-/// UnresolvedTarget). The placeholder namespace is gone (PHASE_02) and so is
-/// placeholder node (PHASE_02) — code vs spec-family discrimination now uses
-/// the node label: `review_add` and other FQN routers check `is_code_label`
+/// UnresolvedTarget). A node label is either a code label or a spec-family
+/// label — there is no placeholder namespace or placeholder node — and
+/// `review_add` and other FQN routers check `is_code_label`
 /// before deriving a project from the FQN.
 pub fn is_code_label(label: &str) -> bool {
     matches!(
@@ -1481,7 +1481,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     // The implementation constraint's language scope (SCHEMA.md): a row can
     // only ever join an `applies-to` edge to a `Language` node.
     conn.query("CREATE REL TABLE AppliesTo(FROM Constraint TO Language, properties STRING)")?;
-    // The transient task-edge rel tables (SCHEMA.md, phase 4). Every table has
+    // The transient task-edge rel tables (SCHEMA.md). Every table has
     // `Task` as its source; the pair list comes from the same enumeration the
     // load files and COPY use, grouped so a multi-pair table (`Target`) is one
     // statement. They carry no serialized-properties column.
@@ -1537,7 +1537,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             "language.parquet",
             format!(r#"COPY Language FROM "{}""#, p("language.parquet")),
         ),
-        // The Scan row (SCAN_HEAD) carries the phase-01 content-identity key
+        // The Scan row (SCAN_HEAD) carries the content-identity key
         // (`content_key`) beside git_sha/git_clean/scanned_at and the scan's
         // resolved module selection (`modules`); the parquet columns are
         // emitted in this exact DDL order, so each lands in the live DB's Scan

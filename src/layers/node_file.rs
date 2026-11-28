@@ -23,7 +23,7 @@ pub type NodeProperties = BTreeMap<String, String>;
 /// occupy, shared by both the full-scan path (create_schema /
 /// `build_load_files`) and the session's incremental reingest path
 /// (`merge_node` / `merge_edge`), and mirrored by `properties_from_json`'s
-/// decode (phase-4 task-2).
+/// decode.
 ///
 /// Canonical means:
 /// - **deterministic key order** — the map is a [`BTreeMap`], which iterates
@@ -66,7 +66,7 @@ pub fn properties_from_json(raw: &str) -> anyhow::Result<NodeProperties> {
 }
 
 // ---------------------------------------------------------------------------
-// Node-file schema + single-node writer (phase-3 task-8)
+// Node-file schema + single-node writer
 // ---------------------------------------------------------------------------
 
 /// One node file's schema (SPEC §4.1). `layer`/`type`/`name` are the identity
@@ -74,10 +74,9 @@ pub fn properties_from_json(raw: &str) -> anyhow::Result<NodeProperties> {
 /// `<layer>.<type>.<name>` (global per-layer namespace, no project prefix).
 /// `body` is the prose; `properties` is metadata (short ids live here, never
 /// as identity); `out`/`in` hold both edge directions in this file (out in the
-/// source's file, in in the target's — the pairing check is task-9, and the
-/// edge/type validation is task-16's [`validate_node`]/[`validate_edges`],
+/// source's file, in in the target's — the pairing check is separate, and the
+/// edge/type validation is [`validate_node`]/[`validate_edges`],
 /// called by write_project **before** [`write_node`]).
-// (Unused until write_project, phase-3 task-16, calls write_node.)
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeFile {
@@ -108,7 +107,6 @@ pub struct NodeFile {
 /// One out-edge in a node file (SPEC §4.1): this node is the source. Two
 /// separate structs for out/in — they carry different fields (`target` vs
 /// `source`).
-// (Unused until write_project, phase-3 task-16, calls write_node.)
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutEdge {
@@ -123,7 +121,6 @@ pub struct OutEdge {
 }
 
 /// One in-edge in a node file (SPEC §4.1): this node is the target.
-// (Unused until write_project, phase-3 task-16, calls write_node.)
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InEdge {
@@ -139,7 +136,6 @@ pub struct InEdge {
 /// Build an authored-node FQN (`<layer>.<type>.<name>`) from its identity —
 /// the inverse of [`parse_fqn`]. The file name IS the identity, so the FQN is
 /// derived, never stored.
-// (Unused until write_project, phase-3 task-16, and ingest_tree, task-15, call it.)
 #[allow(dead_code)]
 pub fn fqn(layer: Layer, node_type: &str, name: &str) -> String {
     format!("{}.{node_type}.{name}", layer.layer_dir())
@@ -153,8 +149,8 @@ pub fn fqn(layer: Layer, node_type: &str, name: &str) -> String {
 ///
 /// This is the **single-file** writer: it creates the parent dirs and writes
 /// the one file (a plain [`std::fs::write`] — the multi-file atomicity is
-/// task-11's `write_through`). It does **not** validate edges or pairing
-/// (task-9/11) and does **not** validate the type against its layer's catalog
+/// `write_through`). It does **not** validate edges or pairing
+/// and does **not** validate the type against its layer's catalog
 /// (that is [`validate_node`], called by write_project before this) — it only
 /// does the cheap identity sanity checks a file name demands:
 ///
@@ -166,7 +162,6 @@ pub fn fqn(layer: Layer, node_type: &str, name: &str) -> String {
 ///
 /// Returns the written file's path. Nothing here treats a `properties` key as
 /// identity — short ids are metadata, stored verbatim.
-// (Unused until write_project, phase-3 task-16, calls it.)
 #[allow(dead_code)]
 pub fn write_node(apg_root: &Path, node: &NodeFile) -> anyhow::Result<PathBuf> {
     let layer = Layer::ALL

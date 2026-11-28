@@ -180,12 +180,12 @@ pub enum Record {
         parent: String,
     },
 
-    // --- Tier-1/2/3 graph-native spec nodes (GraphModel-SPEC.md; PHASE_01) ---
+    // --- Tier-1/2/3 graph-native spec nodes (GraphModel-SPEC.md) ---
     // The 4-tier taxonomy: tier 1 Requirements (Stakeholder), tier 2 Domain
     // (DDD), tier 3 Solution (C4), tier 4 Implementation (scanner code nodes).
     // These are authored via the spec tools, never scanned. FQNs are
-    // project-scoped (`<project>/<slug>.<name>` — PHASE_04 dropped the
-    // prefix). `name` is the concept's short name; `body` its description.
+    // project-scoped (`<project>/<slug>.<name>`). `name` is the concept's short
+    // name; `body` its description.
     /// `{"type":"stakeholder","fqn":"<project>/stakeholder.<name>","name":"...","body":"..."}`
     Stakeholder {
         fqn: String,
@@ -532,7 +532,7 @@ pub enum Record {
         to: String,
     },
 
-    // --- Spine edges (GraphModel-SPEC.md; PHASE_01) ---
+    // --- Spine edges (GraphModel-SPEC.md) ---
     // End-to-end traceability from why to code. The target-model matrix keeps
     // `DrivenBy` (Service → Requirement) and `Represents` (Actor → User,
     // Person → Actor).

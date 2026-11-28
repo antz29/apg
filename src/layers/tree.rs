@@ -14,7 +14,7 @@ use super::validate::{check_edge_pairing, eval_constraint};
 use super::validate_assembled_rules;
 
 // ---------------------------------------------------------------------------
-// SPEC §4.1 — tree ingestion (phase-3 task-15)
+// SPEC §4.1 — tree ingestion
 // ---------------------------------------------------------------------------
 
 /// Ingest the durable `apg/layers/` tree into the new-model graph records
@@ -26,7 +26,7 @@ use super::validate_assembled_rules;
 /// Validation (all ERRORs, never silent):
 /// - [`check_edge_pairing`] over every node file — an in/out edge in one file
 ///   without the matching out/in edge (same source, kind, target, AND
-///   properties) in the other endpoint's file is refused (R16 AC).
+///   properties) in the other endpoint's file is refused.
 /// - [`validate_assembled_rules`] over the assembled set — `contains` trees
 ///   acyclic ([`validate_trees_acyclic`]) and `publishes`/`subscribes`
 ///   targets are `Entity (kind: event)` ([`validate_event_targets`]) (SPEC §4
@@ -122,7 +122,7 @@ pub fn ingest_nodes(
         .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
         .collect();
 
-    // 1. Pairwise in/out symmetry across ALL node files (R16 AC).
+    // 1. Pairwise in/out symmetry across ALL node files.
     check_edge_pairing(&nodes)?;
 
     // 2. Property-aware §4 rules over the assembled set: `contains` trees
