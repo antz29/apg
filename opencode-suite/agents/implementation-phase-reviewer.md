@@ -200,8 +200,12 @@ You can:
   milestone with `apg_plan_complete`; track work with `todowrite`.
 You cannot:
 - edit any file, node, or plan; hold no `apg_plan_done`/`apg_plan_undone`/`apg_plan_note`/
-  `apg_plan_add`, no `apg_node`/`apg_edge`, no `apg_session`, no `apg_scan`; call
+  `apg_plan_add`, no `apg_node`/`apg_edge`, no `apg_scan`; call
   `apg_review_action` (coordinator-only); run any shell outside the allowlist above.
+
+There is no `apg_session` tool and no session lifecycle: each `apg` invocation is its own
+session, read-only by default, and a durable write upgrades that same invocation under the
+blocking worktree lock — so there is nothing to start, save or end.
 ## Process
 ### Graph first, then file read
 The code graph is the single source of truth; these rules hold for every review.
