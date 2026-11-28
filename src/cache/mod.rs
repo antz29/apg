@@ -1,10 +1,10 @@
-//! Win-B incremental content: the **content-addressed manifest**, the shared
+//! Incremental content: the **content-addressed manifest**, the shared
 //! **fact store** and its body codec, and the checkout-local toolchain cache.
 //!
 //! Three concerns live here:
 //!
 //! 1. [`Manifest`] — a `path -> git blob OID` map recorded with each scan
-//!    (`rust.apg.cache`, task-1). Delta/reuse decisions compare blob OIDs,
+//!    (`rust.apg.cache`). Delta/reuse decisions compare blob OIDs,
 //!    never mtime: touching a file without changing a byte keeps the same OID
 //!    (its cached facts are reused); a byte edit changes the OID and
 //!    invalidates them. The OID is git's own blob hash of the working-tree
@@ -57,7 +57,7 @@
 //! it into each record's `code_type`, so a config change must force a full
 //! load).
 
-// This module lands the win-B content-addressed API, and the whole module's
+// This module holds the content-addressed API, and the whole module's
 // surface is deliberately public even though a few accessors are not wired into
 // production: `FactStore::has` is used only by the test suites, and
 // `Manifest::rebase_root` currently has no caller at all.

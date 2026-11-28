@@ -165,7 +165,7 @@ fn index_fixture() -> Graph {
 mod unit {
     use super::*;
 
-    /// fix-module-identity task-13: `rebase` promotes the checkout-relative
+    /// `rebase` promotes the checkout-relative
     /// cache model to the repo-relative identity base. A stored identity
     /// (the form the cache now writes) passes through verbatim regardless of
     /// the reading worktree; a legacy ABSOLUTE path is stripped of its
@@ -254,7 +254,7 @@ mod unit {
         assert!(rendered.get("binary_version").is_none());
     }
 
-    /// phase-03 task-4 (Defect B): the loaded classification config
+    /// The loaded classification config
     /// (`apg/config.json`) is part of the global cache key. `classify_code_type`
     /// runs at ingest and only a FULL load reclassifies, so a classification
     /// change must force a full scan rather than silently reuse cached
@@ -413,7 +413,7 @@ mod unit {
         assert!(built.matches(&CacheKey::compute(&base)));
     }
 
-    /// cobol-frontend phase-02 task-23: the effective COBOL dialect is part of
+    /// The effective COBOL dialect is part of
     /// the key only when set, so a dialect change rebuilds the COBOL facts while
     /// a non-COBOL key stays exactly as it was.
     #[test]
@@ -454,7 +454,7 @@ mod unit {
         assert!(d2.added.is_empty());
     }
 
-    /// phase-04 task-20: the single-pass per-file index is falsifiably ONE
+    /// The single-pass per-file index is falsifiably ONE
     /// traversal (its visit counters equal the graph's own sizes and do not
     /// grow as fragments are derived) and byte-identical to the unchanged
     /// pre-fix `from_graph` per-file scan oracle.
@@ -551,7 +551,7 @@ mod unit {
         assert!(sfrag.nodes.is_empty() && sfrag.edges.is_empty() && sfrag.modules.is_empty());
     }
 
-    /// phase-03 task-16: an Agent node is a *located* node of its definition
+    /// An Agent node is a *located* node of its definition
     /// file's fact unit — both extraction paths keep the `agent.<file-stem>`
     /// row, whose `kind_str` is `agent` — and a unit that round-trips through
     /// the cache's serde shape projects that row back to `NodeKind::Agent`
@@ -615,7 +615,7 @@ mod unit {
         assert_eq!(node.code_type, "docs");
     }
 
-    /// csharp-projects phase-04 task-24: a namespace-less file's
+    /// A namespace-less file's
     /// Language→File containment rides its own fact unit (both extraction
     /// paths agree), the Language root never enters `modules`, and the
     /// Language→Module scaffolding edge rides no file's unit.
@@ -678,7 +678,7 @@ mod unit {
         }
     }
 
-    /// sql-frontend phase-08 task-12: a `uses` edge's properties ride its
+    /// A `uses` edge's properties ride its
     /// fact unit — both extraction paths, the serde round-trip and `project`
     /// keep them; a property-less edge (or a stored edge predating the
     /// field) carries the empty map.
@@ -754,7 +754,7 @@ mod unit {
         assert!(legacy.properties.is_empty());
     }
 
-    /// scan-graph-integrity phase-02 task-3: a mixed file-bearing and
+    /// A mixed file-bearing and
     /// intermediate hierarchy records its `Language` root and a
     /// `Language -> Module` edge for **every** module — the intermediate one
     /// included, though no file of its own anchors it — and a file-rooted
@@ -819,7 +819,7 @@ mod unit {
         assert!(csharp.language_edges.is_empty(), "{csharp:?}");
     }
 
-    /// scan-cache-redb phase-01 task-2: the toolchain cache root is the
+    /// The toolchain cache root is the
     /// checkout's own `apg/.trans/cache`, resolved from the apg root alone —
     /// two distinct checkouts therefore resolve two distinct roots, and no
     /// part of the path comes from the git common dir.
@@ -838,7 +838,7 @@ mod unit {
         assert!(!checkout.to_string_lossy().contains("facts"));
     }
 
-    /// scan-cache-redb phase-01 task-2: each language's directory is a direct
+    /// Each language's directory is a direct
     /// child of the cache root — `<root>/<language>`, with no cache-key or
     /// version segment — so the Go, Java and TypeScript caches sit side by
     /// side under one checkout-local root.
@@ -866,7 +866,7 @@ mod unit {
         );
     }
 
-    /// scan-cache-redb phase-05 task-3: the grace window is inclusive at its
+    /// The grace window is inclusive at its
     /// boundary (`now - at == grace` is still live, one second more is not),
     /// a brand-new intent is live, and an `at` later than the clock (worktree
     /// clock skew) counts as unexpired rather than as an ancient intent.
@@ -889,7 +889,7 @@ mod unit {
         assert!(!intent_live(at, at + 1, 0));
     }
 
-    /// scan-cache-redb phase-05 task-3: a live manifest reaches the unit whose
+    /// A live manifest reaches the unit whose
     /// `(rel, oid)` it records, and that unit roots its body. Every other unit
     /// is collected whatever its body does — a manifest entry for the same path
     /// with a different OID reaches nothing.
@@ -914,7 +914,7 @@ mod unit {
         );
     }
 
-    /// scan-cache-redb phase-05 task-3: live module scaffolding is global, so
+    /// Live module scaffolding is global, so
     /// the body it references is a root with no manifest or intent at all — and
     /// no scaffolding row is ever collected while it is stored.
     #[test]
@@ -936,7 +936,7 @@ mod unit {
         );
     }
 
-    /// scan-cache-redb phase-05 task-3: a body shared on content can survive
+    /// A body shared on content can survive
     /// under another root while the unit row that recorded it is collected —
     /// that row still cannot be reused, so it is deleted with no dangling body.
     #[test]
@@ -955,7 +955,7 @@ mod unit {
         assert!(collection.scaffolding.is_empty());
     }
 
-    /// scan-cache-redb phase-05 task-3: an unexpired intent roots only the
+    /// An unexpired intent roots only the
     /// units whose recorded `writer_root` is that worktree's checkout root —
     /// the store knows the writing root per unit, never per body.
     #[test]
@@ -979,7 +979,7 @@ mod unit {
         );
     }
 
-    /// scan-cache-redb phase-05 task-3: the two degenerate views collect
+    /// The two degenerate views collect
     /// nothing — an empty store, and one where every stored row is reached.
     #[test]
     fn empty_and_fully_reached_views_collect_nothing() {

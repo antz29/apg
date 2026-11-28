@@ -149,8 +149,8 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
 }
 
 /// Renders a module's canonical FQN by rooting its frontend-emitted dotted
-/// identity under the `lang_switch` language id (PHASE_09 language rooting)
-/// after rendering the identity repo-relative against `base` (a Markdown
+/// identity under the `lang_switch` language id, after rendering the identity
+/// repo-relative against `base` (a Markdown
 /// module identity is an absolute directory path; every other frontend emits a
 /// relative identity, which passes through unchanged):
 ///
@@ -299,7 +299,7 @@ pub(crate) fn root_module_endpoint(
 
 /// Roots a scanner-fact edge endpoint that names a **project symbol**, not a
 /// module: a cross-stream (`--targets`) edge carries the target's canonical FQN
-/// instead of an opaque id (phase-02 task-9), and the frontend emits that FQN
+/// instead of an opaque id, and the frontend emits that FQN
 /// UNROOTED. The endpoint is rooted by its longest module-identity prefix
 /// (walked right-to-left over `.`/`/` boundaries, so a nested module wins over
 /// its parent); an opaque id or a foreign name has no such prefix and is left

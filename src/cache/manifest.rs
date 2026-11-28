@@ -1,6 +1,5 @@
-//! The content-addressed manifest and the global cache key — split out of the
-//! former single-file `src/cache.rs` (phase-04 task-19 wave F). Behaviour
-//! preserving: `crate::cache::<name>` keeps resolving through the re-exports in
+//! The content-addressed manifest and the global cache key.
+//! `crate::cache::<name>` resolves through the re-exports in
 //! [`crate::cache`].
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +18,7 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// ingestor's FQN rendering / node projection changes so cached units produced
 /// by an older projection are discarded.
 ///
-/// `2` (feedback-102): the cache additionally carries each language's global
+/// `2`: the cache additionally carries each language's global
 /// **module scaffolding** ([`crate::cache::ModuleScaffolding`]) — the
 /// pure-intermediate `Module` nodes and every `Module -> Module` `contains` edge
 /// that no per-file fact unit can express. A store written by the `1` projection

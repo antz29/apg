@@ -1,4 +1,4 @@
-//! Win-B incremental-scan orchestration (phase-02 task-8): the glue that turns
+//! Incremental-scan orchestration: the glue that turns
 //! the content-addressed manifest ([`crate::cache`]), the git delta + fallbacks
 //! ([`crate::delta`]), and the impact closure ([`crate::impact`]) into the
 //! per-scan state `apg scan` needs.
@@ -29,8 +29,8 @@
 //! refs/scan/delta rows stay this worktree's own
 //! (`requirements.requirement.fact-manifests-are-per-worktree`).
 
-// The phase-02 win-B surface: a few helpers are consumed by the phase-03 splice
-// path and the integration tests rather than by `cmd_scan` directly.
+// A few helpers on this surface are consumed by the splice path and the
+// integration tests rather than by `cmd_scan` directly.
 #![allow(dead_code)]
 
 // The orchestration is split into its cohesive halves — the language mapping

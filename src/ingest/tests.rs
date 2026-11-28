@@ -84,7 +84,7 @@ mod unit {
         assert_eq!(m["n2"], "pkg.C.foo(int)");
     }
 
-    /// Phase-08 task-15: Python duplicate-name disambiguation. Two
+    /// Python duplicate-name disambiguation. Two
     /// identically-annotated `@overload` stubs of one name (their erased
     /// param lists collide) and a same-scope conditional redefinition (the
     /// empty param list) each render a DISTINCT FQN in the FULL form
@@ -127,7 +127,7 @@ mod unit {
         assert_eq!(seen.len(), decls.len());
     }
 
-    /// Phase-09 task-2 / task-40: `root_module_fqn` roots a frontend's
+    /// `root_module_fqn` roots a frontend's
     /// verbatim dotted identity under the `lang_switch` language id, for
     /// every language — Rust's dotted module path, Python's package chain,
     /// TypeScript's npm-package + dot-path identity, Markdown's absolute
@@ -135,7 +135,7 @@ mod unit {
     /// makes two languages that both define a module identity `apg` distinct
     /// (`rust.apg` vs `py.apg`).
     ///
-    /// fix-module-identity task-12: the identity is rendered repo-relative
+    /// The identity is rendered repo-relative
     /// against the base first. A Markdown identity is an absolute directory
     /// path, so `/repo/docs` under base `/repo` renders `md.docs`; every
     /// other frontend identity is already relative and passes through.
@@ -167,7 +167,7 @@ mod unit {
         );
     }
 
-    /// cobol-frontend task-31: a COBOL program in a root-level file has an
+    /// A COBOL program in a root-level file has an
     /// empty parent, which roots to `cobol.` so its name renders `cobol..PROG`;
     /// no other language roots an empty parent. A root-level edge endpoint
     /// roots under the empty root module, while a `src/cobol` prefix keeps its
@@ -201,7 +201,7 @@ mod unit {
         assert_eq!(root_edge_endpoint("rust", "PROG", &modules, base), "PROG");
     }
 
-    /// csharp-projects task-19: a csharp global-namespace canonical FQN edge
+    /// A csharp global-namespace canonical FQN edge
     /// endpoint roots at the bare `csharp` id, declared ids and module-prefixed
     /// endpoints keep root_edge_endpoint's rendering, and other languages are
     /// untouched by the csharp rule.
@@ -251,7 +251,7 @@ mod unit {
         );
     }
 
-    /// cobol-frontend task-34: with `""` a known COBOL identity, a root-level
+    /// With `""` a known COBOL identity, a root-level
     /// scope parent (`PROG`, `ACCT`, `PROG.SEC`) roots under the empty root
     /// module (`cobol..PROG`), while a subdirectory scope with a known module
     /// prefix (`geo.POINT`) and an empty parent keep their rendering. Without a
@@ -288,7 +288,7 @@ mod unit {
         assert_eq!(rooted_scope("go", "", &rust_go, base), "");
     }
 
-    /// csharp-projects phase-06 task-17: a C# global-namespace type has an
+    /// A C# global-namespace type has an
     /// empty parent, which roots at the bare `csharp` Language id (never `""`
     /// and never `csharp.`), so `Alpha` renders `csharp.Alpha`, not
     /// `csharp..Alpha`. Non-empty C# scopes root as every language does, and
@@ -319,7 +319,7 @@ mod unit {
         assert_eq!(rooted_scope("cobol", "", &none, base), "cobol.");
     }
 
-    /// powershell-frontend phase-07 (a): a unique-form script scope renders
+    /// A unique-form script scope renders
     /// `ps.` + key verbatim — its `//` is never collapsed.
     #[test]
     fn ps_unique_form_script_scope_renders_verbatim() {
@@ -331,7 +331,7 @@ mod unit {
         assert_ne!(f, "ps.a/b.ps1/a/b.ps1.F");
     }
 
-    /// powershell-frontend phase-07 (b): a disambiguated class scope keeps its
+    /// A disambiguated class scope keeps its
     /// `Name//path:ordinal` parent for its methods.
     #[test]
     fn ps_disambiguated_class_scope_keeps_ordinal_parent() {
@@ -341,7 +341,7 @@ mod unit {
         assert_eq!(format!("{scope}.M"), "ps.m/s.ps1.C//m/s.ps1:2.M");
     }
 
-    /// powershell-frontend phase-07 (c): a function in a `..\..\` member of a
+    /// A function in a `..\..\` member of a
     /// nested manifest keeps its `../` segments (no `..` pop).
     #[test]
     fn ps_nested_manifest_member_keeps_dotdot_segments() {
@@ -351,7 +351,7 @@ mod unit {
         assert_eq!(format!("{scope}.F"), "ps.m/n/N.psd1/../../x.ps1.F");
     }
 
-    /// powershell-frontend phase-07 (d): a disambiguated `--targets` endpoint
+    /// A disambiguated `--targets` endpoint
     /// renders `ps.` + endpoint whether or not ps identities are recorded.
     #[test]
     fn ps_disambiguated_targets_endpoint_renders_verbatim() {
@@ -368,7 +368,7 @@ mod unit {
         }
     }
 
-    /// powershell-frontend phase-07 (e): a root `build.ps1` beside a directory
+    /// A root `build.ps1` beside a directory
     /// module `build` is never re-rooted under `ps.build`.
     #[test]
     fn ps_root_build_script_beside_build_dir_is_not_rerooted() {
@@ -386,7 +386,7 @@ mod unit {
         assert!(!ep.starts_with("ps.build"), "{ep}");
     }
 
-    /// powershell-frontend phase-07 (f): the repo-root module/File parent is
+    /// The repo-root module/File parent is
     /// `ps.`, the root script Struct `ps..build.ps1`, its root-level scope and
     /// `--targets` endpoint `ps..build.ps1.F`, and a Module identity `sub`
     /// renders `ps.sub` as a contains endpoint.
@@ -412,7 +412,7 @@ mod unit {
         assert_eq!(root_module_endpoint("ps", "sub", &ids, base), "ps.sub");
     }
 
-    /// powershell-frontend phase-07 (g): ps opaque ids (`ps<digits>`,
+    /// Ps opaque ids (`ps<digits>`,
     /// `n<digits>`) are never rooted, even when repo-root directory modules
     /// `ps1`/`n7` exist; `ps`, `psx1` and `ps1.F` are not opaque ids.
     #[test]
@@ -440,7 +440,6 @@ mod unit {
         assert_eq!(root_module_fqn("ps", "ps1", base), "ps.ps1");
     }
 
-    /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
     /// `repo_relative_identity` renders a scanner path relative to the
     /// git-toplevel base (the scan root is the non-git fallback),
     /// `/`-separated, with no leading `/` and no `..` segment. An
@@ -490,7 +489,7 @@ mod unit {
         );
     }
 
-    /// cpp-module-identity phase-02 task-2: the C++ frontend fuses a
+    /// The C++ frontend fuses a
     /// namespace chain onto its module directory's ABSOLUTE path, so the `.`
     /// after the base is a NAME boundary, not a path component. Such a
     /// base-fused parent strips to its bare tail — `/x/base.Ns.Sub` renders
@@ -526,7 +525,7 @@ mod unit {
         );
     }
 
-    /// cpp-module-identity phase-02 task-3: a C++ source directory IS the base
+    /// A C++ source directory IS the base
     /// itself, so its module record, its base-level declaration parent, its
     /// base-fused namespace parent and its root-level File parent all root at
     /// the bare `cpp.` root module — never the `file_name(base)` checkout
@@ -577,7 +576,7 @@ mod unit {
         }
     }
 
-    /// cpp-module-identity phase-02 task-4: a `--targets` canonical edge
+    /// A `--targets` canonical edge
     /// endpoint and the declaration parent render the SAME rooted C++ FQN at
     /// both boundaries — a base-level endpoint (`/x/base.Name`,
     /// `/x/base.Ns.Type`) roots through `root_edge_endpoint` to `cpp..Name` /
@@ -619,7 +618,7 @@ mod unit {
         );
     }
 
-    /// Phase-09 task-9 / task-40: a declaration whose parent is a module
+    /// A declaration whose parent is a module
     /// inherits the rooted module FQN through `parent.name` (the renderer
     /// only concatenates, so rooting the parent at record time roots the
     /// symbol). The shape rules — singleton, overload suffix, Go
@@ -643,7 +642,7 @@ mod unit {
         assert_eq!(mi["n4"], "go.pkg.init#b.go");
     }
 
-    /// Phase-09 task-40: language rooting removes only the CROSS-language
+    /// Language rooting removes only the CROSS-language
     /// collision. A same-kind collision WITHIN one language from two different
     /// sources still fails loudly in `claim` — the rooted FQNs are no
     /// different: two declarations rendering the same rooted FQN panic rather
@@ -685,7 +684,7 @@ mod unit {
         claim(&mut seen, "src/b.rs", "rust.pkg.F", NodeKind::Function);
     }
 
-    /// apg-0.17.0 phase-01 task-20: the claim guard accepts the structural
+    /// The claim guard accepts the structural
     /// scanner's language-rooted identities — the bare per-format roots
     /// (`md.`/`sh.`/…/`misc.`), rooted submodules, and file-rooted
     /// declarations — without a false same-FQN collision. A re-claim by the
@@ -893,7 +892,7 @@ mod unit {
         assert_eq!(out, edges);
     }
 
-    /// exclude-apg-layout phase-03 task-2: the tool-owned top-level `apg/`
+    /// The tool-owned top-level `apg/`
     /// layout is dropped config-independently (no config, no git base) — for a
     /// path-less structural module identity (`misc.apg` / `misc.apg/...`), for
     /// a path-carrying record, and for a stale/cached transient record — while
@@ -950,7 +949,7 @@ mod unit {
         assert!(!is_blacklisted("misc.src/apg", None, "misc", &opts));
     }
 
-    /// schema-alignment phase-03 task-8: the agent node builder renders the
+    /// The agent node builder renders the
     /// tier-4 identity from the record alone — the FQN `agent.<file-stem>` from
     /// the record's stem, and the Location from the definition file's
     /// repo-relative path plus its 1-based line span (no byte span).
@@ -975,7 +974,7 @@ mod unit {
         assert_eq!((location.start, location.end), (0, 0));
     }
 
-    /// phase-01 task-10: [`finalize_delta_graph`] re-resolves a delta-emitted
+    /// [`finalize_delta_graph`] re-resolves a delta-emitted
     /// `unresolved_call`/`unresolved_use` against the full universe. A target
     /// that is a real `Function`/`Struct` in the delta graph or recorded in
     /// `previous.scanned` becomes the `calls`/`uses` edge a full scan produces
@@ -1132,7 +1131,7 @@ mod unit {
         );
     }
 
-    /// phase-01 task-12: [`finalize_delta_graph`] keeps the code-targeted
+    /// [`finalize_delta_graph`] keeps the code-targeted
     /// authored edges — a Note's `details`, a Feedback's `reviews` and a
     /// Component's `spec_implemented_by` — when their far endpoint has no node
     /// in the delta graph but lives in the pre-scan universe (`previous.scanned`
@@ -1260,7 +1259,7 @@ mod unit {
         );
     }
 
-    /// phase-04 task-2: [`resolve_unresolved_edges`] partitions the unresolved
+    /// [`resolve_unresolved_edges`] partitions the unresolved
     /// edge sets in one pass against the assembled graph's real `Function`/
     /// `Struct` FQNs. Only the endpoint-kind pairs a full scan can produce flip
     /// — a `Function`-sourced call onto a real `Function` becomes `calls`, a
@@ -1449,7 +1448,7 @@ mod unit {
         assert_eq!(graph.nodes[real_struct].kind, NodeKind::Struct);
     }
 
-    /// csharp-projects phase-04 task-23: a namespace-less projectless C# file
+    /// A namespace-less projectless C# file
     /// hangs straight off its Language root, so Language ⊃ File is admitted
     /// beside Language ⊃ Module, while the reverse and a skipped tier are not.
     #[test]
@@ -1460,7 +1459,7 @@ mod unit {
         assert!(!valid_contains_pair(&NodeKind::Language, &NodeKind::Struct));
     }
 
-    /// phase-04 task-10: [`finalize_graph`] closes the graph over one live-FQN
+    /// [`finalize_graph`] closes the graph over one live-FQN
     /// set. An edge whose target FQN names no node at all is dropped — never
     /// recycled into a fabricated `UnresolvedTarget` — while an
     /// `unresolved_call`/`unresolved_use` whose target **is** a live
@@ -1605,7 +1604,7 @@ mod unit {
 mod int {
     use super::*;
 
-    /// fix-module-identity task-16: the single identity base flows through
+    /// The single identity base flows through
     /// the whole ingest-side render chain in memory —
     /// [`repo_relative_identity`] → [`root_module_fqn`] → [`rooted_scope`] →
     /// `parent.name` ([`render_function_fqns`]) — so a scanner record set
@@ -1650,7 +1649,7 @@ mod int {
         assert_eq!(rooted_scope("go", "", &HashMap::new(), base), "");
     }
 
-    /// powershell-frontend phase-07: the ps scopes of cases (a), (b) and (f)
+    /// The ps scopes of cases (a), (b) and (f)
     /// flow through [`rooted_scope`] → [`render_function_fqns`] verbatim.
     #[test]
     fn ps_identities_flow_through_the_render_chain() {
@@ -1678,7 +1677,7 @@ mod int {
         assert_eq!(m["n3"], "ps..build.ps1.F");
     }
 
-    /// apg-0.17.0 phase-03 task-9: the structural streams' identity chain
+    /// The structural streams' identity chain
     /// wires [`classify_code_type`] + [`root_module_fqn`] +
     /// [`render_function_fqns`] over every structural stream id — a
     /// structural module roots under its stream id (`md.`/`sh.`/`yaml.` at
@@ -1772,7 +1771,7 @@ mod int {
         );
     }
 
-    /// phase-02 task-7: [`insert_node`] streams exactly one progress symbol and
+    /// [`insert_node`] streams exactly one progress symbol and
     /// one summary tally per admitted code node, and nothing for a non-code
     /// kind or a `None` emitter. Pure in-memory: the emitter writes to a
     /// `Vec<u8>`, and `insert_node` is wired directly (the spooling
@@ -1849,7 +1848,7 @@ mod int {
         );
     }
 
-    /// phase-02 task-7: a `planned` record admitted at a fresh FQN streams
+    /// A `planned` record admitted at a fresh FQN streams
     /// exactly once (its kind); a scanner-replace over that in-graph
     /// placeholder streams exactly once, for the real node; a planned record
     /// colliding with real code is superseded and streams nothing.
@@ -1996,7 +1995,7 @@ mod int {
         );
     }
 
-    /// phase-05 task-1: the kind a `planned_node` record declares is what
+    /// The kind a `planned_node` record declares is what
     /// carries the kind-paired task operation edge through the finalize prune
     /// ([`filter_task_ops`]). The record arm in [`ingest_records`] maps the
     /// record's `kind` string to a [`NodeKind`] and admits the placeholder
@@ -2069,7 +2068,7 @@ mod int {
         );
     }
 
-    /// phase-01 task-11: [`finalize_delta_graph`] and the universe-aware
+    /// [`finalize_delta_graph`] and the universe-aware
     /// [`crate::cleanup::cleanup`], wired in sequence over one in-memory graph,
     /// keep every code edge and every `contains` row whose far endpoint lives
     /// only in the pre-scan universe (`previous.scanned` ∪

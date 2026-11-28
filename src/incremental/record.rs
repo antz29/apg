@@ -11,8 +11,8 @@ use super::prepare::State;
 /// Records the just-completed scan into the shared store: writes the new
 /// manifest, the scan record, each file's fact unit, and the portable indexes.
 ///
-/// `targets_rel` is the FINAL phase-2 re-emission target set (checkout-relative)
-/// — the SAME set that drove the frontend `--targets` hand-off and the win-C DB
+/// `targets_rel` is the FINAL re-emission target set (checkout-relative)
+/// — the SAME set that drove the frontend `--targets` hand-off and the DB
 /// splice, threaded through and never re-derived. On the incremental path
 /// (non-empty) only the re-emitted/target files' units are (re)written; on a
 /// full scan (empty) every located file's unit is written so the shared store
@@ -55,7 +55,7 @@ pub fn record(
     };
 
     // Per-file fact units for every located file in the assembled graph, derived
-    // from ONE per-file index (phase-04 task-12) rather than an `O(F*(N+E))`
+    // from ONE per-file index rather than an `O(F*(N+E))`
     // per-file graph scan.
     let index = FileIndex::build(graph);
     let full_scan = targets_rel.is_empty();
@@ -67,7 +67,7 @@ pub fn record(
     }
     for abs in &files {
         let rel = crate::cache::rel_path_of(scan_root, abs);
-        // Target-scoped recording (phase-04 task-13): with a target set in force
+        // Target-scoped recording: with a target set in force
         // write ONLY the re-emitted/target files' units — an unchanged non-target
         // file keeps the unit a previous scan recorded. The full-scan path keeps
         // writing every located file's unit. A target path the assembled graph
@@ -82,10 +82,10 @@ pub fn record(
         let frag = FileFragment::from_index(&index, abs, &rel, oid, lang);
         store.put(&frag, &writer_root, cache_key)?;
     }
-    // feedback-102: the per-file units cannot carry a language's
+    // The per-file units cannot carry a language's
     // pure-intermediate modules or its `Module -> Module` hierarchy, so record
     // that scaffolding alongside them. A later partial scan that skips a
-    // language replays it, keeping the win-B-assembled graph a full rebuild's
+    // language replays it, keeping the assembled graph a full rebuild's
     // equal. This runs BEFORE the manifest/scan-record save, so a scaffolding
     // write failure aborts the recording and the next scan takes the full-scan
     // fallback rather than reusing an incomplete store. A full scan's graph is
@@ -134,7 +134,7 @@ pub fn record(
         manifest: manifest.clone(),
         // The same content-identity key the DB `Scan` row carries (this scan's
         // `scan_meta`), so the next scan can verify its LOCAL seed against the
-        // shared record before splicing (feedback-101).
+        // shared record before splicing.
         content_key: graph
             .nodes
             .get(crate::schema::SCAN_HEAD)

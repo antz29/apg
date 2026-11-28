@@ -19,7 +19,7 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 /// `csharp`, `py`, `cpp`, `sql`, `ps`, `agent`, `md`, and the bundled structural scanner's
 /// `sh`, `yaml`, `json`, `toml`, `xml`, `sln`, `dockerfile`, `makefile`, `ini`,
 /// `misc`) so it can be compared directly against the scan's detected/requested
-/// language ids — `apg.targets_for_language` filters the win-B target set with
+/// language ids — `apg.targets_for_language` filters the target set with
 /// exactly this comparison. `.py`/`.pyi` therefore return `"py"`, NOT
 /// `"python"` (the scan-side vocabulary is `py`: the detector candidate,
 /// `frontend_cmd`, `id_prefix_for` and the `lang_switch` record all use it).

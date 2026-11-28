@@ -27,7 +27,7 @@
 //! frontend run, and never on open or on a read — until
 //! [`FactStore::save_index`] commits it.
 //!
-//! The legacy phase-2 `<store>/facts/` directory is retired once, on the first
+//! The legacy `<store>/facts/` directory is retired once, on the first
 //! successful open ([`retire_legacy_store`]): its bytes are reported and it is
 //! removed best-effort. The checkout-local toolchain cache
 //! (`<checkout>/apg/.trans/cache`, [`crate::cache::toolchain`]) is a different
@@ -55,11 +55,11 @@ pub const STORE_DIR: &str = "apg";
 /// The redb database file inside the store directory: the repository's one
 /// fact store, shared by every worktree and branch.
 pub const FACTS_DB: &str = "facts.db";
-/// **Legacy.** The phase-2 directory of JSON fact files beside `facts.db`. It is
+/// **Legacy.** The `<store>/facts/` directory of JSON fact files beside `facts.db`. It is
 /// retired on the first successful open; the name survives only so the
 /// migration and its tests can refer to it.
 pub const FACTS_DIR: &str = "facts";
-/// **Legacy.** The phase-2 per-language scaffolding file name inside
+/// **Legacy.** The per-language scaffolding file name inside
 /// [`FACTS_DIR`]. Module scaffolding now lives in the redb `scaffolding` table.
 pub const SCAFFOLDING_FILE: &str = "scaffolding.json";
 
@@ -483,7 +483,7 @@ impl FactStore {
     }
 }
 
-/// Retires the legacy phase-2 store directory (`<store>/facts/`) once, on the
+/// Retires the legacy store directory (`<store>/facts/`) once, on the
 /// first successful open: report the bytes it holds, then remove it
 /// best-effort. A failure warns and continues — the redb store is authoritative
 /// either way. The checkout-local toolchain cache (`apg/.trans/cache`) is a

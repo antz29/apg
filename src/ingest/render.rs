@@ -24,7 +24,7 @@ pub(crate) struct FuncDecl {
 
 /// Renders the FQN of every function declaration (SPEC §4).
 ///
-/// PHASE_09 language rooting: each `FuncDecl.parent` is already the ROOTED
+/// Each `FuncDecl.parent` is already the ROOTED
 /// scope FQN (the caller applies [`root_module_fqn`] to the frontend's raw
 /// parent before buffering — see `ingest_records`), so `parent.name` inherits
 /// the language root for every declaration whose parent is a module (e.g.

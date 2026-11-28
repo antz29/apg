@@ -3,7 +3,7 @@
 //!
 //! Pass 1 buffers node records and renders canonical FQNs (module
 //! `<language-id>.<module-identity>` — the frontend emits the identity verbatim
-//! and the ingestor roots it under the `lang_switch` id, PHASE_09 — struct
+//! and the ingestor roots it under the `lang_switch` id — struct
 //! `parent.name`, function `parent.name` / `parent.name(T1,T2)`, Go
 //! `init` → `parent.init#<file-basename>`), building both `id → FQN` and
 //! `FQN → Node` maps. Pass 2 resolves edge endpoints against those maps.
@@ -57,7 +57,7 @@ pub struct IngestOptions<'a> {
     pub base: Option<&'a Path>,
 }
 
-/// Reuse/splice inputs for a win-B incremental assembly (phase-02 task-7): the
+/// Reuse/splice inputs for an incremental assembly: the
 /// cached facts for files whose bytes AND resolution inputs are unchanged,
 /// projected onto the current worktree. The target-only re-emitted spool is
 /// ingested normally, then the cached units are spliced in.
@@ -75,7 +75,7 @@ pub struct Reuse<'a> {
     /// scaffolding — the pure-intermediate modules and `Module -> Module`
     /// hierarchy that no per-file fact unit carries — is replayed from the store
     /// so the assembled graph — and, with it, the database rows it lands in —
-    /// matches a full rebuild (feedback-102).
+    /// matches a full rebuild.
     pub skipped_langs: BTreeSet<String>,
 }
 
@@ -258,7 +258,7 @@ fn select_language(progress: &mut Option<&mut Progress<'_>>, language: &str) {
 
 /// Which final prune/validate pass [`ingest_records`] runs at the end.
 ///
-/// `Deferred` leaves it to the caller (the win-B splice path finalizes once
+/// `Deferred` leaves it to the caller (the splice path finalizes once
 /// after the cached facts merge); `Full` is the ordinary [`finalize_graph`];
 /// `Delta` is [`finalize_delta_graph`] against the captured previous scan.
 enum Finalizer<'a> {
@@ -275,23 +275,23 @@ pub fn ingest(
     ingest_records(records, opts, Finalizer::Full, progress)
 }
 
-/// [`ingest`] with win-B cached-fact reuse (phase-02 task-7).
+/// [`ingest`] with cached-fact reuse.
 ///
 /// On the incremental path the caller ingests the **target-only** re-emitted
 /// spool here and passes the unaffected files' cached fact units via `reuse`.
 /// The assembler splices those units into the SAME in-memory graph, so the
 /// result is the full fact-spliced graph — exact node/edge/unresolved sets —
-/// and is the single graph consumed downstream (win B and the phase-3 win-C
-/// splice path both consume it).
+/// and is the single graph consumed downstream (the incremental and splice
+/// paths both consume it).
 ///
 /// Ordering: the spool (real, freshly resolved facts) is ingested first; cached
 /// units are then merged, with a freshly-emitted node at an FQN always winning
 /// over a cached one (the re-emitted target is authoritative). Cached units
 /// provide the unaffected files' nodes and edges.
 ///
-/// Win-C hand-off (phase-03 task-6): the returned graph IS the splice delta
+/// Splice hand-off: the returned graph IS the splice delta
 /// source. The caller builds `splice::SpliceDelta { graph, targets,
-/// removed_fqns, scan }` from it — `targets` being the phase-2 re-emission
+/// removed_fqns, scan }` from it — `targets` being the re-emission
 /// target set (the delete scope) and `removed_fqns` the delta's removed
 /// declarations — and the splicer derives its DML from exactly that. The
 /// previous database rows are never re-read and no second assembly runs; the
@@ -299,7 +299,7 @@ pub fn ingest(
 ///
 /// `progress` streams one symbol per admitted code node from BOTH the spool
 /// ([`ingest_records`]) and the cached-fact splice ([`splice_cached`]), so the
-/// whole win-B assembly reports through one emitter.
+/// whole incremental assembly reports through one emitter.
 pub fn ingest_with_reuse(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
@@ -317,7 +317,7 @@ pub fn ingest_with_reuse(
     (graph, report)
 }
 
-/// The target-only delta assembly (phase-01 task-4) — the win-C splice path's
+/// The target-only delta assembly — the splice path's
 /// counterpart of [`ingest_with_reuse`].
 ///
 /// `records` is exactly what the caller buffered: the changed files'
@@ -363,7 +363,7 @@ pub fn ingest_delta(
 /// module records, then every unit's edges — so a cross-file edge whose
 /// endpoints live in different units is never dropped by unit iteration order.
 /// (A single nodes-then-edges pass per unit would lose a `calls`/`uses` edge
-/// whose target unit had not been visited yet; the win-B fact splice must
+/// whose target unit had not been visited yet; the fact splice must
 /// preserve the exact full-scan edge set regardless of ordering.)
 fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Progress<'_>>) {
     // Module FQN -> declaring language, so each pass-2 insert selects the
@@ -472,7 +472,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
         }
     }
 
-    // Pass 2b: the skipped languages' global module scaffolding (feedback-102).
+    // Pass 2b: the skipped languages' global module scaffolding.
     //
     // A language whose frontend was skipped re-emits nothing, so its
     // pure-intermediate modules and every `Module -> Module` hierarchy edge —
@@ -483,7 +483,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
     // spawned language's fresh scaffolding (emitted unconditionally, outside the
     // emission filter) is never shadowed by stale cache rows.
     //
-    // PHASE_09: the skipped language's `Language` root and each replayed
+    // The skipped language's `Language` root and each replayed
     // module's `Language -> Module` edge are DERIVED from the skipped language
     // itself, never read back from the record — the record is stored per
     // language, so its modules and the modules the reused per-file units
@@ -610,7 +610,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
         }
     }
 
-    // Pass 4 (phase-04 task-16): re-resolve. Pass 1 replaced an UnresolvedTarget
+    // Pass 4: re-resolve. Pass 1 replaced an UnresolvedTarget
     // placeholder with a cached real node, but a spool-authored (or cached)
     // unresolved edge still names that FQN, so the assembly would carry an
     // unresolved edge to a real symbol — a shape a full scan never produces.
@@ -620,7 +620,7 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse, mut progress: Option<&mut Pro
 }
 
 /// Converts unresolved edges whose target FQN resolves to a real project node in
-/// the assembled graph (phase-04 task-16), then GCs the `UnresolvedTarget` rows
+/// the assembled graph, then GCs the `UnresolvedTarget` rows
 /// no remaining unresolved edge references.
 ///
 /// A spool-authored `unresolved_call`/`unresolved_use` to an FQN a cached unit
@@ -785,7 +785,7 @@ fn ingest_records(
         for r in records {
             match r {
                 Record::Module { fqn } => {
-                    // PHASE_09 language rooting: the frontend emits the module
+                    // Language rooting: the frontend emits the module
                     // identity verbatim; the ingestor renders it repo-relative
                     // (a Markdown identity is an absolute directory path) and
                     // roots it under the stream's `lang_switch` id.
@@ -883,7 +883,7 @@ fn ingest_records(
                 } => {
                     // A file belongs to a module; if that module is blacklisted
                     // the file and everything in it is out of scope too. The
-                    // parent module FQN is rooted (PHASE_09), and the file's
+                    // parent module FQN is rooted, and the file's
                     // canonical identity is its repo-relative path.
                     //
                     // A STRUCTURAL stream's EMPTY module identity is the
@@ -1039,7 +1039,7 @@ fn ingest_records(
                         graph.contains.insert((parent, fqn));
                     }
                 }
-                // Tier-1/2/3 spec nodes (GraphModel-SPEC.md; PHASE_01): authored
+                // Tier-1/2/3 spec nodes (GraphModel-SPEC.md): authored
                 // via the spec tools, never scanned. All carry `name` (+ `body`);
                 // Container carries a `kind`.
                 Record::Stakeholder {
@@ -1124,7 +1124,7 @@ fn ingest_records(
                     },
                     None,
                 ),
-                // New-model tier catalog (apg-projects SPEC §3.1).
+                // New-model tier catalog (SPEC §3.1).
                 Record::User {
                     fqn,
                     name,
@@ -1331,15 +1331,15 @@ fn ingest_records(
                     },
                     None,
                 ),
-                // Task-edge records (SCHEMA.md, phase 4) are spooled like every
+                // Task-edge records (SCHEMA.md) are spooled like every
                 // other edge by the catch-all below: their endpoints are
                 // canonical FQNs (a plan record carries no opaque id), so they
                 // need no rooting and are admitted in Pass C.
-                // Rooted code-fact edge endpoints (PHASE_09). `Contains`
+                // Rooted code-fact edge endpoints. `Contains`
                 // endpoints are module identities (root exactly) or opaque ids
                 // (leave). `Calls`/`Uses` endpoints are opaque ids for emitted
                 // units or an UNROOTED canonical FQN for a cross-stream target
-                // (phase-02 task-9) — root the latter by its module prefix
+                // — root the latter by its module prefix
                 // (a global-namespace csharp one at the bare `csharp` root).
                 // `Unresolved*` roots only the `from` (the emitted unit); the
                 // `to` is a FOREIGN name, never rooted.
@@ -1543,7 +1543,7 @@ fn ingest_records(
         );
     }
 
-    // Pass B4 (PHASE_09 language rooting): materialise exactly ONE `Language`
+    // Pass B4 (language rooting): materialise exactly ONE `Language`
     // node per scanned stream (the bare `lang_switch` id) and attach each
     // surviving rooted module to its language via `Language -Contains-> Module`
     // exactly once. A shadowed module (already claimed by a type of the same
@@ -1794,7 +1794,7 @@ fn ingest_records(
                     }
                     graph.satisfies.insert((a, b));
                 }
-                // Spine edges (GraphModel-SPEC.md; PHASE_01).
+                // Spine edges (GraphModel-SPEC.md).
                 Record::DrivenBy {
                     from,
                     to,
@@ -1833,7 +1833,7 @@ fn ingest_records(
                     }
                     graph.represents.insert((a, b));
                 }
-                // New-model §3.3 spec edges (apg-projects).
+                // New-model §3.3 spec edges.
                 Record::SpecImplementedBy {
                     from,
                     to,
@@ -1987,7 +1987,7 @@ fn ingest_records(
                     }
                     graph.realises.insert((a, b));
                 }
-                // Task edges (SCHEMA.md, phase 4): the transient plan tier's
+                // Task edges (SCHEMA.md): the transient plan tier's
                 // assigned Agent, implemented Component and per-kind operation
                 // rows. Their endpoints are canonical FQNs (no opaque id to
                 // resolve); a blacklisted endpoint drops the row like any other
@@ -2024,8 +2024,8 @@ fn ingest_records(
     let _ = std::fs::remove_file(&spool);
 
     // The final prune/validate pass runs HERE unless the caller deferred it; on
-    // the win-B splice path the deferred cached facts are merged first, then
-    // the caller re-runs `finalize_graph` (phase-02 task-7), so a freshly-emitted
+    // the splice path the deferred cached facts are merged first, then
+    // the caller re-runs `finalize_graph`, so a freshly-emitted
     // edge to a cached symbol survives.
     match finalizer {
         Finalizer::Deferred => {}
@@ -2046,7 +2046,7 @@ fn ingest_records(
 /// A mutable `Graph` edge-set selector for one task-edge kind.
 type TaskEdgeSetMut = fn(&mut Graph) -> &mut HashSet<(String, String)>;
 
-/// Admit one task edge (SCHEMA.md, phase 4) into the `Graph` edge set its kind
+/// Admit one task edge (SCHEMA.md) into the `Graph` edge set its kind
 /// names. Returns `false` when a blacklisted endpoint dropped the row — the
 /// same hygiene every other spooled edge applies. The endpoints are already
 /// canonical FQNs, so no `resolve` is involved.
@@ -2105,8 +2105,8 @@ fn filter_task_ops(
 }
 
 /// The dangling-edge cleanup and spec/plan/spine edge validation (SPEC R2/R21,
-/// §7). Split out so the win-B splice path can merge cached facts first and
-/// then finalize once (phase-02 task-7) — an edge to a symbol the target-only
+/// §7). Split out so the splice path can merge cached facts first and
+/// then finalize once — an edge to a symbol the target-only
 /// spool did not emit must not be pruned before the cached unit lands.
 ///
 /// Every validator resolves an endpoint through `graph.nodes` — the node the
@@ -2201,7 +2201,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::Requirement)
     });
 
-    // Spine edges (GraphModel-SPEC.md; PHASE_01). `driven-by` runs Service →
+    // Spine edges (GraphModel-SPEC.md). `driven-by` runs Service →
     // Requirement; `represents` runs Actor → User and Person → Actor (both
     // endpoints must exist and carry the tier kinds).
     graph.driven_by = filter_edges(graph, &graph.driven_by, |g, a, b| {
@@ -2212,7 +2212,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
             || (kind_is(g, a, NodeKind::Person) && kind_is(g, b, NodeKind::Actor))
     });
 
-    // New-model §3.3 spec edges (apg-projects). SpecImplementedBy runs
+    // New-model §3.3 spec edges. SpecImplementedBy runs
     // Component → code; Publishes runs Service → Entity; Subscribes runs
     // Service/Actor → Entity.
     graph.spec_implemented_by = filter_edges(graph, &graph.spec_implemented_by, |g, a, b| {
@@ -2253,7 +2253,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
         kind_is(g, a, NodeKind::Component) && kind_is(g, b, NodeKind::Service)
     });
 
-    // Task edges (SCHEMA.md, phase 4): the transient plan tier's assigned
+    // Task edges (SCHEMA.md): the transient plan tier's assigned
     // Agent, implemented Component and per-kind operation rows. Same
     // dangling-drop and endpoint-kind hygiene as the sibling spec edges; the
     // operation/target targets may be planned code nodes (they are Module/
@@ -2293,7 +2293,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     graph.function_rename = filter_task_ops(graph, &graph.function_rename, NodeKind::Function);
 }
 
-/// The target-only counterpart of [`finalize_graph`] (phase-01 task-5).
+/// The target-only counterpart of [`finalize_graph`].
 ///
 /// A delta scan's spool emits only the changed files' facts, so the delta graph
 /// has no node for the unchanged files' code — yet a delta-emitted edge may

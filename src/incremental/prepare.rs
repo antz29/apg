@@ -9,7 +9,7 @@ use crate::impact::{DepIndex, OverloadIndex, SignatureMap, signatures_of_graph};
 
 use super::language::language_of;
 
-/// One reusable file: a fact unit to splice into the win-B assembly.
+/// One reusable file: a fact unit to splice into the assembly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReuseFile {
     /// Absolute path in the current worktree.
@@ -275,7 +275,7 @@ pub struct Prepared {
     /// The changed files (checkout-relative).
     pub changed_rel: BTreeSet<String>,
     /// FQNs that disappeared with the delta's removed/renamed-away files — the
-    /// subtraction half of the full-universe seam (feedback-92).
+    /// subtraction half of the full-universe seam.
     pub removed_fqns: BTreeSet<String>,
     /// The checkout-relative files that are byte-identical to the prior scan
     /// and outside the target set — the fact-reuse candidates.
@@ -285,11 +285,11 @@ pub struct Prepared {
     pub manifest: Manifest,
     /// The content-identity key of the recorded scan the delta was derived from
     /// (`ScanRecord::content_key`), captured BEFORE the completed scan
-    /// overwrites this worktree's store scan row. The win-C splice is eligible
+    /// overwrites this worktree's store scan row. The splice is eligible
     /// only when the LOCAL
     /// seed DB's own recorded key equals this — otherwise another worktree's
     /// scan advanced the shared state past this worktree's DB and seeding would
-    /// publish a DB that is not a full rebuild (feedback-101, see
+    /// publish a DB that is not a full rebuild (see
     /// [`crate::splice::seed_checked`]).
     pub recorded_content_key: Option<String>,
     /// The previous worktree database's snapshot — the recorded `scanned` /
@@ -326,8 +326,8 @@ pub struct ReusePlan {
     pub reader_root: String,
     /// The languages whose frontend is skipped entirely this scan (empty target
     /// set on a partial scan). Their module scaffolding is replayed from the
-    /// store into the assembled graph (feedback-102) — the SAME per-language
-    /// verdict the win-C spawn skip uses, never re-derived.
+    /// store into the assembled graph — the SAME per-language
+    /// verdict the spawn skip uses, never re-derived.
     pub skipped_langs: BTreeSet<String>,
 }
 
@@ -346,7 +346,7 @@ impl ReusePlan {
 }
 
 /// The complete incremental input `run_pipeline` needs to (a) splice cached
-/// facts into the win-B assembly and (b) record the just-completed scan back
+/// facts into the assembly and (b) record the just-completed scan back
 /// into the shared store. `None` on a caller that does not maintain the store
 /// (the hermetic test harness).
 #[derive(Debug, Clone)]
@@ -360,7 +360,7 @@ pub struct PipelineInput {
     pub manifest: Manifest,
     /// The commit sha the scan ran at (empty when not a git repo).
     pub sha: String,
-    /// The fact-reuse plan for the win-B assembly (`None` on a full scan).
+    /// The fact-reuse plan for the assembly (`None` on a full scan).
     pub reuse: Option<ReusePlan>,
     /// The assembly discriminator: `true` only when the warm-cached path
     /// completed for this scan, so `run_pipeline` keeps `ingest_with_reuse` +
@@ -370,22 +370,22 @@ pub struct PipelineInput {
     /// by the caller and carried here so `ingest_delta`, `finalize_delta_graph`,
     /// the universe-aware cleanup and the digest never re-open `db.lbug`.
     pub previous: Option<crate::artifacts::PreviousScan>,
-    /// The FINAL phase-2 re-emission target set (checkout-relative): changed
+    /// The FINAL re-emission target set (checkout-relative): changed
     /// files ∪ the signature-cascade reverse-dependency closure ∪ overload
-    /// peers. This is the win-C splice's delete scope (phase-03 task-4) and the
+    /// peers. This is the splice's delete scope and the
     /// very set that drove the frontend `--targets` hand-off — it is threaded
     /// through, never re-derived. Empty on a full-scan fallback.
     pub targets_rel: BTreeSet<String>,
     /// The code FQNs that disappeared with the delta (the subtraction half of
-    /// the full-universe seam, feedback-92). The splice detaches them even when
+    /// the full-universe seam). The splice detaches them even when
     /// their file path lies outside `targets_rel`. Empty on a full-scan
     /// fallback.
     pub removed_fqns: BTreeSet<String>,
     /// The content-identity key of the recorded scan the delta was derived from
     /// (`ScanRecord::content_key`), captured before the completed scan
     /// overwrites the shared store. `None` on a full-scan fallback and on a
-    /// pre-hardening record; the win-C splice refuses a seed that does not
-    /// match this key (feedback-101).
+    /// pre-hardening record; the splice refuses a seed that does not
+    /// match this key.
     pub recorded_content_key: Option<String>,
 }
 
@@ -440,7 +440,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
         };
     }
     // The content identity the delta is derived from, captured BEFORE the
-    // completed scan rewrites this worktree's store scan row (feedback-101): the win-C
+    // completed scan rewrites this worktree's store scan row: the
     // splice seeds the LOCAL db.lbug and must refuse it when its own recorded
     // key differs — another worktree scanned in between.
     let recorded_content_key = ScanRecord::load(&store_root, scan_root).and_then(|r| r.content_key);
@@ -493,7 +493,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     // Stage-1 target set: the changed files ∪ their overload peers. The
     // reverse-dependency closure is computed AFTER phase 1 by
     // [`extra_cascade_targets`], driven by the phase-1 stream's exported
-    // signature delta — the signature early cutoff (phase-02 task-6). This
+    // signature delta — the signature early cutoff. This
     // function does NOT cascade on bytes alone.
     let mut targets_rel = changed_rel.clone();
     for f in &changed_rel {
@@ -557,7 +557,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     // ps file in the manifest, so none is reused from cached facts.
     crate::ps::widen_targets(&mut targets_rel, &manifest);
 
-    // FULL-UNIVERSE SEAM (feedback-92): the incremental path derives the full
+    // FULL-UNIVERSE SEAM: the incremental path derives the full
     // code-FQN universe from the PREVIOUS database. With a non-empty target set
     // the frontends emission-filter, so the target-only spool would shrink the
     // universe (and `validate_code_refs` would falsely bail `spec drift`) — the
@@ -623,7 +623,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey, force:
     }
 }
 
-/// The signature early cutoff (phase-02 task-6), applied after the phase-1
+/// The signature early cutoff, applied after the phase-1
 /// re-emission: given the phase-1 assembled graph and the stage-1 target set,
 /// return the **additional** files the reverse-dependency closure must pull in.
 ///
@@ -670,7 +670,7 @@ pub fn extra_cascade_targets(
         .collect()
 }
 
-/// The full-universe seam (feedback-92): the complete code-FQN universe
+/// The full-universe seam: the complete code-FQN universe
 /// `layers::ingest_tree` validates authored `implemented-by` targets against, on
 /// the incremental path. Derived from the previous database's captured scanned
 /// universe MINUS the delta's removed FQNs UNION the delta's emitted real code

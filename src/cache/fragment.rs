@@ -1,7 +1,6 @@
 //! Per-file fact units, the single-pass per-file index, and the module
-//! scaffolding — split out of the former single-file `src/cache.rs` (phase-04
-//! task-19 wave F). Behaviour preserving: `crate::cache::<name>` keeps
-//! resolving through the re-exports in [`crate::cache`].
+//! scaffolding. `crate::cache::<name>` resolves through the re-exports in
+//! [`crate::cache`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -34,7 +33,7 @@ pub struct FragNode {
     #[serde(default)]
     pub code_type: String,
     /// The erased parameter list of a Function node. It is the declaration
-    /// surface the win-B signature early-cutoff compares, so it must survive the
+    /// surface the signature early-cutoff compares, so it must survive the
     /// cache round-trip: without it a reused function would present an empty
     /// param list and a body-only edit could be misjudged as a signature change.
     #[serde(default)]
@@ -134,7 +133,7 @@ fn edge_props(graph: &Graph, kind: &str, from: &str, to: &str) -> NodeProperties
 ///
 /// `reader_root` is the reading checkout's base. The stored graph is
 /// checkout-independent, so a unit written in one worktree composes verbatim in
-/// another at the same commit (task-6: cross-checkout reuse) — but a unit whose
+/// another at the same commit (cross-checkout reuse) — but a unit whose
 /// identity is an absolute spelling of the READER's own tree (e.g. a fragment
 /// re-projected under the reader) must normalize to the same repo-relative tail
 /// rather than leak the checkout path. Two clean checkouts of one commit
@@ -313,15 +312,15 @@ impl FileFragment {
         frag
     }
 
-    /// Derives this file's fragment from a one-pass [`FileIndex`] (phase-04
-    /// task-12). Identical to [`FileFragment::from_graph`] for the same graph
+    /// Derives this file's fragment from a one-pass [`FileIndex`]. Identical to
+    /// [`FileFragment::from_graph`] for the same graph
     /// and arguments, but it reads only this file's index buckets instead of
     /// rescanning the whole node map and all five edge sets — so building the
     /// ~1 003 located files' fragments costs ONE graph traversal, not
     /// `O(F*(N+E))`.
     ///
-    /// `from_graph` stays the pre-fix reference oracle (task-20 compares the
-    /// two); the production scan records through this method.
+    /// `from_graph` stays the pre-fix reference oracle; the production scan
+    /// records through this method.
     pub fn from_index(
         index: &FileIndex,
         abs_path: &str,
@@ -605,7 +604,7 @@ impl FileIndex {
 /// pure-intermediate `Module` (one with no `File` child) and every
 /// `Module -> Module` hierarchy edge are invisible to the fact cache. A partial
 /// scan that skips an unchanged language's frontend therefore cannot rebuild
-/// that scaffolding from the cached per-file units alone — the win-B-assembled
+/// that scaffolding from the cached per-file units alone — the assembled
 /// graph — and, with it, the database rows it lands in — would be structurally
 /// incomplete even though the spliced DB kept the seed's rows. This record is
 /// stored per language under the same cache-key dir as the fact units and
@@ -617,8 +616,8 @@ pub struct ModuleScaffolding {
     /// The scaffolding's `Module -> Module` `contains` edges `(from, to)`
     /// (sorted, deduped).
     pub edges: Vec<(String, String)>,
-    /// The `Language` node FQNs this scaffolding roots (PHASE_09 language
-    /// rooting) — the bare scan language ids. `#[serde(default)]` so a unit
+    /// The `Language` node FQNs this scaffolding roots — the bare scan language
+    /// ids. `#[serde(default)]` so a unit
     /// written before the field existed decodes as empty.
     #[serde(default)]
     pub languages: Vec<String>,
@@ -725,7 +724,7 @@ impl ModuleScaffolding {
                 continue;
             };
             let entry = out.entry(lang.clone()).or_default();
-            // PHASE_09: the component's `Language` root and every module's
+            // The component's `Language` root and every module's
             // `Language -> Module` edge, so a skipped language's root survives
             // the incremental assembly.
             entry.languages.push(lang.clone());
